@@ -23,9 +23,20 @@ import (
 // and every frame after that would be the same frozen screen.
 func ExampleTape() *tape.Tape {
 	const (
-		streams     = 8
-		tokens      = 80
+		streams = 8
+		tokens  = 80
+		// promptTotal is the whole prompt; promptCache is the leading part the
+		// server's prefix cache already held. Eight agent sessions share a
+		// system prompt, so a partial hit is the ordinary case, and it is the
+		// case that makes the prefill bar worth drawing: the cached prefix and
+		// the part actually being evaluated are different colours.
+		//
+		// A partial prefix hit does not make the run "warm": tape.CacheCold is
+		// about major faults paging weights in during decode, which this run
+		// still takes. The two are separate measurements and the screen keeps
+		// them apart.
 		promptTotal = 512
+		promptCache = 128
 	)
 	// perStream is a variable, not a constant: the inter-token interval below
 	// is derived from it, and a constant expression there would not be a whole
@@ -46,7 +57,12 @@ func ExampleTape() *tape.Tape {
 
 	runEnd := time.Duration(0)
 	for i := 0; i < streams; i++ {
-		started := time.Duration(i) * 25 * time.Millisecond
+		// All eight requests go out together. An agent workload dispatches its
+		// sessions at once; the spread in TTFT below comes from slots queueing
+		// behind each other, not from the client sending late. It also means
+		// every stream is in prefill at t = 0, which is the frame that has to
+		// show what prefill looks like.
+		started := time.Duration(0)
 		ttft := time.Duration(210+i*40) * time.Millisecond
 
 		req := tape.RequestRecord{
@@ -58,7 +74,8 @@ func ExampleTape() *tape.Tape {
 				RenderedPrompt: exampleRendered(i),
 			},
 			Timings: tape.TimingsSummary{
-				PromptN:                  promptTotal,
+				PromptN:                  promptTotal - promptCache,
+				CacheN:                   promptCache,
 				PromptPerSecond:          1031,
 				PredictedN:               tokens,
 				PredictedMs:              float64(tokens-1) / perStream * 1000,
@@ -71,19 +88,31 @@ func ExampleTape() *tape.Tape {
 				ITLp95Ms:                 164.0,
 				ITLp99Ms:                 402.5,
 			},
-			Cache: tape.CacheSummary{PromptTotal: promptTotal, Label: tape.CacheCold},
+			Cache: tape.CacheSummary{
+				HitTokens:   promptCache,
+				PromptTotal: promptTotal,
+				HitRatio:    float64(promptCache) / float64(promptTotal),
+				Label:       tape.CacheCold,
+			},
 		}
 
-		// Prompt progress: four rows ramping to the full prompt, all of it a
-		// miss — this run is cold, which is what the amber cache tag says.
-		for s := 1; s <= 4; s++ {
-			frac := float64(s) / 4
+		// Prompt progress: eight return_progress rows ramping to the full
+		// prompt. The first is stamped at zero because the server emits one as
+		// soon as it starts on the prompt, which is what puts a progress bar
+		// rather than a blank wait on the opening frame.
+		//
+		// processed counts the cached prefix too, the way llama-server reports
+		// it, so the bar's first rows already start past the cache mark.
+		const progressRows = 8
+		for s := 1; s <= progressRows; s++ {
+			frac := float64(s) / progressRows
+			at := time.Duration(float64(ttft) * 0.8 * float64(s-1) / progressRows)
 			req.Progress = append(req.Progress, tape.PromptProgress{
-				T:         time.Duration(float64(ttft) * frac * 0.8),
+				T:         at,
 				Total:     promptTotal,
-				Cache:     0,
-				Processed: int(float64(promptTotal) * frac),
-				TimeMs:    msOf(ttft) * frac * 0.8,
+				Cache:     promptCache,
+				Processed: promptCache + int(float64(promptTotal-promptCache)*frac),
+				TimeMs:    msOf(at),
 			})
 		}
 
@@ -144,9 +173,12 @@ func ExampleTape() *tape.Tape {
 	tp.Summary.Timings.PredictedPerSecond = perStreamMean
 	tp.Summary.Timings.ClientPredictedPerSecond = perStreamMean
 	tp.Summary.Timings.PredictedMs = tp.Requests[0].Timings.PredictedMs
+	tp.Summary.Timings.PromptN = promptTotal - promptCache
+	tp.Summary.Timings.CacheN = promptCache
+	tp.Summary.Cache = tp.Requests[0].Cache
 	tp.Summary.Aggregate.WallMs = msOf(runEnd)
 	tp.Summary.Aggregate.TotalPredictedN = streams * tokens
-	tp.Summary.Aggregate.TotalPromptN = streams * promptTotal
+	tp.Summary.Aggregate.TotalPromptN = streams * (promptTotal - promptCache)
 	tp.Summary.Aggregate.PerStreamPredictedPerSecond = perStreamMean
 	tp.Summary.Aggregate.AggregatePredictedPerSecond = rateSum
 	tp.Summary.FinishedAt = tp.Summary.StartedAt.Add(runEnd)

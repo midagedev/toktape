@@ -8,27 +8,27 @@
 │ ▏ 있으면 토큰마다▍                                                                                        │ never loaded           84.6G │
 │                                                                                                           │                              │
 │ stream 3/8                                                                       12.1 tok/s · ttft 290 ms │ MEMORY ───────────────────── │
-│ ▏ Flash attention changes the compute buffer size, not the weights. When the buffer grows past▍           │ rss       8.9G file     8.3G │
+│ ▏ Flash attention changes the compute buffer size, not the weights. When the buffer grows past▍           │ rss       9.0G file     8.3G │
 │                                                                                                           │ virt     40.0G anon     1.1G │
 │                                                                                                           │ maj/tok                  0.0 │
-│ stream 4/8                                                                       12.0 tok/s · ttft 330 ms │               ▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ Prefix caching only helps when the system prompt is byte identical. A single changed▍                   │                              │
+│ stream 4/8                                                                       12.2 tok/s · ttft 330 ms │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ Prefix caching only helps when the system prompt is byte identical. A single changed character▍         │                              │
 │                                                                                                           │ SPEED ────────────────────── │
 │                                                                                                           │ prefill           1980 tok/s │
-│ stream 5/8                                                                       12.1 tok/s · ttft 370 ms │ decode            12.1 tok/s │
-│ ▏ 측정값이 흔들릴 때는 먼저 머신이 한가한지 본다. 다른 프로세스가 같은 GPU를 쓰고 있으면▍                 │ ttft       210 ms · 0% cache │
-│                                                                                                           │ 8 streams     96.7 tok/s agg │
+│ stream 5/8                                                                       12.2 tok/s · ttft 370 ms │ decode            12.1 tok/s │
+│ ▏ 측정값이 흔들릴 때는 먼저 머신이 한가한지 본다. 다른 프로세스가 같은 GPU를 쓰고 있으면 재는▍            │ ttft      210 ms · 25% cache │
+│                                                                                                           │ 8 streams     97.0 tok/s agg │
 │                                                                                                           │                              │
 │ stream 6/8                                                                       12.0 tok/s · ttft 410 ms │ HOST ─────────────────────── │
-│ ▏ The aggregate rate is what the server does; the per stream rate▍                                        │ load     4.9 · contended yes │
+│ ▏ The aggregate rate is what the server does; the per stream rate is what▍                                │ load     4.9 · contended yes │
 │                                                                                                           │ GPU0         61°C  292W  90% │
 │                                                                                                           │ GPU1         61°C  292W  90% │
-│ stream 7/8                                                                       12.3 tok/s · ttft 450 ms │                              │
-│ ▏ Speculative decoding is a bet on the draft model. Below roughly half▍                                   │                              │
+│ stream 7/8                                                                       12.1 tok/s · ttft 450 ms │                              │
+│ ▏ Speculative decoding is a bet on the draft model. Below roughly half acceptance▍                        │                              │
 │                                                                                                           │                              │
 │                                                                                                           │                              │
-│ stream 8/8                                                                       12.2 tok/s · ttft 490 ms │                              │
-│ ▏ RSS is not loaded. Under mmap the resident set is what▍                                                 │                              │
+│ stream 8/8                                                                       12.1 tok/s · ttft 490 ms │                              │
+│ ▏ RSS is not loaded. Under mmap the resident set is what this process▍                                    │                              │
 │                                                                                                           │                              │
 │                                                                                                           │                              │
 │                                                                                                           │                              │
@@ -36,5 +36,5 @@
 │                                                                                                           │                              │
 │                                                                                                           │                              │
 ├───────────────────────────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
-│ token latency                                                                                █▏▏▏▏██▏▏▏▏▏▏  p50 91 ms  q quit · p prompt │
+│ token latency                                                                               █▏▏▏████▏▏▏▏██  p50 91 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -27,9 +27,13 @@ const (
 	TickInterval = 50 * time.Millisecond
 )
 
-// spinnerFrames is the braille spinner shown while a stream is still in
-// prefill.
-var spinnerFrames = []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'}
+// spinnerFrames is the spinner shown while a stream is still in prefill.
+//
+// Quarter circles rather than the braille wheel this started as: braille is
+// missing from enough monospace fonts to render as a replacement box, and a
+// tool whose whole pitch is a terminal screenshot cannot afford a tofu in the
+// first frame of the clip.
+var spinnerFrames = []rune{'◐', '◓', '◑', '◒'}
 
 // easeOutCubic maps a 0..1 progress to a 0..1 eased position. Out-cubic is the
 // curve that reads as "a value settling", not as "a value sliding".

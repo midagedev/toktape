@@ -8,23 +8,23 @@
 │ stream 3/8                               12.1 tok/s · ttft 290 ms │ never loaded           84.6G │
 │ ▏ Flash attention changes the compute buffer size, not the        │                              │
 │ ▏ weights. When the buffer grows past▍                            │ MEMORY ───────────────────── │
-│ stream 4/8                               12.0 tok/s · ttft 330 ms │ rss       8.9G file     8.3G │
+│ stream 4/8                               12.2 tok/s · ttft 330 ms │ rss       9.0G file     8.3G │
 │ ▏ Prefix caching only helps when the system prompt is byte        │ virt     40.0G anon     1.1G │
-│ ▏ identical. A single changed▍                                    │ maj/tok                  0.0 │
-│ stream 5/8                               12.1 tok/s · ttft 370 ms │               ▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ identical. A single changed character▍                          │ maj/tok                  0.0 │
+│ stream 5/8                               12.2 tok/s · ttft 370 ms │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ ▏ 측정값이 흔들릴 때는 먼저 머신이 한가한지 본다. 다른            │                              │
-│ ▏ 프로세스가 같은 GPU를 쓰고 있으면▍                              │ SPEED ────────────────────── │
+│ ▏ 프로세스가 같은 GPU를 쓰고 있으면 재는▍                         │ SPEED ────────────────────── │
 │ stream 6/8                               12.0 tok/s · ttft 410 ms │ prefill           1980 tok/s │
 │ ▏ The aggregate rate is what the server does; the per stream      │ decode            12.1 tok/s │
-│ ▏ rate▍                                                           │ ttft       210 ms · 0% cache │
-│ stream 7/8                               12.3 tok/s · ttft 450 ms │ 8 streams     96.7 tok/s agg │
+│ ▏ rate is what▍                                                   │ ttft      210 ms · 25% cache │
+│ stream 7/8                               12.1 tok/s · ttft 450 ms │ 8 streams     97.0 tok/s agg │
 │ ▏ Speculative decoding is a bet on the draft model. Below         │                              │
-│ ▏ roughly half▍                                                   │ HOST ─────────────────────── │
-│ stream 8/8                               12.2 tok/s · ttft 490 ms │ load     4.9 · contended yes │
-│ ▏ RSS is not loaded. Under mmap the resident set is what▍         │ GPU0         61°C  292W  90% │
-│                                                                   │ GPU1         61°C  292W  90% │
+│ ▏ roughly half acceptance▍                                        │ HOST ─────────────────────── │
+│ stream 8/8                               12.1 tok/s · ttft 490 ms │ load     4.9 · contended yes │
+│ ▏ RSS is not loaded. Under mmap the resident set is what this     │ GPU0         61°C  292W  90% │
+│ ▏ process▍                                                        │ GPU1         61°C  292W  90% │
 │                                                                   │                              │
 │                                                                   │                              │
 ├───────────────────────────────────────────────────────────────────┴──────────────────────────────┤
-│ token latency                                        █▏▏▏▏██▏▏▏▏▏▏  p50 91 ms  q quit · p prompt │
+│ token latency                                       █▏▏▏████▏▏▏▏██  p50 91 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘

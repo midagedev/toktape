@@ -257,7 +257,7 @@ func TestEase(t *testing.T) {
 // period later, which is what makes a replay reproduce the frames.
 func TestAnimationsAreFunctionsOfT(t *testing.T) {
 	for _, base := range []time.Duration{0, 37 * time.Millisecond, 4321 * time.Millisecond} {
-		if a, b := spinnerAt(base), spinnerAt(base+spinFrame*10); a != b {
+		if a, b := spinnerAt(base), spinnerAt(base+spinFrame*time.Duration(len(spinnerFrames))); a != b {
 			t.Errorf("spinner at %v is %q, one period later %q", base, a, b)
 		}
 		if a, b := breathPhase(base), breathPhase(base+breathDur); a != b {

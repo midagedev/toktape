@@ -34,7 +34,7 @@ func leftPane(m Model, th Theme, t time.Duration, cw, rows int) []string {
 	}
 
 	n := len(m.Streams)
-	shown, bodyLines, gap := streamLayout(n, avail)
+	shown, bodyLines, gap := streamLayout(n, avail, m.Done)
 	active := m.activeStream()
 
 	for i := 0; i < shown; i++ {
@@ -43,7 +43,7 @@ func leftPane(m Model, th Theme, t time.Duration, cw, rows int) []string {
 			out = append(out, blank)
 		}
 		out = append(out, streamHeader(m, th, s, cw, i == 0 || n > 1, s.Index == active))
-		out = append(out, streamBody(m, th, t, s, cw, bodyLines, s.Index == active)...)
+		out = append(out, streamBody(m, th, t, s, cw, bodyLines[i], s.Index == active)...)
 	}
 	if shown < n {
 		l := newLine(th, cw)
@@ -55,18 +55,39 @@ func leftPane(m Model, th Theme, t time.Duration, cw, rows int) []string {
 }
 
 // streamLayout decides how many streams to show and how many answer lines each
-// gets. Three lines per stream is the design; it degrades to two, then one,
-// then to showing fewer streams, rather than to a scrollbar.
-func streamLayout(n, avail int) (shown, bodyLines, gap int) {
-	if n == 1 {
-		return 1, max(1, avail-1), 0
+// one gets.
+//
+// While the run is live every stream gets the same budget — three lines, then
+// two, then one — because a block that grew as its neighbour finished would
+// make the text jump around under the reader's eye. Once the run is over
+// nothing moves again, so the rows are shared out instead and the pane fills
+// with the tail of every answer, the odd rows going to the streams at the top.
+func streamLayout(n, avail int, done bool) (shown int, bodyLines []int, gap int) {
+	switch {
+	case n < 1:
+		return 0, nil, 0
+	case n == 1:
+		return 1, []int{max(1, avail-1)}, 0
 	}
-	// Answer lines are worth more than breathing room, so k is the outer
-	// choice and the blank line between blocks is the first thing given up.
+	// One header per stream comes off the top whatever the state.
+	if body := avail - n; done && body >= n {
+		lines := make([]int, n)
+		base, extra := body/n, body%n
+		for i := range lines {
+			lines[i] = base
+			if i < extra {
+				lines[i]++
+			}
+		}
+		return n, lines, 0
+	}
+	// Live, or a pane too short to give every finished stream a line: answer
+	// lines are worth more than breathing room, so the per-stream budget is
+	// the outer choice and the blank line between blocks is given up first.
 	for k := 3; k >= 1; k-- {
 		for _, g := range []int{1, 0} {
 			if n*(1+k)+(n-1)*g <= avail {
-				return n, k, g
+				return n, uniform(n, k), g
 			}
 		}
 	}
@@ -83,7 +104,16 @@ func streamLayout(n, avail int) (shown, bodyLines, gap int) {
 			shown = 1
 		}
 	}
-	return shown, 1, 0
+	return shown, uniform(shown, 1), 0
+}
+
+// uniform is the same line budget for every stream.
+func uniform(n, k int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = k
+	}
+	return out
 }
 
 // streamHeader is "stream 3/8" on the left and this stream's own rate on the
@@ -226,9 +256,14 @@ func appendCursor(th Theme, t time.Duration, line string, cw int, active bool) s
 }
 
 // prefillLine is the spinner, the prompt-progress bar and the token counts of
-// a stream that has not produced a token yet. The cached part of the prompt is
-// drawn in a dimmer shade than the part actually being processed, because the
-// difference between the two is the whole question a cold run raises.
+// a stream that has not produced a token yet.
+//
+// The bar has three parts: the share of the prompt the prefix cache already
+// held, the share the server has actually processed since, and what is left.
+// The first two are separated because the difference between them is the whole
+// question a slow first token raises — a prompt that missed the cache is being
+// evaluated from scratch, and the card's cache badge and this bar are two
+// views of the same fact (docs/toktape-spec.ko.md §3 M3).
 func prefillLine(th Theme, t time.Duration, s Stream, cw, indent int, active bool) string {
 	l := newLine(th, cw)
 	gutter(l, th, active)
@@ -241,9 +276,9 @@ func prefillLine(th Theme, t time.Duration, s Stream, cw, indent int, active boo
 	}
 	p := s.Progress[len(s.Progress)-1]
 	tail := fmt.Sprintf(" %d/%d · cache %d", p.Processed, p.Total, p.Cache)
-	barW := l.left() - width(tail)
-	if barW > 24 {
-		barW = 24
+	barW := prefillBarW
+	if room := l.left() - width(tail); barW > room {
+		barW = room
 	}
 	if barW > 0 && p.Total > 0 {
 		cacheN := cells(float64(p.Cache)/float64(p.Total), barW)
@@ -258,6 +293,12 @@ func prefillLine(th Theme, t time.Duration, s Stream, cw, indent int, active boo
 	l.add(th.dim, tail)
 	return l.String()
 }
+
+// prefillBarW is the width of the prompt-progress bar. It is the same solid
+// block in the same three shades as every other gauge on the screen: the
+// prefix the cache already held, what the server has processed since, and what
+// is left.
+const prefillBarW = 12
 
 // cells converts a 0..1 fraction into a whole number of bar cells.
 func cells(frac float64, w int) int {

@@ -167,19 +167,30 @@ func TestViewIsPure(t *testing.T) {
 
 // TestViewAnimates is the other half of purity: the frame has to actually move
 // when only t changes. A screen that is pure but static would pass every other
-// test here and fail the whole point of the track.
+// test in this file and fail the whole point of the track.
+//
+// It renders in colour, because two of the four moving parts — the header
+// shimmer and the cursor's breath — are changes of colour alone and leave no
+// trace in a plain frame.
 func TestViewAnimates(t *testing.T) {
-	m := goldenModel(t, 0) // every stream still in prefill: the spinner runs
-	base := View(m, 0, 120, 36)
-	for _, dt := range []time.Duration{
-		spinFrame,      // spinner
-		breathDur / 4,  // cursor breath
-		shimmerDur / 6, // header shimmer
-		easeDur / 2,    // bar easing
-		150 * time.Millisecond,
-	} {
-		if View(m, dt, 120, 36) == base {
-			t.Errorf("frame at t=%v is identical to the frame at t=0", dt)
+	th := ColourTheme()
+	cases := []struct {
+		what string
+		at   time.Duration // where in the run to look
+		dt   time.Duration // how far to step
+	}{
+		// Every stream is in prefill at t=0, so the spinner is on screen.
+		{"the prefill spinner", 0, spinFrame},
+		{"the header shimmer", 0, shimmerDur / 8},
+		// Mid-run there is a cursor to breathe and bars easing toward a sample.
+		{"the stream cursor", midRun, breathDur / 4},
+		{"the eased bars", 1250 * time.Millisecond, easeDur / 3},
+	}
+	for _, c := range cases {
+		m := goldenModel(t, c.at)
+		m.Theme = th
+		if View(m, c.at+c.dt, 120, 36) == View(m, c.at, 120, 36) {
+			t.Errorf("%s did not move over %v", c.what, c.dt)
 		}
 	}
 }
@@ -387,4 +398,106 @@ func TestBarsUseOneGlyph(t *testing.T) {
 	if !strings.Contains(frame, sgrPrefix(th, th.darkFill)+"█") {
 		t.Error("no bar remainder is drawn in the dark fill colour")
 	}
+}
+
+// TestPrefillFrameShowsProgress: the opening frame is the one a reader sees
+// first in a clip, and "waiting for the first token" says nothing about what
+// the server is doing. Every stream must show the spinner and a prompt-progress
+// bar from the very first frame, which means ExampleTape has to carry a
+// return_progress row stamped at zero.
+func TestPrefillFrameShowsProgress(t *testing.T) {
+	m := goldenModel(t, 0)
+	frame := View(m, 0, 120, 36)
+
+	if strings.Contains(frame, "waiting for the first token") {
+		t.Error("the opening frame still falls back to the waiting message")
+	}
+	bars := strings.Count(frame, "prefill ")
+	if bars == 0 {
+		t.Fatal("no prefill progress bar on the opening frame")
+	}
+	for i, s := range m.Streams {
+		if len(s.Progress) == 0 {
+			t.Errorf("stream %d has no progress row at t=0", i)
+		}
+		if len(s.Tokens) != 0 {
+			t.Errorf("stream %d already has tokens at t=0", i)
+		}
+	}
+	// The counts beside the bar are the ones the tape recorded, not a guess.
+	p := m.Streams[0].Progress[0]
+	if !strings.Contains(frame, fmt.Sprintf("%d/%d · cache %d", p.Processed, p.Total, p.Cache)) {
+		t.Errorf("the bar does not print the recorded counts %d/%d cache %d",
+			p.Processed, p.Total, p.Cache)
+	}
+	if strings.Contains(frame, "░") || strings.Contains(frame, "▓") {
+		t.Error("the prefill bar uses a hatch glyph")
+	}
+
+	// The bar has to show all three shades, or it is not saying anything the
+	// "176/512 · cache 128" beside it does not already say.
+	th := ColourTheme()
+	m.Theme = th
+	coloured := View(m, 0, 120, 36)
+	for _, part := range []struct {
+		st   lipgloss.Style
+		what string
+	}{
+		{th.accentLow, "the prefix the cache already held"},
+		{th.accent, "the part processed since"},
+		{th.darkFill, "the part still to do"},
+	} {
+		if !strings.Contains(coloured, sgrPrefix(th, part.st)+"█") {
+			t.Errorf("the prefill bar does not draw %s", part.what)
+		}
+	}
+}
+
+// TestDoneStateFillsThePane: once nothing is moving, empty rows below the last
+// answer are wasted screen. The rows are shared out across the streams, which
+// is the frame a reader lands on at the end of a clip.
+func TestDoneStateFillsThePane(t *testing.T) {
+	for _, sz := range []struct{ w, h int }{{100, 30}, {120, 36}, {140, 40}, {160, 50}} {
+		m := goldenModel(t, doneAt)
+		if !m.Done {
+			t.Fatal("the fixture is not finished at the done offset")
+		}
+		bodyH := sz.h - chromeH
+		lines := leftPane(m, PlainTheme(), doneAt, sz.w-33-2, bodyH)
+
+		blanks := 0
+		for i := len(lines) - 1; i >= 0 && strings.TrimSpace(lines[i]) == ""; i-- {
+			blanks++
+		}
+		// The done footer is a blank spacer and the saved-tape line, so one
+		// trailing blank belongs to it; anything beyond that is waste.
+		if blanks > 0 {
+			t.Errorf("%dx%d: %d blank rows at the bottom of the answer pane", sz.w, sz.h, blanks)
+		}
+
+		n := len(m.Streams)
+		_, budget, gap := streamLayout(n, bodyH-2, true)
+		if gap != 0 {
+			t.Errorf("%dx%d: the done layout still spends rows on gaps", sz.w, sz.h)
+		}
+		lo, hi := budget[0], budget[0]
+		for _, k := range budget {
+			lo, hi = min(lo, k), max(hi, k)
+		}
+		if hi-lo > 1 {
+			t.Errorf("%dx%d: line budgets range %d..%d; the remainder is not shared evenly",
+				sz.w, sz.h, lo, hi)
+		}
+		if used := n + sum(budget); used != bodyH-2 {
+			t.Errorf("%dx%d: the layout uses %d of %d rows", sz.w, sz.h, used, bodyH-2)
+		}
+	}
+}
+
+func sum(v []int) int {
+	n := 0
+	for _, x := range v {
+		n += x
+	}
+	return n
 }

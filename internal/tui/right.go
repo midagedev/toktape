@@ -243,9 +243,16 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	if ttft <= 0 {
 		ttft = m.Summary.Timings.TTFTMs
 	}
+	// The badge is amber when the prefix cache was missed outright, which is
+	// the case that starts arguments about a "slow" prefill. It deliberately
+	// does not follow tape.CacheCold: that label is about major faults paging
+	// weights in during decode, a different measurement, and the maj/tok row
+	// above already reports it. Colouring one by the other would tell the
+	// reader the prompt cache missed when what actually happened was a disk
+	// read.
 	cache := m.Summary.Cache
 	cacheSt := th.text
-	if cache.Label == tape.CacheCold {
+	if cache.HitRatio <= 0 {
 		cacheSt = th.warn
 	}
 	l = newLine(th, cw)
