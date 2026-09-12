@@ -1,0 +1,739 @@
+package png
+
+import (
+	"bytes"
+	"fmt"
+	"image"
+	"image/color"
+	stdpng "image/png"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/midagedev/toktape/internal/card"
+	"github.com/midagedev/toktape/internal/tape"
+)
+
+// outDir is where the rendered cards are dropped for the lead's visual check.
+// It is gitignored; the tests recreate it.
+const outDir = "testdata/out"
+
+// hangulSummary is the fallback-font fixture: a model whose name is Hangul, so
+// a card rendered without D2Coding would show tofu boxes (or nothing) where
+// the name goes.
+func hangulSummary() *tape.RunSummary {
+	s := card.Example()
+	s.Model.Name = "한글 모델 이름"
+	s.Model.FileName = "한글-모델-Q4_K_M.gguf"
+	return s
+}
+
+// fixtures are the summaries every structural test runs over.
+func fixtures() map[string]*tape.RunSummary {
+	return map[string]*tape.RunSummary{
+		"single":     card.Example(),
+		"concurrent": card.ExampleConcurrent(),
+		"unknown":    {},
+		"hangul":     hangulSummary(),
+	}
+}
+
+// ------------------------------------------------------------- structure ---
+
+func TestRenderBounds(t *testing.T) {
+	for name, s := range fixtures() {
+		t.Run(name, func(t *testing.T) {
+			img, err := Render(s)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			want := image.Rect(0, 0, Width, Height)
+			if got := img.Bounds(); got != want {
+				t.Fatalf("bounds = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestRenderNilSummary(t *testing.T) {
+	img, err := Render(nil)
+	if err != nil {
+		t.Fatalf("Render(nil): %v", err)
+	}
+	if got, want := img.Bounds(), image.Rect(0, 0, Width, Height); got != want {
+		t.Fatalf("bounds = %v, want %v", got, want)
+	}
+}
+
+// TestRenderIsDeterministic is the replay contract: the card is a pure
+// function of the summary, so two renders of the same tape are byte-identical.
+// A clock read or a map iteration leaking into the layout breaks this.
+func TestRenderIsDeterministic(t *testing.T) {
+	encode := func() []byte {
+		img, err := Render(card.Example())
+		if err != nil {
+			t.Fatalf("Render: %v", err)
+		}
+		var buf bytes.Buffer
+		if err := stdpng.Encode(&buf, img); err != nil {
+			t.Fatalf("Encode: %v", err)
+		}
+		return buf.Bytes()
+	}
+	if a, b := encode(), encode(); !bytes.Equal(a, b) {
+		t.Fatalf("two renders of the same summary differ (%d vs %d bytes)", len(a), len(b))
+	}
+}
+
+// ----------------------------------------------------------- pixel probes ---
+
+func at(img *image.RGBA, x, y int) color.RGBA {
+	c := img.RGBAAt(x, y)
+	return color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A}
+}
+
+func TestPixelProbes(t *testing.T) {
+	c, err := renderCanvas(card.Example())
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+
+	// The canvas background outside the panel is the contract's #11111b.
+	if got := at(c.img, 5, 5); got != colBase {
+		t.Errorf("background at (5,5) = %v, want %v", got, colBase)
+	}
+	// The panel interior is #1e1e2e. Sample a spot with nothing drawn on it:
+	// the gap between the hero rule and the memory label.
+	if got := at(c.img, contentR-4, bandMemTop+4); got != colPanel {
+		t.Errorf("panel at (%d,%d) = %v, want %v", contentR-4, bandMemTop+4, got, colPanel)
+	}
+	// The 1px border: the panel's left edge at mid height, where the rounded
+	// corners are far away and the border is exactly one pixel of #313244.
+	mid := (panelTop + panelBottom) / 2
+	if got := at(c.img, panelInset, mid); got != colBorder {
+		t.Errorf("border at (%d,%d) = %v, want %v", panelInset, mid, got, colBorder)
+	}
+	if got := at(c.img, panelInset+1, mid); got != colPanel {
+		t.Errorf("inside border at (%d,%d) = %v, want %v", panelInset+1, mid, got, colPanel)
+	}
+	if got := at(c.img, panelInset-1, mid); got != colBase {
+		t.Errorf("outside border at (%d,%d) = %v, want %v", panelInset-1, mid, got, colBase)
+	}
+
+	// The hairline rules are one pixel tall: the row is not background, the
+	// rows either side of it are.
+	if at(c.img, contentL+40, bandHeroTop) == colPanel {
+		t.Errorf("header rule at y=%d is not drawn", bandHeroTop)
+	}
+	if got := at(c.img, contentL+40, bandHeroTop-2); got != colPanel {
+		t.Errorf("pixel above the header rule = %v, want %v (rule is thicker than 1px)", got, colPanel)
+	}
+	if got := at(c.img, contentL+40, bandHeroTop+2); got != colPanel {
+		t.Errorf("pixel below the header rule = %v, want %v (rule is thicker than 1px)", got, colPanel)
+	}
+}
+
+// inkCount returns how many pixels in r differ from the panel colour.
+func inkCount(img *image.RGBA, r image.Rectangle) int {
+	n := 0
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			if at(img, x, y) != colPanel {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// TestHeroNumbersHaveInk is the "the draw actually happened" probe: the hero
+// is the whole point of the card, and a font that failed to load would leave
+// the region flat.
+func TestHeroNumbersHaveInk(t *testing.T) {
+	for _, name := range []string{"single", "concurrent"} {
+		s := fixtures()[name]
+		t.Run(name, func(t *testing.T) {
+			c, err := renderCanvas(s)
+			if err != nil {
+				t.Fatalf("renderCanvas: %v", err)
+			}
+			for _, id := range []string{"hero.left.number", "hero.right.number"} {
+				m, ok := c.markByID(id)
+				if !ok {
+					t.Fatalf("%s was never drawn", id)
+				}
+				if got := inkCount(c.img, m.Rect); got < 400 {
+					t.Errorf("%s (%q) has %d ink pixels in %v, want >= 400", id, m.Text, got, m.Rect)
+				}
+			}
+		})
+	}
+}
+
+// TestEveryBandHasInk catches a whole region silently failing to render.
+func TestEveryBandHasInk(t *testing.T) {
+	bands := []struct {
+		name     string
+		top, bot int
+	}{
+		{"header", bandHeaderTop, bandHeroTop},
+		{"hero", bandHeroTop, bandMemTop},
+		{"memory", bandMemTop, bandFooterTop},
+		{"footer", bandFooterTop, bandStripTop},
+		{"strip", bandStripTop, bandStripEnd},
+	}
+	for name, s := range fixtures() {
+		t.Run(name, func(t *testing.T) {
+			c, err := renderCanvas(s)
+			if err != nil {
+				t.Fatalf("renderCanvas: %v", err)
+			}
+			for _, b := range bands {
+				r := image.Rect(contentL, b.top, contentR, b.bot)
+				if got := inkCount(c.img, r); got < 200 {
+					t.Errorf("band %s has %d ink pixels, want >= 200", b.name, got)
+				}
+			}
+		})
+	}
+}
+
+// TestHeroGradient asserts the card's single accent ramp is actually a ramp:
+// the left edge of the decode number leans cyan and the right edge leans blue.
+// Cyan and blue share a red channel, so the test reads the blue-minus-green
+// difference, which is what separates them.
+func TestHeroGradient(t *testing.T) {
+	c, err := renderCanvas(card.Example())
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	m, ok := c.markByID("hero.left.number")
+	if !ok {
+		t.Fatal("hero.left.number was never drawn")
+	}
+	lean := func(r image.Rectangle) float64 {
+		var sum float64
+		var n int
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			for x := r.Min.X; x < r.Max.X; x++ {
+				p := at(c.img, x, y)
+				if p == colPanel {
+					continue
+				}
+				sum += float64(p.B) - float64(p.G)
+				n++
+			}
+		}
+		if n == 0 {
+			t.Fatalf("no ink in %v", r)
+		}
+		return sum / float64(n)
+	}
+	third := m.Rect.Dx() / 3
+	left := lean(image.Rect(m.Rect.Min.X, m.Rect.Min.Y, m.Rect.Min.X+third, m.Rect.Max.Y))
+	right := lean(image.Rect(m.Rect.Max.X-third, m.Rect.Min.Y, m.Rect.Max.X, m.Rect.Max.Y))
+	if !(right > left) {
+		t.Errorf("hero number does not ramp cyan→blue: left B-G = %.1f, right B-G = %.1f", left, right)
+	}
+}
+
+// ---------------------------------------------------------------- hangul ---
+
+// TestHangulHasGlyphs is the font-bundling contract: the Latin face has no
+// Hangul, so the fallback must supply it, and Hangul must be twice the Latin
+// advance (handover lesson 5).
+func TestHangulHasGlyphs(t *testing.T) {
+	fs, err := newFontSet()
+	if err != nil {
+		t.Fatalf("newFontSet: %v", err)
+	}
+	defer fs.Close()
+	f, err := fs.face(32, wRegular)
+	if err != nil {
+		t.Fatalf("face: %v", err)
+	}
+	if _, ok := f.latin.GlyphAdvance('한'); ok {
+		t.Fatal("JetBrains Mono unexpectedly has Hangul; the fallback test proves nothing")
+	}
+	for _, r := range []rune{'한', '글', '모', '델'} {
+		if !f.hasGlyph(r) {
+			t.Errorf("no glyph for %q in either face", r)
+		}
+	}
+	latin, _ := f.fallback.GlyphAdvance('A')
+	hangul, _ := f.fallback.GlyphAdvance('한')
+	if hangul != 2*latin {
+		t.Errorf("fallback Hangul advance = %v, want 2× the Latin advance %v", hangul, latin)
+	}
+}
+
+// TestHangulRenders draws a Hangul model name and probes the pixels where the
+// renderer said it put it. Without the fallback face the region would be blank
+// or full of .notdef boxes; a blank region is the failure this catches.
+func TestHangulRenders(t *testing.T) {
+	c, err := renderCanvas(hangulSummary())
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	m, ok := c.markByID("footer.col0.row0")
+	if !ok {
+		t.Fatal("footer.col0.row0 was never drawn")
+	}
+	if !strings.Contains(m.Text, "한글") {
+		t.Fatalf("footer model row = %q, want it to carry the Hangul name", m.Text)
+	}
+	if got := inkCount(c.img, m.Rect); got < 150 {
+		t.Errorf("Hangul model name has %d ink pixels in %v, want >= 150", got, m.Rect)
+	}
+	// The header carries the Hangul file name too, on a different face size.
+	h, ok := c.markByID("header.model")
+	if !ok {
+		t.Fatal("header.model was never drawn")
+	}
+	if got := inkCount(c.img, h.Rect); got < 150 {
+		t.Errorf("Hangul file name has %d ink pixels in %v, want >= 150", got, h.Rect)
+	}
+}
+
+// ------------------------------------------------------------- containment ---
+
+// TestNothingLeavesTheContentBox is the layout guard. Neither the renderer nor
+// this test can look at the picture, so the canvas records where it put every
+// run of text and the test asserts those rectangles stay inside the panel and
+// inside the content column.
+func TestNothingLeavesTheContentBox(t *testing.T) {
+	for name, s := range fixtures() {
+		t.Run(name, func(t *testing.T) {
+			c, err := renderCanvas(s)
+			if err != nil {
+				t.Fatalf("renderCanvas: %v", err)
+			}
+			for _, m := range c.marks {
+				if m.Kind != "text" || m.Text == "" {
+					continue
+				}
+				if m.Rect.Min.X < contentL {
+					t.Errorf("%s (%q) starts at x=%d, left of the content box (%d)", m.ID, m.Text, m.Rect.Min.X, contentL)
+				}
+				if m.Rect.Max.X > contentR {
+					t.Errorf("%s (%q) ends at x=%d, right of the content box (%d)", m.ID, m.Text, m.Rect.Max.X, contentR)
+				}
+				if m.Rect.Min.Y < panelTop || m.Rect.Max.Y > panelBottom {
+					t.Errorf("%s (%q) spans y=%d..%d, outside the panel (%d..%d)", m.ID, m.Text, m.Rect.Min.Y, m.Rect.Max.Y, panelTop, panelBottom)
+				}
+			}
+		})
+	}
+}
+
+// TestFooterColumnsDoNotCollide keeps the four-column grid a grid: a long CPU
+// name or a long GPU list must be truncated, never allowed to run into the
+// next column.
+func TestFooterColumnsDoNotCollide(t *testing.T) {
+	long := card.Example()
+	long.Host.CPU = "AMD Ryzen Threadripper PRO 7995WX 96-Core Processor With A Silly Name"
+	long.Model.Name = "A Model Whose General Name Field Was Filled In By Somebody Enthusiastic"
+	long.Server.Kind = "llama-server-with-an-unreasonably-long-kind"
+
+	for name, s := range map[string]*tape.RunSummary{"example": card.Example(), "long": long} {
+		t.Run(name, func(t *testing.T) {
+			c, err := renderCanvas(s)
+			if err != nil {
+				t.Fatalf("renderCanvas: %v", err)
+			}
+			for i := 0; i < footerCols; i++ {
+				left := contentL + i*footerColStep
+				right := left + footerColW
+				for _, part := range []string{"label", "row0", "row1", "row2", "row3"} {
+					m, ok := c.markByID(colID(i, part))
+					if !ok {
+						t.Fatalf("%s was never drawn", colID(i, part))
+					}
+					if m.Rect.Min.X < left || m.Rect.Max.X > right {
+						t.Errorf("%s (%q) spans x=%d..%d, outside its column (%d..%d)",
+							m.ID, m.Text, m.Rect.Min.X, m.Rect.Max.X, left, right)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestLongFlagsAreTruncated: the -ot group can be arbitrarily long and it is
+// the last thing on the strip, so it must be the thing that gets cut.
+func TestLongFlagsAreTruncated(t *testing.T) {
+	s := card.Example()
+	s.Server.Flags.OverrideTens = []string{strings.Repeat("blk.99.ffn_up_exps=CPU,", 40)}
+	c, err := renderCanvas(s)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	m, ok := c.markByID("strip.flags")
+	if !ok {
+		t.Fatal("strip.flags was never drawn")
+	}
+	if !strings.HasSuffix(m.Text, ellipsis) {
+		t.Errorf("flags line was not truncated: %q", m.Text)
+	}
+	if m.Rect.Max.X > contentR {
+		t.Errorf("flags line ends at x=%d, past the content box (%d)", m.Rect.Max.X, contentR)
+	}
+	// The five argument-starters survive the cut.
+	for _, want := range []string{"-fa on", "-b 2048", "-ub 512", "-ctk q8_0", "-ctv q8_0"} {
+		if !strings.Contains(m.Text, want) {
+			t.Errorf("flags line lost %q: %q", want, m.Text)
+		}
+	}
+}
+
+// -------------------------------------------------------------- contract ---
+
+// TestUnknownSummaryNeverInventsANumber: the all-unknown card must print "?"
+// everywhere, and must not show a plausible-looking zero for anything it did
+// not measure (repo rule; handover lesson 3).
+func TestUnknownSummaryNeverInventsANumber(t *testing.T) {
+	c, err := renderCanvas(&tape.RunSummary{})
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	want := map[string]string{
+		"hero.left.number":  unknown,
+		"hero.right.number": unknown,
+		"header.model":      unknown,
+		"header.runid":      unknown,
+		"footer.col0.row0":  unknown,
+		"footer.col1.row0":  unknown,
+		"footer.col2.row0":  unknown,
+		"footer.col3.row0":  unknown,
+	}
+	for id, w := range want {
+		m, ok := c.markByID(id)
+		if !ok {
+			t.Fatalf("%s was never drawn", id)
+		}
+		if m.Text != w {
+			t.Errorf("%s = %q, want %q", id, m.Text, w)
+		}
+	}
+	// Page faults were not observed, so the pill says "?" rather than "0.0".
+	m, ok := c.markByID("memory.pill0")
+	if !ok {
+		t.Fatal("memory.pill0 was never drawn")
+	}
+	if m.Text != "maj/tok "+unknown {
+		t.Errorf("maj-fault pill = %q, want %q", m.Text, "maj/tok "+unknown)
+	}
+	// The contention label is always printed (lesson 6), but "no" would be a
+	// claim about a machine nobody read, so an empty summary gets "?".
+	if m, ok := c.markByID("memory.pill2"); !ok || m.Text != "contended "+unknown {
+		t.Errorf("contended pill = %q (drawn=%v), want %q", m.Text, ok, "contended "+unknown)
+	}
+	if m, ok := c.markByID("footer.col1.row3"); !ok || m.Text != unknown {
+		t.Errorf("RAM cell = %q (drawn=%v), want %q — an unread size is not %q", m.Text, ok, unknown, "? GB")
+	}
+}
+
+// TestContentionReadingIsPrinted is the other half: once anything was read,
+// the verdict is a measurement and prints as yes/no.
+func TestContentionReadingIsPrinted(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ci   tape.ContentionInfo
+		want string
+	}{
+		{"loadavg only", tape.ContentionInfo{LoadAvg1: 1.2}, "contended no"},
+		{"other gpu procs", tape.ContentionInfo{OtherGPUProcs: 2}, "contended no"},
+		{"flagged", tape.ContentionInfo{Contended: true, LoadAvg1: 12.3, Reasons: []string{"loadavg 12.3 > cores 8"}}, "contended yes"},
+		{"nothing read", tape.ContentionInfo{}, "contended " + unknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := card.Example()
+			s.Contention = tc.ci
+			c, err := renderCanvas(s)
+			if err != nil {
+				t.Fatalf("renderCanvas: %v", err)
+			}
+			if m, _ := c.markByID("memory.pill2"); m.Text != tc.want {
+				t.Errorf("contended pill = %q, want %q", m.Text, tc.want)
+			}
+		})
+	}
+}
+
+// TestObservedZeroIsPrinted is the other half of the rule: a run that really
+// did read /proc and really did see no faults prints 0.0, not "?".
+func TestObservedZeroIsPrinted(t *testing.T) {
+	c, err := renderCanvas(card.Example())
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	m, ok := c.markByID("memory.pill0")
+	if !ok {
+		t.Fatal("memory.pill0 was never drawn")
+	}
+	if m.Text != "maj/tok 0.0" {
+		t.Errorf("maj-fault pill = %q, want %q", m.Text, "maj/tok 0.0")
+	}
+}
+
+// TestConcurrentHeroShowsBothFigures: the aggregate is the headline and the
+// per-stream rate must stay next to it, because "96.8 tok/s" alone would be a
+// different claim (spec §4, track contract).
+func TestConcurrentHeroShowsBothFigures(t *testing.T) {
+	c, err := renderCanvas(card.ExampleConcurrent())
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	checks := map[string]string{
+		"hero.left.number":   "96.8",
+		"hero.left.sub1":     "8 × 12.1 tok/s per stream",
+		"hero.left.eyebrow":  "AGGREGATE DECODE",
+		"hero.right.number":  "8250",
+		"hero.right.sub1":    "8 × 1980 tok/s per stream",
+		"hero.right.eyebrow": "AGGREGATE PREFILL",
+	}
+	for id, want := range checks {
+		m, ok := c.markByID(id)
+		if !ok {
+			t.Fatalf("%s was never drawn", id)
+		}
+		if m.Text != want {
+			t.Errorf("%s = %q, want %q", id, m.Text, want)
+		}
+	}
+	// The TTFT spread stays on the prefill side; it is the figure a concurrent
+	// run is actually judged on.
+	if m, _ := c.markByID("hero.right.sub2"); !strings.Contains(m.Text, "p95 480 ms") {
+		t.Errorf("prefill sub-line = %q, want the p50/p95 TTFT spread", m.Text)
+	}
+	// The cold run's cache pill is red-labelled "cold", not a silent 0%.
+	if m, _ := c.markByID("memory.pill1"); !strings.Contains(m.Text, "cold") {
+		t.Errorf("cache pill = %q, want it to say cold", m.Text)
+	}
+}
+
+// TestSingleStreamPrefillIsNotAggregate: only a concurrent run gets the
+// "aggregate" framing; a one-stream run says plain PREFILL.
+func TestSingleStreamPrefillIsNotAggregate(t *testing.T) {
+	c, err := renderCanvas(card.Example())
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	if m, _ := c.markByID("hero.right.eyebrow"); m.Text != "PREFILL" {
+		t.Errorf("prefill eyebrow = %q, want %q", m.Text, "PREFILL")
+	}
+	if m, _ := c.markByID("hero.right.number"); m.Text != "2450" {
+		t.Errorf("prefill number = %q, want %q", m.Text, "2450")
+	}
+	if m, _ := c.markByID("hero.left.eyebrow"); m.Text != "DECODE" {
+		t.Errorf("decode eyebrow = %q, want %q", m.Text, "DECODE")
+	}
+}
+
+// TestSampleLabel: below tape.MinDecodeTokens the summary carries
+// DecodeLabel "sample", and the card must not call it decode (lesson 2).
+func TestSampleLabel(t *testing.T) {
+	s := card.Example()
+	s.Timings.PredictedN = 19
+	s.Timings.DecodeLabel = "sample"
+	c, err := renderCanvas(s)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	m, _ := c.markByID("hero.left.eyebrow")
+	if m.Text != "SAMPLE" {
+		t.Errorf("decode eyebrow = %q, want %q", m.Text, "SAMPLE")
+	}
+}
+
+// TestPlacementBarSegments: one segment per device plus never-loaded, laid out
+// left to right in placement order and filling the bar exactly.
+func TestPlacementBarSegments(t *testing.T) {
+	s := card.Example()
+	s.Placement.NeverLoadedBytes = 4 * gib
+	c, err := renderCanvas(s)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	want := len(s.Placement.Devices) + 1
+	var segs []mark
+	for i := 0; i < want+2; i++ {
+		if m, ok := c.markByID(segmentID(i)); ok {
+			segs = append(segs, m)
+		}
+	}
+	if len(segs) != want {
+		t.Fatalf("drew %d bar segments, want %d", len(segs), want)
+	}
+	if segs[0].Rect.Min.X != contentL {
+		t.Errorf("first segment starts at x=%d, want %d", segs[0].Rect.Min.X, contentL)
+	}
+	if last := segs[len(segs)-1]; last.Rect.Max.X != contentR {
+		t.Errorf("last segment ends at x=%d, want %d", last.Rect.Max.X, contentR)
+	}
+	for i := 1; i < len(segs); i++ {
+		if segs[i].Rect.Min.X != segs[i-1].Rect.Max.X {
+			t.Errorf("gap between segment %d and %d: %d != %d", i-1, i, segs[i-1].Rect.Max.X, segs[i].Rect.Min.X)
+		}
+	}
+	if m, ok := c.markByID("memory.legend.text3"); !ok || !strings.HasPrefix(m.Text, "never loaded") {
+		t.Errorf("never-loaded legend = %q (drawn=%v)", m.Text, ok)
+	}
+}
+
+// TestGPUSegmentsAreSubdivided: when the placement reports the three-way VRAM
+// split, each GPU segment carries weights | kv | compute as three lightness
+// steps of its own hue, they tile the segment exactly, and the legend names
+// the three recorded totals.
+func TestGPUSegmentsAreSubdivided(t *testing.T) {
+	s := card.Example()
+	c, err := renderCanvas(s)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	for _, seg := range []int{0, 1} { // GPU0, GPU1
+		outer, ok := c.markByID(segmentID(seg))
+		if !ok {
+			t.Fatalf("%s was never drawn", segmentID(seg))
+		}
+		var parts []mark
+		for p := 0; p < 3; p++ {
+			m, ok := c.markByID(fmt.Sprintf("%s.part%d", segmentID(seg), p))
+			if !ok {
+				t.Fatalf("%s.part%d was never drawn", segmentID(seg), p)
+			}
+			parts = append(parts, m)
+		}
+		if parts[0].Rect.Min.X != outer.Rect.Min.X || parts[2].Rect.Max.X != outer.Rect.Max.X {
+			t.Errorf("segment %d parts span %d..%d, want %d..%d", seg,
+				parts[0].Rect.Min.X, parts[2].Rect.Max.X, outer.Rect.Min.X, outer.Rect.Max.X)
+		}
+		for i := 1; i < 3; i++ {
+			if parts[i].Rect.Min.X != parts[i-1].Rect.Max.X {
+				t.Errorf("segment %d has a gap between part%d and part%d", seg, i-1, i)
+			}
+			if _, ok := c.markByID(fmt.Sprintf("%s.div%d", segmentID(seg), i)); !ok {
+				t.Errorf("segment %d is missing the divider before part%d", seg, i)
+			}
+		}
+	}
+	// Host RAM is not a VRAM breakdown, so it stays one block.
+	if _, ok := c.markByID(segmentID(2) + ".part0"); ok {
+		t.Error("the CPU segment was subdivided; the three-way split is VRAM only")
+	}
+	for i, want := range map[int]string{3: "weights 13.5 GiB", 4: "kv 3.0 GiB", 5: "compute 0.9 GiB"} {
+		m, ok := c.markByID(fmt.Sprintf("memory.legend.text%d", i))
+		if !ok || m.Text != want {
+			t.Errorf("legend entry %d = %q (drawn=%v), want %q", i, m.Text, ok, want)
+		}
+	}
+}
+
+// TestUnsplitPlacementDrawsWholeSegments: a placement with no KV or compute
+// figures is not invented into a three-way split.
+func TestUnsplitPlacementDrawsWholeSegments(t *testing.T) {
+	s := card.Example()
+	s.Placement.VRAMKVBytes = 0
+	s.Placement.VRAMComputeBytes = 0
+	c, err := renderCanvas(s)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	if _, ok := c.markByID(segmentID(0) + ".part0"); ok {
+		t.Error("GPU0 was subdivided without a reported VRAM split")
+	}
+	if _, ok := c.markByID("memory.legend.text3"); ok {
+		t.Error("a breakdown legend entry was drawn without a reported VRAM split")
+	}
+}
+
+// TestUnknownPlacementDrawsTrackOnly: with no placement the bar is an empty
+// track and the legend says so, rather than a full bar of invented bytes.
+func TestUnknownPlacementDrawsTrackOnly(t *testing.T) {
+	c, err := renderCanvas(&tape.RunSummary{})
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	for _, m := range c.marks {
+		if strings.HasPrefix(m.ID, "memory.bar.seg") {
+			t.Fatalf("drew a placement segment for an unobserved placement: %s", m.ID)
+		}
+	}
+	if m, ok := c.markByID("memory.legend.none"); !ok || m.Text != "no placement observed" {
+		t.Errorf("legend = %q (drawn=%v), want %q", m.Text, ok, "no placement observed")
+	}
+	if m, ok := c.markByID("memory.bar.track"); !ok || m.Rect.Dx() != contentW {
+		t.Errorf("bar track = %v (drawn=%v), want width %d", m.Rect, ok, contentW)
+	}
+}
+
+// ----------------------------------------------------------------- write ---
+
+// TestWriteCards writes the three contract cards to testdata/out for the
+// lead's visual check and asserts each one decodes back at the right size.
+func TestWriteCards(t *testing.T) {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", outDir, err)
+	}
+	cards := []struct {
+		file string
+		s    *tape.RunSummary
+	}{
+		{"card-single.png", card.Example()},
+		{"card-concurrent.png", card.ExampleConcurrent()},
+		{"card-unknown.png", &tape.RunSummary{}},
+		{"card-hangul.png", hangulSummary()},
+	}
+	for _, c := range cards {
+		path := filepath.Join(outDir, c.file)
+		if err := Write(path, c.s); err != nil {
+			t.Fatalf("Write(%s): %v", path, err)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatalf("open %s: %v", path, err)
+		}
+		img, err := stdpng.Decode(f)
+		f.Close()
+		if err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+		if got, want := img.Bounds(), image.Rect(0, 0, Width, Height); got != want {
+			t.Errorf("%s bounds = %v, want %v", c.file, got, want)
+		}
+		abs, _ := filepath.Abs(path)
+		t.Logf("wrote %s", abs)
+	}
+}
+
+// TestWriteLeavesNoTempFile: Write renames a temp file into place, and a
+// failure must not leave a half-encoded card behind.
+func TestWriteLeavesNoTempFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := Write(filepath.Join(dir, "nested", "card.png"), card.Example()); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "nested"))
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	if len(entries) == 1 && entries[0].Name() == "card.png" {
+		// The card is meant to be handed to other people, so it must not
+		// inherit os.CreateTemp's owner-only mode.
+		info, err := entries[0].Info()
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0o644 {
+			t.Errorf("card mode = %v, want %v", got, os.FileMode(0o644))
+		}
+	}
+	if len(entries) != 1 || entries[0].Name() != "card.png" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("directory holds %v, want just card.png", names)
+	}
+}
