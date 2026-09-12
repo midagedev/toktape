@@ -1,0 +1,179 @@
+package recorder
+
+import (
+	"errors"
+	"time"
+
+	"github.com/midagedev/toktape/internal/gpu"
+	"github.com/midagedev/toktape/internal/server"
+	"github.com/midagedev/toktape/internal/tape"
+)
+
+// ErrUnreachable wraps every failure to reach the server: discovery found
+// nothing, or /props did not answer. The CLI maps it to exit code 2.
+var ErrUnreachable = errors.New("recorder: server unreachable")
+
+// ErrAllStreamsFailed is returned when no stream produced a usable record.
+// The CLI maps it to exit code 3. Partial failure is not an error: a run in
+// which three of four streams answered is still evidence, and the failures
+// are recorded in the records' Error fields and in AggregateTimings.
+var ErrAllStreamsFailed = errors.New("recorder: all streams failed")
+
+// Clock supplies the run's wall-clock stamps. Only Now is needed; the
+// recorder does not sleep on it. Tests pass a fixed clock to pin the run ID.
+type Clock interface {
+	Now() time.Time
+}
+
+// systemClock is the real clock.
+type systemClock struct{}
+
+func (systemClock) Now() time.Time { return time.Now() }
+
+// Options configures one run. The zero value is valid: it discovers the
+// server, sends one default prompt and writes to the live /proc.
+type Options struct {
+	// BaseURL is the server to attach to. Empty means discover it.
+	BaseURL string
+	// Prompts are the requests to send. Empty means
+	// server.DefaultPrompts(Concurrency). When fewer prompts than
+	// Concurrency are given they are cycled; when more are given and
+	// Concurrency is 0, Concurrency becomes len(Prompts).
+	Prompts []server.StreamRequest
+	// Concurrency is the number of streams sent at once. 0 or less means 1,
+	// or len(Prompts) when prompts were supplied.
+	Concurrency int
+	// MaxTokens caps every stream's answer (the server's max_tokens /
+	// n_predict). 0 leaves whatever the prompt itself carries.
+	MaxTokens int
+	// SampleInterval is how often a tape.RunSample is taken. 0 means
+	// tape.DefaultSampleInterval.
+	SampleInterval time.Duration
+	// Progress, when non-nil, receives an Event for each step of the run.
+	// The recorder serialises the calls, so an implementation needs no lock
+	// of its own — but it runs on the stream goroutines and must not block:
+	// a slow callback delays the read loop and skews the timings.
+	Progress func(Event)
+	// FSRoot is the directory that contains "proc". "" means "/". Tests
+	// point it at a fixture tree.
+	FSRoot string
+	// GPU is the device collector. nil means gpu.Open. A collector supplied
+	// here is owned by the caller and is not closed by Record.
+	GPU gpu.Collector
+	// Clock supplies StartedAt and FinishedAt. nil means the system clock.
+	Clock Clock
+	// Version is written into tape.RunSummary.ToktapeVersion. The CLI sets
+	// it from its build-time version string.
+	Version string
+	// Candidates are the base URLs discovery probes when BaseURL is empty.
+	// nil means server.DefaultCandidates.
+	Candidates []string
+}
+
+// EventKind names a step of the run. The CLI prints some of them and the TUI
+// draws on all of them.
+type EventKind string
+
+const (
+	// EventDiscovered fires once the server's base URL is known.
+	EventDiscovered EventKind = "discovered"
+	// EventProps fires once /props answered; Message carries the build.
+	EventProps EventKind = "props"
+	// EventPIDFound fires when the local server process was identified.
+	EventPIDFound EventKind = "pid_found"
+	// EventPIDNotFound fires when it was not: the run has no /proc view.
+	EventPIDNotFound EventKind = "pid_not_found"
+	// EventWarning fires for every sentence appended to
+	// tape.RunSummary.Warnings.
+	EventWarning EventKind = "warning"
+	// EventAttached fires once the static picture is complete — server,
+	// model, flags, host and devices — and before the first request is
+	// sent. Its Summary is that partial summary, which is what the CLI's
+	// header line and the TUI's chrome are drawn from; no timing field is
+	// filled yet.
+	EventAttached EventKind = "attached"
+	// EventStreamStarted fires once per stream, before it is sent.
+	EventStreamStarted EventKind = "stream_started"
+	// EventToken fires for every token that carried text, with the major
+	// fault delta of that token already filled in.
+	EventToken EventKind = "token"
+	// EventSample fires for every periodic host reading.
+	EventSample EventKind = "sample"
+	// EventDone fires once, with the finished summary.
+	EventDone EventKind = "done"
+)
+
+// Event is one progress notification. Only the fields the Kind names are
+// filled; the rest are zero.
+type Event struct {
+	Kind EventKind
+	// Stream is the stream index for the stream-scoped kinds, else -1.
+	Stream int
+	// Streams is the total stream count, for the stream-scoped kinds.
+	Streams int
+	// Message is human-readable detail: the URL, the warning sentence, the
+	// build and model line.
+	Message string
+	// Token is filled for EventToken.
+	Token tape.TokenEvent
+	// Sample is filled for EventSample.
+	Sample tape.RunSample
+	// Summary is filled for EventDone.
+	Summary *tape.RunSummary
+}
+
+// normalize fills the defaults and returns a copy that the run can rely on.
+func (o Options) normalize() Options {
+	if o.Clock == nil {
+		o.Clock = systemClock{}
+	}
+	if o.FSRoot == "" {
+		o.FSRoot = "/"
+	}
+	if o.SampleInterval <= 0 {
+		o.SampleInterval = tape.DefaultSampleInterval
+	}
+	if o.Concurrency <= 0 {
+		if len(o.Prompts) > 0 {
+			o.Concurrency = len(o.Prompts)
+		} else {
+			o.Concurrency = 1
+		}
+	}
+	return o
+}
+
+// buildRequests returns exactly Concurrency requests. Supplied prompts are
+// cycled to fill the count and copied so that per-stream fields (the
+// rendered prompt) cannot alias across streams.
+func buildRequests(o Options, activeBytesPerToken int64) []server.StreamRequest {
+	var reqs []server.StreamRequest
+	if len(o.Prompts) == 0 {
+		reqs = server.DefaultPrompts(o.Concurrency)
+	} else {
+		reqs = make([]server.StreamRequest, o.Concurrency)
+		for i := range reqs {
+			reqs[i] = cloneRequest(o.Prompts[i%len(o.Prompts)])
+		}
+	}
+	for i := range reqs {
+		if o.MaxTokens > 0 {
+			reqs[i].MaxTokens = o.MaxTokens
+		}
+		reqs[i].ActiveBytesPerToken = activeBytesPerToken
+	}
+	return reqs
+}
+
+// cloneRequest deep-copies the parts of a request the recorder mutates.
+func cloneRequest(r server.StreamRequest) server.StreamRequest {
+	out := r
+	out.Messages = append([]tape.Message(nil), r.Messages...)
+	if r.Params != nil {
+		out.Params = make(map[string]any, len(r.Params))
+		for k, v := range r.Params {
+			out.Params[k] = v
+		}
+	}
+	return out
+}
