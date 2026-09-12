@@ -1,0 +1,6 @@
+/toktape
+/dist/
+/scratch/
+*.tape
+*.tape.gz
+/assets/out/
