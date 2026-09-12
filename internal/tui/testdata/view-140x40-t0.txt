@@ -1,0 +1,40 @@
+┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────────────────────────┐
+│ stream 1/8                                                                                        prefill │ PLACEMENT ────────────────── │
+│ ▏ ⠋ prefill  waiting for the first token                                                                  │ GPU0 ███████████████    9.2G │
+│                                                                                                           │ GPU1 ███████████████    9.4G │
+│                                                                                                           │ CPU  ███████████████    6.3G │
+│ stream 2/8                                                                                        prefill │ vram ███████████████   17.4G │
+│ ▏ ⠋ prefill  waiting for the first token                                                                  │      █ weights  █ kv  █ buf  │
+│                                                                                                           │ never loaded           84.6G │
+│                                                                                                           │                              │
+│ stream 3/8                                                                                        prefill │ MEMORY ───────────────────── │
+│ ▏ ⠋ prefill  waiting for the first token                                                                  │ rss       7.7G file     7.1G │
+│                                                                                                           │ virt     40.0G anon     1.1G │
+│                                                                                                           │ maj/tok                  0.1 │
+│ stream 4/8                                                                                        prefill │                              │
+│ ▏ ⠋ prefill  waiting for the first token                                                                  │                              │
+│                                                                                                           │ SPEED ────────────────────── │
+│                                                                                                           │ prefill ⠋         1980 tok/s │
+│ stream 5/8                                                                                        prefill │ decode            11.3 tok/s │
+│ ▏ ⠋ prefill  waiting for the first token                                                                  │ ttft       210 ms · 0% cache │
+│                                                                                                           │ 8 streams     90.6 tok/s agg │
+│                                                                                                           │                              │
+│ stream 6/8                                                                                        prefill │ HOST ─────────────────────── │
+│ ▏ ⠋ prefill  waiting for the first token                                                                  │ load     3.1 · contended yes │
+│                                                                                                           │ GPU0         58°C  280W  88% │
+│                                                                                                           │ GPU1         58°C  280W  88% │
+│ stream 7/8                                                                                        prefill │                              │
+│ ▏ ⠋ prefill  waiting for the first token                                                                  │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+│ stream 8/8                                                                                        prefill │                              │
+│ ▏ ⠋ prefill  waiting for the first token                                                                  │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+├───────────────────────────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
+│ token latency                                                                                                   p50 ?  q quit · p prompt │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

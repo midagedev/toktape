@@ -1,0 +1,40 @@
+┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────────────────────────┐
+│ stream 1/8                                                                       12.1 tok/s · ttft 210 ms │ PLACEMENT ────────────────── │
+│ ▏ The page fault spike you are seeing is the expert tensors being read back from NVMe.▍                   │ GPU0 ███████████████    9.4G │
+│                                                                                                           │ GPU1 ███████████████    9.6G │
+│                                                                                                           │ CPU  ███████████████    6.3G │
+│ stream 2/8                                                                       12.0 tok/s · ttft 250 ms │ vram ███████████████   17.4G │
+│ ▏ 레이어 배치를 바꾸면 디코드 속도가 달라지는 이유는 간단하다. 전문가 텐서가 호스트 메모리에 남아         │      █ weights  █ kv  █ buf  │
+│ ▏ 있으면 토큰마다▍                                                                                        │ never loaded           84.6G │
+│                                                                                                           │                              │
+│ stream 3/8                                                                       12.1 tok/s · ttft 290 ms │ MEMORY ───────────────────── │
+│ ▏ Flash attention changes the compute buffer size, not the weights. When the buffer grows past▍           │ rss       8.9G file     8.3G │
+│                                                                                                           │ virt     40.0G anon     1.1G │
+│                                                                                                           │ maj/tok                  0.0 │
+│ stream 4/8                                                                       12.0 tok/s · ttft 330 ms │               ▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ Prefix caching only helps when the system prompt is byte identical. A single changed▍                   │                              │
+│                                                                                                           │ SPEED ────────────────────── │
+│                                                                                                           │ prefill           1980 tok/s │
+│ stream 5/8                                                                       12.1 tok/s · ttft 370 ms │ decode            12.1 tok/s │
+│ ▏ 측정값이 흔들릴 때는 먼저 머신이 한가한지 본다. 다른 프로세스가 같은 GPU를 쓰고 있으면▍                 │ ttft       210 ms · 0% cache │
+│                                                                                                           │ 8 streams     96.7 tok/s agg │
+│                                                                                                           │                              │
+│ stream 6/8                                                                       12.0 tok/s · ttft 410 ms │ HOST ─────────────────────── │
+│ ▏ The aggregate rate is what the server does; the per stream rate▍                                        │ load     4.9 · contended yes │
+│                                                                                                           │ GPU0         61°C  292W  90% │
+│                                                                                                           │ GPU1         61°C  292W  90% │
+│ stream 7/8                                                                       12.3 tok/s · ttft 450 ms │                              │
+│ ▏ Speculative decoding is a bet on the draft model. Below roughly half▍                                   │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+│ stream 8/8                                                                       12.2 tok/s · ttft 490 ms │                              │
+│ ▏ RSS is not loaded. Under mmap the resident set is what▍                                                 │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+│                                                                                                           │                              │
+├───────────────────────────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
+│ token latency                                                                                █▏▏▏▏██▏▏▏▏▏▏  p50 91 ms  q quit · p prompt │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
