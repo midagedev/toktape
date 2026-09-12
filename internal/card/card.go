@@ -1,0 +1,591 @@
+package card
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"strconv"
+	"strings"
+
+	"github.com/midagedev/toktape/internal/tape"
+)
+
+// Version is the toktape version printed in the card header when the summary
+// itself does not carry one. The CLI sets it at build time.
+var Version = "dev"
+
+// footerText is the card's last line (docs/toktape-spec.ko.md §4 item 11).
+const footerText = "toktape · github.com/midagedev/toktape"
+
+// Label gutters. Everything in a section lines up under the same column so the
+// card reads as one fixed layout regardless of which fields were observed.
+const (
+	blockLabelW = 9  // MODEL / ENGINE / RIG / MEMORY / HOST / FLAGS
+	speedLabelW = 14 // Decode / Prefill / Context / Prefix cache / Streams
+	vramBarW    = 10 // cells in the VRAM bar
+)
+
+// Text renders the result card as a Unicode box.
+//
+// Every line is exactly CardWidth display columns wide, measured with East
+// Asian width, and the output contains no ANSI escapes so it can be pasted
+// into a Reddit code block verbatim. A nil summary renders the all-unknown
+// card rather than panicking.
+func Text(s *tape.RunSummary) string {
+	if s == nil {
+		s = &tape.RunSummary{}
+	}
+
+	sections := [][]string{
+		{headerLine(s)},
+		identitySection(s),
+		speedSection(s),
+		memorySection(s),
+		hostSection(s),
+		flagsSection(s),
+	}
+	if w := warningSection(s); len(w) > 0 {
+		sections = append(sections, w)
+	}
+	sections = append(sections, []string{center(footerText, innerWidth)})
+
+	var b strings.Builder
+	b.WriteString("┌" + repeat('─', CardWidth-2) + "┐\n")
+	for i, sec := range sections {
+		if i > 0 {
+			b.WriteString("├" + repeat('─', CardWidth-2) + "┤\n")
+		}
+		for _, line := range sec {
+			b.WriteString("│ " + pad(line, innerWidth) + " │\n")
+		}
+	}
+	b.WriteString("└" + repeat('─', CardWidth-2) + "┘\n")
+	return b.String()
+}
+
+// Markdown wraps Text in a ```text fence and appends the llama-bench
+// compatible table, so the whole thing can be pasted as one comment.
+func Markdown(s *tape.RunSummary) string {
+	return "```text\n" + Text(s) + "```\n\n" + LlamaBenchTable(s)
+}
+
+// JSON renders the summary as indented JSON. Key order is the struct order of
+// tape.RunSummary, which is the schema order; map keys are sorted by
+// encoding/json, so the output is stable across runs.
+func JSON(s *tape.RunSummary) ([]byte, error) {
+	if s == nil {
+		s = &tape.RunSummary{}
+	}
+	b, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("card: marshal run summary: %w", err)
+	}
+	return append(b, '\n'), nil
+}
+
+// ---------------------------------------------------------------- layout ---
+
+// labelled puts label in the first line's gutter and indents the rest under it.
+func labelled(label string, labelW int, lines []string) []string {
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	avail := innerWidth - labelW
+	out := make([]string, 0, len(lines))
+	for i, l := range lines {
+		gutter := strings.Repeat(" ", labelW)
+		if i == 0 {
+			gutter = pad(label, labelW)
+		}
+		out = append(out, gutter+truncate(l, avail))
+	}
+	return out
+}
+
+// field joins parts with sep and wraps them under label at separator
+// boundaries. A single part wider than the gutter-adjusted width is truncated
+// with "…"; parts are never dropped.
+func field(label string, labelW int, sep string, parts ...string) []string {
+	return labelled(label, labelW, wrapJoin(parts, sep, innerWidth-labelW))
+}
+
+// wrapJoin lays parts out on as few lines of avail columns as possible,
+// joining them with sep and breaking only between parts.
+func wrapJoin(parts []string, sep string, avail int) []string {
+	var lines []string
+	cur := ""
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		if cur == "" {
+			cur = truncate(p, avail)
+			continue
+		}
+		if Width(cur)+Width(sep)+Width(p) <= avail {
+			cur += sep + p
+			continue
+		}
+		lines = append(lines, cur)
+		cur = truncate(p, avail)
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	return lines
+}
+
+// center left-pads s so it sits in the middle of w columns. pad fills the right.
+func center(s string, w int) string {
+	s = truncate(s, w)
+	left := (w - Width(s)) / 2
+	if left < 0 {
+		left = 0
+	}
+	return strings.Repeat(" ", left) + s
+}
+
+// --------------------------------------------------------------- sections ---
+
+func headerLine(s *tape.RunSummary) string {
+	left := versionString(s)
+	right := orUnknown(s.ID)
+	if Width(left)+1+Width(right) > innerWidth {
+		right = truncate(right, innerWidth-Width(left)-1)
+	}
+	gap := innerWidth - Width(left) - Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return left + strings.Repeat(" ", gap) + right
+}
+
+// versionString renders "toktape v0.1.0". The summary's own version wins over
+// the package var so a replayed tape shows the version that recorded it.
+func versionString(s *tape.RunSummary) string {
+	v := s.ToktapeVersion
+	if v == "" {
+		v = Version
+	}
+	if v == "" {
+		return "toktape " + unknown
+	}
+	// Only a numeric version gets the "v" prefix; "dev" stays "dev".
+	if v[0] >= '0' && v[0] <= '9' {
+		v = "v" + v
+	}
+	return "toktape " + v
+}
+
+func identitySection(s *tape.RunSummary) []string {
+	var out []string
+	out = append(out, field("MODEL", blockLabelW, " · ",
+		orUnknown(s.Model.FileName),
+		orUnknown(s.Model.Quant),
+		formatGiB(s.Model.FileBytes),
+	)...)
+
+	engineParts := []string{engineString(s.Server), osString(s.Host)}
+	if s.Host.Hostname != "" {
+		engineParts = append(engineParts, s.Host.Hostname)
+	}
+	out = append(out, field("ENGINE", blockLabelW, " · ", engineParts...)...)
+
+	rigParts := append(rigGPUs(s.Host.GPUs), orUnknown(s.Host.CPU), ramString(s.Host))
+	out = append(out, field("RIG", blockLabelW, " · ", rigParts...)...)
+	return out
+}
+
+func engineString(srv tape.ServerInfo) string {
+	kind := string(srv.Kind)
+	if kind == "" || srv.Kind == tape.ServerUnknown {
+		kind = unknown
+	}
+	if kind == unknown && srv.Build == "" && srv.Commit == "" {
+		return unknown
+	}
+	var b strings.Builder
+	b.WriteString(kind)
+	switch {
+	case srv.Build != "" && srv.Commit != "":
+		b.WriteString(" " + srv.Build + " (" + srv.Commit + ")")
+	case srv.Build != "":
+		b.WriteString(" " + srv.Build)
+	case srv.Commit != "":
+		b.WriteString(" (" + srv.Commit + ")")
+	default:
+		b.WriteString(" " + unknown)
+	}
+	return b.String()
+}
+
+func osString(h tape.HostInfo) string {
+	s := strings.TrimSpace(h.OS + " " + h.Kernel)
+	return orUnknown(s)
+}
+
+// rigGPUs collapses identical devices into "2× RTX 3090 24G".
+func rigGPUs(gpus []tape.GPUInfo) []string {
+	if len(gpus) == 0 {
+		return []string{unknown}
+	}
+	type group struct {
+		name string
+		vram int64
+		n    int
+	}
+	var order []*group
+	seen := map[string]*group{}
+	for _, g := range gpus {
+		name := shortGPUName(g.Name)
+		key := name + "|" + strconv.FormatInt(g.VRAMBytes, 10)
+		e, ok := seen[key]
+		if !ok {
+			e = &group{name: name, vram: g.VRAMBytes}
+			seen[key] = e
+			order = append(order, e)
+		}
+		e.n++
+	}
+	out := make([]string, 0, len(order))
+	for _, e := range order {
+		label := orUnknown(e.name)
+		if e.vram > 0 {
+			label += fmt.Sprintf(" %.0fG", float64(e.vram)/gib)
+		}
+		if e.n > 1 {
+			label = strconv.Itoa(e.n) + "× " + label
+		}
+		out = append(out, label)
+	}
+	return out
+}
+
+// shortGPUName drops the vendor prefixes nvidia-smi reports so the RIG line
+// fits. It shortens, it never invents.
+func shortGPUName(n string) string {
+	n = strings.TrimSpace(n)
+	for _, prefix := range []string{"NVIDIA GeForce ", "NVIDIA ", "GeForce "} {
+		if strings.HasPrefix(n, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(n, prefix))
+		}
+	}
+	return n
+}
+
+func ramString(h tape.HostInfo) string {
+	s := unknown + " GB"
+	if h.RAMBytes > 0 {
+		s = fmt.Sprintf("%.0f GB", float64(h.RAMBytes)/gib)
+	}
+	// RAM speed is omitted when unknown rather than printed as "?": it is a
+	// nice-to-have detail, not one of the argument-settling fields.
+	if h.RAMSpeed != "" {
+		s += " " + h.RAMSpeed
+	}
+	return s
+}
+
+func speedSection(s *tape.RunSummary) []string {
+	t := s.Timings
+	var out []string
+
+	// Lesson 2: a short generation is a "sample", never a "decode" rate.
+	decodeLabel := "Decode"
+	if t.DecodeLabel == "sample" {
+		decodeLabel = "Sample"
+	}
+	decodeParts := []string{formatRateUnit(t.PredictedPerSecond)}
+	if bw := bandwidthString(s); bw != "" {
+		decodeParts = append(decodeParts, bw)
+	}
+	out = append(out, field(decodeLabel, speedLabelW, " · ", decodeParts...)...)
+
+	promptTotal := promptTokens(s)
+	out = append(out, field("Prefill", speedLabelW, " · ",
+		formatRateUnit(t.PromptPerSecond),
+		"TTFT "+formatMs(t.TTFTMs),
+		formatInt(promptTotal)+" prompt tokens",
+	)...)
+
+	out = append(out, labelled("Context", speedLabelW, []string{
+		fmt.Sprintf("%s (%s in / %s out)",
+			formatInt(s.Server.CtxSize), formatInt(promptTotal), formatInt(t.PredictedN)),
+	})...)
+
+	out = append(out, labelled("Prefix cache", speedLabelW, []string{cacheString(s.Cache)})...)
+
+	if s.Concurrency > 1 {
+		out = append(out, streamLines(s)...)
+	}
+	return out
+}
+
+// promptTokens is the whole prompt the run sent, cached prefix included.
+func promptTokens(s *tape.RunSummary) int {
+	if s.Cache.PromptTotal > 0 {
+		return s.Cache.PromptTotal
+	}
+	return s.Timings.PromptN + s.Timings.CacheN
+}
+
+// bandwidthString renders "≈ 91 GB/s, 9% of peak". Empty when the effective
+// bandwidth was not derivable; the "≈" marks it as an estimate (spec §3.2 S6).
+func bandwidthString(s *tape.RunSummary) string {
+	if s.Timings.EffectiveBandwidthBytesPerSec <= 0 {
+		return ""
+	}
+	out := "≈ " + formatGBs(s.Timings.EffectiveBandwidthBytesPerSec)
+	var peak int64
+	for _, g := range s.Host.GPUs {
+		peak += g.PeakBandwidthBytesPerSec
+	}
+	if peak > 0 {
+		ratio := float64(s.Timings.EffectiveBandwidthBytesPerSec) / float64(peak)
+		out += ", " + formatPct(ratio) + " of peak"
+	}
+	return out
+}
+
+func cacheString(c tape.CacheSummary) string {
+	label := string(c.Label)
+	if label == "" {
+		label = unknown
+	}
+	if c.PromptTotal <= 0 {
+		return unknown + " · " + label
+	}
+	ratio := c.HitRatio
+	if ratio == 0 && c.HitTokens > 0 {
+		ratio = float64(c.HitTokens) / float64(c.PromptTotal)
+	}
+	return fmt.Sprintf("%s hit (%d/%d) · %s", formatPct(ratio), c.HitTokens, c.PromptTotal, label)
+}
+
+// streamLines renders the concurrent-run headline. It is two lines because the
+// contract's single line is ~95 columns and none of its figures may be dropped.
+func streamLines(s *tape.RunSummary) []string {
+	a := s.Aggregate
+	n := a.Streams
+	if n == 0 {
+		n = s.Concurrency
+	}
+	first := fmt.Sprintf("%d × %s = %s aggregate",
+		n, formatRateUnit(a.PerStreamPredictedPerSecond), formatRateUnit(a.AggregatePredictedPerSecond))
+	if a.StreamsFailed > 0 {
+		first += fmt.Sprintf(" · %d failed", a.StreamsFailed)
+	}
+	second := fmt.Sprintf("TTFT p50 %s p95 %s · slots busy max %s",
+		formatMs(a.TTFTp50Ms), formatMs(a.TTFTp95Ms), formatInt(a.SlotsBusyMax))
+	return labelled("Streams", speedLabelW, []string{first, second})
+}
+
+func memorySection(s *tape.RunSummary) []string {
+	var lines []string
+
+	if len(s.GPUsAtEnd) == 0 {
+		lines = append(lines, "VRAM "+unknown)
+	} else {
+		total := map[int]int64{}
+		for _, g := range s.Host.GPUs {
+			total[g.Index] = g.VRAMBytes
+		}
+		for _, g := range s.GPUsAtEnd {
+			lines = append(lines, vramLine(g, total[g.Index]))
+		}
+	}
+
+	if p := s.Placement; p.VRAMWeightsBytes > 0 || p.VRAMKVBytes > 0 || p.VRAMComputeBytes > 0 {
+		lines = append(lines, fmt.Sprintf("weights %s | kv %s | compute %s GiB",
+			formatGiBNum(p.VRAMWeightsBytes), formatGiBNum(p.VRAMKVBytes), formatGiBNum(p.VRAMComputeBytes)))
+	}
+
+	// Lesson 3: RSS is not "loaded". Both of these lines need a /proc view to
+	// mean anything; without one a zero would be a lie, so print "?".
+	m := s.Memory
+	hasProc := m.AtEnd.RSSBytes > 0
+	if hasProc {
+		lines = append(lines, fmt.Sprintf("Host RSS %s (file %s / anon %s)",
+			formatGiB(m.AtEnd.RSSBytes), formatGiBNum(m.AtEnd.RSSFileBytes), formatGiBNum(m.AtEnd.RSSAnonBytes)))
+	} else {
+		lines = append(lines, "Host RSS "+unknown)
+	}
+
+	if s.Placement.NeverLoadedBytes > 0 {
+		line := "Never loaded " + formatGiB(s.Placement.NeverLoadedBytes)
+		if what := neverLoadedWhat(s.Placement); what != "" {
+			line += " (" + what + ")"
+		}
+		lines = append(lines, line)
+	}
+
+	if hasProc {
+		lines = append(lines, fmt.Sprintf("Page faults %s maj/token (%d during decode)",
+			formatFloat1(m.MajFaultsPerToken), m.MajFaultsDecode))
+	} else {
+		lines = append(lines, "Page faults "+unknown)
+	}
+
+	return labelled("MEMORY", blockLabelW, lines)
+}
+
+func vramLine(g tape.GPUSample, total int64) string {
+	name := "GPU" + strconv.Itoa(g.Index)
+	if total <= 0 {
+		return fmt.Sprintf("%s %s/%s GiB", name, formatGiBNum(g.UsedBytes), unknown)
+	}
+	return fmt.Sprintf("%s %s %s/%s GiB", name, vramBar(g.UsedBytes, total, vramBarW),
+		formatGiBNum(g.UsedBytes), formatGiBNum(total))
+}
+
+func vramBar(used, total int64, w int) string {
+	filled := 0
+	if used > 0 && total > 0 {
+		filled = int(math.Round(float64(used) / float64(total) * float64(w)))
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > w {
+		filled = w
+	}
+	return "[" + repeat('█', filled) + repeat('░', w-filled) + "]"
+}
+
+// neverLoadedWhat names the tensor class behind the never-loaded bytes when the
+// placement identified one; it is not assumed.
+func neverLoadedWhat(p tape.PlacementSummary) string {
+	for _, d := range p.Devices {
+		if d.Classes[tape.ClassNGram] > 0 {
+			return "ngram tables"
+		}
+	}
+	return ""
+}
+
+func hostSection(s *tape.RunSummary) []string {
+	parts := make([]string, 0, len(s.GPUsAtEnd)+2)
+	throttled := unknown
+	for _, g := range s.GPUsAtEnd {
+		parts = append(parts, fmt.Sprintf("GPU%d %s %s", g.Index, tempString(g.TempC), powerString(g.PowerW)))
+	}
+	if len(s.GPUsAtEnd) > 0 {
+		throttled = "no"
+		for _, g := range s.GPUsAtEnd {
+			if g.Throttled {
+				throttled = "yes"
+				break
+			}
+		}
+	}
+	parts = append(parts, "throttled: "+throttled)
+	// Lesson 6: Contention is always filled in, so it is always printed.
+	parts = append(parts, "contended: "+yesNo(s.Contention.Contended))
+
+	lines := wrapJoin(parts, " · ", innerWidth-blockLabelW)
+	if s.Contention.Contended && len(s.Contention.Reasons) > 0 {
+		lines = append(lines, wrapJoin(s.Contention.Reasons, " · ", innerWidth-blockLabelW)...)
+	}
+	return labelled("HOST", blockLabelW, lines)
+}
+
+func tempString(c float64) string {
+	if c <= 0 {
+		return unknown + "°C"
+	}
+	return strconv.FormatFloat(c, 'f', 0, 64) + "°C"
+}
+
+func powerString(w float64) string {
+	if w <= 0 {
+		return unknown + " W"
+	}
+	return strconv.FormatFloat(w, 'f', 0, 64) + " W"
+}
+
+// flagsSection renders the flag line.
+//
+// The five argument-starters (-fa, -b, -ub, -ctk, -ctv) are always printed and
+// show "?" when unobserved — they are the ones that end comment threads
+// (docs/research/02-sharing-artifacts.md §5.2). The remaining flags are
+// omitted when empty. Everything except the -ot group wraps without
+// truncation; the -ot group, which can be arbitrarily long, is truncated with
+// "…" so it never costs more than one extra line.
+func flagsSection(s *tape.RunSummary) []string {
+	base, ot := flagTokens(s.Server.Flags)
+	avail := innerWidth - blockLabelW
+	lines := wrapJoin(base, " ", avail)
+	if ot != "" {
+		last := lines[len(lines)-1]
+		room := avail - Width(last) - 1
+		switch {
+		case Width(ot) <= room: // fits after the last flag
+			lines[len(lines)-1] = last + " " + ot
+		case Width(ot) <= avail: // fits whole on a line of its own
+			lines = append(lines, ot)
+		case room >= 12: // has to be cut; the tail of this line is roomier
+			lines[len(lines)-1] = last + " " + truncate(ot, room)
+		default:
+			lines = append(lines, truncate(ot, avail))
+		}
+	}
+	return labelled("FLAGS", blockLabelW, lines)
+}
+
+// flagTokens returns the flags in card order plus the -ot group separately.
+func flagTokens(f tape.ServerFlags) (base []string, ot string) {
+	if f.NGL != "" {
+		base = append(base, "-ngl "+f.NGL)
+	}
+	base = append(base,
+		"-fa "+orUnknown(f.FlashAttn),
+		"-b "+orUnknown(f.Batch),
+		"-ub "+orUnknown(f.UBatch),
+		"-ctk "+orUnknown(f.CacheTypeK),
+		"-ctv "+orUnknown(f.CacheTypeV),
+	)
+	if f.LoadMode != "" {
+		base = append(base, "--load-mode "+f.LoadMode)
+	}
+	if f.CPUMoE != "" {
+		// The field holds either a bare count or the verbatim flag.
+		if strings.HasPrefix(f.CPUMoE, "-") {
+			base = append(base, f.CPUMoE)
+		} else {
+			base = append(base, "-ncmoe "+f.CPUMoE)
+		}
+	}
+	if f.Threads != "" {
+		base = append(base, "-t "+f.Threads)
+	}
+	base = append(base, f.Other...)
+
+	parts := make([]string, 0, len(f.OverrideTens))
+	for _, p := range f.OverrideTens {
+		if p == "" {
+			continue
+		}
+		parts = append(parts, "-ot "+p)
+	}
+	return base, strings.Join(parts, " ")
+}
+
+func warningSection(s *tape.RunSummary) []string {
+	var out []string
+	for _, w := range s.Warnings {
+		if strings.TrimSpace(w) == "" {
+			continue
+		}
+		for i, l := range wrapJoin(strings.Fields(w), " ", innerWidth-2) {
+			if i == 0 {
+				out = append(out, "! "+l)
+			} else {
+				out = append(out, "  "+l)
+			}
+		}
+	}
+	return out
+}

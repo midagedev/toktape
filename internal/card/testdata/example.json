@@ -1,0 +1,197 @@
+{
+  "id": "20260913-142530-qwen3.5-35b-a3b",
+  "toktape_version": "0.1.0",
+  "started_at": "2026-09-13T14:25:30Z",
+  "finished_at": "2026-09-13T14:25:32.05Z",
+  "server": {
+    "kind": "llama-server",
+    "url": "http://127.0.0.1:8080",
+    "build": "b3650",
+    "commit": "a1b2c3d",
+    "pid": 48213,
+    "host": "workstation",
+    "flags": {
+      "ngl": "99",
+      "fa": "on",
+      "b": "2048",
+      "ub": "512",
+      "ctk": "q8_0",
+      "ctv": "q8_0",
+      "load_mode": "mmap",
+      "ot": [
+        "blk\\.(3[6-9]|4[0-7])\\.ffn_.*_exps=CPU"
+      ],
+      "cpu_moe": "12",
+      "t": "16"
+    },
+    "n_slots": 8,
+    "ctx_size": 32768
+  },
+  "model": {
+    "path": "/models/Qwen3.5-35B-A3B-UD-Q4_K_M.gguf",
+    "file_name": "Qwen3.5-35B-A3B-UD-Q4_K_M.gguf",
+    "name": "Qwen3.5 35B A3B",
+    "arch": "qwen3moe",
+    "quant": "UD-Q4_K_M",
+    "file_bytes": 21292085248,
+    "params": 35000000000,
+    "n_layers": 48,
+    "n_experts": 128,
+    "n_experts_used": 8,
+    "ctx_train": 262144,
+    "active_bytes_per_token": 1330000000
+  },
+  "host": {
+    "hostname": "workstation",
+    "os": "linux",
+    "kernel": "6.8.0-45-generic",
+    "cpu": "AMD Ryzen 9 7950X",
+    "cpu_cores": 16,
+    "cpu_threads": 32,
+    "ram_bytes": 68719476736,
+    "ram_speed": "DDR5-6000",
+    "ram_channels": 2,
+    "gpus": [
+      {
+        "index": 0,
+        "name": "NVIDIA GeForce RTX 3090",
+        "vram_bytes": 25769803776,
+        "driver": "550.54.14",
+        "pcie": "4.0 x16",
+        "peak_bw_bps": 936200000000
+      },
+      {
+        "index": 1,
+        "name": "NVIDIA GeForce RTX 3090",
+        "vram_bytes": 25769803776,
+        "driver": "550.54.14",
+        "pcie": "4.0 x16",
+        "peak_bw_bps": 936200000000
+      }
+    ]
+  },
+  "placement": {
+    "devices": [
+      {
+        "device": "GPU0",
+        "bytes": 7247757312,
+        "classes": {
+          "attention": 1073741824,
+          "embeddings": 536870912,
+          "experts": 5637144576
+        },
+        "layers": "0-23"
+      },
+      {
+        "device": "GPU1",
+        "bytes": 7247757312,
+        "classes": {
+          "attention": 1073741824,
+          "experts": 5637144576,
+          "output": 536870912
+        },
+        "layers": "24-47"
+      },
+      {
+        "device": "CPU",
+        "bytes": 6796570624,
+        "classes": {
+          "experts": 6796570624
+        },
+        "layers": "ffn_exps 36-47"
+      }
+    ],
+    "never_loaded_bytes": 0,
+    "source": "gguf+args",
+    "vram_weights_bytes": 14495514624,
+    "vram_kv_bytes": 3221225472,
+    "vram_compute_bytes": 966367641
+  },
+  "memory": {
+    "at_end": {
+      "virt_bytes": 42949672960,
+      "rss_bytes": 3650722201,
+      "rss_file_bytes": 3113851289,
+      "rss_anon_bytes": 536870912,
+      "rss_shmem_bytes": 0,
+      "swap_bytes": 0,
+      "maj_faults": 0,
+      "min_faults": 128402
+    },
+    "peak_rss_bytes": 3650722201,
+    "mapped_file_bytes": 21292085248,
+    "maj_faults_total": 0,
+    "maj_faults_prompt": 0,
+    "maj_faults_decode": 0,
+    "maj_faults_per_token": 0
+  },
+  "concurrency": 1,
+  "timings": {
+    "prompt_n": 112,
+    "cache_n": 400,
+    "prompt_ms": 45.7,
+    "prompt_per_second": 2450,
+    "predicted_n": 128,
+    "predicted_ms": 1871.3,
+    "predicted_per_second": 68.4,
+    "ttft_ms": 143,
+    "client_prompt_per_second": 2411,
+    "client_predicted_per_second": 67.9,
+    "client_agrees_with_server": true,
+    "decode_label": "decode",
+    "itl_p50_ms": 14.2,
+    "itl_p95_ms": 19.8,
+    "itl_p99_ms": 31.4,
+    "effective_bw_bps": 90972000000
+  },
+  "aggregate": {
+    "streams": 1,
+    "wall_ms": 2050,
+    "total_prompt_n": 112,
+    "total_predicted_n": 128,
+    "aggregate_predicted_per_second": 68.4,
+    "aggregate_prompt_per_second": 2450,
+    "per_stream_predicted_per_second": 68.4,
+    "ttft_p50_ms": 143,
+    "ttft_p95_ms": 143,
+    "slots_busy_max": 1
+  },
+  "cache": {
+    "hit_tokens": 400,
+    "prompt_total": 512,
+    "hit_ratio": 0.78125,
+    "label": "warm"
+  },
+  "contention": {
+    "contended": false,
+    "loadavg1": 1.2,
+    "other_gpu_procs": 0
+  },
+  "template": {
+    "chat_template": "chatml",
+    "reasoning_effort": "none",
+    "rendered_has_think_close": true,
+    "rendered_prompt_sha256": "9f2c4b1a8d5e6037c1a9b2d4e8f70516a3c9d2b4e6f8017a3c5d9e2b4f6a8017",
+    "rendered_prompt_tokens": 512
+  },
+  "gpus_at_end": [
+    {
+      "index": 0,
+      "used_bytes": 9878753280,
+      "proc_bytes": 9663676416,
+      "util_pct": 97,
+      "temp_c": 64,
+      "power_w": 310,
+      "clock_mhz": 1830
+    },
+    {
+      "index": 1,
+      "used_bytes": 9449766912,
+      "proc_bytes": 9234780160,
+      "util_pct": 95,
+      "temp_c": 61,
+      "power_w": 295,
+      "clock_mhz": 1815
+    }
+  ]
+}
