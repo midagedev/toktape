@@ -1,0 +1,6 @@
+55c0a1c00000-55c0a2500000 r-xp 00000000 103:02 6815745                   /usr/local/bin/llama-server
+55c0c3f21000-55c0d6a42000 rw-p 00000000 00:00 0                          [heap]
+7f8000000000-7f8a80000000 r--p 00000000 103:02 7340033                   /home/rig/.cache/llama.cpp/unsloth_DeepSeek-V3-0324-GGUF_UD-Q4_K_XL-00001-of-00009.gguf
+7f8a80000000-7f9500000000 r--p 00000000 103:02 7340034                   /home/rig/.cache/llama.cpp/unsloth_DeepSeek-V3-0324-GGUF_UD-Q4_K_XL-00002-of-00009.gguf
+7f9500000000-7f9f80000000 r--p 00000000 103:02 7340035                   /home/rig/.cache/llama.cpp/unsloth_DeepSeek-V3-0324-GGUF_UD-Q4_K_XL-00003-of-00009.gguf
+7ffd1a2f9000-7ffd1b2f9000 rw-p 00000000 00:00 0                          [stack]

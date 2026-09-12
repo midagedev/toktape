@@ -1,0 +1,25 @@
+55b8a1c00000-55b8a2500000 r-xp 00000000 103:02 6815745                   /usr/local/bin/llama-server
+55b8a2500000-55b8a2700000 r--p 00900000 103:02 6815745                   /usr/local/bin/llama-server
+55b8a2700000-55b8a2740000 rw-p 00b00000 103:02 6815745                   /usr/local/bin/llama-server
+55b8c3f21000-55b8d6a42000 rw-p 00000000 00:00 0                          [heap]
+7ee000000000-7ee100000000 rw-p 00000000 00:00 0 
+7ef000000000-7ef0a0000000 r-xp 00000000 103:02 6819012                   /usr/local/lib/libggml-cuda.so
+7ef0a0000000-7ef0c0000000 r--p 000a0000 103:02 6819012                   /usr/local/lib/libggml-cuda.so
+7ef100000000-7ef140000000 r-xp 00000000 103:02 6819044                   /usr/local/cuda/lib64/libcudart.so.12.4.127
+7ef200000000-7ef200100000 r--s 00000000 103:02 6820001                   /models/gguf/old models/scratch.bin
+7ef300000000-7ef300400000 r--p 00000000 103:02 6820777                   /models/gguf/DeepSeek-V3-0324-UD-Q4_K_XL.imatrix (deleted)
+7f0000000000-7f0500000000 r--p 00000000 103:02 6821001                   /models/gguf/DeepSeek-V3-0324-UD-Q4_K_XL-00001-of-00009.gguf
+7f0500000000-7f0a80000000 r--p 500000000 103:02 6821001                   /models/gguf/DeepSeek-V3-0324-UD-Q4_K_XL-00001-of-00009.gguf
+7f0a80000000-7f1500000000 r--p 00000000 103:02 6821002                   /models/gguf/DeepSeek-V3-0324-UD-Q4_K_XL-00002-of-00009.gguf
+7f1500000000-7f1f80000000 r--p 00000000 103:02 6821003                   /models/gguf/DeepSeek-V3-0324-UD-Q4_K_XL-00003-of-00009.gguf
+7f1f80000000-7f2a00000000 r--p 00000000 103:02 6821004                   /models/gguf/DeepSeek-V3-0324-UD-Q4_K_XL-00004-of-00009.gguf
+7f2a00000000-7f3480000000 r--p 00000000 103:02 6821005                   /models/gguf/DeepSeek-V3-0324-UD-Q4_K_XL-00005-of-00009.gguf
+7f3480000000-7f3f00000000 r--p 00000000 103:02 6821006                   /models/gguf/DeepSeek-V3-0324-UD-Q4_K_XL-00006-of-00009.gguf
+7f3f00000000-7f4980000000 r--p 00000000 103:02 6821007                   /models/gguf/DeepSeek-V3-0324-UD-Q4_K_XL-00007-of-00009.gguf
+7f4980000000-7f5400000000 r--p 00000000 103:02 6821008                   /models/gguf/DeepSeek-V3-0324-UD-Q4_K_XL-00008-of-00009.gguf
+7f5400000000-7f5b80000000 r--p 00000000 103:02 6821009                   /models/gguf/DeepSeek-V3-0324-UD-Q4_K_XL-00009-of-00009.gguf
+7f5c00000000-7f5c40000000 r--p 00000000 103:02 6821100                   /models/gguf/Qwen3-30B-A3B-Q6_K.gguf
+7ffd0a2f9000-7ffd0b2f9000 rw-p 00000000 00:00 0                          [stack]
+7ffd0b3c1000-7ffd0b3c5000 r--p 00000000 00:00 0                          [vvar]
+7ffd0b3c5000-7ffd0b3c7000 r-xp 00000000 00:00 0                          [vdso]
+ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsyscall]
