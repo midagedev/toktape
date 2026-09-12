@@ -11,6 +11,15 @@ zero-config first run, a card that settles arguments, no flag a first-time
 user has to learn. Multi-session (N concurrent streams) is a first-class
 mode, not an afterthought — agent workloads are the trend.
 
+**Visual quality is the product** (user, 2026-09-13). The TUI, the PNG card
+and the clips must be at least as polished as charmbracelet/crush and never
+tacky. Every region must feel alive — eased bars, a breathing cursor,
+scrolling sparklines, a spinner during prefill — while staying replayable:
+animation is a pure function of clip time `t`, never of wall-clock. The lead
+runs an E2E look-and-adjust loop on real renders after every visual track,
+several rounds, viewing the images directly (this overrides the general
+"lead does not read PNGs" rule for this repo).
+
 ## Contract
 
 - `internal/tape` is the schema. Every renderer reads a `*tape.Tape` and
