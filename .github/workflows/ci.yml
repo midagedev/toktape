@@ -1,0 +1,31 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # Linux is the primary target and macOS must build; both run the same gate.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # scripts/check.sh is the repo's merge gate: gofmt, build, vet, the
+      # linux/amd64 cross-build and the tests. CI runs exactly that, so a
+      # green pipeline and a green local run mean the same thing.
+      - name: check
+        run: ./scripts/check.sh
+        env:
+          CGO_ENABLED: "0"
