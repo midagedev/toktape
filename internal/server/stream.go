@@ -1,0 +1,183 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/midagedev/toktape/internal/tape"
+)
+
+// ChatPath is the streaming endpoint.
+const ChatPath = "/v1/chat/completions"
+
+// StreamRequest is one chat request to record.
+type StreamRequest struct {
+	// Messages is the conversation as sent. Recorded verbatim in
+	// tape.PromptRecord.Messages.
+	Messages []tape.Message
+	// Model names the model when the server hosts more than one. Empty means
+	// "whatever is loaded".
+	Model string
+	// MaxTokens caps the answer (max_tokens). 0 leaves it to the server.
+	MaxTokens int
+	// Params are merged into the request body verbatim: temperature, seed,
+	// reasoning_effort, chat_template_kwargs, and anything else the build
+	// honours. They are recorded in tape.PromptRecord.Params, which is what
+	// lesson 4 asks for: the card shows what was actually sent. Params may
+	// override the defaults below except "messages" and "stream".
+	Params map[string]any
+	// ActiveBytesPerToken is tape.ModelInfo.ActiveBytesPerToken, used only to
+	// fill EffectiveBandwidthBytesPerSec. 0 leaves that field 0.
+	ActiveBytesPerToken int64
+	// RenderedPrompt, when the caller already fetched it from ApplyTemplate,
+	// is copied into the record.
+	RenderedPrompt string
+}
+
+// StreamHooks receive events as they arrive, not after the stream ends.
+//
+// Every hook runs synchronously on the goroutine reading the stream, at the
+// instant the event arrived, so that a hook can sample a host counter that
+// belongs to that instant: the process recorder reads /proc major faults in
+// OnToken, and buffering the tokens would turn the sparkline into a flat
+// average. A slow hook therefore delays the read loop and skews the timings.
+//
+// Under RunConcurrent the hooks of different streams run on different
+// goroutines at the same time, so anything they share must be synchronised.
+// Nil fields are skipped.
+type StreamHooks struct {
+	// OnToken fires for each token that carried text, in order.
+	OnToken func(tape.TokenEvent)
+	// OnProgress fires for each return_progress event during prefill.
+	OnProgress func(tape.PromptProgress)
+	// OnReasoning fires for each reasoning ("thinking") delta. Its Index is
+	// -1: reasoning text is not part of the answer and is not recorded in
+	// tape.RequestRecord.Tokens, because counting it would move the decode
+	// window that lesson 1 defines over the content tokens.
+	OnReasoning func(tape.TokenEvent)
+}
+
+// Body builds the JSON request body. timings_per_token, return_progress and
+// stream_options.include_usage are always asked for: they are what makes the
+// per-token timeline, the prefill progress and the prompt-cache hit
+// recordable, and a server that does not know a field ignores it.
+func (r StreamRequest) Body() map[string]any {
+	body := map[string]any{
+		"timings_per_token": true,
+		"return_progress":   true,
+		"stream_options":    map[string]any{"include_usage": true},
+	}
+	if r.Model != "" {
+		body["model"] = r.Model
+	}
+	if r.MaxTokens > 0 {
+		body["max_tokens"] = r.MaxTokens
+	}
+	for k, v := range r.Params {
+		body[k] = v
+	}
+	body["messages"] = r.Messages
+	body["stream"] = true
+	return body
+}
+
+// Stream sends one chat request and records the whole stream.
+//
+// It returns the record, the server's final timings object, and an error. The
+// record is non-nil whenever the server answered at all, even when the error
+// is non-nil: a stream that died after 200 tokens is still evidence, and
+// RunConcurrent stores it with rec.Error set. The record is complete on
+// return, Reduce and CacheVerdict already applied; a caller holding major
+// fault counters re-runs CacheVerdict with them.
+//
+// The only deadline is ctx. Generation takes as long as it takes, so the
+// control-call timeout deliberately does not apply here.
+func (c *Client) Stream(ctx context.Context, req StreamRequest, hooks StreamHooks) (*tape.RequestRecord, ServerTimings, error) {
+	body, err := json.Marshal(req.Body())
+	if err != nil {
+		return nil, ServerTimings{}, fmt.Errorf("server: stream: encode body: %w", err)
+	}
+	httpReq, err := c.newRequest(ctx, http.MethodPost, ChatPath, bytes.NewReader(body))
+	if err != nil {
+		return nil, ServerTimings{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	sentAt := time.Now()
+	resp, err := c.hc.Do(httpReq)
+	if err != nil {
+		return nil, ServerTimings{}, fmt.Errorf("server: POST %s: %w", ChatPath, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		return nil, ServerTimings{}, fmt.Errorf("server: POST %s: %s: %s", ChatPath, resp.Status, clip(strings.TrimSpace(string(msg)), 200))
+	}
+
+	rec := newRecorder(hooks)
+	rec.rec.Prompt.Messages = req.Messages
+	rec.rec.Prompt.RenderedPrompt = req.RenderedPrompt
+	// Record the parameters as they went over the wire, not as the caller
+	// typed them: max_tokens and the streaming switches are part of what was
+	// measured (lesson 4). Messages and stream live in their own fields.
+	params := req.Body()
+	delete(params, "messages")
+	delete(params, "stream")
+	rec.rec.Prompt.Params = params
+
+	var sc sseScanner
+	buf := make([]byte, 16<<10)
+	var readErr error
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			// One arrival time for every event in this read: they were all
+			// delivered by the same packet, so they share an instant.
+			at := time.Since(sentAt)
+			for _, ev := range sc.feed(buf[:n]) {
+				if ferr := rec.feed(ev, at); ferr != nil {
+					readErr = ferr
+					break
+				}
+			}
+		}
+		if readErr != nil {
+			break
+		}
+		if err != nil {
+			if err != io.EOF {
+				readErr = fmt.Errorf("server: stream: read: %w", err)
+			}
+			break
+		}
+		if rec.done {
+			break
+		}
+	}
+	if readErr == nil {
+		at := time.Since(sentAt)
+		for _, ev := range sc.close() {
+			if ferr := rec.feed(ev, at); ferr != nil {
+				readErr = ferr
+				break
+			}
+		}
+	}
+
+	out, timings, err := rec.finish(sentAt, req.ActiveBytesPerToken)
+	if readErr != nil {
+		// The read failure is the cause and must win: finish only sees that
+		// the stream stopped early and would otherwise report "no finish
+		// chunk" for what was really a cancelled context or a dropped socket.
+		out.Error = readErr.Error()
+		return out, timings, readErr
+	}
+	return out, timings, err
+}

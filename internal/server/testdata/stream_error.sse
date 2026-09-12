@@ -1,0 +1,8 @@
+data: {"id":"chatcmpl-9Kd1pQxRmZ","object":"chat.completion.chunk","created":1757741000,"model":"qwen3-8b-Q4_K_M","system_fingerprint":"b4321-abcdef12","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-9Kd1pQxRmZ","object":"chat.completion.chunk","created":1757741000,"model":"qwen3-8b-Q4_K_M","system_fingerprint":"b4321-abcdef12","choices":[{"index":0,"delta":{"content":"The"},"finish_reason":null}],"timings":{"prompt_n":12,"prompt_ms":50.0,"prompt_per_second":240.0,"predicted_n":1,"predicted_ms":20.0,"predicted_per_second":50.0,"cache_n":0}}
+
+data: {"id":"chatcmpl-9Kd1pQxRmZ","object":"chat.completion.chunk","created":1757741000,"model":"qwen3-8b-Q4_K_M","system_fingerprint":"b4321-abcdef12","choices":[{"index":0,"delta":{"content":" context"},"finish_reason":null}],"timings":{"prompt_n":12,"prompt_ms":50.0,"prompt_per_second":240.0,"predicted_n":2,"predicted_ms":40.0,"predicted_per_second":50.0,"cache_n":0}}
+
+data: {"error":{"code":500,"message":"context shift is disabled","type":"server_error"}}
+

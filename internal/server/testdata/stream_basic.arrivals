@@ -1,0 +1,64 @@
+# Arrival offset of every SSE `data:` event, in milliseconds since the
+# request was sent, one per event, in order (the final [DONE] included).
+# Blank lines and # comments are ignored.
+#
+# These are the CLIENT clock. The `timings` objects inside the fixture are
+# the SERVER clock; the two differ by a constant offset plus jitter, so a
+# client-vs-server agreement test is not circular.
+#
+# Landmarks: role chunk 185, empty deltas 187/189, first content token 194,
+# last content token 1137, finish chunk 1191 (54 ms later, on purpose).
+42
+88
+134
+166
+185
+187
+189
+194
+213
+234
+257
+277
+298
+318
+339
+362
+381
+405
+419
+446
+466
+487
+508
+528
+551
+571
+592
+612
+660
+682
+703
+728
+744
+766
+787
+809
+830
+852
+876
+899
+918
+940
+963
+984
+1006
+1031
+1049
+1073
+1095
+1118
+1137
+1191
+1192
+1193

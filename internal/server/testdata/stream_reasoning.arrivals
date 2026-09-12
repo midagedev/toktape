@@ -1,0 +1,13 @@
+# Arrival offsets (ms since send) for stream_reasoning.sse, one per data: event.
+# A thinking model: three reasoning_content deltas precede the first content
+# token, so the first CONTENT token (TTFT) is at 165, not 90.
+62
+90
+115
+140
+165
+190
+215
+240
+262
+264

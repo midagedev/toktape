@@ -1,0 +1,6 @@
+# Arrival offsets (ms since send) for stream_error.sse. The stream dies
+# mid-generation: an error frame, no finish chunk, no [DONE].
+70
+92
+114
+130
