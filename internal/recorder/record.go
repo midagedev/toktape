@@ -26,6 +26,8 @@ type run struct {
 
 	props    *server.Props
 	kind     tape.ServerKind
+	build    string // from /props (attach)
+	commit   string // from /props, else the ik checkout (collectProcess, TTP-33)
 	model    tape.ModelInfo
 	tensors  []placement.Tensor
 	pid      int
@@ -123,7 +125,7 @@ func (r *run) emitAttached() {
 		Template:    r.template,
 		Warnings:    r.warnings,
 	}
-	s.Server.Build, s.Server.Commit = server.BuildFromProps(r.props.BuildInfo)
+	s.Server.Build, s.Server.Commit = r.build, r.commit
 	r.emit(Event{Kind: EventAttached, Stream: -1, Summary: s})
 }
 
@@ -154,9 +156,9 @@ func (r *run) attach(ctx context.Context) error {
 		if err == nil {
 			r.client, r.props = c, props
 			r.kind = server.DetectKind(props)
+			r.build, r.commit = server.BuildFromProps(props.BuildInfo)
 			r.emit(Event{Kind: EventDiscovered, Stream: -1, Message: c.BaseURL()})
-			build, _ := server.BuildFromProps(props.BuildInfo)
-			r.emit(Event{Kind: EventProps, Stream: -1, Message: build})
+			r.emit(Event{Kind: EventProps, Stream: -1, Message: r.build})
 			return nil
 		}
 
@@ -210,13 +212,16 @@ func (r *run) probe(ctx context.Context) (*server.Client, *server.Props, error) 
 // waitReason says whether err is worth waiting out, and which sentence the CLI
 // should print while it does.
 //
-// A server that is loading is always worth waiting for. A refused connection
+// A server that is loading is always worth waiting for, and so is one busy
+// with another request (TTP-33). A refused connection
 // is only worth waiting for when the user asked (--wait), because otherwise a
 // mistyped --url would hang for ten minutes instead of failing in a second.
 func (r *run) waitReason(err error) (reason string, waitable bool) {
 	switch {
 	case errors.Is(err, server.ErrLoading):
 		return ReasonLoading, true
+	case errors.Is(err, server.ErrBusy):
+		return ReasonBusy, true
 	case r.opts.WaitForStart:
 		return ReasonStarting, true
 	default:
@@ -262,7 +267,8 @@ func (r *run) collectModel() {
 }
 
 // collectProcess finds the local server process and reads its argv, which is
-// where every flag the card prints comes from.
+// where every flag the card prints comes from. The process also settles the
+// engine /props may not have named, and an ik_llama.cpp server's commit.
 func (r *run) collectProcess() {
 	if r.props.ModelPath == "" {
 		return
@@ -279,10 +285,36 @@ func (r *run) collectProcess() {
 	args, err := procmon.Args(r.opts.FSRoot, pid)
 	if err != nil {
 		r.warn("argv of pid %d unreadable, server flags unknown", pid)
-		return
+	} else {
+		r.args = args
+		r.flags = server.ParseFlags(args)
 	}
-	r.args = args
-	r.flags = server.ParseFlags(args)
+
+	// ik_llama.cpp's /props names neither the engine nor a build (TTP-33,
+	// 2026-09-13), so the binary does: its path says ik, and the checkout
+	// around it names a commit. The exe link of another user's process is
+	// unreadable, which is normal and not a caveat for the card — the kind
+	// then stays what /props said. The server's own build_info, when there is
+	// one, is the record and is never replaced by the checkout.
+	exe, err := procmon.Exe(r.opts.FSRoot, pid)
+	if err != nil {
+		exe = ""
+	}
+	r.kind = server.RefineKind(r.kind, exe, r.args)
+	if r.kind == tape.ServerIKLlama && r.commit == "" && exe != "" {
+		// The checkout's HEAD is what the clone says now, not what the binary
+		// was built from: the measured workstation ran a binary under a local
+		// commit on top of the base, with uncommitted changes. The card prints
+		// warnings verbatim, so the provenance travels with the figure.
+		if c, ok := procmon.FindGitCommit("", exe); ok {
+			r.commit = c.Hash
+			msg := fmt.Sprintf("engine commit %s read from the checkout next to the binary, not from the binary", c.Hash)
+			if procmon.BinaryOlderThanCheckout("", exe, c) {
+				msg += "; the binary is older than that commit"
+			}
+			r.warn("%s", msg)
+		}
+	}
 }
 
 // collectHost reads the hardware line and opens the GPU backend.

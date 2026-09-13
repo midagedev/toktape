@@ -87,7 +87,7 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		GPUsAtEnd:   gpusAtEnd,
 		Warnings:    r.warnings,
 	}
-	summary.Server.Build, summary.Server.Commit = server.BuildFromProps(r.props.BuildInfo)
+	summary.Server.Build, summary.Server.Commit = r.build, r.commit
 
 	return &tape.Tape{
 		Schema:   tape.SchemaVersion,

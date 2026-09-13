@@ -39,14 +39,18 @@ const (
 )
 
 // Reasons carried in Event.Message for EventLoading. The CLI prints a
-// different verb for each: one is a model being read off disk, the other is a
-// server that has not opened its port yet.
+// different verb for each: a model being read off disk, a server that has not
+// opened its port yet, and a server that is serving someone else.
 const (
 	// ReasonLoading: a server answered and said it is not ready, or accepted
 	// the connection and never answered.
 	ReasonLoading = "loading"
 	// ReasonStarting: nothing is listening there yet.
 	ReasonStarting = "starting"
+	// ReasonBusy: /props did not answer while /health did, which is a server
+	// with the model resident and another request running — ik_llama.cpp
+	// holds /props until a completion finishes (TTP-33, measured 2026-09-13).
+	ReasonBusy = "busy"
 )
 
 // ErrAllStreamsFailed is returned when no stream produced a usable record.
@@ -133,7 +137,7 @@ const (
 	EventDiscovered EventKind = "discovered"
 	// EventLoading fires once per attach attempt while the server is not
 	// ready. Elapsed is the time spent waiting so far and Message is
-	// ReasonLoading or ReasonStarting.
+	// ReasonLoading, ReasonStarting or ReasonBusy.
 	EventLoading EventKind = "loading"
 	// EventProps fires once /props answered; Message carries the build.
 	EventProps EventKind = "props"

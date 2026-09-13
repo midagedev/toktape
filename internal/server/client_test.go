@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -393,5 +394,104 @@ func TestLoadingDetail(t *testing.T) {
 		if got := loadingDetail([]byte(tc.body)); got != tc.want {
 			t.Errorf("loadingDetail(%q) = %q, want %q", tc.body, got, tc.want)
 		}
+	}
+}
+
+// busyServer is an ik_llama.cpp server in the middle of a completion: /props
+// blocks until the request finishes (measured 2026-09-13: over two minutes)
+// while /health answers at once with the given status.
+func busyServer(t *testing.T, healthStatus int, healthBody string) *httptest.Server {
+	t.Helper()
+	block := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/props", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-block:
+		case <-r.Context().Done():
+		}
+	})
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(healthStatus)
+		_, _ = w.Write([]byte(healthBody))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(func() { close(block); srv.Close() })
+	return srv
+}
+
+// TestPropsBusyIsNotLoading: a /props that does not answer while /health does
+// is a busy server, not a loading one. Printing "loading" there sends the user
+// to wait for a model that is already resident (TTP-33, 2026-09-13).
+func TestPropsBusyIsNotLoading(t *testing.T) {
+	srv := busyServer(t, http.StatusOK, `{"status":"ok"}`)
+	_, err := New(srv.URL, WithTimeout(50*time.Millisecond)).Props(context.Background())
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("Props error = %v, want ErrBusy", err)
+	}
+	if errors.Is(err, ErrLoading) || errors.Is(err, ErrUnreachable) {
+		t.Fatalf("a busy server was also reported as loading or unreachable: %v", err)
+	}
+	if !strings.Contains(err.Error(), "busy with another request") {
+		t.Errorf("Props error = %q, want it to say the server is busy", err)
+	}
+}
+
+// TestPropsHangWithHealth503IsLoading: /health is how llama-server says it is
+// loading, so a 503 there keeps the loading verdict.
+func TestPropsHangWithHealth503IsLoading(t *testing.T) {
+	srv := busyServer(t, http.StatusServiceUnavailable, loadingBody)
+	_, err := New(srv.URL, WithTimeout(50*time.Millisecond)).Props(context.Background())
+	if !errors.Is(err, ErrLoading) {
+		t.Fatalf("Props error = %v, want ErrLoading", err)
+	}
+	if errors.Is(err, ErrBusy) {
+		t.Fatalf("a loading server was reported as busy: %v", err)
+	}
+}
+
+// TestClassifyPropsHealth pins the pure half of the busy rule.
+func TestClassifyPropsHealth(t *testing.T) {
+	deadline := fmt.Errorf("server: GET /props: %w", context.DeadlineExceeded)
+	cases := []struct {
+		name      string
+		status    int
+		transport error
+		health    int
+		want      error
+	}{
+		{"no answer, /health ok", 0, deadline, http.StatusOK, ErrBusy},
+		{"no answer, /health 503", 0, deadline, http.StatusServiceUnavailable, ErrLoading},
+		{"no answer, /health not probed or failed", 0, deadline, 0, ErrLoading},
+		{"no answer, /health 404", 0, deadline, http.StatusNotFound, ErrLoading},
+		{"answered: /health is not consulted", http.StatusOK, nil, http.StatusServiceUnavailable, nil},
+		{"refused: /health is not consulted", 0, errors.New("connection refused"), http.StatusOK, ErrUnreachable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := classifyProps("http://x", tc.status, nil, tc.transport, nil, tc.health)
+			if tc.want == nil {
+				if err != nil {
+					t.Fatalf("classifyProps = %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("classifyProps = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestDiscoverPrefersBusyOverRefused: a busy server is a server, and it
+// outranks a refused port exactly as a loading one does.
+func TestDiscoverPrefersBusyOverRefused(t *testing.T) {
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+	busy := busyServer(t, http.StatusOK, `{"status":"ok"}`)
+
+	_, err := New("", WithTimeout(50*time.Millisecond)).Discover(context.Background(), []string{deadURL, busy.URL})
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("Discover error = %v, want ErrBusy", err)
 	}
 }

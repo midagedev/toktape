@@ -208,8 +208,11 @@ func loadingLine(reason string, elapsed time.Duration) string {
 	}
 	frame := spinnerFrames[int(elapsed/time.Second)%len(spinnerFrames)]
 	verb := "server is loading the model"
-	if reason == recorder.ReasonStarting {
+	switch reason {
+	case recorder.ReasonStarting:
 		verb = "waiting for the server to come up"
+	case recorder.ReasonBusy:
+		verb = "server is busy with another request"
 	}
 	return fmt.Sprintf("%c %s … %s", frame, verb, elapsed.Round(time.Second))
 }

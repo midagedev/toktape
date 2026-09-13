@@ -32,9 +32,9 @@ import (
 // model generates.
 const DefaultTimeout = 10 * time.Second
 
-// ErrUnreachable and ErrLoading are the two ways attaching can fail, and the
-// caller must tell them apart: one is a mistake the user can fix now, the
-// other is a wait.
+// ErrUnreachable, ErrLoading and ErrBusy are the ways attaching can fail, and
+// the caller must tell them apart: the first is a mistake the user can fix
+// now, the other two are waits for different reasons.
 //
 // Measured 2026-09-13: llama-server opens its TCP port and then answers
 // nothing on /props for minutes while it lazily loads a large model. Treating
@@ -49,6 +49,11 @@ var (
 	// ErrLoading means a server is there and is not ready yet. Waiting is
 	// the correct response; the wrapped detail says how it announced itself.
 	ErrLoading = errors.New("server: loading the model")
+	// ErrBusy means /props did not answer while /health did: the model is
+	// resident and another request is running. ik_llama.cpp holds /props
+	// until a completion finishes (measured 2026-09-13: over two minutes), so
+	// without this a busy ik server reads as one still loading its model.
+	ErrBusy = errors.New("server: busy")
 )
 
 // DefaultCandidates are the base URLs Discover probes when given none, in the
@@ -158,12 +163,21 @@ type Props struct {
 
 // Props reads GET /props.
 //
-// Every failure is classified as ErrUnreachable or ErrLoading (see those
-// variables); nothing else is returned, so a caller can branch on the two with
-// errors.Is and never on a message.
+// Every failure is classified as ErrUnreachable, ErrLoading or ErrBusy (see
+// those variables); nothing else is returned, so a caller can branch on them
+// with errors.Is and never on a message.
+//
+// A /props that answers nothing within the timeout is followed by one GET
+// /health with the same timeout, because the two waits that look alike there
+// — a model still loading and a completion holding /props — are told apart
+// only by whether /health is ok.
 func (c *Client) Props(ctx context.Context) (*Props, error) {
 	body, hdr, status, err := c.getRaw(ctx, "/props")
-	if e := classifyProps(c.baseURL, status, body, err, ctx.Err()); e != nil {
+	health := 0
+	if err != nil && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+		health = c.healthStatus(ctx)
+	}
+	if e := classifyProps(c.baseURL, status, body, err, ctx.Err(), health); e != nil {
 		return nil, e
 	}
 	var p Props
@@ -182,15 +196,23 @@ func (c *Client) Props(ctx context.Context) (*Props, error) {
 // every branch is testable without a server.
 //
 // parentErr is the caller's own context error. A per-call deadline that fired
-// while the caller is still interested is the "answers nothing" case and means
-// loading; the same deadline after the caller gave up is just the cancellation
-// and must not be dressed up as a server state.
-func classifyProps(baseURL string, status int, body []byte, transportErr, parentErr error) error {
+// while the caller is still interested is the "answers nothing" case; the same
+// deadline after the caller gave up is just the cancellation and must not be
+// dressed up as a server state.
+//
+// healthStatus is the HTTP status of the /health probe made after that
+// deadline, or 0 when none was made or it got no answer. 200 means the server
+// is up and busy (ErrBusy); anything else keeps the loading verdict, since
+// /health is where llama-server says 503 while it loads.
+func classifyProps(baseURL string, status int, body []byte, transportErr, parentErr error, healthStatus int) error {
 	if parentErr != nil {
 		return fmt.Errorf("%w: %s: %v", ErrUnreachable, baseURL, parentErr)
 	}
 	if transportErr != nil {
 		if errors.Is(transportErr, context.DeadlineExceeded) {
+			if healthStatus == http.StatusOK {
+				return fmt.Errorf("%w: %s: /props did not answer while /health is ok — the server is busy with another request (ik_llama.cpp blocks /props during a completion)", ErrBusy, baseURL)
+			}
 			return fmt.Errorf("%w: %s: no answer on /props within the timeout", ErrLoading, baseURL)
 		}
 		return fmt.Errorf("%w: %s: %v", ErrUnreachable, baseURL, rootCause(transportErr))
@@ -207,6 +229,16 @@ func classifyProps(baseURL string, status int, body []byte, transportErr, parent
 	}
 	return fmt.Errorf("%w: %s: HTTP %d: %s", ErrUnreachable, baseURL, status,
 		clip(strings.TrimSpace(string(body)), 200))
+}
+
+// healthStatus is the status of one bounded GET /health, or 0 when it got no
+// answer.
+func (c *Client) healthStatus(ctx context.Context) int {
+	_, _, status, err := c.getRaw(ctx, "/health")
+	if err != nil {
+		return 0
+	}
+	return status
 }
 
 // rootCause is the innermost error of a chain.
@@ -263,14 +295,36 @@ func (p *Props) CtxSize() int {
 	return p.DefaultGenerationSettings.NCtx
 }
 
+// ikMarkers are the spellings by which ik_llama.cpp names itself, matched
+// case-insensitively.
+var ikMarkers = []string{"ik_llama", "ik-llama", "ikllama"}
+
+// hasIKMarker reports whether s, already lower-cased, names ik_llama.cpp.
+func hasIKMarker(s string) bool {
+	for _, marker := range ikMarkers {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // DetectKind names the serving engine from what /props returned.
 //
-// ik_llama.cpp serves the same routes as llama-server, so there is no field
-// that distinguishes them by contract; the only reliable markers are the
-// engine naming itself somewhere in the response or in the Server header. The
-// heuristic is therefore deliberately conservative: anything that answered
-// /props without an ik marker is reported as tape.ServerLlamaCPP, and only a
-// server that did not answer at all is tape.ServerUnknown.
+// ik_llama.cpp serves the same routes as llama-server, so no field
+// distinguishes them by contract. The rules, in order:
+//
+//   - an ik marker anywhere in the response or the Server header is
+//     tape.ServerIKLlama;
+//   - a build_info key, with any value, is tape.ServerLlamaCPP — mainline
+//     stamps one on every build;
+//   - anything else is tape.ServerUnknown: it answered /props and did not say
+//     what it is.
+//
+// The last rule is measured (TTP-33, 2026-09-13): a real ik_llama.cpp
+// 7b79b229 /props has no build_info and no marker outside model_path and
+// chat_template, and calling that llama-server printed a default nobody
+// observed. RefineKind lets the local process settle it.
 func DetectKind(p *Props) tape.ServerKind {
 	if p == nil {
 		return tape.ServerUnknown
@@ -287,12 +341,35 @@ func DetectKind(p *Props) tape.ServerKind {
 	if p.Headers != nil {
 		hay += " " + strings.ToLower(p.Headers.Get("Server"))
 	}
-	for _, marker := range []string{"ik_llama", "ik-llama", "ikllama"} {
-		if strings.Contains(hay, marker) {
-			return tape.ServerIKLlama
-		}
+	if hasIKMarker(hay) {
+		return tape.ServerIKLlama
 	}
-	return tape.ServerLlamaCPP
+	if _, ok := p.Raw["build_info"]; ok || p.BuildInfo != "" {
+		return tape.ServerLlamaCPP
+	}
+	return tape.ServerUnknown
+}
+
+// RefineKind corrects k with what the local process shows: the executable
+// path (procmon.Exe) and argv[0]. A server whose binary sits in an ik_llama.cpp
+// checkout or install is ik, whatever /props implied.
+//
+// Nothing else is inferred. A binary named plain llama-server leaves k as it
+// was, Unknown included, because a mainline build and an ik build install the
+// same name. Only argv[0] is read: later arguments are user text (a model under
+// an ik_llama.cpp directory names no engine).
+func RefineKind(k tape.ServerKind, exe string, argv []string) tape.ServerKind {
+	if k == tape.ServerIKLlama {
+		return k
+	}
+	hay := strings.ToLower(exe)
+	if len(argv) > 0 {
+		hay += " " + strings.ToLower(argv[0])
+	}
+	if hasIKMarker(hay) {
+		return tape.ServerIKLlama
+	}
+	return k
 }
 
 // BuildFromProps splits a build_info string into the build number and the
@@ -427,7 +504,8 @@ func (c *Client) ApplyTemplate(ctx context.Context, msgs []tape.Message) (string
 // candidates uses DefaultCandidates.
 //
 // Each probe gets its own short deadline, so a port that black-holes packets
-// costs one timeout rather than the whole scan. Discover does not modify c;
+// costs its timeout — twice, since a /props that never answers is followed by
+// the /health probe — rather than the whole scan. Discover does not modify c;
 // use WithBaseURL with the result.
 func (c *Client) Discover(ctx context.Context, candidates []string) (string, error) {
 	if candidates == nil {
@@ -454,11 +532,11 @@ func (c *Client) Discover(ctx context.Context, candidates []string) (string, err
 			if firstErr == nil {
 				firstErr = err
 			}
-			// A candidate that is loading outranks every refusal: it is a
-			// server, and the caller can wait for it. Reporting the first
-			// refused port instead would tell the user to fix a URL while
-			// the server they meant is two seconds from ready.
-			if loadingErr == nil && errors.Is(err, ErrLoading) {
+			// A candidate that is loading or busy outranks every refusal: it
+			// is a server, and the caller can wait for it. Reporting the
+			// first refused port instead would tell the user to fix a URL
+			// while the server they meant is two seconds from ready.
+			if loadingErr == nil && (errors.Is(err, ErrLoading) || errors.Is(err, ErrBusy)) {
 				loadingErr = err
 			}
 			continue
