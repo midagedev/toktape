@@ -1,9 +1,9 @@
 ┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────┐
-│ stream 5/8 · thinking          12.2 tok/s │ stream 6/8                     12.0 tok/s │ PLACEMENT ────────────────── │
-│ ▏ 측정이 흔들린다고 했으니 먼저 기계가    │ ▏ The aggregate rate is what the server   │ GPU0 ███████████████    9.4G │
-│ ▏ 조용했는지 묻는 게 맞다. 잡음이         │ ▏ does; the per stream rate is what▍      │ GPU1 ███████████████    9.6G │
-│ ▏ 신호보다 크면 나머지 숫자는▍            │                                           │ CPU  ███████████████    6.3G │
-│                                           │                                           │ vram ███████████████   17.4G │
+│ stream 5/8 · thinking                     │ stream 6/8                         answer │ PLACEMENT ────────────────── │
+│ 12.2 tok/s ttft 370 ms · 14/128           │ 12.0 tok/s ttft 410 ms · 14/128           │ GPU0 ███████████████    9.4G │
+│ ▏ 측정이 흔들린다고 했으니 먼저 기계가    │ ▏ The aggregate rate is what the server   │ GPU1 ███████████████    9.6G │
+│ ▏ 조용했는지 묻는 게 맞다. 잡음이         │ ▏ does; the per stream rate is what▍      │ CPU  ███████████████    6.3G │
+│ ▏ 신호보다 크면 나머지 숫자는▍            │                                           │ vram ███████████████   17.4G │
 │                                           │                                           │      █ weights  █ kv  █ buf  │
 │                                           │                                           │ never loaded           84.6G │
 │                                           │                                           │                              │
@@ -14,13 +14,13 @@
 │                                           │                                           │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │                                           │                                           │                              │
 │                                           │                                           │ SPEED ────────────────────── │
-│ ▏ tok/s          █▆▇▇█▆▇▇█▆▇▇█  p50 79 ms │ ▏ tok/s          ▆▇▇█▆▇▇█▆▇▇█▆  p50 86 ms │ prefill           2253 tok/s │
+│ ▏                 █▆▇▇█▆▇▇█▆▇▇█  12.3 avg │ ▏                 ▆▇▇█▆▇▇█▆▇▇█▆  12.1 avg │ prefill           2253 tok/s │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ decode            12.1 tok/s │
-│ stream 7/8 · thinking          12.1 tok/s │ stream 8/8                     12.1 tok/s │ ttft      330 ms · 25% cache │
-│ ▏ Speculative decoding, acceptance        │ ▏ RSS is not loaded. Under mmap the       │ 8 streams     97.0 tok/s agg │
-│ ▏ rate. I need the break even point       │ ▏ resident set is what this process▍      │                              │
-│ ▏ before I can▍                           │                                           │ HOST ─────────────────────── │
-│                                           │                                           │ load     4.9 · contended yes │
+│ stream 7/8 · thinking                     │ stream 8/8                         answer │ ttft      330 ms · 25% cache │
+│ 12.1 tok/s ttft 450 ms · 13/128           │ 12.1 tok/s ttft 490 ms · 13/128           │ 8 streams     97.0 tok/s agg │
+│ ▏ Speculative decoding, acceptance        │ ▏ RSS is not loaded. Under mmap the       │                              │
+│ ▏ rate. I need the break even point       │ ▏ resident set is what this process▍      │ HOST ─────────────────────── │
+│ ▏ before I can▍                           │                                           │ load     4.9 · contended yes │
 │                                           │                                           │ GPU0         61°C  292W  90% │
 │                                           │                                           │ GPU1         61°C  292W  90% │
 │                                           │                                           │                              │
@@ -30,7 +30,7 @@
 │                                           │                                           │                              │
 │                                           │                                           │                              │
 │                                           │                                           │                              │
-│ ▏ tok/s           ▇▇█▆▇▇█▆▇▇█▆  p50 79 ms │ ▏ tok/s           ▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │                              │
+│ ▏                  ▇▇█▆▇▇█▆▇▇█▆  12.2 avg │ ▏                  ▇█▆▇▇█▆▇▇█▆▇  12.2 avg │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency                                           █▏▏▏████▏▏▏▏██  p50 91 ms  page 2/2 · ←/→  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

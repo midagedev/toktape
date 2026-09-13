@@ -38,6 +38,15 @@ func truncatedTape(k int) *tape.Tape {
 // TestTileGolden pins the frames the hero clip is cut from: four streams in a
 // grid, eight streams on one page of the default grid, and eight streams split
 // over two pages of a 2×2 grid.
+//
+// 2026-09-13: stat line, user decision. Every one of these frames was
+// re-baselined because a tile gained a row — the rate and the TTFT left the
+// right of the header, which now carries the state and the prefill bar, and
+// landed on a line of their own under it, with the token count and the median
+// beside them. The footer's p50 went the same way and its label is the mean of
+// the window it draws. No assertion here was weakened: the frames under them
+// are different frames (user: "각 pane마다 핵심적으로 tok/s가 표시가 안 되는데,
+// 표시해야 될 지표에 대해서 좀 잘 생각해 보자").
 func TestTileGolden(t *testing.T) {
 	cases := []struct {
 		name string
@@ -299,19 +308,24 @@ func TestTileRulesJoinTheFrame(t *testing.T) {
 	}
 }
 
-// TestTileFooterIsAlive: every tile ends with its own rate sparkline and its
-// own p50, which is what makes a grid a comparison rather than four copies of
-// the same screen.
+// TestTileFooterIsAlive: every tile ends with its own rate sparkline and the
+// mean of the window it draws, which is what makes a grid a comparison rather
+// than four copies of the same screen.
+//
+// 2026-09-13: the footer's label was this stream's p50 and is now the mean
+// rate of the cells beside it; the median moved up to the stat line (user
+// decision, "각 pane마다 핵심적으로 tok/s가 표시가 안 되는데"). The assertions
+// name the new label, and TestTileStatLine pins where the p50 went.
 func TestTileFooterIsAlive(t *testing.T) {
 	at := 3 * time.Second
 	m := tileModel(t, 4, at, DefaultGrid, 0)
 	frame := View(m, at, tileW, tileH)
 
-	if got := strings.Count(frame, "tok/s "); got < len(m.Streams) {
-		t.Errorf("%d tok/s labels in the frame, want at least one per tile (%d)", got, len(m.Streams))
+	if got := strings.Count(frame, " tok/s"); got < len(m.Streams) {
+		t.Errorf("%d tok/s figures in the frame, want at least one per tile (%d)", got, len(m.Streams))
 	}
-	if got := strings.Count(frame, "p50 "); got < len(m.Streams) {
-		t.Errorf("%d p50 figures in the frame, want at least one per tile (%d)", got, len(m.Streams))
+	if got := strings.Count(frame, " avg"); got < len(m.Streams) {
+		t.Errorf("%d footer labels in the frame, want one per tile (%d)", got, len(m.Streams))
 	}
 	if !strings.ContainsAny(frame, string(sparkRunes)) {
 		t.Error("no sparkline glyph in a mid-run tile frame")
@@ -319,8 +333,19 @@ func TestTileFooterIsAlive(t *testing.T) {
 
 	// A stream with no token yet has nothing to plot and says so rather than
 	// printing a zero it never measured (CLAUDE.md).
-	if got := tileFooter(PlainTheme(), Stream{}, 40, false); !strings.Contains(got, "p50 ?") {
-		t.Errorf("an unstarted stream's footer = %q, want an unknown p50", got)
+	if got := tileFooter(PlainTheme(), Stream{}, 40, false); !strings.Contains(got, "? avg") {
+		t.Errorf("an unstarted stream's footer = %q, want an unknown mean", got)
+	}
+
+	// The label is the mean of the cells drawn beside it, not a figure from
+	// somewhere else: a shape and a number that disagree are two claims.
+	for i, s := range m.Streams {
+		line := tileFooter(PlainTheme(), s, 41, false)
+		barW := 41 - 2 - tileAvgW
+		want := mean(streamRates(s, barW))
+		if !strings.Contains(line, fmtRate(want)+" avg") {
+			t.Errorf("stream %d footer %q does not name the window mean %.2f", i, line, want)
+		}
 	}
 
 	// The sparkline scrolls: as the run advances, the tile's cells change.
@@ -342,11 +367,14 @@ func TestTileDropsTheFooterBeforeTheAnswer(t *testing.T) {
 	if len(roomy) != 8 {
 		t.Fatalf("a roomy tile is %d rows, want 8", len(roomy))
 	}
-	if !strings.Contains(roomy[len(roomy)-1], "tok/s") {
+	if !strings.Contains(roomy[len(roomy)-1], " avg") {
 		t.Errorf("a roomy tile has no sparkline footer: %q", roomy[len(roomy)-1])
 	}
 
-	for rows := 1; rows <= 3; rows++ {
+	// 2026-09-13: a tile now spends three rows on chrome rather than two, so
+	// the footer survives from four rows up instead of three, and the marker
+	// this looks for is the footer's own label (user decision: stat line).
+	for rows := 1; rows <= 4; rows++ {
 		got := tile(m, th, midRun, s, 41, rows, 0)
 		if len(got) != rows {
 			t.Fatalf("a %d-row tile came back %d rows", rows, len(got))
@@ -354,8 +382,13 @@ func TestTileDropsTheFooterBeforeTheAnswer(t *testing.T) {
 		if !strings.Contains(got[0], "stream 1") {
 			t.Errorf("a %d-row tile dropped its header: %q", rows, got[0])
 		}
-		if strings.Contains(strings.Join(got, "\n"), "p50 ") {
+		if strings.Contains(strings.Join(got, "\n"), " avg") {
 			t.Errorf("a %d-row tile kept its footer instead of the answer:\n%s", rows, strings.Join(got, "\n"))
+		}
+		// The rate outlives everything but the name: a tile reporting nothing
+		// is not a smaller tile, it is a different one.
+		if rows >= 2 && !strings.Contains(got[1], "tok/s") {
+			t.Errorf("a %d-row tile dropped its stat line: %q", rows, got[1])
 		}
 	}
 }
@@ -407,43 +440,75 @@ func TestTileThinkingStates(t *testing.T) {
 	}
 }
 
-// TestTileHeaderDropsTTFTWhenNarrow: a tile is a fraction of the pane, and a
-// clipped figure reads as a wrong figure. The header gives up the TTFT, then
-// the stream count, and keeps the rate.
-func TestTileHeaderDropsTTFTWhenNarrow(t *testing.T) {
+// TestTileHeaderNamesTheState: the header is identity and state, and nothing
+// else.
+//
+// 2026-09-13: it used to carry the rate and the TTFT on its right, and the
+// test that pinned their degradation order stood here. Both figures moved one
+// row down into the stat line (user decision: "각 pane마다 핵심적으로 tok/s가
+// 표시가 안 되는데"), so the order they degrade in is pinned by
+// TestStatLineDegradesInOrder instead, and what is left to pin here is that
+// the header reports the state and never the rate.
+func TestTileHeaderNamesTheState(t *testing.T) {
 	m := tileModel(t, 4, midRun, DefaultGrid, 0)
-	s := m.Streams[0]
 	th := PlainTheme()
 
-	wide := streamHeader(m, th, s, 85, true, false)
-	if !strings.Contains(wide, "ttft") {
-		t.Errorf("the full-pane header dropped the ttft: %q", wide)
-	}
-	// A tile at the minimum screen is 31 wide; a badged header at the hero
-	// size is 41 wide with 21 of them already spent on name and state.
-	narrow := []string{
-		streamHeader(m, th, s, 31, true, false),
-		streamHeader(m, th, m.Streams[len(m.Streams)-1], 41, true, false),
-	}
-	for _, got := range narrow {
-		if strings.Contains(got, "ttft") {
-			t.Errorf("a narrow header kept the ttft and must have cut something: %q", got)
+	for _, w := range []int{31, 41, 85} {
+		got := streamHeader(m, th, m.Streams[0], w, true, false)
+		if strings.Contains(got, "tok/s") || strings.Contains(got, "ttft") {
+			t.Errorf("the header at width %d still carries a figure: %q", w, got)
 		}
-		if !strings.Contains(got, "tok/s") {
-			t.Errorf("a narrow header dropped the rate: %q", got)
+		if !strings.Contains(got, "answer") {
+			t.Errorf("the header at width %d does not name the state: %q", w, got)
 		}
 	}
-	if !strings.Contains(narrow[1], "· thinking") {
-		t.Errorf("the badged header lost its badge instead of the ttft: %q", narrow[1])
+
+	// A stream whose badge already says what it is doing does not say it
+	// twice: "stream 4/4 · thinking" needs no second "thinking".
+	last := m.Streams[len(m.Streams)-1]
+	if got := thinkingBadge(last); got != "thinking" {
+		t.Fatalf("the fixture's last stream reads %q at %v, want a thinking badge", got, midRun)
 	}
-	// Nothing may be half-printed at any width the header can be asked for.
-	for w := 12; w <= 85; w++ {
-		got := streamHeader(m, th, s, w, true, false)
-		if width(got) != w {
-			t.Fatalf("header at width %d is %d columns: %q", w, width(got), got)
+	badged := streamHeader(m, th, last, 41, true, false)
+	if !strings.Contains(badged, "· thinking") {
+		t.Errorf("the badged header lost its badge: %q", badged)
+	}
+	if strings.Count(badged, "thinking") != 1 {
+		t.Errorf("the header names the same state twice: %q", badged)
+	}
+
+	// The states a tile has to be able to report, each from a stream that is
+	// actually in it.
+	done := tileModel(t, 4, doneAt, DefaultGrid, 0)
+	for _, tc := range []struct {
+		what  string
+		s     Stream
+		state string
+	}{
+		{"a fresh stream", Stream{}, prefillWord},
+		{"a failed stream", Stream{Err: "connection reset"}, "failed"},
+		{"a finished stream", done.Streams[0], "done"},
+		{"an all-reasoning finish", done.Streams[len(done.Streams)-1], "cut"},
+	} {
+		if got := streamState(tc.s); got != tc.state {
+			t.Errorf("%s reads %q, want %q", tc.what, got, tc.state)
 		}
-		if strings.Contains(got, "tok/") && !strings.Contains(got, "tok/s") {
-			t.Errorf("header at width %d printed a cut unit: %q", w, got)
+	}
+
+	// Nothing may be half-printed at any width the header can be asked for,
+	// at any point in the run.
+	for _, at := range []time.Duration{0, 500 * time.Millisecond, midRun, doneAt} {
+		frame := tileModel(t, 4, at, DefaultGrid, 0)
+		for _, s := range frame.Streams {
+			for w := 12; w <= 85; w++ {
+				got := streamHeader(frame, th, s, w, true, false)
+				if width(got) != w {
+					t.Fatalf("header at width %d is %d columns: %q", w, width(got), got)
+				}
+				if strings.Contains(got, "prefil") && !strings.Contains(got, prefillWord) {
+					t.Errorf("header at width %d printed a cut state: %q", w, got)
+				}
+			}
 		}
 	}
 }

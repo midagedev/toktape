@@ -1,10 +1,10 @@
 ┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────┐
-│ stream 1/8                     12.1 tok/s │ stream 2/8                     12.0 tok/s │ PLACEMENT ────────────────── │
-│ ▏ The page fault spike you are seeing     │ ▏ 이건 배치 문제인지 대역폭 문제인지      │ GPU0 ███████████████    9.4G │
-│ ▏ is the expert tensors being read back   │ ▏ 먼저 갈라야 한다. 전문가 텐서가         │ GPU1 ███████████████    9.6G │
-│ ▏ from NVMe.▍                             │ ▏ ▸ answer                                │ CPU  ███████████████    6.3G │
-│                                           │ ▏ 레이어 배치를 바꾸면 디코드 속도가▍     │ vram ███████████████   17.4G │
-│                                           │                                           │      █ weights  █ kv  █ buf  │
+│ stream 1/8                         answer │ stream 2/8                         answer │ PLACEMENT ────────────────── │
+│ 12.1 tok/s ttft 210 ms · 16/128           │ 12.0 tok/s ttft 250 ms · 15/128           │ GPU0 ███████████████    9.4G │
+│ ▏ The page fault spike you are seeing     │ ▏ 이건 배치 문제인지 대역폭 문제인지      │ GPU1 ███████████████    9.6G │
+│ ▏ is the expert tensors being read back   │ ▏ 먼저 갈라야 한다. 전문가 텐서가         │ CPU  ███████████████    6.3G │
+│ ▏ from NVMe.▍                             │ ▏ ▸ answer                                │ vram ███████████████   17.4G │
+│                                           │ ▏ 레이어 배치를 바꾸면 디코드 속도가▍     │      █ weights  █ kv  █ buf  │
 │                                           │                                           │ never loaded           84.6G │
 │                                           │                                           │                              │
 │                                           │                                           │ MEMORY ───────────────────── │
@@ -14,13 +14,13 @@
 │                                           │                                           │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │                                           │                                           │                              │
 │                                           │                                           │ SPEED ────────────────────── │
-│ ▏ tok/s        █▆▇▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │ ▏ tok/s         ▆▇▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │ prefill           2253 tok/s │
+│ ▏               █▆▇▇█▆▇▇█▆▇▇█▆▇  12.2 avg │ ▏                ▆▇▇█▆▇▇█▆▇▇█▆▇  12.1 avg │ prefill           2253 tok/s │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ decode            12.1 tok/s │
-│ stream 3/8                     12.1 tok/s │ stream 4/8                     12.2 tok/s │ ttft      330 ms · 25% cache │
-│ ▏ Flash attention changes the compute     │ ▏ Prefix caching only helps when the      │ 8 streams     97.0 tok/s agg │
-│ ▏ buffer size, not the weights. When      │ ▏ system prompt is byte identical. A      │                              │
-│ ▏ the buffer grows past▍                  │ ▏ single changed character▍               │ HOST ─────────────────────── │
-│                                           │                                           │ load     4.9 · contended yes │
+│ stream 3/8                         answer │ stream 4/8                         answer │ ttft      330 ms · 25% cache │
+│ 12.1 tok/s ttft 290 ms · 15/128           │ 12.2 tok/s ttft 330 ms · 15/128           │ 8 streams     97.0 tok/s agg │
+│ ▏ Flash attention changes the compute     │ ▏ Prefix caching only helps when the      │                              │
+│ ▏ buffer size, not the weights. When      │ ▏ system prompt is byte identical. A      │ HOST ─────────────────────── │
+│ ▏ the buffer grows past▍                  │ ▏ single changed character▍               │ load     4.9 · contended yes │
 │                                           │                                           │ GPU0         61°C  292W  90% │
 │                                           │                                           │ GPU1         61°C  292W  90% │
 │                                           │                                           │                              │
@@ -30,7 +30,7 @@
 │                                           │                                           │                              │
 │                                           │                                           │                              │
 │                                           │                                           │                              │
-│ ▏ tok/s         ▇▇█▆▇▇█▆▇▇█▆▇▇  p50 79 ms │ ▏ tok/s         ▇█▆▇▇█▆▇▇█▆▇▇█  p50 79 ms │                              │
+│ ▏                ▇▇█▆▇▇█▆▇▇█▆▇▇  12.2 avg │ ▏                ▇█▆▇▇█▆▇▇█▆▇▇█  12.3 avg │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency                                           █▏▏▏████▏▏▏▏██  p50 91 ms  page 1/2 · ←/→  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

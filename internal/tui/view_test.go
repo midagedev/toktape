@@ -38,6 +38,12 @@ func goldenModel(t *testing.T, at time.Duration) Model {
 // change: "리스트 레이아웃 아예 버리고 싶어, 다 카드로 하고"). The list goldens are
 // gone rather than loosened — no assertion here was weakened, the layout under
 // them is a different one.
+//
+// 2026-09-13, later the same day: re-baselined again, for the stat line. These
+// are tile frames too, so they moved with TestTileGolden: the rate and the
+// TTFT left the header, which now carries the state and the prefill bar, for a
+// row of their own under it (user decision — see TestTileGolden for the
+// wording). Again a different layout rather than a loosened assertion.
 func TestViewGolden(t *testing.T) {
 	sizes := []struct{ w, h int }{{100, 30}, {140, 40}}
 	offsets := []struct {
@@ -419,20 +425,28 @@ func TestBarsUseOneGlyph(t *testing.T) {
 }
 
 // TestPrefillFrameShowsProgress: the opening frame is the one a reader sees
-// first in a clip, and "waiting for the first token" says nothing about what
-// the server is doing. Every stream must show the spinner and a prompt-progress
-// bar from the very first frame, which means ExampleTape has to carry a
-// return_progress row stamped at zero.
+// first in a clip, and it has to say what the server is doing. Every stream
+// shows a prompt-progress bar and a spinner from the very first frame, which
+// means ExampleTape has to carry a return_progress row stamped at zero.
+//
+// 2026-09-13: the bar moved from the body of the tile to the right of its
+// header, and the body kept the spinner (stat-line track, user decision). The
+// assertions moved with it — the frame must still carry the bar, the recorded
+// counts and all three shades — and one was added: the body says what the
+// stream is waiting for, which is the row the bar used to occupy.
 func TestPrefillFrameShowsProgress(t *testing.T) {
 	m := goldenModel(t, 0)
 	frame := View(m, 0, 120, 36)
 
-	if strings.Contains(frame, "waiting for the first token") {
-		t.Error("the opening frame still falls back to the waiting message")
-	}
 	bars := strings.Count(frame, "prefill ")
 	if bars == 0 {
 		t.Fatal("no prefill progress bar on the opening frame")
+	}
+	if !strings.Contains(frame, "waiting for the first token") {
+		t.Error("the body of a prefilling tile says nothing about what it is waiting for")
+	}
+	if !strings.ContainsAny(frame, string(spinnerFrames)) {
+		t.Error("no spinner on the opening frame: a stream stuck in prefill has to read as alive")
 	}
 	for i, s := range m.Streams {
 		if len(s.Progress) == 0 {
@@ -443,10 +457,15 @@ func TestPrefillFrameShowsProgress(t *testing.T) {
 		}
 	}
 	// The counts beside the bar are the ones the tape recorded, not a guess.
+	// A tile is a fraction of the pane, so the cache figure is the part that
+	// does not fit there; a header with the room prints all of it.
 	p := m.Streams[0].Progress[0]
-	if !strings.Contains(frame, fmt.Sprintf("%d/%d · cache %d", p.Processed, p.Total, p.Cache)) {
-		t.Errorf("the bar does not print the recorded counts %d/%d cache %d",
-			p.Processed, p.Total, p.Cache)
+	if !strings.Contains(frame, fmt.Sprintf("%d/%d", p.Processed, p.Total)) {
+		t.Errorf("the bar does not print the recorded counts %d/%d", p.Processed, p.Total)
+	}
+	wide := streamHeader(m, PlainTheme(), m.Streams[0], 70, true, false)
+	if !strings.Contains(wide, fmt.Sprintf("%d/%d · cache %d", p.Processed, p.Total, p.Cache)) {
+		t.Errorf("a header with room dropped the cache count: %q", wide)
 	}
 	if strings.Contains(frame, "░") || strings.Contains(frame, "▓") {
 		t.Error("the prefill bar uses a hatch glyph")
@@ -498,8 +517,13 @@ func TestDoneStateFillsThePane(t *testing.T) {
 		// The row above the saved-tape line is the grid's last tile row, and
 		// that tile's own footer is the last thing in it: the grid reaches the
 		// footer rather than trailing off into space.
+		//
+		// 2026-09-13: the footer's label is the window's mean rate rather than
+		// the stream's p50, and it dropped the "tok/s" the unit was spelled
+		// out in (stat-line track, user decision). The row this looks for is
+		// the same row.
 		last := lines[len(lines)-3]
-		if !strings.Contains(last, "tok/s") {
+		if !strings.Contains(last, " avg") {
 			t.Errorf("%dx%d: the bottom tile row does not end on its sparkline: %q", sz.w, sz.h, last)
 		}
 	}

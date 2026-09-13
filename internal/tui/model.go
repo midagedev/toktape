@@ -83,6 +83,11 @@ type Stream struct {
 	Progress       []tape.PromptProgress
 	Timings        tape.TimingsSummary
 	Cache          tape.CacheSummary
+	// MaxTokens is the answer cap the request asked for (max_tokens /
+	// n_predict), 0 when it asked for none or when the recorder did not say.
+	// The tile prints "80/128" when it is known and "80 tok" when it is not;
+	// an unknown budget is never guessed at (CLAUDE.md).
+	MaxTokens int
 	// EndedAt is when the last token arrived; 0 while the stream is running.
 	EndedAt time.Duration
 	Done    bool
@@ -148,6 +153,7 @@ func ModelAt(tp *tape.Tape, at time.Duration) Model {
 			Slot:           req.Slot,
 			StartedAt:      req.StartedAt,
 			RenderedPrompt: req.Prompt.RenderedPrompt,
+			MaxTokens:      promptMaxTokens(req.Prompt),
 			Timings:        req.Timings,
 			Cache:          req.Cache,
 			Err:            req.Error,

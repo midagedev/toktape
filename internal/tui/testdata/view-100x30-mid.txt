@@ -1,30 +1,30 @@
 ┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────┐
-│ stream 1/8           12.1 tok/s │ stream 2/8           12.0 tok/s │ PLACEMENT ────────────────── │
-│ ▏ The page fault spike you      │ ▏ 전문가 텐서가                 │ GPU0 ███████████████    9.4G │
+│ stream 1/8               answer │ stream 2/8               answer │ PLACEMENT ────────────────── │
+│ 12.1 tok/s ttft 210 ms          │ 12.0 tok/s ttft 250 ms          │ GPU0 ███████████████    9.4G │
 │ ▏ are seeing is the expert      │ ▏ ▸ answer                      │ GPU1 ███████████████    9.6G │
 │ ▏ tensors being read back       │ ▏ 레이어 배치를 바꾸면 디코드   │ CPU  ███████████████    6.3G │
 │ ▏ from NVMe.▍                   │ ▏ 속도가▍                       │ vram ███████████████   17.4G │
-│ ▏ tok/s ▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │ ▏ tok/s ▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │      █ weights  █ kv  █ buf  │
+│ ▏     █▆▇▇█▆▇▇█▆▇▇█▆▇  12.2 avg │ ▏      ▆▇▇█▆▇▇█▆▇▇█▆▇  12.1 avg │      █ weights  █ kv  █ buf  │
 ├─────────────────────────────────┼─────────────────────────────────┤ never loaded           84.6G │
-│ stream 3/8           12.1 tok/s │ stream 4/8           12.2 tok/s │                              │
-│ ▏ Flash attention changes the   │ ▏ Prefix caching only helps     │ MEMORY ───────────────────── │
+│ stream 3/8               answer │ stream 4/8               answer │                              │
+│ 12.1 tok/s ttft 290 ms          │ 12.2 tok/s ttft 330 ms          │ MEMORY ───────────────────── │
 │ ▏ compute buffer size, not      │ ▏ when the system prompt is     │ rss       9.0G file     8.3G │
 │ ▏ the weights. When the         │ ▏ byte identical. A single      │ virt     40.0G anon     1.1G │
 │ ▏ buffer grows past▍            │ ▏ changed character▍            │ maj/tok                  0.0 │
-│ ▏ tok/s █▆▇▇█▆▇▇█▆▇▇  p50 79 ms │ ▏ tok/s ▆▇▇█▆▇▇█▆▇▇█  p50 79 ms │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏      ▇▇█▆▇▇█▆▇▇█▆▇▇  12.2 avg │ ▏      ▇█▆▇▇█▆▇▇█▆▇▇█  12.3 avg │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 ├─────────────────────────────────┼─────────────────────────────────┤                              │
-│ stream 5 · thinking  12.2 tok/s │ stream 6/8           12.0 tok/s │ SPEED ────────────────────── │
-│ ▏ 측정이 흔들린다고 했으니      │ ▏ The aggregate rate is what    │ prefill           2253 tok/s │
-│ ▏ 먼저 기계가 조용했는지 묻는   │ ▏ the server does; the per      │ decode            12.1 tok/s │
-│ ▏ 게 맞다. 잡음이 신호보다      │ ▏ stream rate is what▍          │ ttft      330 ms · 25% cache │
-│ ▏ 크면 나머지 숫자는▍           │                                 │ 8 streams     97.0 tok/s agg │
-│ ▏ tok/s ▆▇▇█▆▇▇█▆▇▇█  p50 79 ms │ ▏ tok/s ▇▇█▆▇▇█▆▇▇█▆  p50 86 ms │                              │
+│ stream 5/8 · thinking           │ stream 6/8               answer │ SPEED ────────────────────── │
+│ 12.2 tok/s ttft 370 ms          │ 12.0 tok/s ttft 410 ms          │ prefill           2253 tok/s │
+│ ▏ 먼저 기계가 조용했는지 묻는   │ ▏ The aggregate rate is what    │ decode            12.1 tok/s │
+│ ▏ 게 맞다. 잡음이 신호보다      │ ▏ the server does; the per      │ ttft      330 ms · 25% cache │
+│ ▏ 크면 나머지 숫자는▍           │ ▏ stream rate is what▍          │ 8 streams     97.0 tok/s agg │
+│ ▏       █▆▇▇█▆▇▇█▆▇▇█  12.3 avg │ ▏       ▆▇▇█▆▇▇█▆▇▇█▆  12.1 avg │                              │
 ├─────────────────────────────────┼─────────────────────────────────┤ HOST ─────────────────────── │
-│ stream 7 · thinking  12.1 tok/s │ stream 8/8           12.1 tok/s │ load     4.9 · contended yes │
-│ ▏ acceptance rate. I need the   │ ▏ RSS is not loaded. Under      │ GPU0         61°C  292W  90% │
+│ stream 7/8 · thinking           │ stream 8/8               answer │ load     4.9 · contended yes │
+│ 12.1 tok/s ttft 450 ms          │ 12.1 tok/s ttft 490 ms          │ GPU0         61°C  292W  90% │
 │ ▏ break even point before I     │ ▏ mmap the resident set is      │ GPU1         61°C  292W  90% │
 │ ▏ can▍                          │ ▏ what this process▍            │                              │
-│ ▏ tok/s ▇▇█▆▇▇█▆▇▇█▆  p50 79 ms │ ▏ tok/s ▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │                              │
+│ ▏        ▇▇█▆▇▇█▆▇▇█▆  12.2 avg │ ▏        ▇█▆▇▇█▆▇▇█▆▇  12.2 avg │                              │
 ├─────────────────────────────────┴─────────────────────────────────┴──────────────────────────────┤
 │ token latency                                       █▏▏▏████▏▏▏▏██  p50 91 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘

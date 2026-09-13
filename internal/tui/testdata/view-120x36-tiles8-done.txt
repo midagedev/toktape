@@ -1,34 +1,34 @@
 ┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────┐
-│ stream 1/8                     11.3 tok/s │ stream 2/8                     11.3 tok/s │ PLACEMENT ────────────────── │
-│ ▏ before the next token can be emitted.   │ ▏ 텐서는 NVMe까지 내려간다.               │ GPU0 ███████████████   10.3G │
+│ stream 1/8                           done │ stream 2/8                           done │ PLACEMENT ────────────────── │
+│ 11.3 tok/s ttft 210 ms · 80/128           │ 11.3 tok/s ttft 250 ms · 80/128           │ GPU0 ███████████████   10.3G │
 │ ▏ That is the gap in the latency strip.   │ ▏ 스파크라인이 튀는 구간이 정확히 그      │ GPU1 ███████████████   10.5G │
 │ ▏ The page fault spike you are seeing     │ ▏ 지점이다. 레이어 배치를 바꾸면 디코드   │ CPU  ███████████████    6.3G │
 │ ▏ is the expert tensors being read back   │ ▏ 속도가 달라지는 이유는 간단하다.        │ vram ███████████████   17.4G │
 │ ▏ from NVMe. With twelve                  │ ▏ 전문가 텐서가                           │      █ weights  █ kv  █ buf  │
-│ ▏ tok/s ▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇  p50 86 ms │ ▏ tok/s ▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇  p50 86 ms │ never loaded           84.6G │
+│ ▏ ▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇  12.2 avg │ ▏ ▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇  12.2 avg │ never loaded           84.6G │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
-│ stream 3/8                     11.3 tok/s │ stream 4/8                     11.3 tok/s │ MEMORY ───────────────────── │
-│ ▏ size, not the weights. When the         │ ▏ invalidates the whole prefix, the       │ rss      13.8G file    12.8G │
+│ stream 3/8                           done │ stream 4/8                           done │ MEMORY ───────────────────── │
+│ 11.3 tok/s ttft 290 ms · 80/128           │ 11.3 tok/s ttft 330 ms · 80/128           │ rss      13.8G file    12.8G │
 │ ▏ buffer grows past the free VRAM the     │ ▏ cache hit drops to zero, and the        │ virt     40.0G anon     1.1G │
 │ ▏ fit pass silently moves a block of      │ ▏ prefill you thought was free costs      │ maj/tok                  0.1 │
 │ ▏ experts to host RAM, and the decode     │ ▏ the full five hundred tokens again.     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ ▏ rate halves                             │ ▏ Prefix caching                          │                              │
-│ ▏ tok/s ▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█  p50 86 ms │ ▏ tok/s █▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆  p50 86 ms │ SPEED ────────────────────── │
+│ ▏ █▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█  12.3 avg │ ▏ ▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆  12.2 avg │ SPEED ────────────────────── │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ prefill           1980 tok/s │
-│ stream 5/8                     11.3 tok/s │ stream 6/8                     11.3 tok/s │ decode            11.3 tok/s │
-│ ▏ 머신이 한가한지 본다. 다른 프로세스가   │ ▏ The aggregate rate is what the server   │ ttft      210 ms · 25% cache │
+│ stream 5/8                           done │ stream 6/8                           done │ decode            11.3 tok/s │
+│ 11.3 tok/s ttft 370 ms · 80/128           │ 11.3 tok/s ttft 410 ms · 80/128           │ ttft      210 ms · 25% cache │
 │ ▏ 같은 GPU를 쓰고 있으면 재는 대상보다    │ ▏ does; the per stream rate is what one   │ 8 streams     90.6 tok/s agg │
 │ ▏ 잡음이 크다. 그래서 이 화면은 load 와   │ ▏ agent feels. Eight sessions at twelve   │                              │
 │ ▏ 다른 GPU 프로세스 수를 항상 같이 보여   │ ▏ tokens a second is a very different     │ HOST ─────────────────────── │
 │ ▏ 준다. 측정값이 흔들릴 때는 먼저         │ ▏ product from one session                │ load    12.0 · contended yes │
-│ ▏ tok/s ▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇  p50 86 ms │ ▏ tok/s ▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇  p50 86 ms │ GPU0         71°C  338W  99% │
+│ ▏ ▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇  12.2 avg │ ▏ ▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇  12.2 avg │ GPU0         71°C  338W  99% │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ GPU1         71°C  338W  99% │
-│ stream 7/8 · thinking · cut    11.3 tok/s │ stream 8/8                     11.3 tok/s │                              │
-│ ▏ arithmetic properly rather than quote   │ ▏ page cache holds the rest, and          │                              │
+│ stream 7/8 · thinking · cut               │ stream 8/8                           done │                              │
+│ 11.3 tok/s ttft 450 ms · 80/128           │ 11.3 tok/s ttft 490 ms · 80/128           │                              │
 │ ▏ the number I half remember, because     │ ▏ whatever was copied to VRAM may have    │                              │
 │ ▏ the whole point of the question is      │ ▏ been dropped again. Never loaded        │                              │
 │ ▏ the case where the headline speedup     │ ▏ comes from the tensor                   │                              │
-│ ▏ tok/s ▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█  p50 86 ms │ ▏ tok/s █▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆  p50 86 ms │                              │
+│ ▏ █▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█  12.3 avg │ ▏ ▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆  12.1 avg │                              │
 │                                                                                       │                              │
 │ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card    │                              │
 ├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤

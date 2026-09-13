@@ -69,9 +69,9 @@ func (g Grid) resolve(cw, bodyH int) Grid {
 		}
 	}
 	if rows <= 0 {
-		// A tile is a header, its answer and its sparkline footer, and every
-		// row after the first also costs the rule above it.
-		per := 2 + autoBodyLines
+		// A tile is a header, a stat line, its answer and its sparkline
+		// footer, and every row after the first also costs the rule above it.
+		per := tileChromeRows + autoBodyLines
 		rows = (bodyH + 1) / (per + 1)
 	}
 	return Grid{Cols: clampInt(cols, 1, MaxGridCols), Rows: clampInt(rows, 1, MaxGridRows)}

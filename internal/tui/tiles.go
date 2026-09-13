@@ -27,9 +27,14 @@ const tileGutter = 3
 
 // tileMinBody is the answer budget below which a tile gives up its sparkline
 // footer. One line of a reply says less than nothing, so the footer's row goes
-// to the body before the body is cut to it. The header is never dropped: it is
-// the only line that names the stream.
+// to the body before the body is cut to it. Neither of the two rows above the
+// body is ever dropped: one names the stream and the other reports its rate.
 const tileMinBody = 2
+
+// tileChromeRows is what a full tile spends on something other than the
+// answer: the header, the stat line under it and the sparkline footer. The
+// automatic grid budgets with it (grid.go), so the two cannot drift.
+const tileChromeRows = 3
 
 // tilePane draws one page of m.Streams as a grid and returns exactly rows
 // lines of cw columns, footer included.
@@ -218,45 +223,74 @@ func tile(m Model, th Theme, t time.Duration, s Stream, cw, rows, active int) []
 	if rows == 1 {
 		return []string{streamHeader(m, th, s, cw, true, on)}
 	}
-	body := rows - 2
+	if rows == 2 {
+		// Identity and the figure. Below this a tile is a label, not a tile,
+		// but the two rows it can afford are the two that report something.
+		return []string{streamHeader(m, th, s, cw, true, on), tileStatLine(th, s, cw)}
+	}
+	body := rows - tileChromeRows
 	if body < tileMinBody {
 		// No footer: the row it would have taken is worth more as an answer.
-		return fitRows(streamBlock(m, th, t, s, cw, rows-1, true, on), blank, rows)
+		return fitRows(streamBlock(m, th, t, s, cw, rows-2, true, on), blank, rows)
 	}
 	out := streamBlock(m, th, t, s, cw, body, true, on)
 	out = append(out, tileFooter(th, s, cw, on))
 	return fitRows(out, blank, rows)
 }
 
+// tileAvgW is the field reserved at the right of the footer for its label.
+//
+// It is a field rather than the label's own width so that the sparkline's
+// right-hand end sits at the same column in every frame. A bar whose edge
+// moved by one whenever the mean crossed 10 or 100 tok/s would read as the
+// line twitching, which is exactly what a sparkline must not do.
+const tileAvgW = 10
+
 // tileFooter is the bottom line of a tile: this stream's own decode rate as a
-// scrolling sparkline, and the median gap between its tokens.
+// scrolling sparkline, and the mean of the window it draws.
 //
 // The run-wide latency strip along the bottom of the screen answers "is the
 // server even"; this answers "is *this slot* even", which is the question a
 // concurrent run exists to raise. The sparkline is anchored to the right, so
 // it scrolls left under a fixed edge as tokens arrive instead of growing out
-// of its label. A tile too narrow for both gives up the sparkline first: the
-// p50 is a figure, and the sparkline is that figure's shape.
+// of its label.
+//
+// The label is the mean of the cells beside it and not the stream's median
+// gap: the median moved up to the stat line with the rest of the figures
+// (2026-09-13, user decision), and a shape wants the average of what it shows
+// written next to it rather than a statistic from somewhere else.
 func tileFooter(th Theme, s Stream, cw int, active bool) string {
 	l := newLine(th, cw)
 	gutter(l, th, active)
-	l.add(th.dim, "tok/s ")
 
-	p50 := "p50 " + fmtMs(percentile(streamITLs(s), 0.5))
-	if width(p50) > l.left() {
-		p50 = ""
-	}
-	if barW := l.left() - width(p50) - 2; barW > 0 {
-		cells := Sparkline(streamRates(s, barW), barW, 0)
+	barW := l.left() - tileAvgW
+	var rates []float64
+	if barW > 0 {
+		rates = streamRates(s, barW)
+		cells := Sparkline(rates, barW, 0)
 		l.space(barW - len(cells))
 		writeCells(l, th, cells, th.accent)
 	}
-	if p50 == "" {
+	label := fmtRate(mean(rates)) + " avg"
+	if width(label) > l.left() {
 		return l.String()
 	}
-	l.gapTo(width(p50))
-	l.add(th.dim, p50)
+	l.gapTo(width(label))
+	l.add(th.dim, label)
 	return l.String()
+}
+
+// mean is the arithmetic mean of vals, or 0 for an empty window — which every
+// formatter here prints as "?", because no sample is not a zero sample.
+func mean(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	sum := 0.0
+	for _, v := range vals {
+		sum += v
+	}
+	return sum / float64(len(vals))
 }
 
 // spliceRune replaces the i-th rune of s with r. s must carry no escape

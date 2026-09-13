@@ -37,6 +37,11 @@ func ExampleTapeN(streams int) *tape.Tape {
 	}
 	const (
 		tokens = 80
+		// exampleMaxTokens is the cap the requests asked for. It is above the
+		// 80 they actually produce, because a run that stopped because it ran
+		// out of budget is the uncommon case and a tile showing "80/80" for
+		// every stream would read as one.
+		exampleMaxTokens = 128
 		// promptTotal is the whole prompt; promptCache is the leading part the
 		// server's prefix cache already held. Eight agent sessions share a
 		// system prompt, so a partial hit is the ordinary case, and it is the
@@ -86,6 +91,11 @@ func ExampleTapeN(streams int) *tape.Tape {
 			Prompt: tape.PromptRecord{
 				Messages:       []tape.Message{{Role: "user", Content: examplePrompt(i)}},
 				RenderedPrompt: exampleRendered(i),
+				// The parameters as they went over the wire, which is where
+				// the answer cap lives: tape.PromptRecord has no field of its
+				// own for it (internal/server/stream.go records req.Body()).
+				// The tile's stat line reads it to print "80/128".
+				Params: map[string]any{"max_tokens": exampleMaxTokens},
 			},
 			Timings: tape.TimingsSummary{
 				PromptN:                  promptTotal - promptCache,

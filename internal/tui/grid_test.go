@@ -79,9 +79,15 @@ func TestAutoGridFitsThePane(t *testing.T) {
 		if cw < autoCols2Width && g.Cols != 1 {
 			t.Errorf("%dx%d: a %d-column pane chose %d tile columns, want 1", sz.w, sz.h, cw, g.Cols)
 		}
-		// Every row gets a header, four lines of answer and a footer, plus the
-		// rule above it.
-		if used := g.Rows*(2+autoBodyLines) + g.Rows - 1; used > bodyH {
+		// Every row gets a header, a stat line, four lines of answer and a
+		// footer, plus the rule above it.
+		//
+		// 2026-09-13: the chrome went from two rows to three when the stat
+		// line was added (user decision). The budget is tightened, not
+		// loosened: an automatic grid now has to leave room for the extra row
+		// as well, and the constant is tileChromeRows so this and resolve
+		// cannot drift apart.
+		if used := g.Rows*(tileChromeRows+autoBodyLines) + g.Rows - 1; used > bodyH {
 			t.Errorf("%dx%d: auto grid %v needs %d rows of %d", sz.w, sz.h, g, used, bodyH)
 		}
 	}

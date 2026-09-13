@@ -54,6 +54,12 @@ type Event struct {
 	Sample   tape.RunSample
 	Progress tape.PromptProgress
 
+	// MaxTokens is the answer cap the request carried, set on
+	// EventStreamStart. Zero means the recorder did not say, and the tile
+	// prints a bare token count rather than a fraction of a budget it does
+	// not know.
+	MaxTokens int
+
 	// Tape is the finished run, set on EventDone. TapePath is where it was
 	// written, empty when it was not.
 	Tape     *tape.Tape
@@ -93,6 +99,9 @@ func (m Model) Apply(e Event) Model {
 		m.ensureStream(e.Stream)
 		s := &m.Streams[m.streamPos(e.Stream)]
 		s.StartedAt = e.T
+		if e.MaxTokens > 0 {
+			s.MaxTokens = e.MaxTokens
+		}
 		if n := e.Stream + 1; n > m.Summary.Concurrency {
 			m.Summary.Concurrency = n
 		}

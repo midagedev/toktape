@@ -1,7 +1,7 @@
 ┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────┐
-│ stream 1/4                        prefill │ stream 2/4                        prefill │ PLACEMENT ────────────────── │
-│ ▏ ◐ prefill  ████████ 176/512 · cache 128 │ ▏ ◐ prefill  ████████ 176/512 · cache 128 │ GPU0 ███████████████    9.2G │
-│                                           │                                           │ GPU1 ███████████████    9.4G │
+│ stream 1/4   prefill ████████████ 176/512 │ stream 2/4   prefill ████████████ 176/512 │ PLACEMENT ────────────────── │
+│ ? tok/s    ttft ? · 0/128                 │ ? tok/s    ttft ? · 0/128                 │ GPU0 ███████████████    9.2G │
+│ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │ GPU1 ███████████████    9.4G │
 │                                           │                                           │ CPU  ███████████████    6.3G │
 │                                           │                                           │ vram ███████████████   17.4G │
 │                                           │                                           │      █ weights  █ kv  █ buf  │
@@ -14,11 +14,11 @@
 │                                           │                                           │                              │
 │                                           │                                           │                              │
 │                                           │                                           │ SPEED ────────────────────── │
-│ ▏ tok/s                             p50 ? │ ▏ tok/s                             p50 ? │ prefill ◐            ? tok/s │
+│ ▏                                   ? avg │ ▏                                   ? avg │ prefill ◐            ? tok/s │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ decode               ? tok/s │
-│ stream 3/4                        prefill │ stream 4/4                        prefill │ ttft           ? · 25% cache │
-│ ▏ ◐ prefill  ████████ 176/512 · cache 128 │ ▏ ◐ prefill  ████████ 176/512 · cache 128 │ 4 streams        ? tok/s agg │
-│                                           │                                           │                              │
+│ stream 3/4   prefill ████████████ 176/512 │ stream 4/4   prefill ████████████ 176/512 │ ttft           ? · 25% cache │
+│ ? tok/s    ttft ? · 0/128                 │ ? tok/s    ttft ? · 0/128                 │ 4 streams        ? tok/s agg │
+│ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │                              │
 │                                           │                                           │ HOST ─────────────────────── │
 │                                           │                                           │ load     3.1 · contended yes │
 │                                           │                                           │ GPU0         58°C  280W  88% │
@@ -30,7 +30,7 @@
 │                                           │                                           │                              │
 │                                           │                                           │                              │
 │                                           │                                           │                              │
-│ ▏ tok/s                             p50 ? │ ▏ tok/s                             p50 ? │                              │
+│ ▏                                   ? avg │ ▏                                   ? avg │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency                                                                               p50 ?  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
