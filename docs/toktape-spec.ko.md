@@ -147,15 +147,43 @@
 4. **compare는 v1(TTP-10), ab는 v1.1(TTP-14).**
 5. **동시 세션 모드는 v1(TTP-16).** §1 결정 9.
 
-## 7. 첫 공개 시나리오(목표 상태)
+## 7. 공개 시나리오와 채널(목표 상태)
 
-r/LocalLLaMA 글 하나로 판단할 수 있게 목표를 시나리오로 적는다.
+근거: 조사 04(`docs/research/04-launch-channels.md`, 2026-09-13). 채널 규칙과 가이드 페이지는 확인된 것이고, "흥한 사례의 업보트 수"와 X 계정 리치는 조사에서 회수되지 않았다. 아래 순서와 요일은 그 한계 안에서 정한 것이다.
 
-- 제목: "70B가 왜 2 tok/s인지 추측하기 지쳐서 만들었다 — GPU/RAM/NVMe 배치, 페이지 폴트, 실제 서빙 tok/s를 한 화면에 보여 주는 TUI"(조사 02 §8 템플릿의 번역).
-- 본문 미디어: 1200×675 PNG 카드 1장.
-- 최상단 댓글: 텍스트 카드(코드블록) + 설치 한 줄(`go install` 또는 `curl | sh`).
-- X: 12초 mp4(attach → 스파크라인 → 카드 전환).
-- 첫 실행 경험: `toktape` 한 단어. 8080을 찾아 붙고, 기본 프롬프트를 보내고, 카드를 저장하고, 공유 안내를 띄운다. 플래그 없이.
+### 7.1 채널 우선순위
+
+| 순위 | 채널 | 산출물 | 규칙 요약 |
+|---|---|---|---|
+| 1 | r/LocalLLaMA | 8스트림 GIF(992px, 1.1 MB) 또는 PNG 카드 + 최상단 댓글에 텍스트 카드·설치 한 줄 | 자기 홍보 1/10 규칙, 첫 문장에 제작자 고지, 과장 제목 금지, LLM 문체 금지 |
+| 2 | Show HN | GitHub 링크 + 손으로 쓴 배경·트레이드오프 댓글 | `Show HN:` 접두, 즉시 실행 가능해야 함, dang의 LLM 문체 경고 |
+| 3 | llama.cpp Discussions "Show and tell" | 텍스트 카드 + `.tape` 링크 | llama-server 사용자에게 실용성이 있어야 함 |
+| 4 | GeekNews(Show GN) | 한국어 개요 + GIF | **계정이 7일 이상**이어야 링크 제출 가능 — 지금 만들어 둔다 |
+| 5 | Terminal Trove / charm-in-the-wild | TUI GIF | 웹 폼·PR, 비용 거의 없음 |
+| 6 | X | PNG 카드 + 12초 mp4 | 미디어 우선, 호환성 언급 때만 메인테이너 태그 |
+| 7 | 아카라이브 알파카 · DC 로컬LLM 갤 | 하드웨어 비교표 + 카드 | 마케팅 어투 배제, 배치·tok/s 수치로 말한다 |
+| 8 | Discord(Unsloth·TheBloke·LocalLLaMA) | 텍스트 카드 스니펫 | `#showcase` 류 채널만, DM 금지 |
+| 9 | brew tap · AUR · Nix | 설치 한 줄 | 장기 유입. core는 인지도 조건이 있어 v1은 tap |
+| — | Product Hunt | — | 소비자·SaaS 편향으로 제외 |
+
+### 7.2 순서(교차 게시 피로 회피)
+
+- **D-7**: GeekNews 계정 생성, hero GIF·PNG 카드·텍스트 카드 확정, brew tap과 `install.sh`, 예시 tape 3개를 레포에.
+- **화**: r/LocalLLaMA(13–15 UTC). **수**: Show HN. **목**: llama.cpp Show and tell + X. **금**: GeekNews Show GN + 한국 커뮤니티. 주말: 이슈 대응, v0.1.1.
+- **2주차**: Terminal Trove·charm-in-the-wild, Discord, AUR/Nix, 뉴스레터 접촉.
+- **2차 물결**: 비교 포스트 시리즈 — `-ngl` 스윕, `-ctk/-ctv` 양자화, ik_llama vs llama.cpp, 동시성 1→8 스케일링. 전부 `toktape log`의 원장과 `compare`로 만든다. 이게 §1 결정 9와 TTP-19의 존재 이유다.
+
+### 7.3 예상 반론과 대응(요지)
+
+- "llama-bench 있잖아" → llama-bench는 연산 격리 측정, toktape는 서버 실측(슬롯·프리픽스 캐시·TTFT·동시성). 대체가 아니라 보완.
+- "캐시 먹은 수치다 / 워밍업 안 했다 / 배치가 뭐냐" → 카드와 tape에 전부 기록되고 `toktape play`로 재생된다. 반박은 파일로 한다.
+- 자기 홍보 반감 → MIT, 순수 Go 단일 바이너리, 텔레메트리 없음, 첫 문장 고지.
+
+### 7.4 첫 게시물 형태
+
+- 제목(초안): "70B가 왜 2 tok/s인지 추측하기 지쳐서 만들었다 — GPU/RAM/NVMe 배치, 페이지 폴트, 실제 서빙 tok/s를 한 화면에 보여 주는 TUI"(조사 02 §8). 영문 게시물은 손으로 쓴다.
+- 본문 미디어: 8스트림 GIF(Reddit 임베드에 맞춘 992px). PNG 카드는 댓글 또는 X.
+- 첫 실행 경험: `toktape` 한 단어. 서버를 찾아 붙고, 로딩 중이면 기다리고, 카드를 저장하고, 공유 안내를 띄운다. 플래그 없이.
 
 ## 8. 다음 라운드
 
