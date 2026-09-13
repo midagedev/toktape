@@ -19,11 +19,7 @@ import (
 
 	"github.com/midagedev/toktape/internal/render"
 	"github.com/midagedev/toktape/internal/tape"
-	"github.com/midagedev/toktape/internal/tui"
 )
-
-// heroStreams is the concurrency the hero shows.
-const heroStreams = 4
 
 // HeroFPS is the frame rate of the GIF.
 //
@@ -41,14 +37,23 @@ const HeroFPS = 15
 
 func main() {
 	out := flag.String("out", filepath.Join("assets", "hero.gif"), "where to write the GIF")
+	tapePath := flag.String("tape", filepath.Join("assets", "hero.tape"), "the run to render")
 	flag.Parse()
 
-	// Four streams, not eight: eight tiles are too busy to read at clip size
-	// (user, 2026-09-13). The clip opens on a shell prompt and types the
-	// command that produced it, so the stream count here is also the "-n" a
-	// viewer sees being typed — internal/render/open.go derives it from this
-	// tape rather than from a literal.
-	tp := tui.ExampleTapeN(heroStreams)
+	// A real recording, not the fixture (user, 2026-09-14: "히어로 준비된
+	// 코드로 하지 말고 실제 ws에서 돌리는게 어떨까"). The figures at the top of
+	// the README are now ones a machine produced — a 440 GiB MoE on a
+	// workstation, most of its experts in host RAM and a third of the
+	// placement read back off the disk — which is the argument this tool
+	// exists to settle, and no fixture can make that claim.
+	//
+	// The tape is committed beside the GIF, so this command still regenerates
+	// the hero from the repo alone and a change to the TUI still shows up in
+	// it the next time the command is run.
+	tp, err := tape.Read(*tapePath)
+	if err != nil {
+		fail(err)
+	}
 	// The card's footer names the run file this clip came from. The example
 	// run has no file on disk, so the path is derived from its own ID rather
 	// than typed in: a hard-coded string would keep showing the old ID after
