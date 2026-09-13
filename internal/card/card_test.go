@@ -707,3 +707,34 @@ func TestDraftRow(t *testing.T) {
 		}
 	})
 }
+
+// TestOfPeakIsMeasuredAgainstThePlacement pins the two ends of TTP-34
+// (2026-09-13): the ratio on the Decode line is the run's effective bandwidth
+// over the ceiling its own placement allows, and it is omitted entirely when
+// that ceiling is not derivable.
+//
+// Example() is a dense 70B on two identical 3090s with nothing on the CPU, so
+// every byte a token reads crosses a 936.2 GB/s bus and the ceiling is one
+// card's bandwidth, not the pair's sum: 784.7 / 936.2 = 84 %. Before this
+// ticket the denominator was the sum of both cards and the card printed 42 %,
+// a ratio against a number no layer-split run can reach.
+//
+// ExampleSharded()'s placement puts 36.5 GB of attention on the GPUs while its
+// own ActiveBytesPerToken says a whole token is 21.7 GB. The two disagree, so
+// there is no honest ceiling and the clause is dropped rather than guessed
+// (CLAUDE.md: never fix a disagreement by picking the nicer number). Its
+// fixture is rebuilt from a real recording under a separate ticket, and this
+// assertion flips then.
+func TestOfPeakIsMeasuredAgainstThePlacement(t *testing.T) {
+	got := Text(Example())
+	if !strings.Contains(got, "84% of peak") {
+		t.Errorf("Example(): Decode line must carry the ratio against one device's\n"+
+			"bandwidth, want %q in:\n%s", "84% of peak", got)
+	}
+
+	sharded := Text(ExampleSharded())
+	if strings.Contains(sharded, "of peak") {
+		t.Errorf("ExampleSharded(): the placement and ActiveBytesPerToken disagree, so\n"+
+			"no ratio may be printed at all, got:\n%s", sharded)
+	}
+}

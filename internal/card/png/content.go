@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/midagedev/toktape/internal/bandwidth"
 	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -367,17 +368,16 @@ func promptTokens(s *tape.RunSummary) int {
 
 // bandwidthString renders "≈ 91 GB/s · 10% of peak". The "≈" marks it as an
 // estimate (spec §3.2 S6). Empty when it was not derivable.
+//
+// "of peak" is measured against the ceiling this run's placement allows; see
+// internal/bandwidth, which owns the arithmetic for both renderers (TTP-34,
+// 2026-09-13).
 func bandwidthString(s *tape.RunSummary) string {
 	if s.Timings.EffectiveBandwidthBytesPerSec <= 0 {
 		return ""
 	}
 	out := "≈ " + formatGBs(s.Timings.EffectiveBandwidthBytesPerSec) + " effective"
-	var peak int64
-	for _, g := range s.Host.GPUs {
-		peak += g.PeakBandwidthBytesPerSec
-	}
-	if peak > 0 {
-		ratio := float64(s.Timings.EffectiveBandwidthBytesPerSec) / float64(peak)
+	if ratio, ok := bandwidth.OfPeak(s); ok {
 		out += " · " + formatPct(ratio) + " of peak"
 	}
 	return out

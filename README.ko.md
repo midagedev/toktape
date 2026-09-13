@@ -28,7 +28,7 @@ toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.ta
 │          workstation                                                 │
 │ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        9.1 tok/s · ≈ 410 GB/s, 22% of peak                    │
+│ Decode        9.1 tok/s · ≈ 410 GB/s, 44% of peak                    │
 │ Prefill       610 tok/s · TTFT 810 ms · 512 prompt tokens            │
 │ Context       16384 (512 in / 307 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │

@@ -3,6 +3,7 @@ package png
 import (
 	"testing"
 
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -142,5 +143,27 @@ func TestThinkingString(t *testing.T) {
 		if got := thinkingString(tc.n); got != tc.want {
 			t.Errorf("thinkingString(%d) = %q, want %q", tc.n, got, tc.want)
 		}
+	}
+}
+
+// TestBandwidthStringOfPeak mirrors internal/card's
+// TestOfPeakIsMeasuredAgainstThePlacement on the PNG side (TTP-34,
+// 2026-09-13). Both renderers must settle the same argument with the same
+// numbers, and before this ticket both summed the GPUs' bandwidths inline;
+// internal/bandwidth is now the single owner and this pins that the PNG reads
+// it too.
+//
+// The separator differs from the text card by design: " · " here, ", " there.
+func TestBandwidthStringOfPeak(t *testing.T) {
+	got := bandwidthString(card.Example())
+	if want := "≈ 785 GB/s effective · 84% of peak"; got != want {
+		t.Errorf("Example(): bandwidthString = %q, want %q", got, want)
+	}
+
+	// The placement and ActiveBytesPerToken disagree, so there is no honest
+	// ceiling and the clause is dropped rather than guessed.
+	got = bandwidthString(card.ExampleSharded())
+	if want := "≈ 150 GB/s effective"; got != want {
+		t.Errorf("ExampleSharded(): bandwidthString = %q, want %q", got, want)
 	}
 }

@@ -8,7 +8,7 @@
 │ RIG      2× RTX 3090 24G · AMD EPYC 9354 32-Core Processor           │
 │          768 GB DDR5-4800                                            │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        6.9 tok/s · ≈ 150 GB/s, 8% of peak                     │
+│ Decode        6.9 tok/s · ≈ 150 GB/s                                 │
 │ Prefill       172 tok/s · TTFT 2650 ms · 512 prompt tokens           │
 │ Context       16384 (512 in / 248 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │

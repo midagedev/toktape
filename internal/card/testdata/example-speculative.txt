@@ -6,7 +6,7 @@
 │          workstation                                                 │
 │ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        19.0 tok/s · ≈ 128 GB/s, 7% of peak                    │
+│ Decode        19.0 tok/s · ≈ 128 GB/s                                │
 │ Prefill       817 tok/s · TTFT 640 ms · 512 prompt tokens            │
 │ Draft         DSpark-0.6B-Q8_0.gguf · n_max 3                        │
 │               60% accepted (174/290)                                 │

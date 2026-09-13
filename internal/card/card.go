@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/midagedev/toktape/internal/bandwidth"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -627,17 +628,18 @@ func promptTokens(s *tape.RunSummary) int {
 
 // bandwidthString renders "≈ 91 GB/s, 9% of peak". Empty when the effective
 // bandwidth was not derivable; the "≈" marks it as an estimate (spec §3.2 S6).
+//
+// "of peak" is measured against the ceiling this run's placement allows, not
+// against the sum of the GPUs' bandwidths (TTP-34, 2026-09-13): a layer split
+// reads its devices one after another, and a partially offloaded model reads
+// most of a token off the host bus. internal/bandwidth owns that arithmetic
+// and omits the clause entirely when it is not derivable.
 func bandwidthString(s *tape.RunSummary) string {
 	if s.Timings.EffectiveBandwidthBytesPerSec <= 0 {
 		return ""
 	}
 	out := "≈ " + formatGBs(s.Timings.EffectiveBandwidthBytesPerSec)
-	var peak int64
-	for _, g := range s.Host.GPUs {
-		peak += g.PeakBandwidthBytesPerSec
-	}
-	if peak > 0 {
-		ratio := float64(s.Timings.EffectiveBandwidthBytesPerSec) / float64(peak)
+	if ratio, ok := bandwidth.OfPeak(s); ok {
 		out += ", " + formatPct(ratio) + " of peak"
 	}
 	return out

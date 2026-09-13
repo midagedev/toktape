@@ -7,7 +7,7 @@
 │          workstation                                                 │
 │ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        17.4 tok/s · ≈ 785 GB/s, 42% of peak                   │
+│ Decode        17.4 tok/s · ≈ 785 GB/s, 84% of peak                   │
 │ Prefill       610 tok/s · TTFT 630 ms · 512 prompt tokens            │
 │ Context       16384 (512 in / 320 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
