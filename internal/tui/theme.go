@@ -9,26 +9,40 @@ import (
 	"github.com/muesli/termenv"
 )
 
-// The palette. One accent hue, one warm hue, one bad hue, and neutrals —
-// docs/toktape-spec.ko.md §1 decision 10 and the track contract. Nothing else
-// gets a colour; restraint is the look.
+// The palette. One accent hue, one warm hue, one bad hue, and neutrals.
+// Nothing else gets a colour; restraint is the look.
+//
+// "oxide" (TTP-40, user 2026-09-13: "색상은 oxide로 가자", after "전반적으로
+// mute되었지만 그래도 특정 색상 경향은 있는 유니크한 팔레트"): a sage-teal accent
+// on a green-black ground with warm off-white text. It replaced a Tailwind
+// sky/amber/red set whose accent sat at 0.95 saturation and was the first thing
+// the eye found; oxide's is 0.33. The derived shades below are blends of these
+// base colours, so a future palette changes the six and re-derives the rest:
+//
+//	textMuted   text blended 30 % toward the ground
+//	textMid     midpoint of text and textMuted; dimMid of textMuted and dim
+//	accentHigh  accent 45 % toward white
+//	accentMid   accent 25 % toward the ground
+//	accentMuted accent 45 % toward the ground
+//	accentLow   accent 62 % toward the ground
+//	darkFill    accent 86 % toward the ground
 const (
-	colAccent = "#7dd3fc" // cyan: bars, active stream, the live numbers
-	colWarn   = "#fbbf24" // amber: contended, cold cache, throttled
-	colBad    = "#f87171" // red: a maj/tok spike, a failed stream
-	colText   = "#e5e7eb" // primary text
-	colDim    = "#6b7280" // labels and chrome, and nothing else
+	colAccent = "#86c2b4" // sage teal: the rates, the active stream, the cursor
+	colWarn   = "#d6a760" // ochre: contended, cold cache, throttled
+	colBad    = "#d47e70" // clay red: a maj/tok spike, a failed stream
+	colText   = "#e6e2d8" // primary text
+	colDim    = "#6f7872" // labels and chrome, and nothing else
 	// colDarkFill is the unfilled remainder of a bar: the accent hue at the
 	// bottom of its lightness range, drawn with the same solid block as the
 	// filled part. A hatch glyph (░) was noisy in most terminal fonts and read
 	// as texture rather than as an empty measure.
-	colDarkFill = "#1e293b"
+	colDarkFill = "#202d2a"
 )
 
 // colGround is the terminal background the palette is designed on. The TUI
 // never paints it — a terminal brings its own — but internal/render rasterises
 // frames on it, and every luminance step in this file is measured against it.
-const colGround = "#11111b"
+const colGround = "#0f1514"
 
 // Palette is the part of the theme the renderers outside this package draw
 // with directly: the ground a frame is rasterised on, the default foreground,
@@ -48,14 +62,13 @@ func ThemePalette() Palette {
 // cursor and the header shimmer. They are the same hue at three lightnesses,
 // never three different hues.
 const (
-	colAccentLow  = "#38607a"
-	colAccentMid  = "#5aa3c8"
-	colAccentHigh = "#bde8ff"
+	colAccentLow  = "#3c5751"
+	colAccentMid  = "#68978c"
+	colAccentHigh = "#bcddd6"
 )
 
 // colAccentMuted is the accent blended 45% toward the terminal background
-// (#11111b, the ground internal/render rasterises frames on): 0x7d→0x4c,
-// 0xd3→0x7c, 0xfc→0x97.
+// (colGround, the ground internal/render rasterises frames on).
 //
 // It exists because of the emphasis contract (TTP-28, user 2026-09-13: "화면에
 // 너무 많은 요소들이 강조되어 있다"). The shapes that used to be painted in the
@@ -68,7 +81,7 @@ const (
 // It is not colAccentLow: that shade already means "the third segment of a
 // gauge" in the vram legend, and it is dark enough that a whole sparkline in it
 // stops reading as a line.
-const colAccentMuted = "#4c7c97"
+const colAccentMuted = "#50746c"
 
 // The body-text ladder (TTP-28, user 2026-09-13: "토큰 내용 자체는 한 톤 내리는
 // 게 맞겠어", then "방금 막 나온 토큰 정도만 조금 밝게 해서 속도감은 살리자").
@@ -81,11 +94,14 @@ const colAccentMuted = "#4c7c97"
 //
 // Five stops, measured as WCAG relative luminance on this theme's ground:
 //
-//	colText       #e5e7eb  0.798   headers, labels, right-pane values
-//	colTextMid    #c5c7cc  0.571   an answer token 150–500 ms old
-//	colTextMuted  #a5a7ad  0.387   settled answer text, and a fresh thought
-//	colDimMid     #888c96  0.262   a reasoning token 150–500 ms old
-//	colDim        #6b7280  0.167   settled reasoning, chrome, labels
+//	colText       #e6e2d8  0.762   headers, labels, right-pane values
+//	colTextMid    #c6c3ba  0.546   an answer token 150–500 ms old
+//	colTextMuted  #a6a49d  0.371   settled answer text, and a fresh thought
+//	colDimMid     #8a8e88  0.265   a reasoning token 150–500 ms old
+//	colDim        #6f7872  0.180   settled reasoning, chrome, labels
+//
+// (Values for the oxide palette, TTP-40; the ratios below were set on the
+// palette before it and hold on this one: 0.487 and 0.485.)
 //
 // colTextMuted is colText blended 30 % toward the ground, which puts the body
 // at 0.48 of the header's luminance. The first cut (2026-09-13) used
@@ -97,12 +113,12 @@ const colAccentMuted = "#4c7c97"
 // and colDim, so the reasoning ramp is the answer ramp shifted two stops down
 // and the two never collide at the same age.
 //
-// colDim is unchanged: the contract asks that reasoning sit at or below 80 %
-// of colTextMuted's luminance, and 0.167/0.387 = 0.43 clears it.
+// The contract asks that reasoning sit at or below 80 % of colTextMuted's
+// luminance, and colDim at 0.180/0.371 = 0.49 clears it.
 const (
-	colTextMid   = "#c5c7cc"
-	colTextMuted = "#a5a7ad"
-	colDimMid    = "#888c96"
+	colTextMid   = "#c6c3ba"
+	colTextMuted = "#a6a49d"
+	colDimMid    = "#8a8e88"
 )
 
 // Theme carries the styles View paints with. The zero Theme is plain: every

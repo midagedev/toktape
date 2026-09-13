@@ -13,9 +13,9 @@ import (
 // The terminal the frames are rasterised for: a dark, unthemed one. These two
 // are the only colours not carried by an escape sequence.
 var (
-	// bgColour is the terminal background. It is the ANSI-art convention's
-	// near-black with a blue cast rather than #000, which would make the
-	// dim chrome (#6b7280) read as the brightest thing on screen.
+	// bgColour is the terminal background: the palette's ground, a near-black
+	// with a green cast rather than #000, against which every luminance step
+	// of the theme was measured (TTP-40).
 	bgColour = hexColour(tui.ThemePalette().Ground)
 	// fgColour is the default foreground, used for any cell the frame did not
 	// paint. It is tui's text colour, read from its palette (TTP-40).
