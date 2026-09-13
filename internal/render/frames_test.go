@@ -163,7 +163,10 @@ func TestRasteriserCoversEveryRuneTheTUIDraws(t *testing.T) {
 			t.Errorf("no glyph and no geometry for U+%04X %q", r, r)
 		}
 	}
-	if !seen['⠋'] && !seen['⠙'] && !seen['⠹'] {
+	// The TUI's prefill spinner is the quarter-disc set ◐◓◑◒ (tui/anim.go
+	// spinnerFrames, changed from braille in TUI round 3, 2026-09-13); the
+	// assertion follows the glyphs the TUI actually draws.
+	if !seen['◐'] && !seen['◓'] && !seen['◑'] && !seen['◒'] {
 		t.Error("no spinner frame appeared in the clip; the prefill phase is not being drawn")
 	}
 }
