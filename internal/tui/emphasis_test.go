@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/midagedev/toktape/internal/tape"
 )
 
 // The emphasis contract (TTP-28, user 2026-09-13: "화면에 너무 많은 요소들이
@@ -33,7 +35,12 @@ import (
 func accentShades() map[string]bool {
 	th := ColourTheme()
 	out := map[string]bool{}
-	for _, st := range []lipgloss.Style{th.accent, th.accentBold, th.accentHigh, th.accentMid, th.accentLow, th.accentMuted} {
+	// graphSolo and graphRidge are the accent hue too: they carry a background
+	// as well, and styleHex reads only the foreground, so they fold onto
+	// accentMuted and accentMid here. They are listed so the set stays the
+	// answer to "every style that paints the accent hue" and not a list that
+	// happens to cover them (TTP-43b, 2026-09-13).
+	for _, st := range []lipgloss.Style{th.accent, th.accentBold, th.accentHigh, th.accentMid, th.accentLow, th.accentMuted, th.graphRidge, th.graphSolo} {
 		out[styleHex(st)] = true
 	}
 	return out
@@ -679,4 +686,80 @@ func accentRunsOf(row []pcell, hex string) []run {
 		out = append(out, run{from: from, to: x, text: b.String()})
 	}
 	return out
+}
+
+// The card screen's own emphasis contract (TTP-42, lead 2026-09-13).
+//
+// cardScreen painted every line of the text card in th.text, so the MEMORY
+// row's [██████████] gauges — twenty solid cells of the brightest tone on the
+// screen — were the first thing the eye found, and the box-drawing frame
+// around the card was as bright as the figures inside it. That frame is the
+// clip's final image, the one a reader looks at longest, and it was the one
+// region that never got the treatment the rest of the screen has had since
+// TTP-28: shapes are demoted, chrome is dim, and the figures are what is left
+// lit.
+//
+// The gate reads the frame by rune class, which is what paintCardLine keys
+// off: a gauge's fill wears the muted accent the placement bars wear, its
+// track wears the dark fill, the frame wears dim, and nothing in those three
+// classes wears th.text. The counters are the non-vacuity half — the example's
+// gauges are nearly full, so the ░ class is only on the frame at all because
+// the model below makes one gauge partial.
+func TestCardScreenPaintsByRole(t *testing.T) {
+	const w, h = 120, 36
+	th := ColourTheme()
+	m := ModelAt(ExampleTapeN(4), doneAt)
+	m.Mode = ModeCard
+	m.Theme = th
+	m.TapePath = "~/.toktape/runs/" + m.Summary.ID + ".tape"
+	// The example ends with both cards' VRAM nearly full, so every gauge cell
+	// is a fill and the track class would go unchecked. Half of one device's
+	// bytes puts both glyphs on the frame.
+	if len(m.Summary.GPUsAtEnd) == 0 {
+		t.Fatal("the example has no GPU at the end; this test would measure no gauge")
+	}
+	// Copied before it is edited: Summary is a value but its slice is not, and
+	// a halved device leaking into another test's fixture would be a failure
+	// nobody could read.
+	m.Summary.GPUsAtEnd = append([]tape.GPUSample(nil), m.Summary.GPUsAtEnd...)
+	m.Summary.GPUsAtEnd[0].UsedBytes /= 2
+
+	rows := parseFrame(View(m, doneAt, w, h), w, h)
+	text := styleHex(th.text)
+	want := map[rune]struct {
+		hex  string
+		what string
+	}{
+		'█': {styleHex(th.accentMuted), "a gauge fill"},
+		'░': {styleHex(th.darkFill), "a gauge track"},
+	}
+	for _, r := range []rune("┌┐└┘├┤┬┴┼─│") {
+		want[r] = struct {
+			hex  string
+			what string
+		}{styleHex(th.dim), "the card's frame"}
+	}
+	seen := map[rune]int{}
+	for y, row := range rows {
+		for x, c := range row {
+			w, ok := want[c.r]
+			if !ok {
+				continue
+			}
+			seen[c.r]++
+			if c.fg == text {
+				t.Errorf("%s (%q at row %d col %d) wears the card's text tone; shapes and chrome are demoted\n%s",
+					w.what, c.r, y, x, rowContext(rows, y))
+				continue
+			}
+			if c.fg != w.hex {
+				t.Errorf("%s (%q at row %d col %d) is %s, want %s", w.what, c.r, y, x, c.fg, w.hex)
+			}
+		}
+	}
+	for _, r := range []rune{'█', '░', '─', '│'} {
+		if seen[r] == 0 {
+			t.Errorf("no %q on the card frame; the gate checked nothing for that class", r)
+		}
+	}
 }

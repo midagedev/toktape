@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -218,27 +219,39 @@ func TestGraphRidgeOverBody(t *testing.T) {
 	rows := Graph([]float64{90, 10}, 100, 2, 3, GraphBlock)
 	// Column 0 is at 90 %: lit in all three rows, ridge at the top.
 	// Column 1 is at 10 %: lit in the bottom row only, which is its ridge.
-	kinds := func(r int) []int {
+	kinds := func(r int, observed bool) []int {
 		above := ""
 		if r > 0 {
 			above = rows[r-1]
 		}
-		c, a, f := []rune(rows[r]), []rune(above), []rune(rows[len(rows)-1])
-		return []int{graphCellKind(c, a, f, 0), graphCellKind(c, a, f, 1)}
+		c, a := []rune(rows[r]), []rune(above)
+		return []int{graphCellKind(c, a, observed, 0), graphCellKind(c, a, observed, 1)}
 	}
 	// Column 1's unlit cells above its ridge are track: it was measured.
 	for r, want := range [][]int{{cellRidge, cellTrack}, {cellBody, cellTrack}, {cellBody, cellRidge}} {
-		if got := kinds(r); got[0] != want[0] || got[1] != want[1] {
+		if got := kinds(r, true); got[0] != want[0] || got[1] != want[1] {
 			t.Errorf("row %d (%q) kinds = %v, want %v", r, rows[r], got, want)
 		}
 	}
 
-	// A column with no sample is blank all the way down, never track.
-	unseen := Graph([]float64{50}, 100, 2, 3, GraphBlock)
-	for r := range unseen {
-		c, f := []rune(unseen[r]), []rune(unseen[len(unseen)-1])
-		if k := graphCellKind(c, nil, f, 0); k != cellBlank {
-			t.Errorf("row %d of an unsampled column is kind %d, want blank", r, k)
+	// 2026-09-13 (TTP-43a): what makes a blank cell track is now the series
+	// being observed, passed in, rather than its own column carrying a sample.
+	// This case used to assert that a column left of the series' start is
+	// blank; it is track now, and the blank belongs to the series nobody read.
+	// That is a contract change, not a loosened assertion — the rule it pins
+	// is the same size and both halves of it are checked here. The unit case
+	// could not itself be run against the old source, because graphCellKind's
+	// signature is what changed; the FAIL-first is the integration gate on
+	// resourceRows above (TestGraphTrackSpansTheWidth, whose run against the
+	// unmodified source is in scratch/polish2/failfirst-ttp43a.txt).
+	unsampled := Graph([]float64{50}, 100, 2, 3, GraphBlock)
+	for r := range unsampled {
+		c := []rune(unsampled[r])
+		if k := graphCellKind(c, nil, true, 0); k != cellTrack {
+			t.Errorf("row %d of a measured series' unsampled column is kind %d, want track", r, k)
+		}
+		if k := graphCellKind(c, nil, false, 0); k != cellBlank {
+			t.Errorf("row %d of an unobserved series is kind %d, want blank", r, k)
 		}
 	}
 
@@ -253,5 +266,120 @@ func TestGraphRidgeOverBody(t *testing.T) {
 	}
 	if track := styleHex(th.darkFill); relLuminance(track) >= relLuminance(body) {
 		t.Errorf("the track (%s) is not dimmer than the body (%s)", track, body)
+	}
+}
+
+// graphRowsOf drops the resource headers and returns the graph rows, given the
+// height each resource's graph was drawn at. The section is a header and h
+// rows per resource, in that order (resourceRows).
+func graphRowsOf(t *testing.T, lines []string, h int) []string {
+	t.Helper()
+	if h <= 0 || len(lines)%(h+1) != 0 {
+		t.Fatalf("%d lines is not a whole number of %d-row resources", len(lines), h+1)
+	}
+	var out []string
+	for i, l := range lines {
+		if i%(h+1) != 0 {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// TestGraphTrackSpansTheWidth (TTP-43a, lead 2026-09-13).
+//
+// The track used to be drawn only under the columns that carried a sample, so
+// early in a run each resource was a one- or two-cell bar floating at the
+// right edge of the pane: honest — the history does start there — but it read
+// as a glitch rather than as a graph filling up. The track is the shape that
+// says "this is a graph", so a series the tape measured draws its full width
+// of track from the first frame, and the samples light cells inside it.
+//
+// A series that was never measured still draws nothing at all; that half is
+// TestResourceNotObserved.
+func TestGraphTrackSpansTheWidth(t *testing.T) {
+	th := ColourTheme()
+	track := sgrPrefix(th, th.graphTrack)
+	const cw, h = 28, 3
+	for _, at := range []time.Duration{0, 500 * time.Millisecond} {
+		t.Run(fmt.Sprintf("t%v", at), func(t *testing.T) {
+			m := ModelAt(ExampleTapeN(4), at)
+			rows := graphRowsOf(t, resourceRows(m, th, at, cw, h), h)
+			if len(rows) == 0 {
+				t.Fatal("no graph rows")
+			}
+			for i, row := range rows {
+				plain := []rune(card.StripANSI(row))
+				if len(plain) != cw {
+					t.Fatalf("row %d is %d cells, want %d: %q", i, len(plain), cw, plain)
+				}
+				blanks := 0
+				for blanks < len(plain) && plain[blanks] == ' ' {
+					blanks++
+				}
+				if strings.ContainsRune(string(plain[blanks:]), ' ') {
+					t.Errorf("row %d has a gap in its lit cells: %q", i, string(plain))
+				}
+				if blanks == 0 {
+					continue
+				}
+				want := track + strings.Repeat(" ", blanks)
+				if !strings.HasPrefix(row, want) {
+					t.Errorf("row %d does not open with %d cells of track: %q", i, blanks, row)
+				}
+			}
+			// At t = 0 the CPU series is observed and has no usable sample
+			// yet (the first sample carries no delta), so its three rows are
+			// nothing but track — the case the old rule drew as a blank.
+			if at == 0 {
+				for i, row := range rows[:h] {
+					if want := th.paint(th.graphTrack, strings.Repeat(" ", cw)); row != want {
+						t.Errorf("CPU row %d at t=0 is %q, want %d cells of track", i, row, cw)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestOneRowGraphIsNotAllRidge (TTP-43b, lead 2026-09-13).
+//
+// graphCellKind calls a column's topmost lit cell the ridge, which at h = 1 is
+// every lit cell there is, so the whole row came out in the ridge's shade and
+// the 100x30 layout's graphs read as three bright bands. A row with no room
+// for a ridge over a body has nothing to contrast, so it wears the middle
+// shade instead; the track is unchanged. At h >= 2 the ridge stays.
+func TestOneRowGraphIsNotAllRidge(t *testing.T) {
+	th := ColourTheme()
+	ridge := sgrPrefix(th, th.graphRidge)
+	m := ModelAt(ExampleTapeN(4), midRun)
+
+	// h = 1 is what 100x30 chooses (TestResourceGraphHeight).
+	one := graphRowsOf(t, resourceRows(m, th, midRun, rightWidth(100)-2, 1), 1)
+	lit := 0
+	for i, row := range one {
+		if strings.Contains(row, ridge) {
+			t.Errorf("one-row graph %d wears the ridge shade: %q", i, row)
+		}
+		for _, r := range card.StripANSI(row) {
+			if r >= '▁' && r <= '█' {
+				lit++
+				break
+			}
+		}
+	}
+	if lit == 0 {
+		t.Error("no one-row graph is lit at mid-run; this test measured nothing")
+	}
+	// h = 3 still has a ridge over a body.
+	three := graphRowsOf(t, resourceRows(m, th, midRun, rightWidth(120)-2, 3), 3)
+	found := false
+	for _, row := range three {
+		if strings.Contains(row, ridge) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no graph cell wears the ridge shade at h = 3")
 	}
 }

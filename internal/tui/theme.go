@@ -120,12 +120,12 @@ const (
 // layout. Styles set a foreground, and at most the bold attribute, which
 // changes no widths. TestColourMatchesPlain pins that invariant.
 //
-// The one exception is the resource graph (TTP-39, 2026-09-13): graphTrack and
-// graphRidge also set a background, colDarkFill, because a partial block's
-// unlit part shows the cell background and a ridge drawn on the terminal's
-// ground floated free of its own track. A background changes no width either,
-// and the track itself is spaces, so a plain rendering shows no slab where a
-// graph is empty.
+// The one exception is the resource graph (TTP-39, 2026-09-13): graphTrack,
+// graphRidge and graphSolo also set a background, colDarkFill, because a
+// partial block's unlit part shows the cell background and a ridge drawn on
+// the terminal's ground floated free of its own track. A background changes no
+// width either, and the track itself is spaces, so a plain rendering shows no
+// slab where a graph is empty.
 type Theme struct {
 	colour bool
 
@@ -160,6 +160,13 @@ type Theme struct {
 	// on colDarkFill (see the exception above).
 	graphTrack lipgloss.Style
 	graphRidge lipgloss.Style
+	// graphSolo is a one-row graph's lit cells (TTP-43b, 2026-09-13). At
+	// h = 1 every lit cell is its column's topmost, so a row painted in
+	// graphRidge is a bright band with nothing to contrast against — which is
+	// what the 100x30 layout drew. It is no new colour: the accentMuted every
+	// other shape on the screen wears, on the track's own ground so the row
+	// stays inside its measure.
+	graphSolo lipgloss.Style
 }
 
 // PlainTheme returns the theme that emits no escape sequences. It is the zero
@@ -204,6 +211,7 @@ func ColourTheme() Theme {
 			dimMid:      fg(colDimMid),
 			graphTrack:  r.NewStyle().Background(lipgloss.Color(colDarkFill)),
 			graphRidge:  fg(colAccentMid).Background(lipgloss.Color(colDarkFill)),
+			graphSolo:   fg(colAccentMuted).Background(lipgloss.Color(colDarkFill)),
 		}
 	})
 	return colourTheme

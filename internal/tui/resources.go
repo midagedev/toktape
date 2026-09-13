@@ -230,19 +230,38 @@ func resourceHeader(th Theme, cw int, label string, figs []headerFig) string {
 // how far down it reaches. Neither is the full accent, which the emphasis
 // contract keeps for the rates.
 //
-// The unlit cells of a column that was measured are the track, spaces on the
+// The unlit cells of a series that was measured are the track, spaces on the
 // dark the placement bars leave unfilled, so each graph reads as a
 // measure of its own height: a CPU at 6 % is a line at the foot of its own
-// track, not an underline for the header below it. A column was measured
-// exactly when its bottom cell is lit, because Graph lights at least the
-// bottom level of every observed sample; a column with no sample stays blank.
-func graphRow(th Theme, cw int, row, above, bottom string) string {
-	cells, over, foot := []rune(row), []rune(above), []rune(bottom)
+// track, not an underline for the header below it.
+//
+// The track runs the full width whenever the tape measured the series at all
+// (TTP-43a, lead 2026-09-13). It used to be drawn only under the columns that
+// carried a sample, which made the first seconds of a run a one- or two-cell
+// bar floating at the right edge of the pane: honest, since the history does
+// start there, but it read as a glitch rather than as a graph filling up. The
+// track is the shape that says "this is a graph"; the samples light cells
+// inside it. Whether the series was observed is passed in rather than inferred
+// from the drawing, because the drawing cannot tell "nobody read this device"
+// from "nothing has been read yet".
+//
+// rows is the graph's own height, which decides how a lit cell is shaded
+// (TTP-43b): at h = 1 there is no room for a ridge over a body, so every lit
+// cell would be a ridge and the row would come out as a bright band. A row
+// with nothing to contrast wears the middle shade instead. This is a decision
+// about the drawing, which is why it lives here and not in graphCellKind — the
+// kind of a cell is a fact about its column at any height.
+func graphRow(th Theme, cw int, row, above string, observed bool, rows int) string {
+	cells, over := []rune(row), []rune(above)
+	ridge := th.graphRidge
+	if rows == 1 {
+		ridge = th.graphSolo
+	}
 	l := newLine(th, cw)
 	for i := 0; i < len(cells); {
-		kind := graphCellKind(cells, over, foot, i)
+		kind := graphCellKind(cells, over, observed, i)
 		j := i
-		for j < len(cells) && graphCellKind(cells, over, foot, j) == kind {
+		for j < len(cells) && graphCellKind(cells, over, observed, j) == kind {
 			j++
 		}
 		seg := string(cells[i:j])
@@ -250,7 +269,7 @@ func graphRow(th Theme, cw int, row, above, bottom string) string {
 		case cellBody:
 			l.add(th.accentLow, seg)
 		case cellRidge:
-			l.add(th.graphRidge, seg)
+			l.add(ridge, seg)
 		case cellTrack:
 			l.add(th.graphTrack, strings.Repeat(" ", j-i))
 		default:
@@ -269,12 +288,12 @@ const (
 	cellRidge
 )
 
-// graphCellKind is blank for a cell of a column with no sample, track for an
-// unlit cell of a measured column, body for a lit cell under a lit cell, and
-// ridge for the topmost lit cell of its column.
-func graphCellKind(cells, above, bottom []rune, i int) int {
+// graphCellKind is blank for an unlit cell of a series nobody read, track for
+// an unlit cell of a series that was measured, body for a lit cell under a lit
+// cell, and ridge for the topmost lit cell of its column.
+func graphCellKind(cells, above []rune, observed bool, i int) int {
 	if cells[i] == ' ' {
-		if i < len(bottom) && bottom[i] != ' ' {
+		if observed {
 			return cellTrack
 		}
 		return cellBlank
@@ -313,17 +332,21 @@ func resourceGPUs(m Model, t time.Duration) []int {
 func resourceRows(m Model, th Theme, t time.Duration, cw, h int) []string {
 	var out []string
 	cur, _ := m.sampleAt(t)
+	// A nil series is one the tape never measured, which is the one case that
+	// draws nothing at all; an observed series with no usable sample yet draws
+	// its full width of empty track.
 	graph := func(vals []float64) {
 		if h <= 0 {
 			return
 		}
+		observed := vals != nil
 		rows := Graph(vals, utilCeiling, cw, h, resourceGraphStyle)
 		for i, row := range rows {
 			above := ""
 			if i > 0 {
 				above = rows[i-1]
 			}
-			out = append(out, graphRow(th, cw, row, above, rows[len(rows)-1]))
+			out = append(out, graphRow(th, cw, row, above, observed, len(rows)))
 		}
 	}
 

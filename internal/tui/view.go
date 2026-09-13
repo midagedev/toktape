@@ -397,7 +397,7 @@ func cardScreen(m Model, w, h int) string {
 		if len(lines) >= h-1 {
 			break
 		}
-		lines = append(lines, pad(th.paint(th.text, clip(center(line, w), w)), w))
+		lines = append(lines, pad(paintCardLine(th, clip(center(line, w), w)), w))
 	}
 	for len(lines) < h-1 {
 		lines = append(lines, strings.Repeat(" ", w))
