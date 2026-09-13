@@ -40,15 +40,21 @@
 // active.go decides sparseness by tensor NAME; DevicePlacement.Classes has no
 // names, only bytes per class, and ClassExperts holds three different things:
 // the stacked per-expert weights (sparse), the MoE router ffn_gate_inp (read in
-// full) and the shared expert _shexp (read in full). activeBytesOn scales all
-// three by used/count and so under-counts every model that has a router or a
-// shared expert — 0.818 GB of a 7.639 GB token on the ws DeepSeek V4.1 Flash
-// recording, 10.71 %, which is over SplitTolerance and is why that run prints
-// no ratio. ExpertsSplit in split.go recovers how many bytes that is from
-// figures the tape already carries; which DEVICE holds them is not recoverable
-// and wants per-device active bytes recorded at record time. Until then the
-// 10 % check does its job, which is to report nothing rather than a wrong
-// ratio.
+// full) and the shared expert _shexp (read in full). Scaling all three by
+// used/count under-counts every model that has a router or a shared expert —
+// 0.818 GB of a 7.639 GB token on the ws DeepSeek V4.1 Flash recording,
+// 10.71 %, which is over SplitTolerance and is why that run printed no ratio.
+//
+// TTP-68 (2026-09-14) closed it at the owner of the problem. The names exist
+// exactly once, at record time, so the recorder now answers the question while
+// it still has them and writes DevicePlacement.ActiveBytesPerToken; the reader
+// uses that figure and the class rule below is never consulted. What remains
+// of the defect is the tapes already on disk, which carry no such field — the
+// class rule is their fallback, ExpertsSplit in split.go still recovers how
+// many bytes the gap is, and the 10 % check still does its job on them, which
+// is to report nothing rather than a wrong ratio. DeviceExpertsSplit locates
+// those bytes per device on a tape that does carry the field, which is the
+// part TTP-56 recorded as not recoverable.
 //
 // # Unknown is unknown
 //
@@ -88,31 +94,56 @@ const bytesPerTransfer = 8
 // (CLAUDE.md).
 const SplitTolerance = 0.10
 
-// HostBytesPerSec is the host's peak RAM bandwidth in bytes per second, or 0
-// when it was not observed.
+// HostBandwidth is the host's RAM bandwidth in bytes per second, where the
+// figure came from, and whether there is one at all.
 //
-// It is derived from HostInfo.RAMSpeed and HostInfo.RAMChannels, never
-// guessed: the trailing number of a "DDR<generation>-<MT/s>" string is
-// transfers per second in millions, and each channel is 8 bytes wide. A string
-// that does not parse, or a zero or negative channel count, is unknown and
-// returns 0.
+// There are two sources and they are not equal. A recorded
+// HostInfo.RAMBytesPerSec wins, because it is the only one a Linux run can
+// actually have: RAMSpeed and RAMChannels live in the DMI tables and
+// /sys/firmware/dmi/tables/DMI is mode 0400 root-only, so
+// internal/procmon/host.go leaves both empty on every real recording and a
+// mixed CPU/GPU placement — the very case the "of peak" ratio exists for — had
+// no host leg and printed no ratio (TTP-45, 2026-09-14). The way out is to let
+// the operator state it.
 //
-// Note for the reader chasing a missing ratio on a real recording:
-// internal/procmon/host.go leaves RAMSpeed and RAMChannels empty on every
-// Linux run, because they live in the DMI tables and
-// /sys/firmware/dmi/tables/DMI is root-only. So today a mixed CPU/GPU
-// placement recorded on a real machine has no host bandwidth and prints no
-// ratio. That is the honest outcome, not a bug here; making host bandwidth
-// observable is a follow-up.
-func HostBytesPerSec(h tape.HostInfo) int64 {
+// source is one of tape.RAMSourceDMI, tape.RAMSourceStated or
+// tape.RAMSourceMeasured, and the caller prints it, because a theoretical peak
+// derived from the fitted modules, a number the operator typed and a STREAM
+// run are three different claims and only the last is a measurement of this
+// machine. A tape carrying RAMBytesPerSec with no RAMSource is read as
+// "stated": the bytes did not come off the machine, so the weakest provenance
+// that fits is the honest one.
+//
+// A derivation from RAMSpeed × RAMChannels reports tape.RAMSourceDMI: the
+// trailing number of a "DDR<generation>-<MT/s>" string is transfers per second
+// in millions and each channel is 8 bytes wide. A string that does not parse,
+// or a zero or negative channel count, is unknown — ok is false and the caller
+// prints no ceiling rather than a guessed one.
+func HostBandwidth(h tape.HostInfo) (bytesPerSec int64, source string, ok bool) {
+	if h.RAMBytesPerSec > 0 {
+		src := h.RAMSource
+		if src == "" {
+			src = tape.RAMSourceStated
+		}
+		return h.RAMBytesPerSec, src, true
+	}
 	if h.RAMChannels <= 0 {
-		return 0
+		return 0, "", false
 	}
 	mts, ok := transfersPerSecMillions(h.RAMSpeed)
 	if !ok {
-		return 0
+		return 0, "", false
 	}
-	return mts * bytesPerTransfer * int64(h.RAMChannels) * 1_000_000
+	return mts * bytesPerTransfer * int64(h.RAMChannels) * 1_000_000, tape.RAMSourceDMI, true
+}
+
+// HostBytesPerSec is HostBandwidth without the provenance: the host's RAM
+// bandwidth in bytes per second, or 0 when it was not observed. It is what
+// every arithmetic caller in this package wants; a caller that LABELS the
+// figure wants HostBandwidth instead.
+func HostBytesPerSec(h tape.HostInfo) int64 {
+	bps, _, _ := HostBandwidth(h)
+	return bps
 }
 
 // transfersPerSecMillions pulls the MT/s figure out of a memory-speed string
@@ -174,15 +205,29 @@ func DeviceBytesPerSec(s *tape.RunSummary, device string) int64 {
 //     routed). That is active.go's own condition — but active.go applies the
 //     fraction only to tensors whose NAME is a stacked expert weight, while
 //     this can only apply it to the whole class, router and shared expert
-//     included. That is the known under-count of TTP-56; see the package doc
-//     and ExpertsSplit in split.go.
+//     included. That under-count is the whole of TTP-56, and on a pre-TTP-68
+//     tape it is still what happens; see the package doc and ExpertsSplit in
+//     split.go.
 //   - embeddings count in full only for a tied model, where the matrix *is*
 //     the output projection; otherwise decoding looks up one row, not the
 //     matrix, and they are excluded.
 //   - n-gram tables never count: they are lookup tables, not weights in the
 //     per-token matmul chain, and they are what NeverLoadedBytes exists for
 //     (handover lesson 3).
+//
+// All of that is the FALLBACK. When the recorder answered the question itself
+// — DevicePlacement.ActiveBytesPerToken, filled from this device's own tensor
+// NAMES by placement.ActiveBytesPerTokenTied (TTP-68, 2026-09-14) — that
+// figure is used instead and the class rule is not consulted at all. It is not
+// a better estimate, it is the same computation Model.ActiveBytesPerToken is,
+// restricted to one device, so the per-device figures sum to the record with
+// no residue and the SplitTolerance check below passes by construction. Zero
+// means a tape recorded before the field existed, and every tape already on
+// disk is that shape, so the fallback stays live and tested.
 func activeBytesOn(d tape.DevicePlacement, m tape.ModelInfo, tied bool) int64 {
+	if d.ActiveBytesPerToken > 0 {
+		return d.ActiveBytesPerToken
+	}
 	var total int64
 	for class, b := range d.Classes {
 		if b <= 0 {

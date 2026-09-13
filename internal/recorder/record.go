@@ -357,7 +357,15 @@ func (r *run) collectPlacement() {
 	}
 	// lazy: no observable flag says whether the server loads the n-gram /
 	// engram tables lazily, so it is not claimed. See the report.
-	sum, warns := placement.EstimateVerbose(r.tensors, r.flags, len(r.host.GPUs), false)
+	//
+	// WithModel is what lets each device say what it is read FOR on one token
+	// (TTP-68, 2026-09-14). The expert counts come off the GGUF metadata, which
+	// only exists here, and collectModel runs before this, so r.model is
+	// already filled. Without it the per-device field stays 0 and a reader
+	// falls back to the class-proportion estimate that under-counts a sparse
+	// MoE's router and shared expert.
+	sum, warns := placement.EstimateVerbose(r.tensors, r.flags, len(r.host.GPUs), false,
+		placement.WithModel(r.model))
 	r.place = sum
 	for _, w := range warns {
 		r.warn("%s", w)

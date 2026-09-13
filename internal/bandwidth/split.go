@@ -39,10 +39,16 @@ import (
 //
 // internal/placement/active.go knows the difference — it tests the tensor NAME
 // against sparseExpertRe — and counts the router and the shared expert in full.
-// activeBytesOn in this package cannot, and scales the whole bucket. On the ws
-// recording that is 0.818 GB of a 7.639 GB token, 10.71 %, which is over
-// SplitTolerance, which is why Ceiling() reports no ratio on the very machine
-// the card is meant to settle arguments about.
+// A reader working from the class totals alone cannot, and scales the whole
+// bucket. On the ws recording that is 0.818 GB of a 7.639 GB token, 10.71 %,
+// which is over SplitTolerance, which is why Ceiling() reported no ratio on
+// the very machine the card is meant to settle arguments about.
+//
+// Since TTP-68 the recorder writes DevicePlacement.ActiveBytesPerToken and a
+// fresh tape needs none of this. It stays because every tape already recorded
+// does: this is how much of such a tape's experts class was read in full, and
+// DeviceExpertsSplit is the same question asked per device, which only a
+// post-TTP-68 tape can answer.
 type ExpertsClassBytes struct {
 	// Sparse is the stacked per-expert weight bytes: read used/count per token.
 	Sparse int64
@@ -141,6 +147,89 @@ func ExpertsSplit(s *tape.RunSummary) (ExpertsClassBytes, bool) {
 	return ExpertsClassBytes{Sparse: experts - d, Dense: d}, true
 }
 
+// DeviceExpertsSplit is ExpertsSplit asked of ONE device: how many of this
+// device's ClassExperts bytes a token reads sparsely and how many it reads in
+// full.
+//
+// ExpertsSplit can only answer for the whole model — it solves one equation
+// against Model.ActiveBytesPerToken — and TTP-56 recorded that as the open
+// end: "which DEVICE holds them is not recoverable". TTP-68 closed it, and
+// this is where. With the device's own ActiveBytesPerToken recorded, the same
+// two equations are available per device:
+//
+//	E      = d.Classes[ClassExperts]
+//	other  = the device's other classes a token reads in full
+//	f      = ExpertUsedCount / ExpertCount
+//	active = d.ActiveBytesPerToken = Sparse×f + Dense + other,  Sparse+Dense = E
+//
+// so
+//
+//	Sparse = (E − (active − other)) / (1 − f)
+//	Dense  = E − Sparse
+//
+// ok is false on a tape with no per-device figure (the whole point of the
+// exercise is that the class totals cannot answer this), when the expert
+// counts do not describe a sparse MoE, or when the solution falls outside
+// [0, E] by more than splitSlack — which means the device's figure and its
+// class totals disagree about something other than this class rule, and
+// picking one would be picking the nicer number (CLAUDE.md).
+//
+// A device with no expert bytes at all solves trivially to {0, 0}, ok.
+//
+// tied is the caller's answer to the tied-embedding question and must come
+// from tiedEmbeddings over the whole PLACEMENT, never from this device. It
+// inherits that proxy's weakness (see tiedEmbeddings): on a genuinely tied
+// model whose embedding matrix shares a device with expert bytes, "other"
+// omits the matrix and the solution is wrong by that much while still landing
+// inside [0, E], so the slack check will not catch it. Every model this has
+// been exercised against is untied. A caller that needs certainty should read
+// d.ActiveBytesPerToken directly, which is exact either way.
+func DeviceExpertsSplit(d tape.DevicePlacement, m tape.ModelInfo, tied bool) (ExpertsClassBytes, bool) {
+	if d.ActiveBytesPerToken <= 0 {
+		return ExpertsClassBytes{}, false
+	}
+	experts := d.Classes[tape.ClassExperts]
+	if experts <= 0 {
+		return ExpertsClassBytes{}, true
+	}
+	n, used := m.NExperts, m.NExpertsUsed
+	if n <= 0 || used <= 0 || used >= n {
+		return ExpertsClassBytes{}, false
+	}
+
+	var other int64
+	for class, b := range d.Classes {
+		if b <= 0 {
+			continue
+		}
+		switch class {
+		case tape.ClassNGram, tape.ClassExperts:
+			// ngram is never read; experts are the unknown.
+		case tape.ClassEmbed:
+			if tied {
+				other += b
+			}
+		default:
+			other += b
+		}
+	}
+
+	f := float64(used) / float64(n)
+	sparse := (float64(experts) - float64(d.ActiveBytesPerToken-other)) / (1 - f)
+	slack := float64(experts) * splitSlack
+	if sparse < -slack || sparse > float64(experts)+slack {
+		return ExpertsClassBytes{}, false
+	}
+	sp := int64(math.Round(sparse))
+	if sp < 0 {
+		sp = 0
+	}
+	if sp > experts {
+		sp = experts
+	}
+	return ExpertsClassBytes{Sparse: sp, Dense: experts - sp}, true
+}
+
 // expertsClassBytes is the placement's total ClassExperts bytes.
 func expertsClassBytes(p tape.PlacementSummary) int64 {
 	var n int64
@@ -173,11 +262,12 @@ type RAMSide struct {
 	ActiveBytesPerToken int64
 	// BytesPerSec is ActiveBytesPerToken × the decode rate.
 	BytesPerSec int64
-	// OfPeak is BytesPerSec / HostBytesPerSec, or 0 when the host's RAM speed
-	// was not observed. internal/procmon/host.go leaves RAMSpeed empty on
-	// every Linux run (the DMI tables are root-only), so today this is 0 on
-	// real recordings and the caller must print no percentage rather than a
-	// guessed one.
+	// OfPeak is BytesPerSec / HostBytesPerSec, or 0 when the host's RAM
+	// bandwidth was not observed, in which case the caller must print no
+	// percentage rather than a guessed one. internal/procmon/host.go leaves
+	// RAMSpeed empty on every Linux run (the DMI tables are root-only), so
+	// before TTP-45 this was 0 on every real recording; an operator can now
+	// state the figure instead. See HostBandwidth.
 	OfPeak float64
 	// Streams is how many streams the rate covers: 1, or Concurrency for a
 	// concurrent run, where BytesPerSec is the whole server's host traffic and
@@ -188,21 +278,24 @@ type RAMSide struct {
 	// one.
 	//
 	// The doubt is the router and the shared expert: they are ClassExperts but
-	// are read in full, activeBytesOn scales them anyway, and if any of them
-	// are on the CPU the figure is low by that much. ExpertsSplit says how many
-	// such bytes the model has; which DEVICE holds them is not in
-	// DevicePlacement.Classes at all.
+	// are read in full, a reader working from class totals scales them anyway,
+	// and if any of them are on the CPU the figure is low by that much.
+	// ExpertsSplit says how many such bytes the model has; which DEVICE holds
+	// them is not in DevicePlacement.Classes at all.
 	//
-	// So Exact is true in exactly two cases: the CPU carries no ClassExperts
-	// bytes, so there is nothing to have got wrong; or ExpertsSplit succeeded
-	// AND found no such bytes in the model. It is deliberately false when
-	// ExpertsSplit could not solve at all — "we could not check" is not
-	// "we checked and it is fine", and collapsing the two is how a figure gets
-	// trusted more than it has earned.
+	// TTP-68 (2026-09-14) closed the doubt for tapes recorded since: the CPU
+	// states its own ActiveBytesPerToken, counted from its own tensor names,
+	// so there is no attribution left to have got wrong and Exact is true.
+	//
+	// On a tape without that field Exact is true in exactly two further cases:
+	// the CPU carries no ClassExperts bytes, so there is nothing to have got
+	// wrong; or ExpertsSplit succeeded AND found no such bytes in the model.
+	// It is deliberately false when ExpertsSplit could not solve at all —
+	// "we could not check" is not "we checked and it is fine", and collapsing
+	// the two is how a figure gets trusted more than it has earned.
 	//
 	// The card's "≈" already marks the clause an estimate, so this is for the
-	// reader of a report rather than a branch in a renderer. Closing it means
-	// recording per-device active bytes at record time; see the TTP-56 report.
+	// reader of a report rather than a branch in a renderer.
 	Exact bool
 }
 
@@ -251,7 +344,14 @@ func RAM(s *tape.RunSummary) (RAMSide, bool) {
 	if peak := HostBytesPerSec(s.Host); peak > 0 {
 		out.OfPeak = float64(out.BytesPerSec) / float64(peak)
 	}
-	if cpu.Classes[tape.ClassExperts] <= 0 {
+	if cpu.ActiveBytesPerToken > 0 {
+		// TTP-68 (2026-09-14): the recorder read this device's own tensor
+		// names and wrote what they are read for, so there is no attribution
+		// left to have got wrong. This is the case the field was waiting for —
+		// "closing it means recording per-device active bytes at record time",
+		// as the doc above says.
+		out.Exact = true
+	} else if cpu.Classes[tape.ClassExperts] <= 0 {
 		// Nothing of the doubtful class is here at all.
 		out.Exact = true
 	} else if split, ok := ExpertsSplit(s); ok && split.Dense == 0 {
@@ -325,6 +425,10 @@ type Verify struct {
 	RAMBytesPerSec int64
 	// AcceptRate is DraftNAccepted / DraftN.
 	AcceptRate float64
+	// Streams is how many streams the figures cover: 1, or Concurrency on a
+	// concurrent run, where Steps is the SERVER's verify steps and
+	// RAMBytesPerSec is an UPPER bound (see verifyWindow).
+	Streams int
 }
 
 // Speculative is the verify-step view of a run, and whether it is derivable.
@@ -344,29 +448,34 @@ type Verify struct {
 //	            244 − 174          = 70 steps, 210/70 = 3.00
 //	            242 − 174          = 68 steps, 204/68 = 3.00
 //
-// ok is false when Concurrency > 1. THIS IS NOT A CONVENIENCE: tape.TimingsSummary
-// documents (tape.go, TTP-30) that at run level DraftN and DraftNAccepted are
-// the SUM over streams while PredictedN is the per-stream MEAN, so the
-// subtraction mixes a sum with a mean and returns nonsense — on the ws code
-// recording it gives 250 − 719 = −469 steps. The per-request timings are
-// consistent and this function is right on those.
+// On a CONCURRENT run the same arithmetic holds, but only against the
+// server-wide token count. At run level DraftN and DraftNAccepted are the SUM
+// over streams while Timings.PredictedN is the per-stream MEAN (tape.go,
+// TTP-30), so subtracting the one from the other mixes a sum with a mean and
+// returns nonsense — on the ws code recording it gives 250 − 719 = −469 steps.
+// Aggregate.TotalPredictedN is the matching sum, and with it the subtraction
+// is between two figures of the same kind again. This matters because the
+// project's README hero is a two-stream run: a version that refused N > 1
+// would never appear on the card anyone actually sees (TTP-67, 2026-09-14).
 //
-// ok is also false without both draft figures, without an expert count to
-// expand the batch over, without a decode window, or when the arithmetic does
+// ok is false without both draft figures, without an expert count to expand
+// the batch over, without a decode window, on a concurrent run with no
+// Aggregate.TotalPredictedN or no aggregate rate, or when the arithmetic does
 // not describe a real run (no steps, a batch under one token).
 func Speculative(s *tape.RunSummary) (Verify, bool) {
 	if s == nil || s.Timings.DraftN == nil || s.Timings.DraftNAccepted == nil {
 		return Verify{}, false
 	}
-	if s.Concurrency > 1 {
-		return Verify{}, false
-	}
 	t := s.Timings
 	draftN, accepted := *t.DraftN, *t.DraftNAccepted
-	if draftN <= 0 || accepted < 0 || t.PredictedMs <= 0 {
+	if draftN <= 0 || accepted < 0 {
 		return Verify{}, false
 	}
-	steps := t.PredictedN - accepted
+	predictedN, window, streams, ok := verifyWindow(s)
+	if !ok {
+		return Verify{}, false
+	}
+	steps := predictedN - accepted
 	if steps <= 0 {
 		return Verify{}, false
 	}
@@ -397,16 +506,33 @@ func Speculative(s *tape.RunSummary) (Verify, bool) {
 	}
 	tied := tiedEmbeddings(s.Placement)
 	cpuActive := activeBytesOn(cpu, s.Model, tied)
-	cpuExperts := cpu.Classes[tape.ClassExperts]
-	// The CPU's non-expert bytes are read once per step, exactly as they are
-	// read once per token; only the expert stack re-expands with the batch.
-	cpuDense := cpuActive - cpuExperts*int64(used)/int64(n)
-	perStep := cpuDense + int64(math.Round(float64(cpuExperts)*distinct/float64(n)))
+
+	// Only the STACKED expert weights re-expand with the batch: B tokens route
+	// to up to B×used distinct slices of the stack instead of used. The
+	// router and the shared expert are ClassExperts too, but every token runs
+	// both, so a batch reads them exactly once per step — the same as every
+	// other dense weight. Scaling the whole class would inflate the step by
+	// the router and the shared expert all over again.
+	//
+	// DeviceExpertsSplit separates the two when the tape says what this device
+	// is read for (TTP-68). On a tape that does not, the whole class is
+	// treated as the stack, which is what this function did before the field
+	// existed and is what activeBytesOn's own fallback assumed — the two must
+	// make the same assumption or the subtraction below leaves a residue.
+	sparse := cpu.Classes[tape.ClassExperts]
+	if split, ok := DeviceExpertsSplit(cpu, s.Model, tied); ok {
+		sparse = split.Sparse
+	}
+	// Everything the CPU reads once per step: its non-expert weights, plus the
+	// router and shared expert, which is whatever is left when the sparse
+	// stack's per-token share is taken out of the per-token figure.
+	cpuOncePerStep := cpuActive - sparse*int64(used)/int64(n)
+	perStep := cpuOncePerStep + int64(math.Round(float64(sparse)*distinct/float64(n)))
 	if perStep <= 0 {
 		return Verify{}, false
 	}
 
-	stepsPerSec := float64(steps) / (t.PredictedMs / 1000)
+	stepsPerSec := float64(steps) / window
 	out := Verify{
 		Steps:                   steps,
 		StepsPerSec:             stepsPerSec,
@@ -415,6 +541,38 @@ func Speculative(s *tape.RunSummary) (Verify, bool) {
 		RAMBytesPerStep:         perStep,
 		RAMBytesPerSec:          int64(math.Round(float64(perStep) * stepsPerSec)),
 		AcceptRate:              float64(accepted) / float64(draftN),
+		Streams:                 streams,
 	}
 	return out, true
+}
+
+// verifyWindow is the token count the verify-step arithmetic must be done
+// against, the seconds it happened in, and how many streams that covers.
+//
+// One stream: Timings.PredictedN over Timings.PredictedMs, the same window
+// Timings.PredictedPerSecond and EffectiveBandwidthBytesPerSec are defined
+// against, so every clause on the card stays comparable.
+//
+// More than one: the server-wide Aggregate.TotalPredictedN over the window
+// Aggregate.AggregatePredictedPerSecond is itself defined against
+// (TotalPredictedN / decode window), which is the only place that window is
+// recorded. Timings.PredictedN cannot be used here — it is the per-stream
+// MEAN while the draft figures are SUMS (tape.go, TTP-30).
+//
+// The concurrent result is an UPPER bound on forward passes, for the reason
+// decodeRate gives: llama.cpp batches the busy slots into one pass, so two
+// streams verifying at the same instant are one pass and not two. Steps
+// counts what each stream asked for; the hardware may have done fewer.
+func verifyWindow(s *tape.RunSummary) (predictedN int, seconds float64, streams int, ok bool) {
+	if s.Concurrency > 1 {
+		a := s.Aggregate
+		if a.TotalPredictedN <= 0 || a.AggregatePredictedPerSecond <= 0 {
+			return 0, 0, 0, false
+		}
+		return a.TotalPredictedN, float64(a.TotalPredictedN) / a.AggregatePredictedPerSecond, s.Concurrency, true
+	}
+	if s.Timings.PredictedMs <= 0 {
+		return 0, 0, 0, false
+	}
+	return s.Timings.PredictedN, s.Timings.PredictedMs / 1000, 1, true
 }

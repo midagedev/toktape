@@ -18,6 +18,36 @@ const (
 	SourceUnknown = "unknown"
 )
 
+// An Option refines what Estimate can answer about a placement.
+//
+// It is an option rather than a parameter because every caller can say where
+// the tensors went, but only a caller holding the model's card line can say
+// what each device is read FOR — and a placement with no answer to that must
+// leave the field at 0 rather than guess (see WithModel).
+type Option func(*options)
+
+type options struct {
+	model    tape.ModelInfo
+	hasModel bool
+}
+
+// WithModel gives Estimate the model's card line, which lets it fill
+// tape.DevicePlacement.ActiveBytesPerToken: what each device is actually read
+// for on one token, summing to ModelInfo.ActiveBytesPerToken exactly.
+//
+// Only the expert counts are read, and only the recorder has them — they come
+// off the GGUF metadata, not off the tensor headers placement otherwise works
+// from. Without this option the field stays 0 on every device, because the
+// alternative is to assume NExperts == 0 and count the whole expert stack in
+// full, which would print a dense model nobody observed (CLAUDE.md: unknown is
+// 0, never a default you did not observe). A reader of such a placement falls
+// back to the class-proportion estimate.
+func WithModel(m tape.ModelInfo) Option {
+	return func(o *options) {
+		o.model, o.hasModel = m, true
+	}
+}
+
 // Estimate replays llama.cpp's placement rules over the tensor headers and
 // the server's flags.
 //
@@ -27,17 +57,23 @@ const (
 // NeverLoadedBytes and left out of the device totals so the card cannot count
 // them twice (handover lesson 3).
 //
+// Pass WithModel to have each device's ActiveBytesPerToken filled in too.
+//
 // Warnings about dropped -ot rules are discarded; use EstimateVerbose to keep
 // them for RunSummary.Warnings.
-func Estimate(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bool) tape.PlacementSummary {
-	s, _ := EstimateVerbose(tensors, flags, gpus, lazy)
+func Estimate(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bool, opts ...Option) tape.PlacementSummary {
+	s, _ := EstimateVerbose(tensors, flags, gpus, lazy, opts...)
 	return s
 }
 
 // EstimateVerbose is Estimate plus the human-readable warnings it produced
 // (an -ot rule Go's RE2 cannot compile, an unknown buffer type). The caller
 // appends them to tape.RunSummary.Warnings, which the card prints verbatim.
-func EstimateVerbose(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bool) (tape.PlacementSummary, []string) {
+func EstimateVerbose(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bool, opts ...Option) (tape.PlacementSummary, []string) {
+	var opt options
+	for _, o := range opts {
+		o(&opt)
+	}
 	if gpus < 0 {
 		gpus = 0
 	}
@@ -134,14 +170,34 @@ func EstimateVerbose(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bo
 		b.tensors = append(b.tensors, t)
 	}
 
+	// The tied-embedding question is asked ONCE, of the whole tensor list,
+	// before any device is walked — never of a device's own share. A model
+	// whose output.weight is on GPU1 (which is where -ngl puts it, and where
+	// the ws rig has it) looks tied to every other device, and the CPU is
+	// where token_embd lives, so its 1.32 GB would be counted in full for
+	// every token on exactly the device the card is trying to report honestly.
+	// That is why TiedEmbeddings is separate from ActiveBytesPerTokenTied
+	// (TTP-68, 2026-09-14).
+	tied := TiedEmbeddings(tensors)
+
 	for _, dev := range sortedDevices(buckets) {
 		b := buckets[dev]
-		sum.Devices = append(sum.Devices, tape.DevicePlacement{
+		d := tape.DevicePlacement{
 			Device:  dev,
 			Bytes:   b.bytes,
 			Classes: b.classes,
 			Layers:  LayersSummary(b.tensors),
-		})
+		}
+		if opt.hasModel {
+			// The same function the model's own figure comes from, applied to
+			// this device's tensors. Both truncate per tensor, and the devices
+			// partition the tensor list, so the per-device figures sum to
+			// ModelInfo.ActiveBytesPerToken with no residue — which is the
+			// property bandwidth.SplitTolerance is checking for.
+			d.ActiveBytesPerToken = ActiveBytesPerTokenTied(
+				b.tensors, opt.model.NExpertsUsed, opt.model.NExperts, tied)
+		}
+		sum.Devices = append(sum.Devices, d)
 		if dev != tape.DeviceCPU {
 			sum.VRAMWeightsBytes += b.bytes
 		}

@@ -87,6 +87,12 @@ func TestHostBytesPerSec(t *testing.T) {
 			host: tape.HostInfo{RAMSpeed: "  DDR5-6000  ", RAMChannels: 2},
 			want: 96_000_000_000,
 		},
+		{
+			// TTP-45: the only source a Linux run can actually have.
+			name: "a stated figure with no DMI at all",
+			host: tape.HostInfo{RAMBytesPerSec: 115_800_000_000, RAMSource: tape.RAMSourceMeasured},
+			want: 115_800_000_000,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -659,6 +665,106 @@ func TestOfPeak(t *testing.T) {
 			if math.Abs(got-c.want) > 0.0005 {
 				t.Errorf("OfPeak = %.4f (%.1f%%), want %.4f (%.1f%%)",
 					got, got*100, c.want, c.want*100)
+			}
+		})
+	}
+}
+
+// TestHostBandwidth is TTP-45's contract: which figure wins, and what the card
+// is allowed to call it.
+//
+// The provenance is not decoration. A theoretical peak derived from the fitted
+// modules, a number the operator typed and a STREAM run are three different
+// claims, and only the last is a measurement of this machine — so the ratio
+// they produce means three different things and the card says which.
+func TestHostBandwidth(t *testing.T) {
+	cases := []struct {
+		name       string
+		host       tape.HostInfo
+		wantBytes  int64
+		wantSource string
+		wantOK     bool
+	}{
+		{
+			// The case the ticket exists for: procmon leaves RAMSpeed and
+			// RAMChannels empty on every Linux run, so without this there is
+			// no host leg and a mixed placement prints no ratio.
+			name:       "a measured figure the operator supplied",
+			host:       tape.HostInfo{RAMBytesPerSec: 115_800_000_000, RAMSource: tape.RAMSourceMeasured},
+			wantBytes:  115_800_000_000,
+			wantSource: tape.RAMSourceMeasured,
+			wantOK:     true,
+		},
+		{
+			name:       "a figure the operator named",
+			host:       tape.HostInfo{RAMBytesPerSec: 96_000_000_000, RAMSource: tape.RAMSourceStated},
+			wantBytes:  96_000_000_000,
+			wantSource: tape.RAMSourceStated,
+			wantOK:     true,
+		},
+		{
+			// A tape carrying the bytes but no provenance gets the WEAKEST
+			// reading that fits: the figure did not come off the machine, so
+			// calling it measured would claim more than the tape says.
+			name:       "bytes with no source recorded read as stated",
+			host:       tape.HostInfo{RAMBytesPerSec: 96_000_000_000},
+			wantBytes:  96_000_000_000,
+			wantSource: tape.RAMSourceStated,
+			wantOK:     true,
+		},
+		{
+			name:       "derived from the DMI tables",
+			host:       tape.HostInfo{RAMSpeed: "DDR5-6000", RAMChannels: 2},
+			wantBytes:  96_000_000_000,
+			wantSource: tape.RAMSourceDMI,
+			wantOK:     true,
+		},
+		{
+			// A recorded figure beats a derivation even when both are there:
+			// the derivation is the modules' theoretical peak and the run
+			// never reaches it, so preferring it would flatter the ratio.
+			name: "a recorded figure wins over the DMI derivation",
+			host: tape.HostInfo{
+				RAMSpeed: "DDR5-6000", RAMChannels: 2, // would be 96.0 GB/s
+				RAMBytesPerSec: 115_800_000_000, RAMSource: tape.RAMSourceMeasured,
+			},
+			wantBytes:  115_800_000_000,
+			wantSource: tape.RAMSourceMeasured,
+			wantOK:     true,
+		},
+		{
+			name:   "nothing observed",
+			host:   tape.HostInfo{},
+			wantOK: false,
+		},
+		{
+			// Zero is unknown, not a figure, so it does not suppress the
+			// derivation sitting next to it.
+			name:       "a zero byte rate falls through to the DMI derivation",
+			host:       tape.HostInfo{RAMBytesPerSec: 0, RAMSpeed: "DDR4-3200", RAMChannels: 2},
+			wantBytes:  51_200_000_000,
+			wantSource: tape.RAMSourceDMI,
+			wantOK:     true,
+		},
+		{
+			name:   "an unparseable speed with no recorded figure",
+			host:   tape.HostInfo{RAMSpeed: "DDR5", RAMChannels: 2},
+			wantOK: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			bytes, source, ok := HostBandwidth(c.host)
+			if ok != c.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, c.wantOK)
+			}
+			if bytes != c.wantBytes || source != c.wantSource {
+				t.Errorf("HostBandwidth = %d/%q, want %d/%q", bytes, source, c.wantBytes, c.wantSource)
+			}
+			// HostBytesPerSec is the same answer without the label; every
+			// arithmetic caller in this package goes through it.
+			if got := HostBytesPerSec(c.host); got != c.wantBytes {
+				t.Errorf("HostBytesPerSec = %d, want %d", got, c.wantBytes)
 			}
 		})
 	}
