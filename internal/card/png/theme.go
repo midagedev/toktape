@@ -1,37 +1,52 @@
 package png
 
-import "image/color"
+import (
+	"image/color"
+
+	"github.com/midagedev/toktape/internal/palette"
+)
 
 // ---------------------------------------------------------------- palette ---
 
-// The colour contract is fixed by the track spec and
-// docs/research/02-sharing-artifacts.md §6.2 (Catppuccin Mocha). Hues are
-// rationed on purpose: one cool accent family (cyan → blue) carries decode,
-// one warm hue (amber) carries memory, green means "clean/verified", red means
-// "this run is contended or cold", and everything else is a neutral. Nothing
-// on the card may introduce a sixth hue.
+// The card is drawn in oxide, the TUI's palette, so a posted card and the clip
+// beside it read as one product (TTP-44, 2026-09-13; it was Catppuccin Mocha
+// until then). Every value comes from internal/palette, the one owner; the
+// names here are the card's roles, never hues.
+//
+// The rules are the TUI's emphasis contract. One accent family (Accent →
+// AccentHigh) carries the decode rate, the card's one lit figure, and the
+// wordmark; the prefill figure beside it is Text. The GPU segments are the
+// accent hue at four lightnesses, the host segment is a desaturated sand that
+// is warm without reading as a warning, Warn marks a caution, Bad marks a run
+// that is contended, cold or cut, and a pill that reports nothing wrong is a
+// neutral. Nothing on the card may introduce another hue.
 var (
-	colBase    = rgb(0x11111b) // canvas behind the panel
-	colPanel   = rgb(0x1e1e2e) // the card panel
-	colBorder  = rgb(0x313244) // 1px panel border and every hairline rule
-	colSurface = rgb(0x45475a) // inert fill: bar track, never-loaded segment
+	colBase    = palette.RGBA(palette.CardBase)    // canvas behind the panel
+	colPanel   = palette.RGBA(palette.CardPanel)   // the card panel
+	colBorder  = palette.RGBA(palette.CardBorder)  // 1px panel border and every hairline rule
+	colSurface = palette.RGBA(palette.CardSurface) // inert fill: bar track, never-loaded segment
 
-	colText  = rgb(0xcdd6f4) // primary text
-	colDim   = rgb(0xa6adc8) // secondary text, labels
-	colFaint = rgb(0x6c7086) // tertiary text: run id, credits, unobserved
+	colText  = palette.RGBA(palette.Text)      // primary text, the prefill figure
+	colDim   = palette.RGBA(palette.TextMuted) // secondary text, labels, a clean pill
+	colFaint = palette.RGBA(palette.Dim)       // tertiary text: run id, credits, unobserved
 
-	colCyan     = rgb(0x89dceb) // decode accent, gradient start
-	colBlue     = rgb(0x89b4fa) // gradient end, second GPU
-	colSapphire = rgb(0x74c7ec) // third GPU
-	colTeal     = rgb(0x94e2d5) // fourth GPU
-	colGreen    = rgb(0xa6e3a1) // prefill / TTFT, "clean" pills
-	colAmber    = rgb(0xf9e2af) // host memory
-	colRed      = rgb(0xf38ba8) // contended / cold
+	colAccent     = palette.RGBA(palette.Accent)     // decode ramp start, wordmark, first GPU
+	colAccentHigh = palette.RGBA(palette.AccentHigh) // decode ramp end
+	colHost       = palette.RGBA(palette.CardHost)   // host memory segment
+	colWarn       = palette.RGBA(palette.Warn)       // a caution pill
+	colBad        = palette.RGBA(palette.Bad)        // contended / cold / cut pills
 )
 
 // gpuColors is the rotation used for GPU segments of the placement bar, in
-// device-index order. Beyond four devices it repeats.
-var gpuColors = []color.RGBA{colCyan, colBlue, colSapphire, colTeal}
+// device-index order. Beyond four devices it repeats. The four are one hue at
+// lightnesses far enough apart that adjacent segments stay distinct
+// (palette_test pins the ratios).
+var gpuColors = []color.RGBA{
+	colAccent,
+	palette.RGBA(palette.CardGPU1),
+	palette.RGBA(palette.CardGPU2),
+	palette.RGBA(palette.CardGPU3),
+}
 
 // Lightness steps used to subdivide a GPU segment of the placement bar.
 // Weights keep the device hue; the KV cache and the compute buffers are the

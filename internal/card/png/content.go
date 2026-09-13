@@ -406,10 +406,10 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 			continue
 		}
 		if !strings.HasPrefix(d.Device, devicePrefixGPU) {
-			// Host RAM is the warm hue and is not subdivided: the three-way
-			// split is a VRAM breakdown.
+			// Host RAM is the sand segment and is not subdivided: the
+			// three-way split is a VRAM breakdown.
 			c.segments = append(c.segments, segment{
-				label: orUnknown(d.Device), size: formatGiB(d.Bytes), bytes: d.Bytes, col: colAmber,
+				label: orUnknown(d.Device), size: formatGiB(d.Bytes), bytes: d.Bytes, col: colHost,
 			})
 			continue
 		}
@@ -481,7 +481,7 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 }
 
 // answerCutPill flags a run that spent every predicted token thinking and
-// never reached an answer. Red, like the other pills that mean "this run does
+// never reached an answer. Bad, like the other pills that mean "this run does
 // not say what you think it says": the decode rate beside it is real, the
 // empty completion is not the tool's doing, and the fix is --n-predict.
 func answerCutPill(s *tape.RunSummary) (pill, bool) {
@@ -489,7 +489,7 @@ func answerCutPill(s *tape.RunSummary) (pill, bool) {
 	if t.PredictedN <= 0 || t.ReasoningN < t.PredictedN {
 		return pill{}, false
 	}
-	return pill{text: "answer cut", col: colRed}, true
+	return pill{text: "answer cut", col: colBad}, true
 }
 
 func majFaultPill(s *tape.RunSummary, hasProc bool) pill {
@@ -497,12 +497,12 @@ func majFaultPill(s *tape.RunSummary, hasProc bool) pill {
 		return pill{text: "maj/tok " + unknown, col: colFaint}
 	}
 	v := s.Memory.MajFaultsPerToken
-	col := colGreen
+	col := colDim
 	switch {
 	case v >= tape.ColdMajFaultsPerToken:
-		col = colRed
+		col = colBad
 	case v > 0:
-		col = colAmber
+		col = colWarn
 	}
 	return pill{text: "maj/tok " + formatFloat1(v), col: col}
 }
@@ -512,9 +512,9 @@ func cachePill(c tape.CacheSummary) pill {
 	if label == "" {
 		return pill{text: "cache " + unknown, col: colFaint}
 	}
-	col := colGreen
+	col := colDim
 	if c.Label == tape.CacheCold {
-		col = colRed
+		col = colBad
 	}
 	if c.PromptTotal <= 0 {
 		return pill{text: "cache " + label, col: col}
@@ -535,9 +535,9 @@ func contendedPill(ci tape.ContentionInfo) pill {
 	if !contentionObserved(ci) {
 		return pill{text: "contended " + unknown, col: colFaint}
 	}
-	col := colGreen
+	col := colDim
 	if ci.Contended {
-		col = colRed
+		col = colBad
 	}
 	return pill{text: "contended " + yesNo(ci.Contended), col: col}
 }

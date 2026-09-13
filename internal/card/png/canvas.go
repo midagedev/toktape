@@ -132,7 +132,7 @@ func (c *canvas) maskedFill(id string, r, sub image.Rectangle, m *image.Alpha, c
 // ------------------------------------------------------------- gradients ---
 
 // hGradient is a horizontal linear ramp addressed in canvas coordinates. It is
-// the card's single gradient: cyan → blue across the decode number, the one
+// the card's single gradient: Accent → AccentHigh across the decode number, the one
 // place the spec allows an accent ramp.
 type hGradient struct {
 	x0, x1 int

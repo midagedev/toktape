@@ -105,7 +105,7 @@ func TestUnknownRules(t *testing.T) {
 // TestShadeSteps: the three VRAM lightness steps must be distinguishable and
 // must descend, or the subdivided bar reads as one flat block.
 func TestShadeSteps(t *testing.T) {
-	base := colCyan
+	base := colAccent
 	steps := []float64{shadeWeights, shadeKV, shadeCompute}
 	lum := func(t float64) float64 {
 		c := shade(base, t)

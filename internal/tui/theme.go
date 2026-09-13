@@ -7,42 +7,31 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+
+	"github.com/midagedev/toktape/internal/palette"
 )
 
 // The palette. One accent hue, one warm hue, one bad hue, and neutrals.
-// Nothing else gets a colour; restraint is the look.
-//
-// "oxide" (TTP-40, user 2026-09-13: "색상은 oxide로 가자", after "전반적으로
-// mute되었지만 그래도 특정 색상 경향은 있는 유니크한 팔레트"): a sage-teal accent
-// on a green-black ground with warm off-white text. It replaced a Tailwind
-// sky/amber/red set whose accent sat at 0.95 saturation and was the first thing
-// the eye found; oxide's is 0.33. The derived shades below are blends of these
-// base colours, so a future palette changes the six and re-derives the rest:
-//
-//	textMuted   text blended 30 % toward the ground
-//	textMid     midpoint of text and textMuted; dimMid of textMuted and dim
-//	accentHigh  accent 45 % toward white
-//	accentMid   accent 25 % toward the ground
-//	accentMuted accent 45 % toward the ground
-//	accentLow   accent 62 % toward the ground
-//	darkFill    accent 86 % toward the ground
+// Nothing else gets a colour; restraint is the look. The values, their blends
+// and the user's words that chose them live in internal/palette, their one
+// owner (TTP-44); the names here are the TUI's.
 const (
-	colAccent = "#86c2b4" // sage teal: the rates, the active stream, the cursor
-	colWarn   = "#d6a760" // ochre: contended, cold cache, throttled
-	colBad    = "#d47e70" // clay red: a maj/tok spike, a failed stream
-	colText   = "#e6e2d8" // primary text
-	colDim    = "#6f7872" // labels and chrome, and nothing else
+	colAccent = palette.Accent // sage teal: the rates, the active stream, the cursor
+	colWarn   = palette.Warn   // ochre: contended, cold cache, throttled
+	colBad    = palette.Bad    // clay red: a maj/tok spike, a failed stream
+	colText   = palette.Text   // primary text
+	colDim    = palette.Dim    // labels and chrome, and nothing else
 	// colDarkFill is the unfilled remainder of a bar: the accent hue at the
 	// bottom of its lightness range, drawn with the same solid block as the
 	// filled part. A hatch glyph (░) was noisy in most terminal fonts and read
 	// as texture rather than as an empty measure.
-	colDarkFill = "#202d2a"
+	colDarkFill = palette.DarkFill
 )
 
 // colGround is the terminal background the palette is designed on. The TUI
 // never paints it — a terminal brings its own — but internal/render rasterises
 // frames on it, and every luminance step in this file is measured against it.
-const colGround = "#0f1514"
+const colGround = palette.Ground
 
 // Palette is the part of the theme the renderers outside this package draw
 // with directly: the ground a frame is rasterised on, the default foreground,
@@ -62,9 +51,9 @@ func ThemePalette() Palette {
 // cursor and the header shimmer. They are the same hue at three lightnesses,
 // never three different hues.
 const (
-	colAccentLow  = "#3c5751"
-	colAccentMid  = "#68978c"
-	colAccentHigh = "#bcddd6"
+	colAccentLow  = palette.AccentLow
+	colAccentMid  = palette.AccentMid
+	colAccentHigh = palette.AccentHigh
 )
 
 // colAccentMuted is the accent blended 45% toward the terminal background
@@ -81,7 +70,7 @@ const (
 // It is not colAccentLow: that shade already means "the third segment of a
 // gauge" in the vram legend, and it is dark enough that a whole sparkline in it
 // stops reading as a line.
-const colAccentMuted = "#50746c"
+const colAccentMuted = palette.AccentMuted
 
 // The body-text ladder (TTP-28, user 2026-09-13: "토큰 내용 자체는 한 톤 내리는
 // 게 맞겠어", then "방금 막 나온 토큰 정도만 조금 밝게 해서 속도감은 살리자").
@@ -116,9 +105,9 @@ const colAccentMuted = "#50746c"
 // The contract asks that reasoning sit at or below 80 % of colTextMuted's
 // luminance, and colDim at 0.180/0.371 = 0.49 clears it.
 const (
-	colTextMid   = "#c6c3ba"
-	colTextMuted = "#a6a49d"
-	colDimMid    = "#8a8e88"
+	colTextMid   = palette.TextMid
+	colTextMuted = palette.TextMuted
+	colDimMid    = palette.DimMid
 )
 
 // Theme carries the styles View paints with. The zero Theme is plain: every

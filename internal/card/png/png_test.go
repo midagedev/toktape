@@ -206,9 +206,16 @@ func TestEveryBandHasInk(t *testing.T) {
 }
 
 // TestHeroGradient asserts the card's single accent ramp is actually a ramp:
-// the left edge of the decode number leans cyan and the right edge leans blue.
-// Cyan and blue share a red channel, so the test reads the blue-minus-green
-// difference, which is what separates them.
+// the left edge of the decode number is Accent and the right edge is
+// AccentHigh, the same hue 45 % toward white.
+//
+// 2026-09-13 (TTP-44): the ramp used to be cyan → blue, two hues sharing a red
+// channel, so this test read the blue-minus-green lean. Oxide's ramp is one hue
+// at two lightnesses, so the test now reads lightness: the brightest pixel of
+// the right third must be clearly lighter than the brightest of the left third.
+// Brightest, because antialiased edge pixels are blends with the panel and
+// would dilute a mean. FAIL-first: on the cyan → blue source the right third
+// is darker (blue is the lower-luminance end), so this assertion fails there.
 func TestHeroGradient(t *testing.T) {
 	c, err := renderCanvas(card.Example())
 	if err != nil {
@@ -218,29 +225,28 @@ func TestHeroGradient(t *testing.T) {
 	if !ok {
 		t.Fatal("hero.left.number was never drawn")
 	}
-	lean := func(r image.Rectangle) float64 {
-		var sum float64
-		var n int
+	brightest := func(r image.Rectangle) float64 {
+		best := -1.0
 		for y := r.Min.Y; y < r.Max.Y; y++ {
 			for x := r.Min.X; x < r.Max.X; x++ {
 				p := at(c.img, x, y)
-				if p == colPanel {
-					continue
+				if l := 0.2126*float64(p.R) + 0.7152*float64(p.G) + 0.0722*float64(p.B); l > best {
+					best = l
 				}
-				sum += float64(p.B) - float64(p.G)
-				n++
 			}
 		}
-		if n == 0 {
-			t.Fatalf("no ink in %v", r)
+		if best < 0 {
+			t.Fatalf("no pixels in %v", r)
 		}
-		return sum / float64(n)
+		return best
 	}
 	third := m.Rect.Dx() / 3
-	left := lean(image.Rect(m.Rect.Min.X, m.Rect.Min.Y, m.Rect.Min.X+third, m.Rect.Max.Y))
-	right := lean(image.Rect(m.Rect.Max.X-third, m.Rect.Min.Y, m.Rect.Max.X, m.Rect.Max.Y))
-	if !(right > left) {
-		t.Errorf("hero number does not ramp cyan→blue: left B-G = %.1f, right B-G = %.1f", left, right)
+	left := brightest(image.Rect(m.Rect.Min.X, m.Rect.Min.Y, m.Rect.Min.X+third, m.Rect.Max.Y))
+	right := brightest(image.Rect(m.Rect.Max.X-third, m.Rect.Min.Y, m.Rect.Max.X, m.Rect.Max.Y))
+	// Accent → AccentHigh spans ~34 levels of luma; the two thirds' extremes
+	// sit about two thirds of that apart. 15 is the "visibly a ramp" floor.
+	if right-left < 15 {
+		t.Errorf("hero number does not ramp Accent→AccentHigh: brightest left = %.1f, right = %.1f", left, right)
 	}
 }
 

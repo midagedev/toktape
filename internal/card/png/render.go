@@ -37,7 +37,7 @@ func (c *canvas) drawHeader(ct *content) {
 	markBase := bandHeaderTop + 38
 	r := c.text(textOpts{
 		id: "header.wordmark.tok", s: "tok", x: contentL, baseline: markBase,
-		style: stWordmark, src: solid(colCyan),
+		style: stWordmark, src: solid(colAccent),
 	})
 	r = c.text(textOpts{
 		id: "header.wordmark.tape", s: "tape", x: r.Max.X, baseline: markBase,
@@ -70,12 +70,14 @@ func (c *canvas) drawHero(ct *content) {
 	c.vrule("hero.split", heroSplitX, heroRuleTop, heroRuleBottom, colBorder)
 
 	c.drawHeroCol("hero.left", ct.left, contentL, heroSplitX-heroGutter, func(x0, x1 int) image.Image {
-		// The card's single accent gradient, cyan → blue across the decode
-		// number. Nothing else on the card ramps.
-		return hGradient{x0: x0, x1: x1, c0: colCyan, c1: colBlue}
+		// The card's single accent gradient, Accent → AccentHigh across the
+		// decode number. Nothing else on the card ramps.
+		return hGradient{x0: x0, x1: x1, c0: colAccent, c1: colAccentHigh}
 	})
 	c.drawHeroCol("hero.right", ct.right, heroRightX, contentR, func(int, int) image.Image {
-		return solid(colGreen)
+		// Prefill is a primary figure, not an accent one: the accent is the
+		// decode rate's alone, as in the TUI's emphasis contract.
+		return solid(colText)
 	})
 }
 
