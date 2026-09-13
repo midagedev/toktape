@@ -63,23 +63,27 @@ const colAccentMuted = "#4c7c97"
 // Five stops, measured as WCAG relative luminance on this theme's ground:
 //
 //	colText       #e5e7eb  0.798   headers, labels, right-pane values
-//	colTextMid    #d6d8dc  0.686   an answer token 150–500 ms old
-//	colTextMuted  #c6c8cc  0.577   settled answer text, and a fresh thought
-//	colDimMid     #989da6  0.335   a reasoning token 150–500 ms old
+//	colTextMid    #c5c7cc  0.571   an answer token 150–500 ms old
+//	colTextMuted  #a5a7ad  0.387   settled answer text, and a fresh thought
+//	colDimMid     #888c96  0.262   a reasoning token 150–500 ms old
 //	colDim        #6b7280  0.167   settled reasoning, chrome, labels
 //
-// colTextMuted is colText blended toward the ground until its luminance is
-// 72 % of colText's; the measured ratio is 0.723. colTextMid is the sRGB
+// colTextMuted is colText blended 30 % toward the ground, which puts the body
+// at 0.48 of the header's luminance. The first cut (2026-09-13) used
+// 0.72, and the user watched the clip and could see the write-head glow on the
+// reasoning text but not on the answers: a 0.72 step is one the eye reads as
+// the same tone. The reasoning ramp (0.29 of the body) was visible, so the
+// answer body drops until its step is of the same order. colTextMid is the sRGB
 // midpoint of colText and colTextMuted, colDimMid the midpoint of colTextMuted
 // and colDim, so the reasoning ramp is the answer ramp shifted two stops down
 // and the two never collide at the same age.
 //
 // colDim is unchanged: the contract asks that reasoning sit at or below 80 %
-// of colTextMuted's luminance, and 0.167/0.577 = 0.29 clears it with room.
+// of colTextMuted's luminance, and 0.167/0.387 = 0.43 clears it.
 const (
-	colTextMid   = "#d6d8dc"
-	colTextMuted = "#c6c8cc"
-	colDimMid    = "#989da6"
+	colTextMid   = "#c5c7cc"
+	colTextMuted = "#a5a7ad"
+	colDimMid    = "#888c96"
 )
 
 // Theme carries the styles View paints with. The zero Theme is plain: every

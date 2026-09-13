@@ -382,11 +382,14 @@ func TestBodyToneLadderDescends(t *testing.T) {
 				stop.name, lum[stop.name], prev.name, lum[prev.name])
 		}
 	}
-	// The two ratios the contract names. The body sits at roughly 72 % of the
-	// header's luminance, and the reasoning text at or under 80 % of the body's
-	// — far under, here, which is why colDim did not have to move.
-	if got := lum["textMuted"] / lum["text"]; got < 0.68 || got > 0.76 {
-		t.Errorf("the body is %.3f of the header's luminance, want about 0.72", got)
+	// The two ratios the contract names. The body sits at roughly half the
+	// header's luminance, and the reasoning text at or under 80 % of the body's.
+	// 2026-09-13: re-pinned from 0.72 (band 0.68–0.76) after the user watched
+	// the clip: the glow was visible on reasoning and invisible on answers, so
+	// the answer step had to become as large as the reasoning step. FAIL-first:
+	// the 0.72 palette fails this band.
+	if got := lum["textMuted"] / lum["text"]; got < 0.44 || got > 0.54 {
+		t.Errorf("the body is %.3f of the header's luminance, want about 0.49", got)
 	}
 	if got := lum["dim"] / lum["textMuted"]; got > 0.80 {
 		t.Errorf("reasoning text is %.3f of the body's luminance, want 0.80 or less", got)
