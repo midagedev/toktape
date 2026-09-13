@@ -6,9 +6,9 @@ toktape attaches to a llama-server you already have running, records one run
 into a `.tape` file, and prints a card that says where the model sits, what the
 process actually touched, and how fast the request really was.
 
-<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording 8 concurrent streams"></p>
+<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording 4 concurrent streams, from the command being typed to the result card"></p>
 
-<p align="center"><em>Eight streams at once, replayed from a tape through the same renderer <code>toktape render</code> uses — no terminal recorder involved.</em></p>
+<p align="center"><em>The whole session: the command typed at a prompt, the server found and attached, four streams at once, then the card — replayed from a tape through the same renderer <code>toktape render</code> uses, with no terminal recorder involved.</em></p>
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐

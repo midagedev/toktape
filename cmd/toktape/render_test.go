@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/midagedev/toktape/internal/render"
 	"github.com/midagedev/toktape/internal/tape"
@@ -289,12 +290,17 @@ func TestHeroGIFIsPostable(t *testing.T) {
 	// upper bound, and identical frames are folded into the one before them,
 	// so the stored count is at most that and nowhere near it only if the
 	// clip stopped early.
-	sched := render.NewSchedule(render.RunEnd(tui.ExampleTape()), render.DefaultFPS, 0)
+	sched := render.NewSchedule(render.RunEnd(tui.ExampleTapeN(4)), render.DefaultFPS, 0)
 	if len(g.Image) > sched.Count {
 		t.Errorf("the hero has %d frames, more than the schedule's %d", len(g.Image), sched.Count)
 	}
-	if len(g.Image) < sched.Count/2 {
-		t.Errorf("the hero has %d frames, want most of the schedule's %d", len(g.Image), sched.Count)
+	// The lower bound is the streaming phase, the only phase that must be
+	// stored frame by frame: the cold open is static by design and the card
+	// hold folds into one frame. Measured 2026-09-13 on the twenty-second
+	// hero: 295 of 601 stored — open 29/180, intro 19/30, stream 246/270,
+	// card 1/120. (Lead, on the coldopen track's report.)
+	if want := int(sched.Stream*time.Duration(sched.FPS)/time.Second) * 4 / 5; len(g.Image) < want {
+		t.Errorf("the hero has %d frames, want at least the streaming phase's %d", len(g.Image), want)
 	}
 	if g.Config.Width != 992 {
 		t.Errorf("the hero is %d px wide, want the 992 GIFFontSize gives", g.Config.Width)

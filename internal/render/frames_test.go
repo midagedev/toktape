@@ -55,6 +55,7 @@ func TestFramesWritesReadablePNGs(t *testing.T) {
 		t.Fatalf("wrote %d frames, want 3", len(paths))
 	}
 
+	sched := NewSchedule(RunEnd(tui.ExampleTape()), 2, time.Second)
 	var bounds image.Rectangle
 	for i, p := range paths {
 		if want := filepath.Join(dir, "frame_0000"+string(rune('0'+i))+".png"); p != want {
@@ -66,7 +67,16 @@ func TestFramesWritesReadablePNGs(t *testing.T) {
 		} else if img.Bounds() != bounds {
 			t.Errorf("frame %d is %v, want every frame at %v", i, img.Bounds(), bounds)
 		}
-		if got := inkFraction(img); got < 0.02 {
+		// A frame of the cold open is a nearly empty terminal — a prompt, a
+		// chevron, whatever has been typed and a cursor — so it cannot clear
+		// the TUI's floor. Measured 2026-09-13: 0.028% at the open's first
+		// frame against 8–14% for a TUI frame. The assertion is the same one
+		// either way: the screen did not come out blank.
+		floor := 0.02
+		if sched.Frame(i).InOpen {
+			floor = 0.0002
+		}
+		if got := inkFraction(img); got < floor {
 			t.Errorf("frame %d is %.3f%% ink — the screen came out blank", i, got*100)
 		}
 	}

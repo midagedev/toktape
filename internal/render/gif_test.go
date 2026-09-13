@@ -260,9 +260,17 @@ func TestGIFOfTheWholeClipStaysPostable(t *testing.T) {
 	// three things that keep this one small — one global palette, the dirty
 	// rectangle, and transparency for unchanged pixels — are each easy to
 	// undo by accident. Without the transparency pass this same clip is
-	// 7.4 MB (measured 2026-09-13). It runs unconditionally — 2.7 s is worth
-	// paying on every gate for the one number that decides whether the clip
-	// can be posted at all.
+	// 19.3 MB (measured 2026-09-13). It runs unconditionally — a few seconds
+	// is worth paying on every gate for the one number that decides whether
+	// the clip can be posted at all.
+	//
+	// The budget stayed at 1.5 MB when the cold open nearly doubled the
+	// clip's length, 11.5 s to 20 s (2026-09-13). It could have been raised
+	// and was not: measured on this fixture the clip went 1.09 MB → 1.22 MB,
+	// and the hero's own four-stream shape is 0.87 MB. A static opening is
+	// almost free here — every frame of it is one dirty rectangle of a few
+	// cells — so a looser gate would have bought headroom nobody needs and
+	// given up the one that caught a 7× regression before.
 	out := filepath.Join(t.TempDir(), "clip.gif")
 	if err := GIF(tui.ExampleTape(), Options{}, out); err != nil {
 		t.Fatalf("GIF: %v", err)

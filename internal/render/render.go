@@ -39,18 +39,20 @@ const (
 	DefaultFontSize = 20
 	// GIFFontSize is the cell size GIF uses when Options.FontSize is unset.
 	//
-	// A GIF is posted inline and has to stay attachable, so this is the
-	// largest cell the whole clip fits the 1.5 MB budget at. Measured
-	// 2026-09-13 on the eleven-and-a-half-second example clip at 30 fps:
+	// A GIF is posted inline and has to stay attachable. Measured 2026-09-13
+	// on the twenty-second example clip — the one with the cold open — at
+	// 30 fps:
 	//
-	//	cell 10  744×532  0.76 MB
-	//	cell 12  868×646  0.95 MB
-	//	cell 13  992×684  1.09 MB   <- here
-	//	cell 14  992×760  1.16 MB
+	//	cell 10  744×532  0.85 MB
+	//	cell 12  868×646  1.06 MB
+	//	cell 13  992×684  1.22 MB   <- here
+	//	cell 14  992×760  1.30 MB
 	//
 	// 13 gives a 992 px frame, which is a Reddit embed at full width rather
-	// than a thumbnail, and still leaves a quarter of the budget spare. The
-	// mp4 keeps DefaultFontSize; it has no such ceiling.
+	// than a thumbnail, and still leaves a fifth of the 1.5 MB budget spare.
+	// 14 is not wider — the advance rounds to the same integer number of
+	// pixels — so the extra 80 kB buys nothing but a taller frame. The mp4
+	// keeps DefaultFontSize; it has no such ceiling.
 	GIFFontSize = 13
 )
 
@@ -144,7 +146,13 @@ func RunEnd(tp *tape.Tape) time.Duration {
 //
 // This is the only place the tape meets the TUI. Everything downstream —
 // asciicast events, PNG frames, GIF frames, mp4 input — is this string.
+//
+// A frame of the cold open comes from OpenScreen instead: it is a terminal
+// before the tool has taken the screen, so there is no model to cut.
 func FrameText(tp *tape.Tape, o Options, f Frame) string {
+	if f.InOpen {
+		return OpenScreen(tp, o.Width, o.Height, f.Open)
+	}
 	m := tui.ModelAt(tp, f.At)
 	m.Theme = tui.ColourTheme()
 	m.Mode = f.Mode

@@ -6,21 +6,30 @@ import (
 	"github.com/midagedev/toktape/internal/tui"
 )
 
-// The shape of every clip: a held opening, the run, a held card.
+// The shape of every clip: the cold open, a held intro, the run, a held card.
 const (
+	// OpenHold is the cold open: a shell prompt, the command typed into it,
+	// and the tool finding the server and attaching — everything before the
+	// TUI takes the screen (user, 2026-09-13: "뭔가 셋팅하는 것부터
+	// 시작되면 더 좋을 것 같고"). A clip that starts on the finished screen
+	// reads as a mock-up; one that starts on an empty prompt reads as a
+	// session, and a reader who has never run the tool learns the command
+	// from the clip. open.go draws it and owns the beats inside it.
+	OpenHold = 6 * time.Second
 	// IntroHold is the opening: the screen before the first token, so a
 	// viewer reads the rig and the model before anything moves.
 	IntroHold = 1 * time.Second
 	// CardHold is the payoff: the result card, held long enough to read the
 	// two hero numbers and screenshot it.
-	CardHold = 3 * time.Second
-	// MinDuration and MaxDuration bound the derived clip length. Under ten
-	// seconds the streaming phase is too short to show a stall; over twelve
-	// the clip stops being scrollable-past-able on a feed.
-	MinDuration = 10 * time.Second
-	MaxDuration = 12 * time.Second
+	CardHold = 4 * time.Second
+	// MinDuration and MaxDuration bound the derived clip length. The cold
+	// open and the two holds are eleven seconds of it, so under twenty the
+	// streaming phase is too short to show a stall; over twenty-five the clip
+	// stops being scrollable-past-able on a feed.
+	MinDuration = 20 * time.Second
+	MaxDuration = 25 * time.Second
 
-	// holdShare caps the two held phases at four fifths of a short clip, so
+	// holdShare caps the three held phases at four fifths of a short clip, so
 	// an explicitly requested two-second clip still has a streaming phase.
 	holdShare = 5
 )
@@ -42,19 +51,29 @@ type Frame struct {
 	Clip time.Duration
 	// At is the instant of the *run* the model is cut at.
 	At time.Duration
-	// Anim is the t handed to tui.View.
+	// Anim is the t handed to tui.View, or the open's own clock when InOpen.
 	Anim time.Duration
-	// Mode is the screen the frame draws.
+	// Mode is the screen the frame draws. Open frames are not a tui.Mode —
+	// the cold open is not the TUI — so Mode stays ModeLive there and InOpen
+	// is what a renderer branches on.
 	Mode tui.Mode
+	// InOpen marks a frame of the cold open, drawn by OpenScreen rather than
+	// by tui.View.
+	InOpen bool
+	// Open is the instant of the cold open the frame draws, on the open's own
+	// nominal OpenHold-long clock. A clip too short to hold a six-second open
+	// gets a shorter one, and this rescaling is what lets the whole script
+	// still play inside it. Meaningless unless InOpen.
+	Open time.Duration
 }
 
 // Schedule maps frame indices onto the run's timeline.
 //
-// A clip is three phases: IntroHold on the pre-run screen, the run itself
-// stretched or compressed uniformly into whatever is left, and CardHold on the
-// result card. The middle phase is the only one that scales, so a two-minute
-// run and a four-second run produce clips of the same shape — which is what
-// makes two clips comparable at a glance.
+// A clip is four phases: OpenHold on the cold open, IntroHold on the pre-run
+// screen, the run itself stretched or compressed uniformly into whatever is
+// left, and CardHold on the result card. The streaming phase is the only one
+// that scales, so a two-minute run and a four-second run produce clips of the
+// same shape — which is what makes two clips comparable at a glance.
 //
 // Two clocks, on purpose. tui.View's t is both an animation phase and a data
 // cut: sampleAt(t) and decodeRateAt(t) read it, and ease(prev, cur, since, t)
@@ -67,6 +86,10 @@ type Frame struct {
 // run begins. The spinner (800 ms) and the header shimmer (4 s) both divide
 // that offset, so the handover from the intro's clock to the run's clock is
 // continuous rather than a visible jump.
+//
+// The cold open is outside all of that: it never touches the TUI, so it runs
+// on a third clock of its own (Frame.Open) and hands over with a hard cut —
+// which is what a program taking the screen looks like.
 type Schedule struct {
 	// Duration is the length of the finished clip.
 	Duration time.Duration
@@ -76,8 +99,8 @@ type Schedule struct {
 	Count int
 	// RunEnd is the instant the run's last token arrived.
 	RunEnd time.Duration
-	// Intro, Stream and Card are the three phases, summing to Duration.
-	Intro, Stream, Card time.Duration
+	// Open, Intro, Stream and Card are the four phases, summing to Duration.
+	Open, Intro, Stream, Card time.Duration
 
 	// introLead is added to clip time during the intro; see the type comment.
 	introLead time.Duration
@@ -85,8 +108,8 @@ type Schedule struct {
 
 // NewSchedule plans a clip of a run that ends at runEnd.
 //
-// dur of zero derives the length: the natural one-second-plus-run-plus-three
-// clip, clamped to [MinDuration, MaxDuration]. A run longer than that is
+// dur of zero derives the length: the natural open-plus-intro-plus-run-plus-
+// card clip, clamped to [MinDuration, MaxDuration]. A run longer than that is
 // compressed uniformly; a shorter one plays in slow motion, which is the right
 // reading of a run too fast to watch. A non-zero dur is used as given — the
 // clamp describes the default, not the API.
@@ -98,7 +121,7 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration) Schedule {
 		fps = DefaultFPS
 	}
 	if dur <= 0 {
-		dur = IntroHold + runEnd + CardHold
+		dur = OpenHold + IntroHold + runEnd + CardHold
 		if dur < MinDuration {
 			dur = MinDuration
 		}
@@ -119,19 +142,32 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration) Schedule {
 	// duration exactly rather than a nanosecond either side of it.
 	dur = frames * time.Second / time.Duration(fps)
 
-	// The holds are fixed until the clip is short enough that they would eat
-	// it, at which point both shrink in proportion and keep their 1:3 ratio.
-	intro, card := IntroHold, CardHold
-	if room := dur / holdShare; intro > room {
-		intro, card = room, 3*room
+	// The three held phases are fixed until the clip is short enough that they
+	// would eat it, at which point all three shrink in proportion and keep
+	// their 6:1:4 ratio. Frame rescales the open's own clock by the same
+	// factor, so a squeezed clip plays the whole cold open faster rather than
+	// cutting it off half way through the typing.
+	//
+	// The arithmetic goes through float64 because the exact form
+	// (room × OpenHold / holds) overflows int64 at these magnitudes: six
+	// seconds is 6e9 nanoseconds and the product is past 9.2e18.
+	open, intro, card := OpenHold, IntroHold, CardHold
+	if holds, room := open+intro+card, dur-dur/holdShare; holds > room {
+		share := func(d time.Duration) time.Duration {
+			return time.Duration(float64(room) * float64(d) / float64(holds))
+		}
+		open, intro, card = share(OpenHold), share(IntroHold), share(CardHold)
 	}
 	s := Schedule{
 		Duration: dur,
 		FPS:      fps,
 		RunEnd:   runEnd,
+		Open:     open,
 		Intro:    intro,
 		Card:     card,
-		Stream:   dur - intro - card,
+		// The streaming phase takes the rounding: the four phases must sum to
+		// the duration exactly or the last frame lands in the wrong one.
+		Stream: dur - open - intro - card,
 	}
 	s.Count = int(frames) + 1
 
@@ -158,11 +194,16 @@ func (s Schedule) Frame(i int) Frame {
 	f := Frame{Index: i, Clip: clip, Mode: tui.ModeLive}
 
 	switch {
-	case clip < s.Intro:
+	case clip < s.Open && s.Open > 0:
+		f.InOpen = true
+		f.Open = time.Duration(float64(clip) * float64(OpenHold) / float64(s.Open))
 		f.At = 0
-		f.Anim = clip + s.introLead
-	case clip < s.Intro+s.Stream && s.Stream > 0:
-		p := float64(clip-s.Intro) / float64(s.Stream)
+		f.Anim = f.Open
+	case clip < s.Open+s.Intro:
+		f.At = 0
+		f.Anim = clip - s.Open + s.introLead
+	case clip < s.Open+s.Intro+s.Stream && s.Stream > 0:
+		p := float64(clip-s.Open-s.Intro) / float64(s.Stream)
 		f.At = time.Duration(float64(s.RunEnd) * p)
 		f.Anim = f.At
 	default:

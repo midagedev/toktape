@@ -94,8 +94,8 @@ func TestAsciicastOfAConcurrentRun(t *testing.T) {
 			}
 		}
 	}
-	if last < 10 || last > 12 {
-		t.Errorf("recording ends at %.3fs, want it inside [10s, 12s]", last)
+	if lo, hi := MinDuration.Seconds(), MaxDuration.Seconds(); last < lo || last > hi {
+		t.Errorf("recording ends at %.3fs, want it inside [%.0fs, %.0fs]", last, lo, hi)
 	}
 }
 

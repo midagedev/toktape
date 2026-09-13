@@ -30,10 +30,14 @@ func main() {
 	h := flag.Int("h", render.DefaultHeight, "frame height in rows")
 	fps := flag.Int("fps", render.DefaultFPS, "frame rate")
 	size := flag.Float64("size", render.DefaultFontSize, "cell size in pixels for the stills and the mp4")
-	at := flag.String("at", "0,1.5,4,8", "clip times to write stills for, in seconds")
+	// The default set walks the whole clip: the empty prompt, the command
+	// half typed, the search, the streams in prefill, the TUI just after it
+	// takes the screen, and the run mid-flight. The last frame is added below.
+	at := flag.String("at", "0.4,1.8,3.5,5,6.5,12", "clip times to write stills for, in seconds")
 	flag.Parse()
 
-	tp := tui.ExampleTape()
+	// Four streams, the shape the README hero uses (tui.ExampleTapeN).
+	tp := tui.ExampleTapeN(4)
 	opts := render.Options{
 		Width:    *w,
 		Height:   *h,
@@ -48,12 +52,15 @@ func main() {
 	}
 	fmt.Printf("run ends at %v; clip is %v at %d fps (%d frames)\n",
 		sched.RunEnd.Round(time.Millisecond), sched.Duration.Round(time.Millisecond), sched.FPS, sched.Count)
-	fmt.Printf("phases: intro %v · stream %v · card %v\n\n", sched.Intro, sched.Stream, sched.Card)
+	fmt.Printf("phases: open %v · intro %v · stream %v · card %v\n\n",
+		sched.Open, sched.Intro, sched.Stream, sched.Card)
 
 	for _, secs := range parseTimes(*at) {
 		writeStill(tp, opts, sched, secs, *out)
 	}
-	// The last frame of the clip: the card, held.
+	// The two ends of the card hold: the frame half a second before the clip
+	// stops, and the last one.
+	writeStill(tp, opts, sched, sched.Duration.Seconds()-0.5, *out)
 	writeStill(tp, opts, sched, sched.Duration.Seconds(), *out)
 
 	gifPath := filepath.Join(*out, "clip.gif")
@@ -114,17 +121,25 @@ func writeStill(tp *tape.Tape, opts render.Options, sched render.Schedule, secs 
 }
 
 func modeName(f render.Frame) string {
-	if f.Mode == tui.ModeCard {
+	switch {
+	case f.InOpen:
+		return "open"
+	case f.Mode == tui.ModeCard:
 		return "card"
+	default:
+		return "live"
 	}
-	return "live"
 }
 
 func modeSuffix(f render.Frame) string {
-	if f.Mode == tui.ModeCard {
+	switch {
+	case f.InOpen:
+		return "-open"
+	case f.Mode == tui.ModeCard:
 		return "-card"
+	default:
+		return ""
 	}
-	return ""
 }
 
 // trim formats a duration as a short, file-name-safe number of seconds.
