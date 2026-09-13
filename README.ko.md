@@ -20,9 +20,10 @@ toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.ta
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ toktape v0.1.0                          20260913-150210-llama3.3-70b │
+│ toktape v0.1.0                  20260913-150210-r1-distill-llama-70b │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MODEL    Llama-3.3-70B-Instruct-Q4_K_M.gguf · Q4_K_M · 42.5 GiB      │
+│ MODEL    DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf · Q4_K_M          │
+│          42.5 GiB                                                    │
 │ ENGINE   llama-server b3650 (a1b2c3d) · linux 6.8.0-45-generic       │
 │          workstation                                                 │
 │ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │

@@ -1,4 +1,4 @@
-┌─ toktape · Llama 3.3 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────────────────────┐
+┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 5/8                         answer │ stream 6/8                         answer │ PLACEMENT ────────────────── │
 │ 9.1 tok/s  ttft 870 ms · 102/320          │ 9.1 tok/s  ttft 930 ms · 101/320          │ GPU0 ███████████████   22.9G │
 │ ▏ 차가웠던 것이고, 그러면 페이지 캐시     │ ▏ quality. In the common mixed schemes    │ GPU1 ███████████████   21.9G │

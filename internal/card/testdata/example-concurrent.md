@@ -1,8 +1,9 @@
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ toktape v0.1.0                          20260913-150210-llama3.3-70b │
+│ toktape v0.1.0                  20260913-150210-r1-distill-llama-70b │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MODEL    Llama-3.3-70B-Instruct-Q4_K_M.gguf · Q4_K_M · 42.5 GiB      │
+│ MODEL    DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf · Q4_K_M          │
+│          42.5 GiB                                                    │
 │ ENGINE   llama-server b3650 (a1b2c3d) · linux 6.8.0-45-generic       │
 │          workstation                                                 │
 │ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
@@ -38,11 +39,11 @@
 
 Server (as seen from /proc/48213/cmdline):
 
-    /usr/local/bin/llama-server -m /models/Llama-3.3-70B-Instruct-Q4_K_M.gguf -c 16384 --parallel 8 -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0 -t 16
+    /usr/local/bin/llama-server -m /models/DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf -c 16384 --parallel 8 -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0 -t 16
 
 Recorded with:
 
     toktape --url http://127.0.0.1:8080 -n 8 --n-predict 307
 
-Tape: `20260913-150210-llama3.3-70b.tape` (attach it and anyone can `toktape play` it)
+Tape: `20260913-150210-r1-distill-llama-70b.tape` (attach it and anyone can `toktape play` it)
 </details>

@@ -1,4 +1,4 @@
-┌─ toktape · Llama 3.3 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────────────────────────────────────────┐
+┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────────────────────────┐
 │ stream 1/8                                     done │ stream 2/8                                     done │ PLACEMENT ────────────────── │
 │ 9.1 tok/s  ttft 630 ms · 296/320 · p50 111 ms       │ 9.1 tok/s  ttft 690 ms · 301/320 · p50 111 ms       │ GPU0 ███████████████   23.8G │
 │ ▏ Tensor parallelism would split each matrix        │ ▏ 오른쪽의 메모리 칸이 그 계산과 실제 장치          │ GPU1 ███████████████   22.8G │

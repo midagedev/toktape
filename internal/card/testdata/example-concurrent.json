@@ -1,5 +1,5 @@
 {
-  "id": "20260913-150210-llama3.3-70b",
+  "id": "20260913-150210-r1-distill-llama-70b",
   "toktape_version": "0.1.0",
   "started_at": "2026-09-13T15:02:10Z",
   "finished_at": "2026-09-13T15:02:46.007Z",
@@ -13,7 +13,7 @@
     "args": [
       "/usr/local/bin/llama-server",
       "-m",
-      "/models/Llama-3.3-70B-Instruct-Q4_K_M.gguf",
+      "/models/DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
       "-c",
       "16384",
       "--parallel",
@@ -46,9 +46,9 @@
     "ctx_size": 16384
   },
   "model": {
-    "path": "/models/Llama-3.3-70B-Instruct-Q4_K_M.gguf",
-    "file_name": "Llama-3.3-70B-Instruct-Q4_K_M.gguf",
-    "name": "Llama 3.3 70B",
+    "path": "/models/DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
+    "file_name": "DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
+    "name": "R1 Distill Llama 70B",
     "arch": "llama",
     "quant": "Q4_K_M",
     "file_bytes": 45655502848,

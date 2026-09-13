@@ -526,3 +526,110 @@ func TestFreshTokensGlowAtTheWriteHead(t *testing.T) {
 		}
 	}
 }
+
+// TestBodyTextSitsBelowTheHeaderTone is the body-tone contract read off the
+// frame rather than off the bands (TTP-28, lead 2026-09-13).
+//
+// The band test above proves the renderer computes the right shade for each
+// rune. This one proves the shade reaches the screen and nothing else on the
+// tile side of the divider is wearing the header's tone: a tile body may use
+// th.text only where a token has just landed, and everywhere else it sits at
+// textMuted or below.
+func TestBodyTextSitsBelowTheHeaderTone(t *testing.T) {
+	const w, h = 120, 36
+	tp := ExampleTapeN(4)
+	m := ModelAt(tp, midRun)
+	m.Theme = ColourTheme()
+	rows := parseFrame(View(m, midRun, w, h), w, h)
+
+	// Everything the glow is allowed to light, as text: the freshest band of
+	// every stream on the frame. A run of header-toned cells in a tile body
+	// has to come from here.
+	fresh := map[string]bool{}
+	for _, s := range m.Streams {
+		lines := streamTextLines(s, 48)
+		for i, bl := range bodyBands(s, lines, midRun) {
+			if lines[i].marker || lines[i].reasoning {
+				continue
+			}
+			for _, sg := range bl {
+				if sg.band == bandFresh {
+					for _, word := range strings.Fields(sg.text) {
+						fresh[word] = true
+					}
+				}
+			}
+		}
+	}
+	if len(fresh) == 0 {
+		t.Fatal("no stream has a freshest band at the golden instant; this test would pass vacuously")
+	}
+
+	rightStart := rightPaneStart(rows, w)
+	hex := styleHex(ColourTheme().text)
+	for y, row := range rows {
+		if y == 0 {
+			continue // the title bar, which names the model in the header tone
+		}
+		// A tile header row: "stream 3/4 · thinking". The header keeps th.text
+		// by contract, and it is the tone the body is measured against.
+		if strings.HasPrefix(segmentAt(row, 2), "stream ") {
+			continue
+		}
+		for _, rn := range accentRunsOf(row, hex) {
+			if rn.from >= rightStart {
+				continue // the right pane's values wear th.text by contract
+			}
+			for _, word := range strings.Fields(rn.text) {
+				if !fresh[word] {
+					t.Errorf("%q at row %d col %d wears the header tone inside a tile body, and it is not a token that just landed\n%s",
+						rn.text, y, rn.from, rowContext(rows, y))
+					break
+				}
+			}
+		}
+	}
+}
+
+// rightPaneStart is the column the right pane's content begins at: one past the
+// last tile divider on the frame. Taken from the frame rather than recomputed
+// from the geometry, so a layout change moves it without the test noticing.
+func rightPaneStart(rows [][]pcell, w int) int {
+	at := 0
+	for _, row := range rows {
+		for x := 0; x < w-1; x++ {
+			if row[x].r == '│' && x > at {
+				at = x
+			}
+		}
+	}
+	return at + 1
+}
+
+// accentRunsOf returns the maximal runs of visible cells on a row that wear one
+// exact foreground.
+//
+// Unlike accentRuns it walks through the trailing half of a wide rune — a cell
+// with a zero rune and the same colour — instead of ending the run there. The
+// digit gate never needs that, because a figure is narrow; this one reads
+// Hangul, where ending a run at every syllable would cut the words apart and
+// no word would ever match.
+func accentRunsOf(row []pcell, hex string) []run {
+	var out []run
+	for x := 0; x < len(row); {
+		if row[x].fg != hex || row[x].r == 0 || row[x].r == ' ' {
+			x++
+			continue
+		}
+		var b strings.Builder
+		from := x
+		for x < len(row) && row[x].fg == hex && row[x].r != ' ' {
+			if row[x].r != 0 {
+				b.WriteRune(row[x].r)
+			}
+			x++
+		}
+		out = append(out, run{from: from, to: x, text: b.String()})
+	}
+	return out
+}
