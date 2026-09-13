@@ -29,3 +29,51 @@ jobs:
         run: ./scripts/check.sh
         env:
           CGO_ENABLED: "0"
+
+  # The release path has no test of its own in scripts/check.sh, and its two
+  # halves can drift apart silently: .goreleaser.yaml names the archives and
+  # scripts/install.sh reconstructs that name from uname. If they disagree the
+  # curl-pipe-sh install 404s on the day of the launch and nothing before that
+  # would have failed. This job builds a real snapshot and then asserts that
+  # install.sh asks for a file the release actually contains.
+  #
+  # `goreleaser check` is deliberately not run here: the Homebrew formula block
+  # is `brews`, which goreleaser v2 reports as deprecated and which makes
+  # `check` exit 2. We use a formula rather than the suggested homebrew_casks
+  # because casks are macOS-only and Linux is this tool's primary target.
+  release-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean --skip=publish
+        env:
+          # Snapshot mode publishes nothing; the value only has to render.
+          HOMEBREW_TAP_GITHUB_TOKEN: snapshot-not-published
+      - name: shellcheck install.sh
+        run: shellcheck -s sh scripts/install.sh
+      - name: archive name matches install.sh
+        run: |
+          set -eu
+          # goreleaser's .Version, read off any archive it just wrote.
+          version=$(ls dist/toktape_*.tar.gz | head -n1 |
+            sed -e 's#.*/toktape_##' -e 's#_[a-z0-9]*_[a-z0-9]*\.tar\.gz$##')
+          # install.sh names the asset for THIS host, so the assertion holds on
+          # whatever runner this job moves to.
+          want=$(TOKTAPE_VERSION="v$version" sh scripts/install.sh --dry-run |
+            sed -n 's#^archive: *.*/##p')
+          echo "install.sh wants: $want"
+          test -f "dist/$want" ||
+            { echo "no such archive in the release: dist/$want" >&2; ls dist/; exit 1; }
+          grep -qF "  $want" dist/checksums.txt ||
+            { echo "$want is missing from checksums.txt" >&2; exit 1; }
+      - name: formula tests the binary
+        run: grep -q 'system "#{bin}/toktape", "version"' dist/homebrew/Formula/toktape.rb

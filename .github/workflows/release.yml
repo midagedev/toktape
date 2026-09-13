@@ -1,0 +1,47 @@
+name: release
+
+# Cutting a release is one gesture: push a v* tag.
+#
+#   git tag -a v0.1.0 -m 'toktape v0.1.0' && git push origin v0.1.0
+#
+# Required repository secret:
+#   HOMEBREW_TAP_GITHUB_TOKEN — a PAT with `contents: write` on
+#   midagedev/homebrew-tap. GITHUB_TOKEN cannot write to another repository,
+#   so the tap update needs its own token. Set it before the first tag.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The changelog is built from the commit range since the previous
+          # tag, so the whole history has to be here.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The merge gate runs again on the tagged tree: a release is never cut
+      # from a commit that would not have been merged.
+      - name: check
+        run: ./scripts/check.sh
+        env:
+          CGO_ENABLED: "0"
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

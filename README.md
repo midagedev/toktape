@@ -49,11 +49,36 @@ process actually touched, and how fast the request really was.
 ## Install
 
 ```sh
+brew install midagedev/tap/toktape
+```
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/midagedev/toktape/main/scripts/install.sh | sh
+```
+
+```sh
 go install github.com/midagedev/toktape/cmd/toktape@latest
 ```
 
-One static binary with nothing to resolve, so `scp` to the box that runs the
-server is also a valid install. A Homebrew tap is coming.
+The script verifies the download against the release checksums and installs to
+`~/.local/bin`; set `TOKTAPE_INSTALL` to put it elsewhere and `TOKTAPE_VERSION`
+to pin a release. One static binary with nothing to resolve, so `scp` to the
+box that runs the server is also a valid install.
+
+Linux is the primary target. macOS attaches to a remote llama-server with
+`--url`, since the `/proc` view the card is built on only exists on the server's
+own host.
+
+<details>
+<summary>Cutting a release</summary>
+
+Push a `v*` tag and `.github/workflows/release.yml` runs GoReleaser. It needs
+one repository secret, `HOMEBREW_TAP_GITHUB_TOKEN`: a token with write access to
+`midagedev/homebrew-tap`, because the built-in `GITHUB_TOKEN` cannot write to
+another repository. Set it before the first tag, or the tap will not be
+updated.
+
+</details>
 
 ## First run
 

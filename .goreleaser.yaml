@@ -1,0 +1,119 @@
+# GoReleaser v2 — https://goreleaser.com
+#
+# One static binary per platform, nothing to resolve at runtime. Linux is the
+# primary target (amd64 for workstations, arm64 for Jetson/Grace boxes) and
+# macOS is built so a laptop can attach to a remote llama-server with --url.
+#
+# Cut a release by pushing a tag: `git tag v0.1.0 && git push origin v0.1.0`.
+# .github/workflows/release.yml then runs `goreleaser release --clean`.
+version: 2
+
+project_name: toktape
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: toktape
+    main: ./cmd/toktape
+    binary: toktape
+    env:
+      # No cgo anywhere in the tree; this keeps the artifacts fully static.
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    # cmd/toktape/main.go declares `var version = "dev"`, so the symbol that -X
+    # has to reach is main.version.
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: toktape
+    ids:
+      - toktape
+    formats:
+      - tar.gz
+    # Explicit, because the default template appends a conditional arch version
+    # suffix. scripts/install.sh builds this exact string from uname, so the two
+    # must be read together.
+    name_template: "toktape_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  # Plain checksums.txt, not the default toktape_<version>_checksums.txt:
+  # scripts/install.sh fetches it by a fixed name.
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  sort: asc
+  use: git
+  # Commit subjects in this repo are `pkg: summary`, not Conventional Commits,
+  # so the grouping is permissive on purpose: anything that happens to carry a
+  # feat/fix prefix is grouped, everything else falls into Changes. A subject
+  # that matches nothing must never fail the release.
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Changes
+      order: 999
+  filters:
+    exclude:
+      - "^Merge "
+
+release:
+  github:
+    owner: midagedev
+    name: toktape
+  draft: false
+  prerelease: auto
+  name_template: "toktape {{ .Tag }}"
+  footer: |
+    ## Install
+
+    ```sh
+    brew install midagedev/tap/toktape
+    ```
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/midagedev/toktape/main/scripts/install.sh | sh
+    ```
+
+# A formula, not a cask: casks are macOS-only and Linux is this tool's primary
+# target, so Linuxbrew users need `brew install midagedev/tap/toktape` to work.
+brews:
+  - name: toktape
+    ids:
+      - toktape
+    repository:
+      owner: midagedev
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/midagedev/toktape"
+    description: "The black-box tape for local LLM serving"
+    license: MIT
+    commit_author:
+      name: goreleaser
+      email: noreply@github.com
+    commit_msg_template: "toktape: {{ .Tag }}"
+    test: |
+      system "#{bin}/toktape", "version"
