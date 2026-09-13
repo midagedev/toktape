@@ -231,6 +231,9 @@ func (r *run) collectModel() {
 	mi, tensors, err := placement.ModelInfoFromFile(path)
 	if err == nil {
 		r.model, r.tensors = mi, tensors
+		// The header was read from the named part; the variant directory and
+		// the whole set's size come from the file system around it (TTP-32).
+		r.fillShardSet(path, true)
 		return
 	}
 	// A warning is printed verbatim on the card, so it is a short human
@@ -243,6 +246,12 @@ func (r *run) collectModel() {
 		FileName: base,
 		Quant:    placement.QuantFromFileName(base),
 	}
+	// The parts are not on this machine either, so they are named but never
+	// stat'ed: FileBytes stays 0 and the card prints "?" rather than the size
+	// of a file it could not see. The warning above already says the file was
+	// unreadable, and a second one about the other eight parts would only
+	// crowd the card.
+	r.fillShardSet(path, false)
 }
 
 // collectProcess finds the local server process and reads its argv, which is

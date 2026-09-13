@@ -1,0 +1,31 @@
+┌──────────────────────────────────────────────────────────────────────┐
+│ toktape v0.1.0                   20260913-161540-deepseek-v4-1-flash │
+├──────────────────────────────────────────────────────────────────────┤
+│ MODEL    DeepSeek-V4.1-Flash-engramQ8-tokembdBF16 · 9 shards         │
+│          Q4_K_M · 400.0 GiB                                          │
+│ ENGINE   llama-server b3650 (a1b2c3d) · linux 6.8.0-45-generic       │
+│          bigram                                                      │
+│ RIG      2× RTX 3090 24G · AMD EPYC 9354 32-Core Processor           │
+│          768 GB DDR5-4800                                            │
+├──────────────────────────────────────────────────────────────────────┤
+│ Decode        6.9 tok/s · ≈ 150 GB/s, 8% of peak                     │
+│ Prefill       172 tok/s · TTFT 2650 ms · 512 prompt tokens           │
+│ Context       16384 (512 in / 248 out)                               │
+│ Prefix cache  25% hit (128/512) · warm                               │
+│ Streams       4 × 6.9 tok/s = 27.6 tok/s aggregate                   │
+│               TTFT p50 2650 ms p95 3100 ms · slots busy max 4        │
+├──────────────────────────────────────────────────────────────────────┤
+│ MEMORY   GPU0 [██████████] 23.9/24.0 GiB                             │
+│          GPU1 [██████████] 23.6/24.0 GiB                             │
+│          weights 43.0 | kv 3.0 | compute 1.5 GiB                     │
+│          Host RSS 359.0 GiB (file 357.0 / anon 2.0)                  │
+│          Page faults 0.0 maj/token (0 during decode)                 │
+├──────────────────────────────────────────────────────────────────────┤
+│ HOST     GPU0 58°C 174 W · GPU1 56°C 166 W · throttled: no           │
+│          contended: no                                               │
+├──────────────────────────────────────────────────────────────────────┤
+│ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0 -t 32    │
+│          -ot blk\.[0-9]+\.ffn_(gate|up|down)_exps\.weight=CPU        │
+├──────────────────────────────────────────────────────────────────────┤
+│                toktape · github.com/midagedev/toktape                │
+└──────────────────────────────────────────────────────────────────────┘

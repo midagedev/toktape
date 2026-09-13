@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -475,12 +476,19 @@ func fitRows(lines []string, blank string, n int) []string {
 }
 
 // modelName is what the title bar calls the model: the GGUF's own name when it
-// has one, otherwise the file name with the extension dropped.
+// has one, otherwise the file name with the extension dropped — and, for a
+// split set, with the "-00001-of-00009" part marker dropped too, so the bar
+// names the model rather than part one of it (TTP-32). card.ModelStem is the
+// same trim for a single file, so no existing title moves.
+//
+// The variant directory the card's MODEL line prints is deliberately not here:
+// the title bar is the one place on screen where space is scarcer than
+// precision, and the card beside it carries the full label.
 func modelName(mi tape.ModelInfo) string {
 	if mi.Name != "" {
 		return mi.Name
 	}
-	return strings.TrimSuffix(mi.FileName, ".gguf")
+	return card.ModelStem(mi.FileName)
 }
 
 // rigSummary collapses the GPU list to "2× RTX 3090". Vendor prefixes are

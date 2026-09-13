@@ -98,12 +98,26 @@ func build(s *tape.RunSummary) *content {
 func (c *content) buildHeader(s *tape.RunSummary) {
 	c.version = versionString(s)
 	c.runID = orUnknown(s.ID)
-	c.modelFile = orUnknown(s.Model.FileName)
+	// The header names the file, not the GGUF's general.name. For a split set
+	// that is the variant label rather than part one's name, which every
+	// variant of the model shares (TTP-32); card.ModelLabel returns the file
+	// name unchanged for a single file.
+	c.modelFile = orUnknown(card.ModelLabel(s.Model))
 	c.modelSub = joinParts(" · ",
 		orUnknown(s.Model.Quant),
+		shardsPart(s.Model),
 		formatFileGiB(s.Model.FileBytes),
 		s.Model.Arch,
 	)
+}
+
+// shardsPart is the "9 shards" element of the header sub-line, empty for a
+// single file so joinParts drops it and the line is what it always was.
+func shardsPart(m tape.ModelInfo) string {
+	if !card.Sharded(m) {
+		return ""
+	}
+	return strconv.Itoa(m.Shards) + " shards"
 }
 
 // versionString mirrors internal/card/card.go: the summary's own version wins
@@ -453,12 +467,7 @@ func contentionObserved(ci tape.ContentionInfo) bool {
 // ---------------------------------------------------------------- footer ---
 
 func (c *content) buildFooter(s *tape.RunSummary) {
-	c.cols[0] = footerCol{label: "model", rows: [footerRows]string{
-		modelDisplayName(s.Model),
-		orUnknown(s.Model.Quant),
-		joinParts(" · ", formatFileGiB(s.Model.FileBytes), formatParamsB(s.Model.Params)),
-		modelShape(s.Model),
-	}}
+	c.cols[0] = footerCol{label: "model", rows: modelFooterRows(s.Model)}
 
 	c.cols[1] = footerCol{label: "rig", rows: [footerRows]string{
 		strings.Join(rigGPUs(s.Host.GPUs), " + "),
@@ -512,11 +521,56 @@ func engineFlagRow(names, values []string) string {
 	return strings.Join(parts, " · ")
 }
 
+// modelDisplayName is what the footer's model column calls the model: the
+// GGUF's own general.name when it has one, else the file name — or, for a
+// split set, the variant label the text card's MODEL line uses, because part
+// one's name is the same string for every variant of the model (TTP-32).
+// card.ModelLabel returns the file name unchanged for a single file, so this
+// is byte-identical to what it was for every non-sharded card.
 func modelDisplayName(m tape.ModelInfo) string {
 	if strings.TrimSpace(m.Name) != "" {
 		return m.Name
 	}
-	return orUnknown(m.FileName)
+	return orUnknown(card.ModelLabel(m))
+}
+
+// modelFooterRows is the four-row model column of the footer grid.
+//
+// A split set (TTP-32) spends its middle two rows differently. Two variants of
+// one model are hard-linked side by side and share general.name as well as
+// every file name, so the directory can be the only thing on the whole card
+// that says which of them ran, and it has to be readable: the part count joins
+// the quant, the parameter count goes up to join it, and the size row closes
+// with the variant. A single-file model is untouched — every row is the string
+// it always was — and the architecture row never moves.
+//
+// The column is 255px and a 40-character directory does not fit beside a size
+// and a parameter count; it was measured truncating to "DeepSeek-V4.1-F…",
+// which is the one thing on the card that must not be cut. variantTag drops the
+// part the row above already says.
+func modelFooterRows(m tape.ModelInfo) [footerRows]string {
+	quant := orUnknown(m.Quant)
+	size := joinParts(" · ", formatFileGiB(m.FileBytes), formatParamsB(m.Params))
+	if card.Sharded(m) {
+		quant = joinParts(" · ", orUnknown(m.Quant), shardsPart(m), formatParamsB(m.Params))
+		size = joinParts(" · ", formatFileGiB(m.FileBytes), variantTag(m))
+	}
+	return [footerRows]string{modelDisplayName(m), quant, size, modelShape(m)}
+}
+
+// variantTag is the part of the model's directory the rest of the column does
+// not already say: "DeepSeek-V4.1-Flash-engramQ8-tokembdBF16" beside a model
+// called DeepSeek V4.1 Flash is "engramQ8-tokembdBF16", which is exactly what
+// separates the hard-linked variants of one model set. It is a substring of the
+// recorded directory, never a rewrite of it, and the text card and the tape
+// keep the directory whole. A directory that shares no prefix with the file
+// name is printed as it stands.
+func variantTag(m tape.ModelInfo) string {
+	stem := card.ModelStem(m.FileName)
+	if stem == "" || !strings.HasPrefix(m.Dir, stem) {
+		return m.Dir
+	}
+	return strings.TrimLeft(strings.TrimPrefix(m.Dir, stem), "-_. ")
 }
 
 // modelShape is the architecture line: dense models have no expert counts, so

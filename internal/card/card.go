@@ -185,8 +185,12 @@ func versionString(s *tape.RunSummary) string {
 
 func identitySection(s *tape.RunSummary) []string {
 	var out []string
+	// A shard set names its variant directory and says how many parts it has;
+	// a single file is unchanged (TTP-32). shardsPart is empty for a single
+	// file and wrapJoin drops it, so the existing goldens do not move.
 	out = append(out, field("MODEL", blockLabelW, " · ",
-		orUnknown(s.Model.FileName),
+		orUnknown(ModelLabel(s.Model)),
+		shardsPart(s.Model),
 		orUnknown(s.Model.Quant),
 		formatGiB(s.Model.FileBytes),
 	)...)
