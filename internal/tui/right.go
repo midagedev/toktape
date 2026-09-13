@@ -134,13 +134,7 @@ func placementRows(m Model, th Theme, t time.Duration, cw int) []string {
 		out = append(out, barRow(th, cw, fmt.Sprintf("GPU%d", g.Index), frac, fmtG(int64(eased)), th.accentMuted))
 	}
 
-	if cpu := deviceBytes(m.Summary.Placement, tape.DeviceCPU); cpu > 0 {
-		frac := 0.0
-		if ram := m.Summary.Host.RAMBytes; ram > 0 {
-			frac = float64(cpu) / float64(ram)
-		}
-		out = append(out, barRow(th, cw, "CPU", frac, fmtG(cpu), th.accentMuted))
-	}
+	out = append(out, hostRows(m, th, t, cw, cur, prev)...)
 
 	p := m.Summary.Placement
 	if split := p.VRAMWeightsBytes + p.VRAMKVBytes + p.VRAMComputeBytes; split > 0 {
@@ -183,6 +177,120 @@ func placementRows(m Model, th Theme, t time.Duration, cw int) []string {
 		out = append(out, kvRow(th, cw, "never loaded", fmtG(p.NeverLoadedBytes), th.text))
 	}
 	return out
+}
+
+// hostRows is the CPU placement: a bar whose full width is what llama.cpp put
+// on the host, split into the part that is in RAM and the part that is read
+// back from the model file, with a legend naming both. Nothing when nothing
+// was placed on the CPU.
+//
+// The row used to be placed ÷ RAM (TTP-63, user 2026-09-14: "cpu 388g
+// 찍혀있는데 이게 ram이랑 nvme랑 구분이 안되나?"). On the ws rig that is 388
+// GiB over 252 GB — 1.54, clamped to a full bar — and a full bar is the shape
+// of "it fits". What was actually happening is the opposite: about 193 GiB of
+// the mapping is not resident and comes back from the file on every touch,
+// which is what the maj/tok sparkline one section down counts. DeviceCPU is
+// llama.cpp's backend assignment, never a residency, so the bar now measures
+// the placement against itself and the split inside it is the answer.
+//
+// The split is tape.Residency's and is never re-derived here: the pane, the
+// modal, the text card and the PNG all read that one function, so they cannot
+// drift apart. The word is "disk" rather than "NVMe" — what was observed is
+// that the pages are not resident and come back from the file; the medium
+// behind that file is not in the tape.
+func hostRows(m Model, th Theme, t time.Duration, cw int, cur, prev *tape.RunSample) []string {
+	p := m.Summary.Placement
+	// The sample the rest of the section animates on, with the run's final
+	// reading as the fallback, the way memoryRows does it.
+	sample := m.Summary.Memory.AtEnd
+	if cur != nil {
+		sample = cur.Mem
+	}
+	res := tape.Residency(p, sample)
+	if res.Placed <= 0 {
+		return nil
+	}
+	const labelW, valueW = 5, 7
+	value := fmtG(res.Placed)
+
+	// No /proc sample: a remote server, where the placement is all that was
+	// observed. The bar is the plain full one and there is no legend — a
+	// "disk 0G" here would be a reading nobody took.
+	if !res.Ok {
+		return []string{barRow(th, cw, "CPU", 1, value, th.accentMuted)}
+	}
+
+	// What moves during a run is how much of the mapping is resident, not how
+	// much was placed, so the resident share is what eases — the same tween
+	// the GPU bars run on the bytes in VRAM.
+	prevRes := res
+	since := time.Duration(0)
+	if prev != nil {
+		prevRes = tape.Residency(p, prev.Mem)
+		since = cur.T
+	}
+	resident := ease(float64(prevRes.Resident), float64(res.Resident), since, t)
+	if resident > float64(res.Placed) {
+		resident = float64(res.Placed)
+	}
+	// A run with nothing paged draws no paged segment at all, mid-tween
+	// included: the remainder of a bar that is still filling is the empty
+	// shade, which is what a GPU bar does, and a warm segment that appears for
+	// a third of a second and vanishes would be an alarm about nothing.
+	paged := 0.0
+	if res.Paged > 0 {
+		paged = float64(res.Placed) - resident
+		if paged < 0 {
+			paged = 0
+		}
+	}
+
+	// The paged share wears the warm hue only once the run is cold. The
+	// palette gives that hue to alarms (CLAUDE.md) and this is the thing it
+	// alarms about; a rig that keeps a little of the mapping out of RAM and
+	// never faults during decode is working fine and must not be lit.
+	pagedSt := th.dim
+	if majFaultsPerToken(m) >= tape.ColdMajFaultsPerToken {
+		pagedSt = th.warn
+	}
+
+	barW := cw - labelW - valueW - 1
+	segs := segmentBar([]float64{resident, paged}, float64(res.Placed), barW)
+	l := newLine(th, cw)
+	l.add(th.dim, pad("CPU", labelW))
+	l.add(th.accentMuted, segs[0])
+	l.add(pagedSt, segs[1])
+	l.add(th.darkFill, segs[2])
+	l.space(1)
+	l.add(th.text, padLeft(value, valueW))
+	out := []string{l.String()}
+
+	// The legend under it, shaped like the vram split's: the glyph in its
+	// segment's own shade, the word dim, the figure a step brighter so the two
+	// numbers are what the eye lands on. It indents under the bar when there
+	// is room and slides left when there is not, rather than losing a figure
+	// to the clip.
+	ramTxt, diskTxt := " ram "+fmtG(int64(resident)), " disk "+fmtG(int64(paged))
+	legendW := 1 + width(ramTxt)
+	if paged > 0 {
+		legendW += 2 + 1 + width(diskTxt)
+	}
+	ind := labelW
+	if ind+legendW > cw {
+		ind = max(0, cw-legendW)
+	}
+	l2 := newLine(th, cw)
+	l2.space(ind)
+	l2.add(th.accentMuted, string(barGlyph))
+	l2.add(th.dim, " ram ")
+	l2.add(th.textMid, fmtG(int64(resident)))
+	if paged > 0 {
+		l2.space(2)
+		l2.add(pagedSt, string(barGlyph))
+		l2.add(th.dim, " disk ")
+		l2.add(th.textMid, fmtG(int64(paged)))
+	}
+	return append(out, l2.String())
 }
 
 // memoryRows is the process memory picture and the sparkline the clip is
@@ -537,16 +645,6 @@ func gpuUsed(gs []tape.GPUSample, idx int) int64 {
 	for _, g := range gs {
 		if g.Index == idx {
 			return g.UsedBytes
-		}
-	}
-	return 0
-}
-
-// deviceBytes is the bytes the placement puts on one device.
-func deviceBytes(p tape.PlacementSummary, device string) int64 {
-	for _, d := range p.Devices {
-		if d.Device == device {
-			return d.Bytes
 		}
 	}
 	return 0

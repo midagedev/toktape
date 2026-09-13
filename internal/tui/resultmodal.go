@@ -73,7 +73,10 @@ func resultModal(m Model, th Theme, boxW int) []string {
 		l.addTrunc(th.textMid, s)
 		line(l.String())
 	}
-	for _, row := range placementLines(th, s.Placement, inner, 2) {
+	// The modal is the run's last frame, so the residency it names is the run's
+	// last reading (TTP-63).
+	res := tape.Residency(s.Placement, s.Memory.AtEnd)
+	for _, row := range placementLines(th, s.Placement, res, majFaultsPerToken(m) >= tape.ColdMajFaultsPerToken, inner, 2) {
 		line(row)
 	}
 	blank()
@@ -161,36 +164,93 @@ func engineLine(m Model) string {
 // that hold weights, in the pane's descending shades, and a legend naming
 // each device's share, both indented by ind columns. Nothing when the
 // placement was not derived.
-func placementLines(th Theme, p tape.PlacementSummary, w, ind int) []string {
+//
+// The host's share is split again inside the bar (TTP-63, user 2026-09-14:
+// "cpu 388g 찍혀있는데 이게 ram이랑 nvme랑 구분이 안되나?"). A CPU placement
+// is llama.cpp's backend assignment, not a residency, and a reader looking at
+// the last frame of a clip reads that segment as "and the rest is in RAM". On
+// the ws rig half of it is not: res says how much, and the part that is read
+// back from the file takes the empty shade, which is the one the eye already
+// reads as "not filled". Its legend entry carries both figures rather than a
+// second entry, so the legend still has one entry per device.
+//
+// res is tape.Residency's, taken at the sample the caller is showing; a
+// residency that is not Ok, or a run with nothing paged, draws exactly what
+// this function drew before.
+//
+// cold is the pane's own verdict (maj/tok at or above tape.ColdMajFaultsPerToken):
+// the weights are being read back from the file while the model decodes, and
+// then the paged share wears the warm hue here exactly as it does in the pane.
+// Without it the surface that alarms is the live screen and the surface that
+// does not is the modal — which is the frame a reader looks at longest.
+func placementLines(th Theme, p tape.PlacementSummary, res tape.HostResidency, cold bool, w, ind int) []string {
+	// One entry per device in the legend, whatever the bar does inside it.
+	// The value is a run of spans rather than a string because the host's
+	// carries two figures and the words between them are dim, the way the
+	// pane's legend paints the same fact: words dim, figures a step brighter.
+	type span struct {
+		st lipgloss.Style
+		s  string
+	}
+	type entry struct {
+		st    lipgloss.Style
+		label string
+		value []span
+	}
 	var parts []float64
-	var devs []tape.DevicePlacement
+	var styles []lipgloss.Style
+	var legend []entry
 	total := 0.0
+	// The host is split once: Residency sums every CPU device, so splitting a
+	// second one would spend the same bytes twice.
+	split := res.Ok && res.Paged > 0
+	shades := []lipgloss.Style{th.accentMuted, th.accentLow, th.dim}
 	for _, d := range p.Devices {
 		if d.Bytes <= 0 {
 			continue
 		}
-		devs = append(devs, d)
-		parts = append(parts, float64(d.Bytes))
+		st := shades[min(len(legend), len(shades)-1)]
 		total += float64(d.Bytes)
+		if d.Device == tape.DeviceCPU && split {
+			split = false
+			paged := th.darkFill
+			if cold {
+				paged = th.warn
+			}
+			parts = append(parts, float64(res.Resident), float64(res.Paged))
+			styles = append(styles, st, paged)
+			legend = append(legend, entry{st, d.Device, []span{
+				{th.textMid, fmtG(res.Resident)},
+				{th.dim, " ram · "},
+				{th.textMid, fmtG(res.Paged)},
+				{th.dim, " disk"},
+			}})
+			continue
+		}
+		parts = append(parts, float64(d.Bytes))
+		styles = append(styles, st)
+		legend = append(legend, entry{st, d.Device, []span{{th.textMid, fmtG(d.Bytes)}}})
 	}
-	if len(devs) == 0 || w-2*ind < 20 {
+	if len(legend) == 0 || w-2*ind < 20 {
 		return nil
 	}
-	shades := []lipgloss.Style{th.accentMuted, th.accentLow, th.dim, th.darkFill}
 	segs := segmentBar(parts, total, w-2*ind)
 	bar := newLine(th, w)
-	legend := newLine(th, w)
 	bar.space(ind)
-	legend.space(ind)
-	for i, d := range devs {
-		st := shades[min(i, len(shades)-1)]
-		bar.add(st, segs[i])
-		if i > 0 {
-			legend.space(2)
-		}
-		legend.add(st, string(barGlyph))
-		legend.add(th.dim, " "+d.Device+" ")
-		legend.add(th.textMid, fmtG(d.Bytes))
+	for i := range parts {
+		bar.add(styles[i], segs[i])
 	}
-	return []string{bar.String(), legend.String()}
+	l := newLine(th, w)
+	l.space(ind)
+	for i, e := range legend {
+		if i > 0 {
+			l.space(2)
+		}
+		l.add(e.st, string(barGlyph))
+		l.add(th.dim, " "+e.label+" ")
+		for _, sp := range e.value {
+			l.add(sp.st, sp.s)
+		}
+	}
+	return []string{bar.String(), l.String()}
 }
