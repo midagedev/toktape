@@ -121,6 +121,70 @@ func TestParseFlags(t *testing.T) {
 			argv: nil,
 			want: tape.ServerFlags{},
 		},
+		// Speculative decoding (TTP-30). The four named draft flags leave
+		// Other; the draft's own placement flags stay in it verbatim.
+		{
+			name: "a speculative decoding command line, short spellings",
+			argv: []string{
+				"llama-server", "-m", "/models/target.gguf",
+				"-md", "/models/drafts/DSpark-0.6B-Q8_0.gguf",
+				"--draft-max", "3", "--draft-min", "1", "--draft-p-min", "0.75",
+			},
+			want: tape.ServerFlags{
+				DraftModel: "DSpark-0.6B-Q8_0.gguf",
+				DraftMax:   "3",
+				DraftMin:   "1",
+				DraftPMin:  "0.75",
+				Other:      []string{"-m /models/target.gguf"},
+			},
+		},
+		{
+			name: "the long and alternative spellings parse to the same fields",
+			argv: []string{
+				"llama-server",
+				"--model-draft", "/models/drafts/DSpark-0.6B-Q8_0.gguf",
+				"--draft-n", "5", "--draft-n-min", "2",
+			},
+			want: tape.ServerFlags{
+				DraftModel: "DSpark-0.6B-Q8_0.gguf",
+				DraftMax:   "5",
+				DraftMin:   "2",
+			},
+		},
+		{
+			name: "--draft is the block size, the same field as --draft-max",
+			argv: []string{"llama-server", "--draft", "8"},
+			want: tape.ServerFlags{DraftMax: "8"},
+		},
+		{
+			name: "the inline = form carries the same values",
+			argv: []string{
+				"llama-server",
+				"-md=/models/drafts/DSpark-0.6B-Q8_0.gguf",
+				"--draft-max=3", "--draft-min=1", "--draft-p-min=0.75",
+			},
+			want: tape.ServerFlags{
+				DraftModel: "DSpark-0.6B-Q8_0.gguf",
+				DraftMax:   "3",
+				DraftMin:   "1",
+				DraftPMin:  "0.75",
+			},
+		},
+		{
+			name: "the draft's own placement flags stay verbatim in Other",
+			argv: []string{
+				"llama-server", "-md", "/models/drafts/d.gguf",
+				"-ngld", "99", "-devd", "CUDA1", "-ctkd", "q8_0", "-ctvd", "q8_0",
+				"--n-gpu-layers-draft", "40", "--device-draft", "CUDA0",
+			},
+			want: tape.ServerFlags{
+				DraftModel: "d.gguf",
+				Other: []string{
+					"-ngld 99", "-devd CUDA1", "-ctkd q8_0", "-ctvd q8_0",
+					"--n-gpu-layers-draft 40", "--device-draft CUDA0",
+				},
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -156,7 +220,8 @@ func TestParseFlagsNeverInventsADefault(t *testing.T) {
 	got := ParseFlags([]string{"llama-server", "-m", "/models/x.gguf"})
 	if got.NGL != "" || got.FlashAttn != "" || got.Batch != "" || got.UBatch != "" ||
 		got.CacheTypeK != "" || got.CacheTypeV != "" || got.LoadMode != "" ||
-		got.CPUMoE != "" || got.Threads != "" || got.OverrideTens != nil {
+		got.CPUMoE != "" || got.Threads != "" || got.OverrideTens != nil ||
+		got.DraftModel != "" || got.DraftMax != "" || got.DraftMin != "" || got.DraftPMin != "" {
 		t.Errorf("ParseFlags invented a value: %+v", got)
 	}
 }

@@ -222,11 +222,30 @@ func engineString(srv tape.ServerInfo) string {
 	case srv.Build != "":
 		b.WriteString(" " + srv.Build)
 	case srv.Commit != "":
-		b.WriteString(" (" + srv.Commit + ")")
+		b.WriteString(" " + bareCommit(srv))
 	default:
 		b.WriteString(" " + unknown)
 	}
 	return b.String()
+}
+
+// bareCommit renders a commit that has no build number beside it.
+//
+// The parentheses on "llama-server (abcdef12)" are what separates the hash
+// from the build number it belongs to. ik_llama.cpp has no build number at all
+// (TTP-33, 2026-09-13) — the hash is the whole version — so bracketing it
+// would set apart a figure there is nothing to set it apart from, and the line
+// reads "ik_llama.cpp 7b79b229" instead. Every other engine keeps the
+// parentheses, because for them a missing build number is a gap, not a fact
+// about the project, and the brackets are where that gap shows.
+//
+// internal/card/png/content.go carries the same rule: the two renderings of one
+// summary must never disagree.
+func bareCommit(srv tape.ServerInfo) string {
+	if srv.Kind == tape.ServerIKLlama {
+		return srv.Commit
+	}
+	return "(" + srv.Commit + ")"
 }
 
 func osString(h tape.HostInfo) string {
@@ -320,6 +339,10 @@ func speedSection(s *tape.RunSummary) []string {
 		formatInt(promptTotal)+" prompt tokens",
 	)...)
 
+	if parts := draftParts(s); len(parts) > 0 {
+		out = append(out, field("Draft", speedLabelW, " · ", parts...)...)
+	}
+
 	out = append(out, labelled("Context", speedLabelW, []string{
 		contextString(s.Server.CtxSize, promptTotal, t.PredictedN, reasoningTokens(s)),
 	})...)
@@ -330,6 +353,47 @@ func speedSection(s *tape.RunSummary) []string {
 		out = append(out, streamLines(s)...)
 	}
 	return out
+}
+
+// draftParts is the Draft row, or nil when the run used no speculative
+// decoding (TTP-30, 2026-09-13).
+//
+//	Draft         DSpark-0.6B-Q8_0.gguf · n_max 3 · 60% accepted (174/290)
+//
+// The row exists because a decode rate on its own does not say where the speed
+// came from. Speculative decoding makes the rate a property of three things —
+// the draft model, the block size it was allowed to guess in, and how often
+// the target agreed — and a reader who wants the same number on their own box
+// needs all three. The acceptance figure carries its own counts because a
+// percentage over an unstated denominator is the kind of number this card
+// exists to replace.
+//
+// The row's presence is decided by the reported figure, not by the flags: the
+// server's timings object is what says a draft actually ran. A model name that
+// is empty prints "?" like every other unobserved field — a draft cannot run
+// without a model, so "" means nobody read the command line, never that the
+// server had a default.
+func draftParts(s *tape.RunSummary) []string {
+	t := s.Timings
+	if t.DraftN == nil {
+		return nil
+	}
+	f := s.Server.Flags
+	parts := []string{
+		orUnknown(f.DraftModel),
+		"n_max " + orUnknown(f.DraftMax),
+	}
+	// Zero drafted is a reading, and it is not "0% accepted": there was no
+	// denominator, so there is no rate to report.
+	if *t.DraftN == 0 {
+		return append(parts, "0 drafted")
+	}
+	accepted := 0
+	if t.DraftNAccepted != nil {
+		accepted = *t.DraftNAccepted
+	}
+	return append(parts, fmt.Sprintf("%s accepted (%d/%d)",
+		formatPct(float64(accepted)/float64(*t.DraftN)), accepted, *t.DraftN))
 }
 
 // contextString is the value of the Context row: the window the server was
@@ -630,6 +694,24 @@ func flagTokens(srv tape.ServerInfo) (base []string, ot string) {
 	}
 	if f.Threads != "" {
 		base = append(base, "-t "+f.Threads)
+	}
+	// Speculative decoding (TTP-30). These used to reach the card inside
+	// Other, because the parser did not name them; now that it does, they are
+	// printed here rather than dropped — a flag that was on the command line
+	// belongs on the FLAGS line. The Draft row in the speed section repeats
+	// the model and the block size because it needs them beside the acceptance
+	// rate, but --draft-min and --draft-p-min have no other home at all.
+	if f.DraftModel != "" {
+		base = append(base, "-md "+f.DraftModel)
+	}
+	if f.DraftMax != "" {
+		base = append(base, "--draft-max "+f.DraftMax)
+	}
+	if f.DraftMin != "" {
+		base = append(base, "--draft-min "+f.DraftMin)
+	}
+	if f.DraftPMin != "" {
+		base = append(base, "--draft-p-min "+f.DraftPMin)
 	}
 	base = append(base, f.Other...)
 

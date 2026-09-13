@@ -99,6 +99,13 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 		n   float64
 	)
 	agrees := true
+	// The draft figures are pooled rather than averaged (tape.TimingsSummary,
+	// TTP-30): accepted over drafted is a ratio, and the run's acceptance rate
+	// is the sum of the numerators over the sum of the denominators. Averaging
+	// the per-stream rates would give a stream that drafted twelve tokens the
+	// same weight as one that drafted three hundred.
+	var draftN, draftAccepted int
+	draftReported := false
 	for i := range recs {
 		t := recs[i].Timings
 		if recs[i].Error != "" || t.PredictedN <= 0 {
@@ -126,12 +133,21 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 		if !t.ClientAgreesWithServer {
 			agrees = false
 		}
-		if t.DraftN != nil && out.DraftN == nil {
-			out.DraftN, out.DraftNAccepted = t.DraftN, t.DraftNAccepted
+		if t.DraftN != nil {
+			draftReported = true
+			draftN += *t.DraftN
+			if t.DraftNAccepted != nil {
+				draftAccepted += *t.DraftNAccepted
+			}
 		}
 	}
 	if n == 0 {
 		return tape.TimingsSummary{}
+	}
+	// New ints, never the records' own: the run-level pair must not alias a
+	// stream's, or writing the sum would rewrite the request it came from.
+	if draftReported {
+		out.DraftN, out.DraftNAccepted = &draftN, &draftAccepted
 	}
 	out.PromptN = int(float64(out.PromptN)/n + 0.5)
 	out.CacheN = int(float64(out.CacheN)/n + 0.5)

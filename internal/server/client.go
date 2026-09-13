@@ -295,18 +295,66 @@ func DetectKind(p *Props) tape.ServerKind {
 	return tape.ServerLlamaCPP
 }
 
-// BuildFromProps splits a build_info string such as "b4321-abcdef12" into the
-// build number and the short commit hash. A string without a separator is all
-// build; an empty string yields two empty strings, which print as "?".
+// BuildFromProps splits a build_info string into the build number and the
+// short commit hash. An empty string yields two empty strings, which print
+// as "?".
+//
+// Mainline llama.cpp stamps "b4321-abcdef12" and the dash split is the whole
+// of it. ik_llama.cpp has no bNNNN counter (TTP-33, 2026-09-13), so its
+// build_info is whatever its own build stamped there, and the shapes below are
+// the ones seen or plausibly produced by a tree without a release number:
+//
+//	b4321-abcdef12     mainline: build b4321, commit abcdef12
+//	7b79b229           a bare short hash: no build, commit 7b79b229
+//	3650 (abcdef12)    a counter with its hash in parentheses
+//	build 3650         a counter and nothing else
+//
+// Whatever parses is kept and nothing is invented: a shape none of these match
+// is returned whole as the build, which is what it was called in /props.
 func BuildFromProps(buildInfo string) (build, commit string) {
 	s := strings.TrimSpace(buildInfo)
 	if s == "" {
 		return "", ""
 	}
+	// "build 3650", possibly with a parenthesised hash after it.
+	if rest := strings.TrimSpace(strings.TrimPrefix(s, "build ")); rest != s {
+		s = rest
+	}
+	if s == "" {
+		return "", ""
+	}
+	// "<n> (<hash>)". Either half may be empty, and an empty half stays empty
+	// rather than borrowing the other.
+	if i := strings.Index(s, "("); i >= 0 && strings.HasSuffix(s, ")") {
+		return strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+1 : len(s)-1])
+	}
 	if i := strings.Index(s, "-"); i >= 0 {
 		return s[:i], s[i+1:]
 	}
+	// A bare short hash is a commit, not a build number. Mainline's "b4321" is
+	// five characters and so cannot reach this rule.
+	if isShortHash(s) {
+		return "", s
+	}
 	return s, ""
+}
+
+// isShortHash reports whether s is a git object name as a build stamps it:
+// 7 to 40 hexadecimal digits and nothing else.
+func isShortHash(s string) bool {
+	if len(s) < 7 || len(s) > 40 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'f':
+		case r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Slot is one entry of GET /slots.

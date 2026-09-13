@@ -1,0 +1,225 @@
+{
+  "id": "20260913-161420-deepseek-v4-1-flash-q4-k",
+  "toktape_version": "0.1.0",
+  "started_at": "2026-09-13T16:14:20Z",
+  "finished_at": "2026-09-13T16:14:24.28Z",
+  "server": {
+    "kind": "ik_llama.cpp",
+    "url": "http://127.0.0.1:8080",
+    "commit": "7b79b229",
+    "pid": 51402,
+    "host": "workstation",
+    "args": [
+      "/usr/local/bin/llama-server",
+      "-m",
+      "/models/DeepSeek-V4.1-Flash-Q4_K_M.gguf",
+      "-md",
+      "/models/drafts/DSpark-0.6B-Q8_0.gguf",
+      "--draft-max",
+      "3",
+      "--draft-min",
+      "1",
+      "-c",
+      "16384",
+      "--parallel",
+      "4",
+      "-ngl",
+      "99",
+      "-ncmoe",
+      "48",
+      "-fa",
+      "on",
+      "-b",
+      "2048",
+      "-ub",
+      "512",
+      "-ctk",
+      "q8_0",
+      "-ctv",
+      "q8_0",
+      "-t",
+      "16"
+    ],
+    "flags": {
+      "ngl": "99",
+      "fa": "on",
+      "b": "2048",
+      "ub": "512",
+      "ctk": "q8_0",
+      "ctv": "q8_0",
+      "cpu_moe": "48",
+      "t": "16",
+      "model_draft": "DSpark-0.6B-Q8_0.gguf",
+      "draft_max": "3",
+      "draft_min": "1"
+    },
+    "n_slots": 4,
+    "ctx_size": 16384
+  },
+  "model": {
+    "path": "/models/DeepSeek-V4.1-Flash-Q4_K_M.gguf",
+    "file_name": "DeepSeek-V4.1-Flash-Q4_K_M.gguf",
+    "name": "DeepSeek V4.1 Flash",
+    "arch": "deepseek2",
+    "quant": "Q4_K_M",
+    "file_bytes": 49392123904,
+    "params": 81400000000,
+    "n_layers": 48,
+    "n_experts": 128,
+    "n_experts_used": 8,
+    "ctx_train": 131072,
+    "active_bytes_per_token": 6720000000
+  },
+  "host": {
+    "hostname": "workstation",
+    "os": "linux",
+    "kernel": "6.8.0-45-generic",
+    "cpu": "AMD Ryzen 9 7950X",
+    "cpu_cores": 16,
+    "cpu_threads": 32,
+    "ram_bytes": 68719476736,
+    "ram_speed": "DDR5-6000",
+    "ram_channels": 2,
+    "gpus": [
+      {
+        "index": 0,
+        "name": "NVIDIA GeForce RTX 3090",
+        "vram_bytes": 25769803776,
+        "driver": "550.54.14",
+        "pcie": "4.0 x16",
+        "peak_bw_bps": 936200000000
+      },
+      {
+        "index": 1,
+        "name": "NVIDIA GeForce RTX 3090",
+        "vram_bytes": 25769803776,
+        "driver": "550.54.14",
+        "pcie": "4.0 x16",
+        "peak_bw_bps": 936200000000
+      }
+    ]
+  },
+  "placement": {
+    "devices": [
+      {
+        "device": "GPU0",
+        "bytes": 3650722201,
+        "classes": {
+          "attention": 1610612736,
+          "embeddings": 2040109465
+        },
+        "layers": "0-23 attn"
+      },
+      {
+        "device": "GPU1",
+        "bytes": 3543348019,
+        "classes": {
+          "attention": 1610612736,
+          "output": 1932735283
+        },
+        "layers": "24-47 attn"
+      },
+      {
+        "device": "CPU",
+        "bytes": 42198053684,
+        "classes": {
+          "experts": 42198053684
+        },
+        "layers": "0-47 experts"
+      }
+    ],
+    "never_loaded_bytes": 0,
+    "source": "gguf+args",
+    "vram_weights_bytes": 7194070220,
+    "vram_kv_bytes": 2576980378,
+    "vram_compute_bytes": 1503238554
+  },
+  "memory": {
+    "at_end": {
+      "virt_bytes": 53687091200,
+      "rss_bytes": 45204530790,
+      "rss_file_bytes": 44238163149,
+      "rss_anon_bytes": 966367642,
+      "rss_shmem_bytes": 0,
+      "swap_bytes": 0,
+      "maj_faults": 0,
+      "min_faults": 2148302
+    },
+    "peak_rss_bytes": 45204530790,
+    "mapped_file_bytes": 49392123904,
+    "maj_faults_total": 0,
+    "maj_faults_prompt": 0,
+    "maj_faults_decode": 0,
+    "maj_faults_per_token": 0
+  },
+  "concurrency": 4,
+  "timings": {
+    "prompt_n": 384,
+    "cache_n": 128,
+    "prompt_ms": 470,
+    "prompt_per_second": 817,
+    "predicted_n": 68,
+    "predicted_ms": 3578.9,
+    "predicted_per_second": 19,
+    "draft_n": 290,
+    "draft_n_accepted": 174,
+    "ttft_ms": 640,
+    "client_prompt_per_second": 809,
+    "client_predicted_per_second": 18.9,
+    "client_agrees_with_server": true,
+    "decode_label": "decode",
+    "itl_p50_ms": 52.6,
+    "itl_p95_ms": 58.1,
+    "itl_p99_ms": 71,
+    "effective_bw_bps": 127680000000
+  },
+  "aggregate": {
+    "streams": 4,
+    "wall_ms": 4280,
+    "total_prompt_n": 1536,
+    "total_predicted_n": 272,
+    "aggregate_predicted_per_second": 76,
+    "aggregate_prompt_per_second": 2130,
+    "per_stream_predicted_per_second": 19,
+    "ttft_p50_ms": 640,
+    "ttft_p95_ms": 720,
+    "slots_busy_max": 4
+  },
+  "cache": {
+    "hit_tokens": 128,
+    "prompt_total": 512,
+    "hit_ratio": 0.25,
+    "label": "warm"
+  },
+  "contention": {
+    "contended": false,
+    "loadavg1": 5.4,
+    "other_gpu_procs": 0
+  },
+  "template": {
+    "chat_template": "deepseek3",
+    "rendered_has_think_close": false,
+    "rendered_prompt_sha256": "3d81f04ac6b25e79f0a1c8d3b6e5074a2c9f1b8d4e6a03157c2d9b4f6e8a0135",
+    "rendered_prompt_tokens": 512
+  },
+  "gpus_at_end": [
+    {
+      "index": 0,
+      "used_bytes": 6657199309,
+      "proc_bytes": 6442450944,
+      "util_pct": 88,
+      "temp_c": 64,
+      "power_w": 240,
+      "clock_mhz": 1830
+    },
+    {
+      "index": 1,
+      "used_bytes": 5690831667,
+      "proc_bytes": 5476083302,
+      "util_pct": 84,
+      "temp_c": 61,
+      "power_w": 225,
+      "clock_mhz": 1815
+    }
+  ]
+}

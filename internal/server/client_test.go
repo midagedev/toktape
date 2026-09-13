@@ -123,6 +123,21 @@ func TestBuildFromProps(t *testing.T) {
 		{"b4321", "b4321", ""},
 		{"", "", ""},
 		{"  b1-aa  ", "b1", "aa"},
+		// TTP-33: ik_llama.cpp has no bNNNN release counter, so its build_info
+		// is not the mainline shape. These are the shapes the parser tolerates;
+		// the real one is whatever the lead measures off an ik server.
+		{"7b79b229", "", "7b79b229"},
+		{"  7b79b229  ", "", "7b79b229"},
+		{"3650 (a1b2c3d)", "3650", "a1b2c3d"},
+		{"b3650 (7b79b229)", "b3650", "7b79b229"},
+		{"build 3650", "3650", ""},
+		{"build 3650 (7b79b229)", "3650", "7b79b229"},
+		// A mainline build number is five characters and every one of them is
+		// a hex digit; the bare-hash rule must not claim it as a commit.
+		{"b3650", "b3650", ""},
+		{"abcdef", "abcdef", ""}, // six characters: too short to be a hash
+		// Not a hash and not a known shape: kept whole rather than guessed at.
+		{"ik_llama.cpp", "ik_llama.cpp", ""},
 	}
 	for _, tc := range cases {
 		build, commit := BuildFromProps(tc.in)

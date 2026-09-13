@@ -1,0 +1,22 @@
+toktape compare
+  A  20260913-160902-deepseek-v4-1-flash-q4-k
+  B  20260913-161420-deepseek-v4-1-flash-q4-k
+────────────────────────────────────────────────────────────────────────
+metric                                 A               B               Δ
+TTFT                              640 ms          640 ms           +0.0%
+prefill tok/s                        817             817           +0.0%
+decode tok/s                        11.8            19.0            +61%
+draft accepted                         ?             60%                
+aggregate tok/s                     47.2            76.0            +61%
+VRAM used                       11.5 GiB        11.5 GiB           +0.0%
+host RSS                        42.1 GiB        42.1 GiB           +0.0%
+maj faults/token                     0.0             0.0                
+cache hit                            25%             25%           +0.0%
+contended                             no              no                
+
+flags
+  --draft-min   ? → 1
+
+run
+  draft model   ? → DSpark-0.6B-Q8_0.gguf
+  draft n_max   ? → 3

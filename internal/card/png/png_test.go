@@ -36,6 +36,9 @@ func fixtures() map[string]*tape.RunSummary {
 		"concurrent": card.ExampleConcurrent(),
 		"unknown":    {},
 		"hangul":     hangulSummary(),
+		// TTP-30: three placement devices with a CPU one, a longer flags strip,
+		// a bare-commit engine line and the draft clause in the hero.
+		"speculative": card.ExampleSpeculative(),
 	}
 }
 
@@ -947,4 +950,81 @@ func TestAnswerCutPillFitsTheCard(t *testing.T) {
 				m.ID, m.Text, m.Rect.Min.X, m.Rect.Max.X, contentL, contentR)
 		}
 	}
+}
+
+// TestEngineStringIKLlamaHasNoBuildNumber is internal/card's test of the same
+// name, run against this package's copy of the rule: the two renderings of one
+// summary must never disagree about how a version is spelled (TTP-33).
+func TestEngineStringIKLlamaHasNoBuildNumber(t *testing.T) {
+	cases := []struct {
+		name string
+		srv  tape.ServerInfo
+		want string
+	}{
+		{"ik with a bare commit", tape.ServerInfo{Kind: tape.ServerIKLlama, Commit: "7b79b229"}, "ik_llama.cpp 7b79b229"},
+		{"ik that did stamp a build keeps the pair", tape.ServerInfo{Kind: tape.ServerIKLlama, Build: "b3650", Commit: "7b79b229"}, "ik_llama.cpp b3650 (7b79b229)"},
+		{"mainline with a bare commit keeps the brackets", tape.ServerInfo{Kind: tape.ServerLlamaCPP, Commit: "abcdef12"}, "llama-server (abcdef12)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := engineString(tc.srv); got != tc.want {
+				t.Errorf("engineString = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDraftClauseReplacesTheSecondDecodeLine pins TTP-30 on the share image.
+// On a speculative run the decode column's second sub-line is the draft
+// clause, whole and uncut, inside the column. On any other run it is what it
+// was.
+func TestDraftClauseReplacesTheSecondDecodeLine(t *testing.T) {
+	const want = "draft DSpark-0.6B-Q8_0.gguf · n_max 3 · 60% accepted"
+	single := card.ExampleSpeculative()
+	single.Concurrency = 1
+	for name, s := range map[string]*tape.RunSummary{
+		"concurrent": card.ExampleSpeculative(),
+		"single":     single,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := renderCanvas(s)
+			if err != nil {
+				t.Fatalf("renderCanvas: %v", err)
+			}
+			m, ok := c.markByID("hero.left.sub2")
+			if !ok {
+				t.Fatal("hero.left.sub2 was never drawn")
+			}
+			if m.Text != want {
+				t.Errorf("hero.left.sub2 = %q, want %q", m.Text, want)
+			}
+			if m.Rect.Max.X > heroSplitX-heroGutter {
+				t.Errorf("the draft clause ends at x=%d, past the decode column (%d)", m.Rect.Max.X, heroSplitX-heroGutter)
+			}
+		})
+	}
+
+	t.Run("a run without a draft keeps its ITL", func(t *testing.T) {
+		c, err := renderCanvas(card.Example())
+		if err != nil {
+			t.Fatalf("renderCanvas: %v", err)
+		}
+		if m, _ := c.markByID("hero.left.sub2"); !strings.Contains(m.Text, "ITL p50") || strings.Contains(m.Text, "draft") {
+			t.Errorf("hero.left.sub2 = %q, want the ITL clause and no draft", m.Text)
+		}
+	})
+
+	t.Run("zero drafted and an unread argv", func(t *testing.T) {
+		s := card.ExampleSpeculative()
+		zero := 0
+		s.Timings.DraftN, s.Timings.DraftNAccepted = &zero, &zero
+		s.Server.Flags.DraftModel, s.Server.Flags.DraftMax = "", ""
+		c, err := renderCanvas(s)
+		if err != nil {
+			t.Fatalf("renderCanvas: %v", err)
+		}
+		if m, _ := c.markByID("hero.left.sub2"); m.Text != "draft ? · n_max ? · 0 drafted" {
+			t.Errorf("hero.left.sub2 = %q", m.Text)
+		}
+	})
 }

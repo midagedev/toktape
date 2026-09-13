@@ -187,6 +187,21 @@ func (c *content) buildHero(s *tape.RunSummary) {
 		}
 	}
 
+	// A speculative run replaces the decode column's second sub-line with the
+	// draft clause (TTP-30, 2026-09-13). The frame is a fixed 1200×675 and
+	// nothing else may move, so the clause takes a row rather than adding one.
+	// It takes the whole row because it measures 416 px of the column's 504,
+	// and appended to the token count it would be cut through "accepted".
+	// Token count, ms and ITL stay on the text card. A failed-streams note is
+	// a warning, not a figure, so it is kept.
+	if d := draftString(s); d != "" {
+		if concurrent {
+			c.left.sub2 = joinParts(" · ", d, failedStreams(a))
+		} else {
+			c.left.sub2 = d
+		}
+	}
+
 	// Right: prefill and TTFT.
 	prompt := promptTokens(s)
 	if concurrent {
@@ -266,6 +281,28 @@ func thinkingString(reasoningN int) string {
 // reasoningTokens is how many of the run's generated tokens were
 // reasoning_content, the same figure the text card's Context row prints.
 func reasoningTokens(s *tape.RunSummary) int { return s.Timings.ReasoningN }
+
+// draftString is the PNG's form of the text card's Draft row:
+// "draft DSpark-0.6B-Q8_0.gguf · n_max 3 · 60% accepted". Empty when the
+// server reported no draft figure. The counts stay on the text card, and the
+// rules are its rules: an unread model is "?", and zero drafted is "0 drafted"
+// rather than a rate over nothing.
+func draftString(s *tape.RunSummary) string {
+	t := s.Timings
+	if t.DraftN == nil {
+		return ""
+	}
+	f := s.Server.Flags
+	rate := "0 drafted"
+	if *t.DraftN > 0 {
+		accepted := 0
+		if t.DraftNAccepted != nil {
+			accepted = *t.DraftNAccepted
+		}
+		rate = formatPct(float64(accepted)/float64(*t.DraftN)) + " accepted"
+	}
+	return joinParts(" · ", "draft "+orUnknown(f.DraftModel), "n_max "+orUnknown(f.DraftMax), rate)
+}
 
 func itlString(t tape.TimingsSummary) string {
 	if t.ITLp50Ms <= 0 {
@@ -686,11 +723,21 @@ func engineString(srv tape.ServerInfo) string {
 	case srv.Build != "":
 		b.WriteString(" " + srv.Build)
 	case srv.Commit != "":
-		b.WriteString(" (" + srv.Commit + ")")
+		b.WriteString(" " + bareCommit(srv))
 	default:
 		b.WriteString(" " + unknown)
 	}
 	return b.String()
+}
+
+// bareCommit is internal/card/card.go's rule character for character: a commit
+// with no build number beside it keeps its parentheses, except on
+// ik_llama.cpp, which has no build number to be set apart from (TTP-33).
+func bareCommit(srv tape.ServerInfo) string {
+	if srv.Kind == tape.ServerIKLlama {
+		return srv.Commit
+	}
+	return "(" + srv.Commit + ")"
 }
 
 func osString(h tape.HostInfo) string {
@@ -787,6 +834,24 @@ func flagsLine(srv tape.ServerInfo) string {
 	}
 	if f.Threads != "" {
 		base = append(base, "-t "+f.Threads)
+	}
+	// Speculative decoding (TTP-30). These used to reach the card inside
+	// Other, because the parser did not name them; now that it does, they are
+	// printed here rather than dropped — a flag that was on the command line
+	// belongs on the FLAGS line. The Draft row in the speed section repeats
+	// the model and the block size because it needs them beside the acceptance
+	// rate, but --draft-min and --draft-p-min have no other home at all.
+	if f.DraftModel != "" {
+		base = append(base, "-md "+f.DraftModel)
+	}
+	if f.DraftMax != "" {
+		base = append(base, "--draft-max "+f.DraftMax)
+	}
+	if f.DraftMin != "" {
+		base = append(base, "--draft-min "+f.DraftMin)
+	}
+	if f.DraftPMin != "" {
+		base = append(base, "--draft-p-min "+f.DraftPMin)
 	}
 	base = append(base, f.Other...)
 	for _, p := range f.OverrideTens {

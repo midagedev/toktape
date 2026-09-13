@@ -81,6 +81,14 @@ func metrics(a, b *tape.RunSummary) []Row {
 		numRow("prefill tok/s", a.Timings.PromptPerSecond, b.Timings.PromptPerSecond, formatRate),
 		numRow("decode tok/s", a.Timings.PredictedPerSecond, b.Timings.PredictedPerSecond, formatRate),
 	}
+	// The acceptance rate sits directly under the rate it explains. A
+	// speculative run's decode figure is a property of the draft model as much
+	// as of the target, and the row above is already the net speed-up — its
+	// delta is the whole answer to "did the draft help", so there is no second
+	// speed-up row here (TTP-30, 2026-09-13).
+	if a.Timings.DraftN != nil || b.Timings.DraftN != nil {
+		rows = append(rows, draftAcceptedRow(a, b))
+	}
 	// The aggregate is the server-wide view and only says something new when
 	// at least one of the runs sent more than one stream.
 	if a.Concurrency > 1 || b.Concurrency > 1 {
@@ -102,6 +110,46 @@ func metrics(a, b *tape.RunSummary) []Row {
 		},
 	)
 	return rows
+}
+
+// draftAcceptedRow is the share of drafted tokens the target agreed with, on
+// each side.
+//
+// It is built by hand rather than through numRow because the two "no figure"
+// cases are different claims and only one of them is a number. A run that
+// reported no draft prints "?" — nobody drafted anything — while a run that
+// drafted and had nothing accepted really is 0 %, and flattening the two would
+// make a draft model the target never agreed with look like a run that never
+// used one. A rate over zero drafted tokens is no rate at all, so that prints
+// "?" too: the denominator was never there.
+func draftAcceptedRow(a, b *tape.RunSummary) Row {
+	rate := func(s *tape.RunSummary) (float64, bool) {
+		t := s.Timings
+		if t.DraftN == nil || *t.DraftN == 0 {
+			return 0, false
+		}
+		accepted := 0
+		if t.DraftNAccepted != nil {
+			accepted = *t.DraftNAccepted
+		}
+		return float64(accepted) / float64(*t.DraftN) * 100, true
+	}
+	av, aok := rate(a)
+	bv, bok := rate(b)
+	row := Row{Label: "draft accepted", A: "?", B: "?"}
+	if aok {
+		row.A = formatPct(av)
+	}
+	if bok {
+		row.B = formatPct(bv)
+	}
+	// A delta needs both an observation to compare against and a baseline that
+	// is not zero, like every other row here.
+	if aok && bok && av != 0 {
+		row.DeltaPct = (bv - av) / av * 100
+		row.HasDelta = true
+	}
+	return row
 }
 
 // numRow renders one numeric metric and computes the relative change.
@@ -140,6 +188,11 @@ func flagChanges(a, b tape.ServerFlags) []Change {
 		{"-t", a.Threads, b.Threads},
 		{"--load-mode", a.LoadMode, b.LoadMode},
 		{"-cmoe/-ncmoe", a.CPUMoE, b.CPUMoE},
+		// The two draft thresholds have no other home: -md and --draft-max are
+		// named in the run metadata above, but these reach the reader only
+		// here and on the card's FLAGS line (TTP-30).
+		{"--draft-min", a.DraftMin, b.DraftMin},
+		{"--draft-p-min", a.DraftPMin, b.DraftPMin},
 	}
 	var out []Change
 	for _, s := range scalars {
@@ -186,10 +239,19 @@ func metaChanges(a, b *tape.RunSummary) []Change {
 		a, b  string
 	}{
 		{"model", a.Model.FileName, b.Model.FileName},
+		// The directory is part of the model's identity when the file is
+		// sharded (TTP-32): a hard-linked shard set with a different embedding
+		// quant carries the same file names and differs only here.
+		{"model dir", modelDir(a, b), modelDir(b, a)},
 		{"quant", a.Model.Quant, b.Model.Quant},
 		{"build", a.Server.Build, b.Server.Build},
 		{"commit", a.Server.Commit, b.Server.Commit},
 		{"engine", string(a.Server.Kind), string(b.Server.Kind)},
+		// Which draft produced the acceptance rate in the metric table, and
+		// how many tokens it was allowed to guess at a time (TTP-30). A rate
+		// that moved says nothing if the draft moved with it.
+		{"draft model", a.Server.Flags.DraftModel, b.Server.Flags.DraftModel},
+		{"draft n_max", a.Server.Flags.DraftMax, b.Server.Flags.DraftMax},
 		{"ctx", itoa(a.Server.CtxSize), itoa(b.Server.CtxSize)},
 		{"streams", itoa(a.Concurrency), itoa(b.Concurrency)},
 	}
@@ -200,6 +262,21 @@ func metaChanges(a, b *tape.RunSummary) []Change {
 		}
 	}
 	return out
+}
+
+// modelDir is s's model directory, but only when the other run recorded one
+// too.
+//
+// A directory that only one side has is a gap in that recording — an older
+// tape, or a path the recorder could not read — and reporting it as
+// "? → bartowski-Q4_K_M" would read as a change in the thing being measured
+// when nothing about the model moved. With neither side carrying one the
+// values are equal and the row never appears at all.
+func modelDir(s, other *tape.RunSummary) string {
+	if s.Model.Dir == "" || other.Model.Dir == "" {
+		return ""
+	}
+	return s.Model.Dir
 }
 
 // orUnknown is the card's rule: a value that was not observed prints "?".

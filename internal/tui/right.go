@@ -319,7 +319,52 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 		l.add(th.dim, unit)
 		out = append(out, l.String())
 	}
+
+	// The draft line (TTP-30, 2026-09-13): the pooled acceptance rate of the
+	// streams that have finished. Only the server's final timings object
+	// carries draft figures, so the line cannot appear before a stream ends.
+	// A replayed tape holds every stream's final timings from t=0, so reading
+	// them early would print a figure nobody had observed yet.
+	//
+	// The percentage is plain text and the counts are dim. It is not the
+	// muted accent: the emphasis contract lights only the rate figures, and
+	// TestOnlyTheRateIsAccent counts every accent shade, the muted one
+	// included, as lit.
+	if drafted, accepted, ok := liveDraft(m); ok {
+		l = newLine(th, cw)
+		l.add(th.dim, "draft")
+		if drafted == 0 {
+			l.gapTo(width("0 drafted"))
+			l.add(th.text, "0 drafted")
+		} else {
+			pct := fmtPct(float64(accepted) / float64(drafted))
+			counts := fmt.Sprintf("%d/%d", accepted, drafted)
+			l.gapTo(width(pct) + 3 + width(counts))
+			l.add(th.text, pct)
+			l.add(th.dim, " · ")
+			l.add(th.dim, counts)
+		}
+		out = append(out, l.String())
+	}
 	return out
+}
+
+// liveDraft sums the draft figures over the streams that have finished
+// successfully and reported them. ok is false while none has. Failed streams
+// are left out, as the recorder's run-level reduction leaves them out, so the
+// finished screen and the card agree.
+func liveDraft(m Model) (drafted, accepted int, ok bool) {
+	for _, s := range m.Streams {
+		if !s.Done || s.Err != "" || s.Timings.DraftN == nil {
+			continue
+		}
+		ok = true
+		drafted += *s.Timings.DraftN
+		if s.Timings.DraftNAccepted != nil {
+			accepted += *s.Timings.DraftNAccepted
+		}
+	}
+	return drafted, accepted, ok
 }
 
 // livePromptRate is the prompt-processing rate observed so far: the mean over

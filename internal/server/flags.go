@@ -1,6 +1,7 @@
 package server
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/midagedev/toktape/internal/tape"
@@ -98,6 +99,31 @@ func ParseFlags(argv []string) tape.ServerFlags {
 		case "-t", "--threads":
 			if v, ok := value(); ok {
 				f.Threads = v
+			}
+		// Speculative decoding (TTP-30). The draft model gets its own field
+		// because the card has to name which draft produced the acceptance
+		// rate beside it, and the base name is what identifies it — the path
+		// is the recording machine's, not the reader's. The block size and the
+		// two thresholds are kept verbatim.
+		//
+		// The draft's own placement flags (-ngld, -devd, -ctkd, -ctvd) are
+		// deliberately not named here: they stay in Other and print verbatim,
+		// the way every flag this parser does not model does.
+		case "-md", "--model-draft":
+			if v, ok := value(); ok {
+				f.DraftModel = filepath.Base(v)
+			}
+		case "--draft-max", "--draft", "--draft-n":
+			if v, ok := value(); ok {
+				f.DraftMax = v
+			}
+		case "--draft-min", "--draft-n-min":
+			if v, ok := value(); ok {
+				f.DraftMin = v
+			}
+		case "--draft-p-min":
+			if v, ok := value(); ok {
+				f.DraftPMin = v
 			}
 		default:
 			// Everything else, -c/--ctx-size included, is printed verbatim.

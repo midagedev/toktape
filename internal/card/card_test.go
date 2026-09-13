@@ -55,6 +55,10 @@ func TestTextGolden(t *testing.T) {
 	}{
 		{"example", Example()},
 		{"example-concurrent", ExampleConcurrent()},
+		// TTP-30: four streams with a draft model on ik_llama.cpp. It is the
+		// only golden carrying the Draft row, the bare-commit ENGINE line and
+		// a CPU device in the placement.
+		{"example-speculative", ExampleSpeculative()},
 		{"unknowns", unknownsSummary()},
 		// The two width stress fixtures are goldens as well, so a reviewer can
 		// read what a Hangul rig and an oversized -ot actually render as.
@@ -79,6 +83,7 @@ func TestJSONGolden(t *testing.T) {
 	}{
 		{"example", Example()},
 		{"example-concurrent", ExampleConcurrent()},
+		{"example-speculative", ExampleSpeculative()},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -583,4 +588,118 @@ func TestAnswerCutOnExampleConcurrent(t *testing.T) {
 	if warn > 2 {
 		t.Errorf("the warning spans %d lines, want at most 2", warn)
 	}
+}
+
+// TestEngineStringIKLlamaHasNoBuildNumber pins TTP-33 (2026-09-13).
+//
+// ik_llama.cpp does not stamp a bNNNN release counter, so its /props
+// build_info is a bare commit and tape.ServerInfo.Build is empty. Bracketing
+// the hash there would set it apart from a build number that does not exist;
+// every other engine keeps the parentheses, because for them the missing build
+// number is a gap worth showing.
+func TestEngineStringIKLlamaHasNoBuildNumber(t *testing.T) {
+	cases := []struct {
+		name string
+		srv  tape.ServerInfo
+		want string
+	}{
+		{"ik with a bare commit", tape.ServerInfo{Kind: tape.ServerIKLlama, Commit: "7b79b229"}, "ik_llama.cpp 7b79b229"},
+		{"ik that did stamp a build keeps the pair", tape.ServerInfo{Kind: tape.ServerIKLlama, Build: "b3650", Commit: "7b79b229"}, "ik_llama.cpp b3650 (7b79b229)"},
+		{"ik with neither", tape.ServerInfo{Kind: tape.ServerIKLlama}, "ik_llama.cpp ?"},
+		{"mainline with a bare commit keeps the brackets", tape.ServerInfo{Kind: tape.ServerLlamaCPP, Commit: "abcdef12"}, "llama-server (abcdef12)"},
+		{"mainline unchanged", tape.ServerInfo{Kind: tape.ServerLlamaCPP, Build: "b3650", Commit: "a1b2c3d"}, "llama-server b3650 (a1b2c3d)"},
+		{"an unknown engine with a bare commit keeps the brackets", tape.ServerInfo{Kind: tape.ServerUnknown, Commit: "abcdef12"}, "? (abcdef12)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := engineString(tc.srv); got != tc.want {
+				t.Errorf("engineString = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDraftRow pins the speed section's Draft row (TTP-30, 2026-09-13).
+//
+// A reader looking at a speculative run wants four things and gets none of
+// them from a decode rate alone: which draft model produced it, how many
+// tokens it was allowed to guess at a time, what share of those guesses the
+// target agreed with, and out of how many. The row is present exactly when the
+// server reported a draft figure — on a run without one there is nothing to
+// say, and a row saying so would cost a line of a card whose whole layout is
+// the argument that nothing was dropped.
+func TestDraftRow(t *testing.T) {
+	draftLines := func(s *tape.RunSummary) []string {
+		var out []string
+		keep := false
+		for _, line := range strings.Split(Text(s), "\n") {
+			body := strings.TrimSuffix(strings.TrimPrefix(line, "│ "), " │")
+			switch {
+			case strings.HasPrefix(body, "Draft "):
+				keep = true
+			case keep && !strings.HasPrefix(body, "              "):
+				keep = false
+			}
+			if keep {
+				out = append(out, strings.TrimRight(body, " "))
+			}
+		}
+		return out
+	}
+
+	t.Run("the example prints the model, the block size and the rate", func(t *testing.T) {
+		got := strings.Join(draftLines(ExampleSpeculative()), " ")
+		for _, want := range []string{
+			"Draft ", "DSpark-0.6B-Q8_0.gguf", "n_max 3", "60% accepted (174/290)",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("the Draft row is %q, which does not contain %q", got, want)
+			}
+		}
+	})
+
+	t.Run("a run without a draft has no row", func(t *testing.T) {
+		if got := draftLines(Example()); len(got) != 0 {
+			t.Errorf("a run that reported no draft printed %q", got)
+		}
+	})
+
+	t.Run("an unread argv prints ? for the model, never a default", func(t *testing.T) {
+		s := ExampleSpeculative()
+		s.Server.Args = nil
+		s.Server.Flags.DraftModel = ""
+		s.Server.Flags.DraftMax = ""
+		got := strings.Join(draftLines(s), " ")
+		if !strings.Contains(got, "? · n_max ?") {
+			t.Errorf("the Draft row is %q, want the model and the block size as %q", got, "?")
+		}
+	})
+
+	t.Run("a draft that never drafted says so rather than 0%", func(t *testing.T) {
+		s := ExampleSpeculative()
+		zero := 0
+		s.Timings.DraftN, s.Timings.DraftNAccepted = &zero, &zero
+		got := strings.Join(draftLines(s), " ")
+		if !strings.Contains(got, "0 drafted") {
+			t.Errorf("the Draft row is %q, want %q", got, "0 drafted")
+		}
+		if strings.Contains(got, "accepted") {
+			t.Errorf("the Draft row is %q; an acceptance rate over zero drafts is not a measurement", got)
+		}
+	})
+
+	t.Run("the row sits between Prefill and Context", func(t *testing.T) {
+		order := map[string]int{}
+		for i, line := range strings.Split(Text(ExampleSpeculative()), "\n") {
+			body := strings.TrimPrefix(line, "│ ")
+			for _, label := range []string{"Prefill ", "Draft ", "Context "} {
+				if _, seen := order[label]; !seen && strings.HasPrefix(body, label) {
+					order[label] = i
+				}
+			}
+		}
+		if len(order) != 3 || !(order["Prefill "] < order["Draft "] && order["Draft "] < order["Context "]) {
+			t.Errorf("row order is %v, want Prefill then Draft then Context", order)
+		}
+	})
 }
