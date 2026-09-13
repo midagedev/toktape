@@ -1,6 +1,7 @@
 package palette
 
 import (
+	"fmt"
 	"math"
 	"testing"
 )
@@ -109,5 +110,44 @@ func TestGPUStepsDistinguishable(t *testing.T) {
 func TestHostIsNotAWarning(t *testing.T) {
 	if h, w := saturation(CardHost), saturation(Warn); h > w/2 {
 		t.Errorf("CardHost saturation %.3f is more than half of Warn's %.3f", h, w)
+	}
+}
+
+// TestGPUStepsClearTheLegendShades (TTP-44, lead 2026-09-13): the share card's
+// legend draws the weights/kv/compute swatches as the first GPU's colour mixed
+// toward CardPanel by 0, 0.36 and 0.60 (internal/card/png shadeKV and
+// shadeCompute), on the same row as the GPU swatches. On the first oxide card
+// CardGPU1 sat at 1.12× the kv swatch's luminance and the two read as one
+// colour. Every other GPU step must stand at least 1.25× away from both
+// shades. The weights are copied here because this package cannot import the
+// card; a change there that breaks this is what the test is for.
+func TestGPUStepsClearTheLegendShades(t *testing.T) {
+	mix := func(c, toward string, by float64) string {
+		a, b := RGBA(c), RGBA(toward)
+		f := func(x, y uint8) uint8 { return uint8(float64(x) + (float64(y)-float64(x))*by + 0.5) }
+		return fmt.Sprintf("#%02x%02x%02x", f(a.R, b.R), f(a.G, b.G), f(a.B, b.B))
+	}
+	shades := map[string]string{"kv": mix(Accent, CardPanel, 0.36), "compute": mix(Accent, CardPanel, 0.60)}
+	for name, step := range map[string]string{"CardGPU1": CardGPU1, "CardGPU2": CardGPU2, "CardGPU3": CardGPU3} {
+		for sname, sh := range shades {
+			a, b := luminance(step), luminance(sh)
+			if r := math.Max(a, b) / math.Min(a, b); r < 1.25 {
+				t.Errorf("%s (%s) and the legend's %s swatch (%s): luminance ratio %.3f, want ≥ 1.25", name, step, sname, sh, r)
+			}
+		}
+	}
+}
+
+// TestHostIsQuieterThanTheAccent (TTP-44, lead 2026-09-13): on a partially
+// offloaded run the host segment is most of the memory bar — 39 of 50 GiB on
+// the speculative example — and at the first cut's brightness it was the
+// largest lit area on the card, competing with the decode figure. The emphasis
+// contract gives the accent to the decode rate alone, so the host sand is held
+// at or under 0.6 of the accent's luminance — merely "darker" was already true
+// of the first cut (0.85) and did not stop it from dominating the card.
+func TestHostIsQuieterThanTheAccent(t *testing.T) {
+	h, a := luminance(CardHost), luminance(Accent)
+	if r := h / a; r > 0.6 {
+		t.Errorf("CardHost is %.2f of the Accent's luminance (%.3f vs %.3f), want 0.60 or less", r, h, a)
 	}
 }

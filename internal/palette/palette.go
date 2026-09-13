@@ -32,10 +32,17 @@
 //	CardPanel   Ground 4.5 % toward Accent                  —
 //	CardBorder  = DarkFill                                  1.20:1
 //	CardSurface bar track, never-loaded segment             1.39:1
-//	CardGPU1    Accent 30 % toward Ground                   4.68:1
+//	CardGPU1    Accent 15 % toward Ground                   6.41:1
 //	CardGPU2    Accent 30 % toward white                   10.63:1
-//	CardGPU3    Accent 48 % toward Ground                   3.10:1
-//	CardHost    a desaturated sand, deliberately not Warn   7.36:1
+//	CardGPU3    = AccentMuted (Accent 45 % toward Ground)  3.32:1
+//	CardHost    desaturated sand 20 % toward Ground, below
+//	            the Accent's luminance, never Warn           5.10:1
+//
+// The GPU steps darken from the first device before they brighten, so the
+// order on the bar reads as device order, and each clears the legend's kv and
+// compute swatches as well as the other steps (lead 2026-09-13, after the first oxide card showed GPU1
+// and kv as one colour), and the host sand is dimmed so a mostly-offloaded
+// bar does not outshine the decode figure.
 //
 // Every colour is a "#rrggbb" string, because lipgloss takes strings; RGBA
 // converts one for the image renderers.
@@ -96,15 +103,15 @@ const (
 	// CardSurface is the inert fill: the bar track, the never-loaded segment.
 	CardSurface = "#273834"
 	// CardGPU1 is the second GPU segment.
-	CardGPU1 = "#628e84"
+	CardGPU1 = "#74a89c"
 	// CardGPU2 is the third GPU segment.
 	CardGPU2 = "#aad4ca"
 	// CardGPU3 is the fourth GPU segment.
-	CardGPU3 = "#4d6f67"
+	CardGPU3 = "#50746c"
 	// CardHost is the host / CPU memory segment. It is warm like Warn and sits
 	// a few degrees from it in hue, so it is kept from reading as a warning by
 	// saturation: 0.25 against Warn's 0.59.
-	CardHost = "#b8a888"
+	CardHost = "#968b71"
 )
 
 // RGBA parses a "#rrggbb" palette entry into an opaque colour. It panics on a
