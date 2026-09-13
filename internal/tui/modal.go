@@ -62,7 +62,7 @@ func templateRows(th Theme, tpl tape.TemplateInfo, inner int) []string {
 	var out []string
 	l := newLine(th, inner)
 	l.add(th.dim, "template ")
-	l.add(th.text, orUnknown(tpl.ChatTemplate))
+	l.add(th.text, templateName(tpl.ChatTemplate))
 	l.add(th.dim, "   effort ")
 	l.add(th.text, orUnknown(tpl.ReasoningEffort))
 	out = append(out, l.String())
@@ -93,6 +93,24 @@ func templateRows(th Theme, tpl tape.TemplateInfo, inner int) []string {
 		out = append(out, l.String())
 	}
 	return out
+}
+
+// templateName is what the template row can hold (TTP-51, 2026-09-14).
+//
+// The recorder keeps whatever the server's /props reported, and a real
+// llama-server reports the Jinja source itself, thousands of characters over a
+// hundred lines, where the examples carry a name. A name prints as it is.
+// Source prints as what it is and how long, which is observed, and which tells
+// two runs' templates apart at a glance without inventing a name nobody
+// reported.
+func templateName(src string) string {
+	if src == "" {
+		return unknown
+	}
+	if !strings.Contains(src, "\n") {
+		return src
+	}
+	return fmt.Sprintf("jinja, %d lines", strings.Count(strings.TrimRight(src, "\n"), "\n")+1)
 }
 
 // renderedPrompt is what /apply-template returned for the stream whose cursor

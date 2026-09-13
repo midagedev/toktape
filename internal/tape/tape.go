@@ -479,7 +479,7 @@ type LlamaProc struct {
 
 // TemplateInfo records what was actually sent. Lesson 4.
 type TemplateInfo struct {
-	ChatTemplate          string            `json:"chat_template,omitempty"` // name or "custom"
+	ChatTemplate          string            `json:"chat_template,omitempty"` // what /props reported: a name, or on llama-server the Jinja source itself
 	ReasoningEffort       string            `json:"reasoning_effort,omitempty"`
 	TemplateKwargs        map[string]string `json:"template_kwargs,omitempty"`
 	RenderedHasThinkClose bool              `json:"rendered_has_think_close"` // "</think>" present in rendered prompt

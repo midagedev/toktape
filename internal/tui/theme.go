@@ -4,6 +4,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -259,7 +260,7 @@ func (l *lineBuf) left() int { return l.w - l.used }
 
 // add appends s painted with st, clipped to what is left.
 func (l *lineBuf) add(st lipgloss.Style, s string) *lineBuf {
-	s = clip(s, l.left())
+	s = clip(oneLine(s), l.left())
 	if s == "" {
 		return l
 	}
@@ -270,12 +271,14 @@ func (l *lineBuf) add(st lipgloss.Style, s string) *lineBuf {
 
 // addTrunc is add with an ellipsis when the text does not fit.
 func (l *lineBuf) addTrunc(st lipgloss.Style, s string) *lineBuf {
-	return l.addRaw(st, truncate(s, l.left()))
+	return l.addRaw(st, truncate(oneLine(s), l.left()))
 }
 
-// addRaw appends s painted with st without clipping. The caller must already
-// have measured it; used where a segment was fitted by the layout.
+// addRaw appends s painted with st. The caller has already fitted it, so the
+// clip is a no-op on every path that measured correctly; it is there so that a
+// path that did not cannot push a line past its width.
 func (l *lineBuf) addRaw(st lipgloss.Style, s string) *lineBuf {
+	s = clip(oneLine(s), l.left())
 	if s == "" {
 		return l
 	}
@@ -299,6 +302,29 @@ func (l *lineBuf) space(n int) *lineBuf {
 
 // gapTo leaves blanks so that the next segment of width n ends at column w.
 func (l *lineBuf) gapTo(n int) *lineBuf { return l.space(l.left() - n) }
+
+// oneLine folds every control rune in s to a space (TTP-51, 2026-09-14).
+//
+// A lineBuf is one row of exactly w columns, and the width it keeps is
+// measured by a function that counts a control rune as nothing. So a newline
+// handed to add escaped the row, and an ESC started an escape sequence the
+// palette never wrote. The first real recording to reach the prompt modal
+// showed it: llama-server reports its chat template as the Jinja source, the
+// newline in it split the template row, and the modal came out a row taller
+// than the screen. Folding here, where every segment enters a line, means no
+// string from a server — a template, a model name, a note — can do that again,
+// whichever caller forgets.
+func oneLine(s string) string {
+	if strings.IndexFunc(s, unicode.IsControl) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
+}
 
 // String returns the line padded with spaces to exactly w columns.
 func (l *lineBuf) String() string {
