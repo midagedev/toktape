@@ -175,6 +175,17 @@ func defaultRunsDir() string {
 	return filepath.Join(home, ".toktape", "runs")
 }
 
+// noRunsMessage is what every verb says about an empty runs directory. It
+// names the way out for the case that reads as data loss (TTP-60,
+// 2026-09-14): after `record --out DIR` a bare `toktape ls` prints nothing,
+// and a user who does not remember the flag concludes the tape is gone. The
+// CLI keeps no state between runs on purpose — a remembered directory would
+// be a default nobody asked for — so the message says where to look instead.
+func noRunsMessage(dir string) string {
+	return fmt.Sprintf("No runs yet in %s. Run `toktape` to record one.\n"+
+		"A run recorded with --out DIR is found by `toktape ls --out DIR`.\n", tildePath(dir))
+}
+
 // tildePath shortens a path under the home directory for display. The paths
 // the CLI prints are read by a person, and "~/.toktape/runs/..." is the form
 // they can paste back.

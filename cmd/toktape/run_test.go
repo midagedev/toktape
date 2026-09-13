@@ -189,7 +189,9 @@ func TestLsEmptyDir(t *testing.T) {
 	if out != "" {
 		t.Errorf("stdout = %q, want nothing", out)
 	}
-	if !strings.Contains(errOut, "No runs yet") {
+	// The message names the way out of the case that reads as data loss
+	// (TTP-60, 2026-09-14): a tape written with --out DIR is not lost.
+	if !strings.Contains(errOut, "No runs yet") || !strings.Contains(errOut, "--out DIR") {
 		t.Errorf("stderr = %q", errOut)
 	}
 }

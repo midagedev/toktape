@@ -102,7 +102,7 @@ func runRender(stdout, stderr io.Writer, args []string) int {
 	} else {
 		tapePath = newestTape(*outDir)
 		if tapePath == "" {
-			fmt.Fprintf(stderr, "No runs yet in %s. Run `toktape` to record one.\n", tildePath(*outDir))
+			fmt.Fprint(stderr, noRunsMessage(*outDir))
 			return exitUsage
 		}
 		// Say which run was picked. A verb that chooses a file for you must

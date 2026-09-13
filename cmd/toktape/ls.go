@@ -30,7 +30,7 @@ func runLs(stdout, stderr io.Writer, args []string) int {
 	entries, err := os.ReadDir(*outDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Fprintf(stderr, "No runs yet in %s. Run `toktape` to record one.\n", tildePath(*outDir))
+			fmt.Fprint(stderr, noRunsMessage(*outDir))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "toktape: %v\n", err)
@@ -59,7 +59,7 @@ func runLs(stdout, stderr io.Writer, args []string) int {
 		})
 	}
 	if len(rows) == 0 {
-		fmt.Fprintf(stderr, "No runs yet in %s. Run `toktape` to record one.\n", tildePath(*outDir))
+		fmt.Fprint(stderr, noRunsMessage(*outDir))
 		return exitOK
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i][0] > rows[j][0] })

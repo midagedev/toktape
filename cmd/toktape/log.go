@@ -54,7 +54,7 @@ func runLog(stdout, stderr io.Writer, args []string) int {
 	rows, err := loadLedger(stderr, *outDir, *rebuild)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(stderr, "No runs yet in %s. Run `toktape` to record one.\n", tildePath(*outDir))
+			fmt.Fprint(stderr, noRunsMessage(*outDir))
 			return exitOK
 		}
 		fmt.Fprintf(stderr, "toktape: %v\n", err)
@@ -92,7 +92,7 @@ func runLog(stdout, stderr io.Writer, args []string) int {
 // run names the wrong one.
 func emptyLine(dir string, recorded int, model, tag string) string {
 	if recorded == 0 {
-		return fmt.Sprintf("No runs yet in %s. Run `toktape` to record one.\n", tildePath(dir))
+		return noRunsMessage(dir)
 	}
 	var by []string
 	if model != "" {
