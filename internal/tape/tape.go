@@ -311,6 +311,9 @@ type TimingsSummary struct {
 	PredictedMs        float64 `json:"predicted_ms"`
 	PredictedPerSecond float64 `json:"predicted_per_second"`
 	// Speculative decoding, when the server reports it. nil = not reported.
+	// Per request: the final timings' figures. Run level (TTP-30): the SUM
+	// over streams, so accepted/drafted is the pooled acceptance rate — unlike
+	// the neighbouring per-stream means.
 	DraftN         *int `json:"draft_n,omitempty"`
 	DraftNAccepted *int `json:"draft_n_accepted,omitempty"`
 
