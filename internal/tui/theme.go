@@ -120,12 +120,12 @@ const (
 // layout. Styles set a foreground, and at most the bold attribute, which
 // changes no widths. TestColourMatchesPlain pins that invariant.
 //
-// The one exception is the resource graph (TTP-39, 2026-09-13): graphTrack,
-// graphRidge and graphSolo also set a background, colDarkFill, because a
-// partial block's unlit part shows the cell background and a ridge drawn on
-// the terminal's ground floated free of its own track. A background changes no
-// width either, and the track itself is spaces, so a plain rendering shows no
-// slab where a graph is empty.
+// Two exceptions set a background as well, both colDarkFill, and a background
+// changes no width either. The resource graph (TTP-39, 2026-09-13): graphTrack,
+// graphRidge and graphSolo, because a partial block's unlit part shows the cell
+// background and a ridge drawn on the terminal's ground floated free of its own
+// track; the track itself is spaces, so a plain rendering shows no slab where a
+// graph is empty. And the answer's write head (TTP-47, 2026-09-14): textFresh.
 type Theme struct {
 	colour bool
 
@@ -154,6 +154,19 @@ type Theme struct {
 	textMid   lipgloss.Style
 	textMuted lipgloss.Style
 	dimMid    lipgloss.Style
+
+	// textFresh is an answer token that has just landed: the header's tone on
+	// the dark fill (TTP-47, user 2026-09-14, "마지막 출력토큰의 하일라이팅이
+	// 아직도 제대로 안보인다 … 아예 백그라운드에 살짝 더 주던가 하자").
+	//
+	// The ladder had run out of room. colText is already the top of it, so the
+	// only lightness the write head could gain was taken from the body below —
+	// and the body sits in a pinned band at about half the header's luminance
+	// (TestTheBodyIsOneToneDown), with the reasoning ladder two stops under it.
+	// A fill is the axis the body was not using: a couple of tokens wide, it
+	// reads as a cursor trail rather than as a highlighted phrase, and it
+	// fades with the band the moment the next token lands.
+	textFresh lipgloss.Style
 
 	// graphTrack is the unlit part of a resource graph's measured columns,
 	// painted as spaces; graphRidge is a column's topmost lit cell. Both sit
@@ -209,6 +222,7 @@ func ColourTheme() Theme {
 			textMid:     fg(colTextMid),
 			textMuted:   fg(colTextMuted),
 			dimMid:      fg(colDimMid),
+			textFresh:   fg(colText).Background(lipgloss.Color(colDarkFill)),
 			graphTrack:  r.NewStyle().Background(lipgloss.Color(colDarkFill)),
 			graphRidge:  fg(colAccentMid).Background(lipgloss.Color(colDarkFill)),
 			graphSolo:   fg(colAccentMuted).Background(lipgloss.Color(colDarkFill)),

@@ -25,6 +25,7 @@ import (
 type pcell struct {
 	r    rune
 	fg   string
+	bg   string
 	bold bool
 }
 
@@ -39,6 +40,7 @@ func parseFrame(frame string, w, h int) [][]pcell {
 	}
 	var (
 		fg   string
+		bg   string
 		bold bool
 		x, y int
 	)
@@ -47,7 +49,7 @@ func parseFrame(frame string, w, h int) [][]pcell {
 		case c == '\x1b':
 			n, params, isSGR := scanSGR(frame[i:])
 			if isSGR {
-				fg, bold = applySGR(fg, bold, params)
+				fg, bg, bold = applySGR(fg, bg, bold, params)
 			}
 			i += n
 			continue
@@ -63,9 +65,9 @@ func parseFrame(frame string, w, h int) [][]pcell {
 			x += rw
 			continue
 		}
-		rows[y][x] = pcell{r: r, fg: fg, bold: bold}
+		rows[y][x] = pcell{r: r, fg: fg, bg: bg, bold: bold}
 		for k := 1; k < rw; k++ {
-			rows[y][x+k] = pcell{fg: fg, bold: bold}
+			rows[y][x+k] = pcell{fg: fg, bg: bg, bold: bold}
 		}
 		x += rw
 	}
@@ -90,30 +92,39 @@ func scanSGR(s string) (n int, params string, isSGR bool) {
 }
 
 // applySGR folds one parameter list into the pen. Only what lipgloss emits for
-// this package's styles is interpreted: reset, bold, and a 24-bit foreground.
-func applySGR(fg string, bold bool, params string) (string, bool) {
+// this package's styles is interpreted: reset, bold, and a 24-bit foreground or
+// background. The background is read because two contracts are about one — the
+// resource graph's track and the answer's write head (TTP-47).
+func applySGR(fg, bg string, bold bool, params string) (string, string, bool) {
 	if params == "" {
-		return "", false
+		return "", "", false
 	}
 	fields := strings.Split(params, ";")
 	for i := 0; i < len(fields); i++ {
 		switch fields[i] {
 		case "0":
-			fg, bold = "", false
+			fg, bg, bold = "", "", false
 		case "1":
 			bold = true
 		case "22":
 			bold = false
 		case "39":
 			fg = ""
+		case "49":
+			bg = ""
 		case "38":
 			if i+4 < len(fields) && fields[i+1] == "2" {
 				fg = hex(fields[i+2], fields[i+3], fields[i+4])
 				i += 4
 			}
+		case "48":
+			if i+4 < len(fields) && fields[i+1] == "2" {
+				bg = hex(fields[i+2], fields[i+3], fields[i+4])
+				i += 4
+			}
 		}
 	}
-	return fg, bold
+	return fg, bg, bold
 }
 
 func hex(parts ...string) string {
@@ -140,6 +151,13 @@ func styleHex(st lipgloss.Style) string {
 	th := ColourTheme()
 	rows := parseFrame(th.paint(st, "x"), 1, 1)
 	return rows[0][0].fg
+}
+
+// styleBG is the background a style emits, "" when it sets none.
+func styleBG(st lipgloss.Style) string {
+	th := ColourTheme()
+	rows := parseFrame(th.paint(st, "x"), 1, 1)
+	return rows[0][0].bg
 }
 
 // TestParseFrameReadsTheThemesColours is the reader's own check: a painted

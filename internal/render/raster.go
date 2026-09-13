@@ -158,12 +158,24 @@ func (rs *rasteriser) draw(sc screen) *image.RGBA {
 // reuses one buffer for every frame.
 func (rs *rasteriser) drawInto(img *image.RGBA, sc screen) {
 	draw.Draw(img, img.Bounds(), image.NewUniform(bgColour), image.Point{}, draw.Src)
+	// Every fill first, then every glyph (TTP-47, 2026-09-14). A two-column
+	// rune is drawn once across its own cell and the continuation cell to its
+	// right, so filling cell by cell in reading order painted the next cell's
+	// background over the right half of the glyph that had just been drawn.
+	// Nothing showed it while a background appeared only under spaces and
+	// block elements; the answer's write head put one behind text and a Korean
+	// answer came out as half-syllables. Two passes close the whole class: no
+	// fill can ever land on top of a glyph.
+	for y := 0; y < sc.h; y++ {
+		for x := 0; x < sc.w; x++ {
+			if c := sc.at(x, y); c.hasBG {
+				fillRect(img, rs.cellRect(x, y, 1), c.bg)
+			}
+		}
+	}
 	for y := 0; y < sc.h; y++ {
 		for x := 0; x < sc.w; x++ {
 			c := sc.at(x, y)
-			if c.hasBG {
-				fillRect(img, rs.cellRect(x, y, 1), c.bg)
-			}
 			if c.cont || c.r == 0 || c.r == ' ' {
 				continue
 			}

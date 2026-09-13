@@ -763,3 +763,45 @@ func TestCardScreenPaintsByRole(t *testing.T) {
 		}
 	}
 }
+
+// TestTheWriteHeadCarriesAFill is TTP-47: the answer's freshest band is the
+// one body style that paints a fill behind the text.
+//
+// The glow contract already had a ladder (TestTheBodyIsOneToneDown), and the
+// ladder alone did not reach the user: "마지막 출력토큰의 하일라이팅이 아직도
+// 제대로 안보인다" (2026-09-14). Lowering the body another stop was the other
+// option they named and it is the worse one — the body/header band is pinned
+// at 0.44–0.54 and the answer ladder would collapse onto the reasoning one —
+// so the step at the write head is spent on a fill instead, which is the one
+// axis the body was not using.
+//
+// The contract is read off bodyStyle rather than off a frame because a fill is
+// a decision about a band, and the resource graph's track carries the same
+// colour for an unrelated reason.
+func TestTheWriteHeadCarriesAFill(t *testing.T) {
+	th := ColourTheme()
+	answer := bodyLine{}
+	if bg := styleBG(bodyStyle(th, answer, bandFresh)); bg == "" {
+		t.Errorf("the freshest answer band paints no fill; the user cannot see where the write head is")
+	}
+	for _, c := range []struct {
+		name string
+		bl   bodyLine
+		band tokenBand
+	}{
+		{"a settled answer", answer, bandSettled},
+		{"an answer 150–500 ms old", answer, bandMid},
+		{"fresh reasoning", bodyLine{reasoning: true}, bandFresh},
+		{"settled reasoning", bodyLine{reasoning: true}, bandSettled},
+		{"the answer marker", bodyLine{marker: true}, bandFresh},
+	} {
+		if bg := styleBG(bodyStyle(th, c.bl, c.band)); bg != "" {
+			t.Errorf("%s paints a fill (%s); only the write head may", c.name, bg)
+		}
+	}
+	// The fill is the dark the bars and the graph tracks already use, not a
+	// new colour: one accent hue at the bottom of its lightness range.
+	if got, want := styleBG(bodyStyle(th, answer, bandFresh)), styleHex(th.darkFill); got != want {
+		t.Errorf("the write head's fill is %s, want the theme's dark fill %s", got, want)
+	}
+}

@@ -170,6 +170,13 @@ func thinkingBadge(s Stream) string {
 // every age: an answer that has settled wears the shade a thought wears when
 // it has just arrived, and a thought never reaches the shade a fresh answer
 // has. The marker is chrome and stays at the bottom whatever its age.
+//
+// The answer's freshest band is the one stop that also carries a fill (TTP-47,
+// 2026-09-14). Both ladders end at the top of the palette's lightness, so the
+// answer's write head had nowhere brighter to go and the user could not find
+// it. The reasoning ladder keeps its foreground-only step: its glow was the
+// one that was visible when the answer's was not, and a monologue is not what
+// the eye is meant to be led to.
 func bodyStyle(th Theme, bl bodyLine, band tokenBand) lipgloss.Style {
 	if bl.marker {
 		return th.dim
@@ -185,7 +192,7 @@ func bodyStyle(th Theme, bl bodyLine, band tokenBand) lipgloss.Style {
 	}
 	switch band {
 	case bandFresh:
-		return th.text
+		return th.textFresh
 	case bandMid:
 		return th.textMid
 	}
