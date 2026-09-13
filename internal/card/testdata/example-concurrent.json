@@ -10,6 +10,35 @@
     "commit": "a1b2c3d",
     "pid": 48213,
     "host": "workstation",
+    "args": [
+      "/usr/local/bin/llama-server",
+      "-m",
+      "/models/Qwen3.5-35B-A3B-UD-Q4_K_M.gguf",
+      "-c",
+      "32768",
+      "--parallel",
+      "8",
+      "-ngl",
+      "99",
+      "-fa",
+      "on",
+      "-b",
+      "2048",
+      "-ub",
+      "512",
+      "-ctk",
+      "q8_0",
+      "-ctv",
+      "q8_0",
+      "--load-mode",
+      "mmap",
+      "-ncmoe",
+      "12",
+      "-t",
+      "16",
+      "-ot",
+      "blk\\.(3[6-9]|4[0-7])\\.ffn_.*_exps=CPU"
+    ],
     "flags": {
       "ngl": "99",
       "fa": "on",
@@ -195,7 +224,6 @@
     }
   ],
   "warnings": [
-    "nvml unavailable, VRAM read from nvidia-smi",
     "cold run: 1.4 major faults per token during decode"
   ]
 }

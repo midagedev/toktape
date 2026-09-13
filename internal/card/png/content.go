@@ -89,7 +89,7 @@ func build(s *tape.RunSummary) *content {
 	c.buildHero(s)
 	c.buildMemory(s)
 	c.buildFooter(s)
-	c.flags = flagsLine(s.Server.Flags)
+	c.flags = flagsLine(s.Server)
 	return c
 }
 
@@ -421,10 +421,15 @@ func (c *content) buildFooter(s *tape.RunSummary) {
 	}}
 
 	f := s.Server.Flags
+	// The five argument-starters distinguish "?" (no argv was read) from
+	// "default" (a read argv did not set it); ngl is not one of the five.
+	read := argvObserved(s.Server)
 	c.cols[2] = footerCol{label: "engine", rows: [footerRows]string{
 		engineString(s.Server),
-		fmt.Sprintf("fa %s · ctk %s · ctv %s", orUnknown(f.FlashAttn), orUnknown(f.CacheTypeK), orUnknown(f.CacheTypeV)),
-		fmt.Sprintf("b %s · ub %s · ngl %s", orUnknown(f.Batch), orUnknown(f.UBatch), orUnknown(f.NGL)),
+		engineFlagRow([]string{"fa", "ctk", "ctv"},
+			[]string{flagValue(f.FlashAttn, read), flagValue(f.CacheTypeK, read), flagValue(f.CacheTypeV, read)}),
+		engineFlagRow([]string{"b", "ub", "ngl"},
+			[]string{flagValue(f.Batch, read), flagValue(f.UBatch, read), orUnknown(f.NGL)}),
 		joinParts(" · ", "ctx "+formatInt(s.Server.CtxSize), "slots "+formatInt(s.Server.NSlots)),
 	}}
 
@@ -434,6 +439,30 @@ func (c *content) buildFooter(s *tape.RunSummary) {
 		gpuStateString(s.GPUsAtEnd),
 		startedString(s),
 	}}
+}
+
+// engineFlagRow renders one row of the ENGINE column: "fa on · ctk q8_0 · ctv
+// q8_0". When every flag in the row is at the server's default it says so once
+// instead of three times: three "default"s measure 266px against a 255px
+// column and would be cut mid-word, and the collapsed form is the same claim
+// in fewer glyphs. Only the fa/ctk/ctv row can reach it — ngl is omitted, not
+// defaulted, so its row always carries a value.
+func engineFlagRow(names, values []string) string {
+	allDefault := true
+	for _, v := range values {
+		if v != serverDefault {
+			allDefault = false
+			break
+		}
+	}
+	if allDefault {
+		return strings.Join(names, " · ") + " at defaults"
+	}
+	parts := make([]string, 0, len(names))
+	for i, n := range names {
+		parts = append(parts, n+" "+values[i])
+	}
+	return strings.Join(parts, " · ")
 }
 
 func modelDisplayName(m tape.ModelInfo) string {
@@ -630,17 +659,19 @@ func startedString(s *tape.RunSummary) string {
 // ones that end comment threads (docs/research/02-sharing-artifacts.md §5.2).
 // The rest are omitted when empty. The -ot group goes last because it is the
 // only part that can be arbitrarily long, so truncation eats it first.
-func flagsLine(f tape.ServerFlags) string {
+func flagsLine(srv tape.ServerInfo) string {
+	f := srv.Flags
+	read := argvObserved(srv)
 	var base []string
 	if f.NGL != "" {
 		base = append(base, "-ngl "+f.NGL)
 	}
 	base = append(base,
-		"-fa "+orUnknown(f.FlashAttn),
-		"-b "+orUnknown(f.Batch),
-		"-ub "+orUnknown(f.UBatch),
-		"-ctk "+orUnknown(f.CacheTypeK),
-		"-ctv "+orUnknown(f.CacheTypeV),
+		"-fa "+flagValue(f.FlashAttn, read),
+		"-b "+flagValue(f.Batch, read),
+		"-ub "+flagValue(f.UBatch, read),
+		"-ctk "+flagValue(f.CacheTypeK, read),
+		"-ctv "+flagValue(f.CacheTypeV, read),
 	)
 	if f.LoadMode != "" {
 		base = append(base, "--load-mode "+f.LoadMode)

@@ -340,3 +340,78 @@ func TestUnknownNeverPrintsAsNo(t *testing.T) {
 		}
 	})
 }
+
+// TestUnsetFlagPrintsDefaultOnceTheArgvWasRead is the other half of the "?"
+// rule. "?" means unobserved; a flag that is absent from an argv the recorder
+// actually read is observed-as-absent, and what is in effect is the server's
+// own default. Printing "?" there invites the comment thread the card exists
+// to end ("was flash attention on?" — it was not set, and the card can say so).
+func TestUnsetFlagPrintsDefaultOnceTheArgvWasRead(t *testing.T) {
+	// The argv was read: -ngl and -b were given, the other four were not.
+	read := &tape.RunSummary{Concurrency: 1, Server: tape.ServerInfo{
+		PID:   4242,
+		Args:  []string{"/usr/local/bin/llama-server", "-ngl", "99", "-b", "2048"},
+		Flags: tape.ServerFlags{NGL: "99", Batch: "2048"},
+	}}
+	out := Text(read)
+	for _, want := range []string{"-ngl 99", "-b 2048", "-fa default", "-ub default", "-ctk default", "-ctv default"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("card with a read argv is missing %q:\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{"-fa ?", "-b ?", "-ub ?", "-ctk ?", "-ctv ?"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("a flag the recorder observed as absent printed as %q:\n%s", bad, out)
+		}
+	}
+
+	// The PID was found but /proc/<pid>/cmdline could not be read: nothing
+	// about the flags was observed, so every one of the five stays "?".
+	unread := &tape.RunSummary{Concurrency: 1, Server: tape.ServerInfo{PID: 4242}}
+	out = Text(unread)
+	for _, want := range []string{"-fa ?", "-b ?", "-ub ?", "-ctk ?", "-ctv ?"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("card with an unreadable argv is missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "default") {
+		t.Errorf("a server default was claimed from an argv nobody read:\n%s", out)
+	}
+
+	// -ngl is not one of the five: it is omitted when unset, not defaulted.
+	if strings.Contains(Text(read), "-ngl default") {
+		t.Error("-ngl is printed only when observed, never as a default")
+	}
+
+	// The worst case is a server started with nothing but a model path, where
+	// all five read "default". The row wraps; it is never cut, because the
+	// five are exactly the fields the card exists to settle.
+	bare := Text(&tape.RunSummary{Concurrency: 1, Server: tape.ServerInfo{
+		PID:  4242,
+		Args: []string{"/usr/local/bin/llama-server", "-m", "/models/model.gguf"},
+	}})
+	for _, want := range []string{"-fa default", "-b default", "-ub default", "-ctk default", "-ctv default"} {
+		if !strings.Contains(bare, want) {
+			t.Errorf("the all-default card is missing %q:\n%s", want, bare)
+		}
+	}
+	if strings.Contains(bare, "…") {
+		t.Errorf("the all-default flag row was truncated:\n%s", bare)
+	}
+}
+
+// The llama-bench table renders the same fact as the FLAGS row and must not
+// disagree with it: fa is one of the five.
+func TestBenchTableFollowsTheDefaultRule(t *testing.T) {
+	read := &tape.RunSummary{Concurrency: 1, Server: tape.ServerInfo{
+		Args:  []string{"/usr/local/bin/llama-server", "-ngl", "99"},
+		Flags: tape.ServerFlags{NGL: "99"},
+	}}
+	if got := LlamaBenchTable(read); !strings.Contains(got, "| default |") {
+		t.Errorf("bench table does not carry the observed-as-absent fa:\n%s", got)
+	}
+	unread := &tape.RunSummary{Concurrency: 1}
+	if got := LlamaBenchTable(unread); strings.Contains(got, "default") {
+		t.Errorf("bench table claimed a default from an argv nobody read:\n%s", got)
+	}
+}

@@ -31,7 +31,11 @@ func LlamaBenchTable(s *tape.RunSummary) string {
 	params := formatParamsB(s.Model.Params)
 	backend := unknown
 	ngl := orUnknown(s.Server.Flags.NGL)
-	fa := orUnknown(s.Server.Flags.FlashAttn)
+	// fa is one of the five always-printed flags, so it carries the FLAGS
+	// row's distinction between "?" (no argv was read) and "default" (an argv
+	// was read and did not set it). ngl is not one of the five and keeps "?":
+	// the card omits it entirely when unset, and a llama-bench column cannot.
+	fa := flagValue(s.Server.Flags.FlashAttn, argvObserved(s.Server))
 
 	var b strings.Builder
 	b.WriteString("| model | size | params | backend | ngl | fa | test | t/s |\n")

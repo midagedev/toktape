@@ -126,7 +126,9 @@ func TestFromTapeConcurrent(t *testing.T) {
 		"ttft_p50_ms":      "210",
 		"ttft_p95_ms":      "480",
 		"cache_label":      "cold",
-		"warnings":         "2",
+		// 1 since 2026-09-13 (TTP-21): the example lost its NVML warning,
+		// which toktape never emits any more; the cold-run caveat remains.
+		"warnings": "1",
 	}
 	for col, w := range want {
 		if got := get(t, tp, col); got != w {

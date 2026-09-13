@@ -48,8 +48,12 @@ func TestOpenPicksNvidiaSMI(t *testing.T) {
 	if c.Name() != "nvidia-smi" {
 		t.Fatalf("Name = %q, want nvidia-smi", c.Name())
 	}
-	if len(warnings) != 1 || warnings[0] != WarnNoNVML {
-		t.Fatalf("warnings = %q, want [%q]", warnings, WarnNoNVML)
+	// 2026-09-13: the nvidia-smi backend no longer warns about NVML. toktape
+	// never links NVML (no cgo, by design — internal/gpu/nvml_notes.md), so
+	// "nvml unavailable" described a choice rather than a caveat, and it was
+	// printed on the card of every Linux run. A successful open is silent.
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %q, want none", warnings)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/recorder"
 	"github.com/midagedev/toktape/internal/tape"
 	"github.com/midagedev/toktape/internal/tui"
@@ -588,4 +589,56 @@ func (s *syncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+// TestShareHintNamesTheTape: the tape is what turns a posted card from a claim
+// into something a reader can check, so the hint says to attach it and names
+// the verb that replays it. A run that saved no tape offers neither.
+func TestShareHintNamesTheTape(t *testing.T) {
+	dir := t.TempDir()
+	tp := &tape.Tape{Schema: tape.SchemaVersion, Summary: tape.RunSummary{
+		ID:    "20260913-120000-qwen3.5-35b-a3b",
+		Model: tape.ModelInfo{FileName: "Qwen3.5-35B-A3B-UD-Q4_K_M.gguf"},
+	}}
+	arts := artifacts{tape: filepath.Join(dir, tp.Summary.ID+tape.Ext)}
+
+	got := shareHint(dir, tp, arts)
+	if !strings.Contains(got, "toktape play "+tp.Summary.ID+tape.Ext) {
+		t.Errorf("hint does not say how a reviewer replays the tape:\n%s", got)
+	}
+	if !strings.Contains(got, "Attach the .tape when you post") {
+		t.Errorf("hint does not ask for the tape to be attached:\n%s", got)
+	}
+
+	// No tape on disk: there is nothing to attach and nothing to replay.
+	if bare := shareHint(dir, tp, artifacts{}); strings.Contains(bare, "toktape play") {
+		t.Errorf("a run that saved no tape offered a replay:\n%s", bare)
+	}
+}
+
+// TestCardMarkdownCarriesReproduce walks the real path a poster takes: a tape
+// written to disk, read back, and rendered with --md. The Reproduce block is
+// built from fields that survive the gzip'd JSON round trip, so the argv a
+// reader pastes is the one the recorder read off /proc, not a re-derivation.
+func TestCardMarkdownCarriesReproduce(t *testing.T) {
+	dir := t.TempDir()
+	s := card.ExampleConcurrent()
+	path := writeTape(t, dir, s)
+
+	code, out, stderr := exec(t, "card", path, "--md")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	for _, want := range []string{
+		"<details><summary>Reproduce</summary>",
+		"Server (as seen from /proc/48213/cmdline):",
+		strings.Join(s.Server.Args, " "),
+		"toktape --url http://127.0.0.1:8080 -n 8 --n-predict 128",
+		"Tape: `" + s.ID + tape.Ext + "`",
+		"</details>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--md output is missing %q:\n%s", want, out)
+		}
+	}
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/midagedev/toktape/internal/tape"
 )
 
 // unknown is what the card prints for anything that was not observed. Repo
@@ -126,6 +128,44 @@ func orUnknown(s string) string {
 		return unknown
 	}
 	return s
+}
+
+// serverDefault is what one of the always-printed flags reads as when the
+// recorder read the server's argv and the flag was not in it.
+//
+// "?" and "default" are different claims. "?" is "nobody looked"; an argv that
+// was read and does not carry -fa is a reading, and what it says is that the
+// server's own default is in effect. A card that prints "?" for both makes the
+// reader ask the question the card exists to answer (launch research
+// docs/research/04-launch-channels.md, Risk 3: "was flash attention on?").
+// The value itself is still never guessed — the card names whose default it is
+// by naming the build on the ENGINE line, and prints no number.
+const serverDefault = "default"
+
+// argvObserved reports whether the recorder read the server's command line.
+//
+// It is Args and not PID because the two can disagree: the recorder finds the
+// PID first and reads /proc/<pid>/cmdline second (internal/recorder/record.go
+// collectProcess), and a PID whose argv could not be read leaves every flag
+// genuinely unobserved. Args is non-empty exactly when ServerFlags was parsed.
+func argvObserved(srv tape.ServerInfo) bool {
+	return len(srv.Args) > 0
+}
+
+// flagValue renders one of the always-printed flags: its value when it was
+// given, "default" when an argv that was read did not carry it, and "?" when
+// no argv was read at all.
+//
+// internal/card/png/content.go carries a character-for-character copy: the two
+// renderings of one summary must never disagree about what is known.
+func flagValue(v string, argvWasRead bool) string {
+	if strings.TrimSpace(v) != "" {
+		return v
+	}
+	if argvWasRead {
+		return serverDefault
+	}
+	return unknown
 }
 
 // yesNo renders a bool the way the card's labels read.

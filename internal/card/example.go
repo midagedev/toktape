@@ -31,6 +31,30 @@ func Example() *tape.RunSummary {
 			Commit: "a1b2c3d",
 			PID:    48213,
 			Host:   "workstation",
+			// Args is the process's own argv, the way the recorder reads it
+			// out of /proc/<pid>/cmdline. It is what the Reproduce block in
+			// the Markdown card quotes, so the fixture carries a command line
+			// a reader could actually paste. Flags below is the parsed view:
+			// every named flag here agrees with it (TestExampleArgvParsesToItsFlags).
+			// A live recording would also put the tokens this parser does not
+			// name (-m, -c, --parallel) into Flags.Other; the fixture leaves
+			// Other empty so the golden FLAGS row stays the named set.
+			Args: []string{
+				"/usr/local/bin/llama-server",
+				"-m", "/models/Qwen3.5-35B-A3B-UD-Q4_K_M.gguf",
+				"-c", "32768",
+				"--parallel", "8",
+				"-ngl", "99",
+				"-fa", "on",
+				"-b", "2048",
+				"-ub", "512",
+				"-ctk", "q8_0",
+				"-ctv", "q8_0",
+				"--load-mode", "mmap",
+				"-ncmoe", "12",
+				"-t", "16",
+				"-ot", `blk\.(3[6-9]|4[0-7])\.ffn_.*_exps=CPU`,
+			},
 			Flags: tape.ServerFlags{
 				NGL:          "99",
 				FlashAttn:    "on",
@@ -221,7 +245,6 @@ func ExampleConcurrent() *tape.RunSummary {
 		{Index: 1, UsedBytes: 9878753280, ProcBytes: 9663676416, UtilPct: 98, TempC: 69, PowerW: 330, ClockMHz: 1770},
 	}
 	s.Warnings = []string{
-		"nvml unavailable, VRAM read from nvidia-smi",
 		"cold run: 1.4 major faults per token during decode",
 	}
 	return s

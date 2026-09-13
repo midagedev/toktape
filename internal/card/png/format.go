@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/midagedev/toktape/internal/tape"
 )
 
 // The formatters below are deliberate duplicates of the unexported ones in
@@ -18,6 +20,12 @@ import (
 // rule: an unobserved value is the empty string or 0 and prints as "?". Never
 // print a default you did not observe.
 const unknown = "?"
+
+// serverDefault is what one of the five always-printed flags reads as when an
+// argv the recorder actually read did not carry it: "?" means nobody looked,
+// "default" means the reading says the server's own default is in effect.
+// internal/card/format.go carries the derivation.
+const serverDefault = "default"
 
 // gib is one gibibyte.
 const gib = 1 << 30
@@ -128,6 +136,27 @@ func orUnknown(s string) string {
 		return unknown
 	}
 	return s
+}
+
+// argvObserved reports whether the recorder read the server's command line.
+// Args and not PID: a PID whose /proc/<pid>/cmdline could not be read leaves
+// every flag genuinely unobserved (internal/card/format.go).
+func argvObserved(srv tape.ServerInfo) bool {
+	return len(srv.Args) > 0
+}
+
+// flagValue renders one of the five always-printed flags: its value when it
+// was given, "default" when a read argv did not carry it, "?" when no argv was
+// read. Character-for-character the text card's rule (internal/card/format.go)
+// — the two renderings of one summary must not disagree about what is known.
+func flagValue(v string, argvWasRead bool) string {
+	if strings.TrimSpace(v) != "" {
+		return v
+	}
+	if argvWasRead {
+		return serverDefault
+	}
+	return unknown
 }
 
 func yesNo(b bool) string {

@@ -63,10 +63,13 @@ func Text(s *tape.RunSummary) string {
 	return b.String()
 }
 
-// Markdown wraps Text in a ```text fence and appends the llama-bench
-// compatible table, so the whole thing can be pasted as one comment.
+// Markdown wraps Text in a ```text fence, appends the llama-bench compatible
+// table and closes with the folded Reproduce block, so the whole thing can be
+// pasted as one comment: the figures first, then the same figures in the table
+// the thread is already using, then the provenance that answers "paste your
+// command" before anyone asks it.
 func Markdown(s *tape.RunSummary) string {
-	return "```text\n" + Text(s) + "```\n\n" + LlamaBenchTable(s)
+	return "```text\n" + Text(s) + "```\n\n" + LlamaBenchTable(s) + "\n" + Reproduce(s)
 }
 
 // JSON renders the summary as indented JSON. Key order is the struct order of
@@ -539,7 +542,7 @@ func powerString(w float64) string {
 // truncation; the -ot group, which can be arbitrarily long, is truncated with
 // "…" so it never costs more than one extra line.
 func flagsSection(s *tape.RunSummary) []string {
-	base, ot := flagTokens(s.Server.Flags)
+	base, ot := flagTokens(s.Server)
 	avail := innerWidth - blockLabelW
 	lines := wrapJoin(base, " ", avail)
 	if ot != "" {
@@ -560,16 +563,24 @@ func flagsSection(s *tape.RunSummary) []string {
 }
 
 // flagTokens returns the flags in card order plus the -ot group separately.
-func flagTokens(f tape.ServerFlags) (base []string, ot string) {
+//
+// It takes the whole ServerInfo and not just the flags because the five
+// always-printed ones distinguish "not observed" from "observed as absent",
+// and only the argv says which of the two happened (see flagValue).
+func flagTokens(srv tape.ServerInfo) (base []string, ot string) {
+	f := srv.Flags
+	read := argvObserved(srv)
+	// -ngl is not one of the five: it is omitted when unset rather than
+	// defaulted, because a card that prints it implies a placement decision.
 	if f.NGL != "" {
 		base = append(base, "-ngl "+f.NGL)
 	}
 	base = append(base,
-		"-fa "+orUnknown(f.FlashAttn),
-		"-b "+orUnknown(f.Batch),
-		"-ub "+orUnknown(f.UBatch),
-		"-ctk "+orUnknown(f.CacheTypeK),
-		"-ctv "+orUnknown(f.CacheTypeV),
+		"-fa "+flagValue(f.FlashAttn, read),
+		"-b "+flagValue(f.Batch, read),
+		"-ub "+flagValue(f.UBatch, read),
+		"-ctk "+flagValue(f.CacheTypeK, read),
+		"-ctv "+flagValue(f.CacheTypeV, read),
 	)
 	if f.LoadMode != "" {
 		base = append(base, "--load-mode "+f.LoadMode)

@@ -4,7 +4,8 @@
 //
 // The backend is chosen at Open time and never fails: a host with no
 // nvidia-smi gets a Null collector and a warning the card prints verbatim,
-// so the rest of the recorder does not branch on GPU availability.
+// so the rest of the recorder does not branch on GPU availability. A backend
+// that opened warns about nothing.
 //
 // Everything that interprets nvidia-smi output is a pure function of text
 // (ParseQueryGPU, ParseComputeApps, Bandwidth, Contention, Throttled); only
@@ -37,14 +38,6 @@ type Collector interface {
 	Close()
 }
 
-// Warning strings Open can return. They are printed on the card verbatim,
-// so they are sentences a reader understands without the source.
-const (
-	// WarnNoNVML is emitted whenever the nvidia-smi backend is in use: the
-	// figures are a subprocess reading, not NVML's.
-	WarnNoNVML = "nvml unavailable, VRAM from nvidia-smi"
-)
-
 // Open picks the best available backend and never fails. The order is
 // nvidia-smi, then the Null collector. The returned warnings are appended
 // to RunSummary.Warnings.
@@ -64,7 +57,11 @@ func OpenWith(ctx context.Context, run Runner) (Collector, []string) {
 	if _, err := ParseQueryGPU(out); err != nil {
 		return Null{}, []string{fmt.Sprintf("nvidia-smi output not understood (%v), GPU metrics disabled", err)}
 	}
-	return c, []string{WarnNoNVML}
+	// A working backend warns about nothing. There is no NVML path to fall
+	// back from: toktape never links NVML (no cgo, by design — nvml_notes.md),
+	// so "nvml unavailable" stated a design decision as a caveat and took a
+	// line of every Linux card. The warnings that remain are real failures.
+	return c, nil
 }
 
 // OpenFailureWarning is the sentence the card prints when the nvidia-smi

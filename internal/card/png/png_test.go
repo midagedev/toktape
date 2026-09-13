@@ -737,3 +737,78 @@ func TestWriteLeavesNoTempFile(t *testing.T) {
 		t.Errorf("directory holds %v, want just card.png", names)
 	}
 }
+
+// TestUnsetFlagPrintsDefaultOnceTheArgvWasRead: the PNG's ENGINE column obeys
+// the text card's rule (internal/card/format.go flagValue). "?" is "nobody
+// looked"; a flag missing from an argv the recorder read is observed-as-absent
+// and the server's own default is in effect.
+func TestUnsetFlagPrintsDefaultOnceTheArgvWasRead(t *testing.T) {
+	read := &tape.RunSummary{Server: tape.ServerInfo{
+		PID:   4242,
+		Args:  []string{"/usr/local/bin/llama-server", "-b", "2048"},
+		Flags: tape.ServerFlags{Batch: "2048"},
+	}}
+	c, err := renderCanvas(read)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	for id, want := range map[string]string{
+		"footer.col2.row1": "fa · ctk · ctv at defaults",
+		"footer.col2.row2": "b 2048 · ub default · ngl ?",
+	} {
+		m, ok := c.markByID(id)
+		if !ok {
+			t.Fatalf("%s was never drawn", id)
+		}
+		if m.Text != want {
+			t.Errorf("%s = %q, want %q", id, m.Text, want)
+		}
+	}
+
+	// No argv was read: every one of the five is genuinely unobserved.
+	c, err = renderCanvas(&tape.RunSummary{Server: tape.ServerInfo{PID: 4242}})
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	for id, want := range map[string]string{
+		"footer.col2.row1": "fa ? · ctk ? · ctv ?",
+		"footer.col2.row2": "b ? · ub ? · ngl ?",
+	} {
+		m, ok := c.markByID(id)
+		if !ok {
+			t.Fatalf("%s was never drawn", id)
+		}
+		if m.Text != want {
+			t.Errorf("%s = %q, want %q — a default was claimed from an argv nobody read", id, m.Text, want)
+		}
+	}
+}
+
+// TestAllDefaultFlagsStripFits: the worst case of the observed-as-absent rule
+// is a server started with nothing but a model path, where all five
+// argument-starters read "default". That strip must still fit the content box
+// uncut — the five are exactly the fields the card exists to settle.
+func TestAllDefaultFlagsStripFits(t *testing.T) {
+	s := &tape.RunSummary{Server: tape.ServerInfo{
+		Args: []string{"/usr/local/bin/llama-server", "-m", "/models/model.gguf"},
+	}}
+	c, err := renderCanvas(s)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	m, ok := c.markByID("strip.flags")
+	if !ok {
+		t.Fatal("strip.flags was never drawn")
+	}
+	if strings.HasSuffix(m.Text, ellipsis) {
+		t.Errorf("the all-default flag strip was truncated: %q", m.Text)
+	}
+	for _, want := range []string{"-fa default", "-b default", "-ub default", "-ctk default", "-ctv default"} {
+		if !strings.Contains(m.Text, want) {
+			t.Errorf("flags strip is missing %q: %q", want, m.Text)
+		}
+	}
+	if m.Rect.Max.X > contentR {
+		t.Errorf("flags line ends at x=%d, past the content box (%d)", m.Rect.Max.X, contentR)
+	}
+}

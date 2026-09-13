@@ -246,6 +246,11 @@ func shareHint(outDir string, tp *tape.Tape, a artifacts) string {
 	}
 	fmt.Fprintf(&b, "→ Post it:  toktape card %s --md --copy    (Reddit-ready, copied to clipboard)\n",
 		tildePath(a.tape))
+	// The tape is what separates a posted card from a screenshot: a reader who
+	// has the file can replay the run instead of taking the numbers on trust.
+	// The hint names the basename, which is what an upload is called.
+	fmt.Fprintf(&b, "→ Attach the .tape when you post — reviewers can replay it with: toktape play %s\n",
+		filepath.Base(a.tape))
 	if prev := previousTape(outDir, tp); prev != "" {
 		fmt.Fprintf(&b, "→ Compare:  toktape compare %s %s\n", tildePath(prev), tildePath(a.tape))
 	}
