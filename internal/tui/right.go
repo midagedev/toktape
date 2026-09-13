@@ -191,13 +191,31 @@ func majFaultsPerToken(m Model) float64 {
 func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	var out []string
 
+	// Every figure in this pane is a client-side measurement while the run is
+	// live, and the server's own timing once it is over — server figures are
+	// the record and client figures the check (CLAUDE.md).
+	//
+	// Which way round that goes is not cosmetic. A replayed tape carries the
+	// whole run from its first frame, so m.Summary already holds the final
+	// prefill rate, decode rate and TTFT at t=0. Reading one of them before
+	// the run has produced it puts "decode 11.3 tok/s" on a screen where all
+	// eight streams still say "waiting for the first token" — a figure nobody
+	// has observed yet, which is what CLAUDE.md's "never print a default you
+	// did not observe" forbids. So until a measurement exists the row prints
+	// "?", and each one appears at the moment it becomes real: prefill when
+	// the server reports prompt progress, TTFT when a first token lands, a
+	// decode rate when a second one does.
+	//
 	// Per stream, to match the decode row directly below it. Mixing a
 	// server-wide prefill figure with a per-stream decode figure on adjacent
 	// rows is exactly the confusion M3 exists to end
 	// (docs/toktape-spec.ko.md §3); the aggregate has its own line lower down.
-	prefill := m.Summary.Timings.PromptPerSecond
-	if prefill <= 0 && m.Summary.Concurrency == 1 {
-		prefill = m.Summary.Aggregate.AggregatePromptPerSecond
+	prefill := livePromptRate(m)
+	if m.Done {
+		prefill = m.Summary.Timings.PromptPerSecond
+		if prefill <= 0 && m.Summary.Concurrency == 1 {
+			prefill = m.Summary.Aggregate.AggregatePromptPerSecond
+		}
 	}
 	l := newLine(th, cw)
 	l.add(th.dim, "prefill ")
@@ -223,9 +241,11 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	perStreamRate := agg / float64(n)
 	// Once the run is over the server's own timings are the record and the
 	// client-side reduction goes back to being the cross-check (CLAUDE.md).
-	// While it is running there is no server figure yet, so the live count is
-	// all there is — and it must be the same number the stream headers show.
-	if m.Done || agg <= 0 {
+	// While it is running the live count is all there is — and it must be the
+	// same number the stream headers show. Before the second token of any
+	// stream there is no count either, and the row says so rather than
+	// reaching for the summary.
+	if m.Done {
 		if r := m.Summary.Aggregate.PerStreamPredictedPerSecond; r > 0 {
 			perStreamRate = r
 		}
@@ -239,9 +259,12 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	}
 	out = append(out, kvRow(th, cw, label, fmtRate(perStreamRate)+" tok/s", th.accentBold))
 
-	ttft := m.Summary.Aggregate.TTFTp50Ms
-	if ttft <= 0 {
-		ttft = m.Summary.Timings.TTFTMs
+	ttft := liveTTFT(m)
+	if m.Done {
+		ttft = m.Summary.Aggregate.TTFTp50Ms
+		if ttft <= 0 {
+			ttft = m.Summary.Timings.TTFTMs
+		}
 	}
 	// The badge is amber when the prefix cache was missed outright, which is
 	// the case that starts arguments about a "slow" prefill. It deliberately
@@ -277,6 +300,56 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 		out = append(out, l.String())
 	}
 	return out
+}
+
+// livePromptRate is the prompt-processing rate observed so far: the mean over
+// the streams whose newest return_progress row says how many prompt tokens the
+// server has put through and how long that took.
+//
+// Zero — printed "?" — until the first row arrives. A stream that reports no
+// progress at all contributes nothing rather than a guess: without a progress
+// row the prompt's length is not known live, and the only place it exists is
+// the summary, which is the figure this function is here to stop leaking.
+func livePromptRate(m Model) float64 {
+	var total float64
+	n := 0
+	for _, s := range m.Streams {
+		if len(s.Progress) == 0 {
+			continue
+		}
+		p := s.Progress[len(s.Progress)-1]
+		if p.Processed <= 0 || p.TimeMs <= 0 {
+			continue
+		}
+		total += float64(p.Processed) / (p.TimeMs / 1000)
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	return total / float64(n)
+}
+
+// liveTTFT is the median time to first token over the streams that have one.
+//
+// The median, to match the summary figure the row falls back to once the run
+// is over (AggregateTimings.TTFTp50Ms), so the number does not change meaning
+// as the screen crosses that boundary. Zero — printed "?" — until a first
+// token has landed anywhere.
+func liveTTFT(m Model) float64 {
+	vals := make([]float64, 0, len(m.Streams))
+	for _, s := range m.Streams {
+		if len(s.Tokens) == 0 {
+			continue
+		}
+		if d := s.Tokens[0].T - s.StartedAt; d > 0 {
+			vals = append(vals, msOf(d))
+		}
+	}
+	if len(vals) == 0 {
+		return 0
+	}
+	return percentile(vals, 0.5)
 }
 
 // prefilling reports whether any stream is still waiting for its first token.

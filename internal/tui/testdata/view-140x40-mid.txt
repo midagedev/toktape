@@ -14,9 +14,9 @@
 │ stream 4/8                                                                       12.2 tok/s · ttft 330 ms │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ ▏ Prefix caching only helps when the system prompt is byte identical. A single changed character▍         │                              │
 │                                                                                                           │ SPEED ────────────────────── │
-│                                                                                                           │ prefill           1980 tok/s │
+│                                                                                                           │ prefill           2253 tok/s │
 │ stream 5/8                                                                       12.2 tok/s · ttft 370 ms │ decode            12.1 tok/s │
-│ ▏ 측정값이 흔들릴 때는 먼저 머신이 한가한지 본다. 다른 프로세스가 같은 GPU를 쓰고 있으면 재는▍            │ ttft      210 ms · 25% cache │
+│ ▏ 측정값이 흔들릴 때는 먼저 머신이 한가한지 본다. 다른 프로세스가 같은 GPU를 쓰고 있으면 재는▍            │ ttft      330 ms · 25% cache │
 │                                                                                                           │ 8 streams     97.0 tok/s agg │
 │                                                                                                           │                              │
 │ stream 6/8                                                                       12.0 tok/s · ttft 410 ms │ HOST ─────────────────────── │

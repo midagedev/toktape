@@ -14,10 +14,10 @@
 │ stream 5/8                                                prefill │                              │
 │ ▏ ◐ prefill  ████████████ 176/512 · cache 128                     │                              │
 │                                                                   │ SPEED ────────────────────── │
-│ stream 6/8                                                prefill │ prefill ◐         1980 tok/s │
-│ ▏ ◐ prefill  ████████████ 176/512 · cache 128                     │ decode            11.3 tok/s │
-│                                                                   │ ttft      210 ms · 25% cache │
-│ stream 7/8                                                prefill │ 8 streams     90.6 tok/s agg │
+│ stream 6/8                                                prefill │ prefill ◐            ? tok/s │
+│ ▏ ◐ prefill  ████████████ 176/512 · cache 128                     │ decode               ? tok/s │
+│                                                                   │ ttft           ? · 25% cache │
+│ stream 7/8                                                prefill │ 8 streams        ? tok/s agg │
 │ ▏ ◐ prefill  ████████████ 176/512 · cache 128                     │                              │
 │                                                                   │ HOST ─────────────────────── │
 │ stream 8/8                                                prefill │ load     3.1 · contended yes │
