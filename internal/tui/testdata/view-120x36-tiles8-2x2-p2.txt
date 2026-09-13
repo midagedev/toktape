@@ -17,7 +17,7 @@
 │ ▏ 준다. 다른 프로세스가 같은 카드를▍      │ ▏ with the same label can▍                │ ttft      810 ms · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
 │ stream 7/8 · thinking                     │ stream 8/8                         answer │                              │
-│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1050 ms          │ HOST ─────────────────────── │
+│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1.05 s · 100/320 │ HOST ─────────────────────── │
 │ ▏ before I can answer that properly, so   │ ▏ of confused bug reports comes from.     │ load      3.1 · contended no │
 │ ▏ let me work it rather than quoting      │ ▏ The server maps the model file rather   │ GPU0         69°C  343W  98% │
 │ ▏ the number I half remember. Each        │ ▏ than reading it into its own memory.    │ GPU1         65°C  313W  94% │

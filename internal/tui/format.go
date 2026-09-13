@@ -43,6 +43,16 @@ func fmtMs(v float64) string {
 	if v <= 0 {
 		return unknown
 	}
+	// A second or more prints in seconds ("1.05 s") so the figure never grows
+	// past the six cells "250 ms" takes: at hero width the stat line's reserved
+	// ttft column is one cell from full, and "1050 ms" pushed a stream's token
+	// count off the line mid-run (TTP-29 finding, lead 2026-09-13).
+	if v >= 1000 {
+		if v < 10000 {
+			return strconv.FormatFloat(v/1000, 'f', 2, 64) + " s"
+		}
+		return strconv.FormatFloat(v/1000, 'f', 1, 64) + " s"
+	}
 	return strconv.FormatFloat(v, 'f', 0, 64) + " ms"
 }
 

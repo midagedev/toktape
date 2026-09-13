@@ -165,6 +165,8 @@ func TestFormatters(t *testing.T) {
 		{fmtRate(12.14), "12.1"},
 		{fmtRate(2450), "2450"},
 		{fmtMs(0), "?"},
+		{fmtMs(1050), "1.05 s"}, // 2026-09-13: seconds past 1000 ms, six cells like "250 ms"
+		{fmtMs(12345), "12.3 s"},
 		{fmtMs(143.4), "143 ms"},
 		{fmtPct(0), "0%"},
 		{fmtPct(0.78125), "78%"},

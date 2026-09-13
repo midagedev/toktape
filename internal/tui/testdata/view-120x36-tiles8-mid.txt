@@ -25,7 +25,7 @@
 │ ▏ 준다. 다른 프로세스가 같은 카드를▍      │ ▏ with the same label can▍                │                              │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
 │ stream 7/8 · thinking                     │ stream 8/8                         answer │                              │
-│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1050 ms          │                              │
+│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1.05 s · 100/320 │                              │
 │ ▏ its own forward passes cost, one per    │ ▏ file backed page can be dropped and     │                              │
 │ ▏ proposed token. So for a draft that     │ ▏ read back later. So the resident        │                              │
 │ ▏ is a tenth the size, proposing four     │ ▏ figure tells you what this process      │                              │

@@ -27,7 +27,7 @@
 │ ▏ 도구가 실행마다                                   │ ▏ cheaper multiplications. The                      │                              │
 ├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤                              │
 │ stream 7/8 · thinking · cut                         │ stream 8/8                                     done │                              │
-│ 9.1 tok/s  ▇██▇▇█▇██▇▇▇█ ttft 990 ms · 320/320      │ 9.1 tok/s  ██▇▇▇██▇▇▇██▇ ttft 1050 ms · 310/320     │                              │
+│ 9.1 tok/s  ▇██▇▇█▇██▇▇▇█ ttft 990 ms · 320/320      │ 9.1 tok/s  ██▇▇▇██▇▇▇██▇ ttft 1.05 s · 310/320      │                              │
 │ ▏ been spent on the other sequences. The            │ ▏ touch. That is where the never loaded figure on   │                              │
 │ ▏ technique wants an idle machine with one stream   │ ▏ the card comes from, and it is why the figure     │                              │
 │ ▏ on it. Their message says agents, which means     │ ▏ is absent rather than zero when a model is        │                              │

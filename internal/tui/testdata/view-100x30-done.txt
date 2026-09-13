@@ -19,7 +19,7 @@
 │ ▏ 실행마다                      │ ▏ multiplications. The          │                              │
 ├─────────────────────────────────┼─────────────────────────────────┤ HOST ─────────────────────── │
 │ stream 7/8 · thinking · cut     │ stream 8/8                 done │ load      3.1 · contended no │
-│ 9.1 tok/s  ttft 990 ms          │ 9.1 tok/s  ttft 1050 ms         │ GPU0         71°C  348W  98% │
+│ 9.1 tok/s  ttft 990 ms          │ 9.1 tok/s  ttft 1.05 s          │ GPU0         71°C  348W  98% │
 │ ▏ means concurrency, which      │ ▏ fully offloaded. The          │ GPU1         67°C  318W  94% │
 │ ▏ means my whole break even     │ ▏ counter that does matter      │                              │
 │ ▏ calculation is answering      │ ▏ during                        │                              │

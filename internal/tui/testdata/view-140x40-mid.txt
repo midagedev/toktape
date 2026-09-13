@@ -28,7 +28,7 @@
 │ ▏ 같은 카드를▍                                      │ ▏ the same label can▍                               │                              │
 ├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤                              │
 │ stream 7/8 · thinking                               │ stream 8/8                                   answer │                              │
-│ 9.1 tok/s  █▇██▇▇▇██▇▇▇█ ttft 990 ms · 101/320      │ 9.1 tok/s  █▇██▇▇▇██▇▇▇█ ttft 1050 ms · 100/320     │                              │
+│ 9.1 tok/s  █▇██▇▇▇██▇▇▇█ ttft 990 ms · 101/320      │ 9.1 tok/s  █▇██▇▇▇██▇▇▇█ ttft 1.05 s · 100/320      │                              │
 │ ▏ batch of four candidate tokens reads them once.   │ ▏ resident set when they are touched, and they      │                              │
 │ ▏ The draft costs whatever its own forward passes   │ ▏ can leave again whenever the kernel needs the     │                              │
 │ ▏ cost, one per proposed token. So for a draft      │ ▏ memory, because a clean file backed page can be   │                              │

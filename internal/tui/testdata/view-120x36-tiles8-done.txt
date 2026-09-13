@@ -24,7 +24,7 @@
 │ ▏ 할 증상이다. 이 도구가 실행마다         │ ▏ The                                     │                              │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
 │ stream 7/8 · thinking · cut               │ stream 8/8                           done │                              │
-│ 9.1 tok/s  █▇██▇▇▇█ ttft 990 ms · 320/320 │ 9.1 tok/s  ██▇▇███▇ ttft 1050 ms          │                              │
+│ 9.1 tok/s  █▇██▇▇▇█ ttft 990 ms · 320/320 │ 9.1 tok/s  ██▇▇███▇ ttft 1.05 s · 310/320 │                              │
 │ ▏ Their message says agents, which        │ ▏ is why the figure is absent rather      │                              │
 │ ▏ means concurrency, which means my       │ ▏ than zero when a model is fully         │                              │
 │ ▏ whole break even calculation is         │ ▏ offloaded. The counter that does        │                              │

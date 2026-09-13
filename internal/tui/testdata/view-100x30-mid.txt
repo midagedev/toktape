@@ -21,7 +21,7 @@
 │ ▏ 카드를▍                       │ ▏ can▍                          │ load      3.1 · contended no │
 ├─────────────────────────────────┼─────────────────────────────────┤ GPU0         69°C  343W  98% │
 │ stream 7/8 · thinking           │ stream 8/8               answer │ GPU1         65°C  313W  94% │
-│ 9.1 tok/s  ttft 990 ms          │ 9.1 tok/s  ttft 1050 ms         │                              │
+│ 9.1 tok/s  ttft 990 ms          │ 9.1 tok/s  ttft 1.05 s          │                              │
 │ ▏ size, proposing four tokens   │ ▏ process has touched           │                              │
 │ ▏ costs about four tenths of    │ ▏ recently and what the         │                              │
 │ ▏ a step plus the one step▍     │ ▏ kernel has chosen to▍         │                              │
