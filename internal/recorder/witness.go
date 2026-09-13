@@ -14,14 +14,18 @@ const (
 )
 
 // witness takes one reading of how busy the box is: the 1-minute load
-// average, /proc/pressure/io some avg10, the page-cache size and every live
-// llama-* process with its age.
+// average, /proc/pressure/io some avg10, the page-cache size, every live
+// llama-* process with its age, and the machine's operating point — the
+// cpufreq clock cap and one CPU temperature (TTP-57, 2026-09-14), so that a
+// thermal watchdog which drops the cap mid-run leaves its fingerprint in the
+// tape instead of an unexplained rate.
 //
 // Each reading degrades on its own and silently — the witness is evidence
 // attached to the verdict, not a collector whose absence is a caveat for the
 // card: an unreadable load stays 0, IO pressure nil (a kernel without PSI),
-// the page cache 0, and a process table that could not be scanned leaves
-// ProcsRead false. An unreadable boot time only leaves the ages at 0.
+// the page cache 0, the clock cap 0, the sensor "" (and then TempC is not a
+// reading), and a process table that could not be scanned leaves ProcsRead
+// false. An unreadable boot time only leaves the ages at 0.
 func (r *run) witness(t time.Duration, round int, edge string) tape.ContentionWitness {
 	fsRoot := r.opts.FSRoot
 	w := tape.ContentionWitness{T: t, Round: round, Edge: edge}
@@ -33,6 +37,12 @@ func (r *run) witness(t time.Duration, round int, edge string) tape.ContentionWi
 	}
 	if v, err := procmon.ReadPageCache(fsRoot); err == nil {
 		w.PageCacheBytes = v
+	}
+	if v, err := procmon.ReadCPUMaxKHz(fsRoot); err == nil {
+		w.CPUMaxKHz = v
+	}
+	if c, sensor, err := procmon.ReadHwmonTemp(fsRoot); err == nil {
+		w.TempC, w.TempSensor = c, sensor
 	}
 	boot, err := procmon.ReadBootTime(fsRoot)
 	if err != nil {

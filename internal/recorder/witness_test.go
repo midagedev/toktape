@@ -142,6 +142,15 @@ func TestWitnessesRoundsBusyBox(t *testing.T) {
 		if bench.PID != 4242 || bench.Comm != "llama-bench" || bench.Attached {
 			t.Errorf("witness %d proc 1 = %+v, want the foreign llama-bench 4242", i, bench)
 		}
+		// The operating point (TTP-57, 2026-09-14): the fixture's caps are
+		// 2.7 GHz on cpu0 and 3.6 on cpu1, and its chips are an NVMe
+		// controller before the k10temp whose Tctl reads 50 °C.
+		if w.CPUMaxKHz != 3600000 {
+			t.Errorf("witness %d CPUMaxKHz = %d, want 3600000", i, w.CPUMaxKHz)
+		}
+		if w.TempSensor != "k10temp Tctl" || w.TempC != 50 {
+			t.Errorf("witness %d temperature = %v %q, want 50 \"k10temp Tctl\"", i, w.TempC, w.TempSensor)
+		}
 		if i > 0 && w.T < c.Witnesses[i-1].T {
 			t.Errorf("witness %d T = %v before witness %d T = %v", i, w.T, i-1, c.Witnesses[i-1].T)
 		}
@@ -194,6 +203,52 @@ func TestWitnessesJudgeWithoutGPUBackendOrLoad(t *testing.T) {
 	}
 	if warnsAbout(tp.Summary.Warnings, "contention not judged") {
 		t.Errorf("a run with witnesses was not judged: %q", tp.Summary.Warnings)
+	}
+}
+
+// TestWitnessOperatingPointDegrades (TTP-57, 2026-09-14): a box whose kernel
+// publishes no cpufreq and whose chips publish no temperature — a VM, an older
+// kernel, a machine whose CPU driver is not loaded — still produces a witness.
+// The two readings stay 0 and "", which the tape and the card read as unknown,
+// and neither absence becomes a warning: the operating point is evidence
+// attached to the verdict, not a collector whose absence is a caveat.
+func TestWitnessOperatingPointDegrades(t *testing.T) {
+	srv := fakeServer(t)
+	tp, err := recorder.Record(context.Background(), recorder.Options{
+		BaseURL:        srv.URL,
+		Concurrency:    1,
+		MaxTokens:      64,
+		SampleInterval: 20 * time.Millisecond,
+		FSRoot: busyTree(t,
+			"sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq",
+			"sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq",
+			"sys/class/hwmon/hwmon0/temp1_input",
+			"sys/class/hwmon/hwmon1/temp1_input",
+			"sys/class/hwmon/hwmon1/temp3_input"),
+		GPU: gpu.Null{},
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	ws := tp.Summary.Contention.Witnesses
+	if len(ws) != 2 {
+		t.Fatalf("witnesses = %+v, want two", ws)
+	}
+	for i, w := range ws {
+		if w.CPUMaxKHz != 0 || w.TempSensor != "" || w.TempC != 0 {
+			t.Errorf("witness %d = %d kHz, %v %q; want the unknowns 0, 0, \"\"",
+				i, w.CPUMaxKHz, w.TempC, w.TempSensor)
+		}
+		// The rest of the witness is unaffected: one reading failing does
+		// not take the others with it.
+		if w.LoadAvg1 != 0.42 || w.IOSomeAvg10 == nil || !w.ProcsRead {
+			t.Errorf("witness %d lost an unrelated reading: %+v", i, w)
+		}
+	}
+	for _, want := range []string{"cpufreq", "hwmon", "temperature", "clock"} {
+		if warnsAbout(tp.Summary.Warnings, want) {
+			t.Errorf("an unread operating point warned about %q: %q", want, tp.Summary.Warnings)
+		}
 	}
 }
 

@@ -47,6 +47,16 @@ func procPath(fsRoot string, elem ...string) string {
 	return filepath.Join(append([]string{fsRoot, "proc"}, elem...)...)
 }
 
+// sysPath joins fsRoot, "sys" and elem: sysfs, the sibling of procfs, where
+// the machine's operating point lives (cpufreq, hwmon — TTP-57). fsRoot ""
+// means the live root, as in procPath.
+func sysPath(fsRoot string, elem ...string) string {
+	if fsRoot == "" {
+		fsRoot = "/"
+	}
+	return filepath.Join(append([]string{fsRoot, "sys"}, elem...)...)
+}
+
 // pidPath is procPath for a per-process file.
 func pidPath(fsRoot string, pid int, elem ...string) string {
 	return procPath(fsRoot, append([]string{strconv.Itoa(pid)}, elem...)...)
