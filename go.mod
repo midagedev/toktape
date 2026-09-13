@@ -3,6 +3,7 @@ module github.com/midagedev/toktape
 go 1.26
 
 require (
+	github.com/alecthomas/chroma/v2 v2.18.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/gpustack/gguf-parser-go v0.26.3
@@ -18,6 +19,7 @@ require (
 	github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd // indirect
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
+	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/henvic/httpretty v0.1.4 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect

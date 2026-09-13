@@ -67,10 +67,12 @@ const (
 	glowSettled = 500 * time.Millisecond
 )
 
-// bodySeg is a run of one line's text that shares an age band.
+// bodySeg is a run of one line's text that shares an age band and, inside a
+// fenced code block, a syntax class.
 type bodySeg struct {
-	text string
-	band tokenBand
+	text  string
+	band  tokenBand
+	class codeClass
 }
 
 // streamTextLines wraps a stream's generated text into display lines, keeping
@@ -190,7 +192,12 @@ func thinkingBadge(s Stream) string {
 // it. The reasoning ladder keeps its foreground-only step: its glow was the
 // one that was visible when the answer's was not, and a monologue is not what
 // the eye is meant to be led to.
-func bodyStyle(th Theme, bl bodyLine, band tokenBand) lipgloss.Style {
+//
+// A syntax class (highlight.go) moves an answer rune down the same ladder or
+// gives it weight; it never lifts it, and the write head wins over it. Ladder
+// positions are text, textMid, textMuted, dimMid, dim; the answer's settled
+// stop is textMuted, so a comment there is dim and punctuation dimMid.
+func bodyStyle(th Theme, bl bodyLine, band tokenBand, class codeClass) lipgloss.Style {
 	if bl.marker {
 		return th.dim
 	}
@@ -203,13 +210,25 @@ func bodyStyle(th Theme, bl bodyLine, band tokenBand) lipgloss.Style {
 		}
 		return th.dim
 	}
-	switch band {
-	case bandFresh:
+	if band == bandFresh {
 		return th.textFresh
-	case bandMid:
-		return th.textMid
 	}
-	return th.textMuted
+	ladder := []lipgloss.Style{th.textMid, th.textMuted, th.dimMid, th.dim}
+	stop := 1
+	if band == bandMid {
+		stop = 0
+	}
+	switch class {
+	case classKeyword:
+		return ladder[stop].Bold(true)
+	case classPunct:
+		stop++
+	case classComment:
+		stop += 2
+	case classFence:
+		return th.dim
+	}
+	return ladder[min(stop, len(ladder)-1)]
 }
 
 // bandStarts is where the two glow bands begin, as rune offsets into the text
@@ -255,6 +274,7 @@ func bandStarts(s Stream, t time.Duration) (midStart, freshStart int) {
 // and the write head's fill has no business lighting it.
 func bodyBands(s Stream, lines []bodyLine, t time.Duration) [][]bodySeg {
 	midStart, freshStart := bandStarts(s, t)
+	classes := codeClasses(s)
 	out := make([][]bodySeg, len(lines))
 	for i, bl := range lines {
 		if bl.marker {
@@ -262,13 +282,14 @@ func bodyBands(s Stream, lines []bodyLine, t time.Duration) [][]bodySeg {
 			continue
 		}
 		var (
-			segs []bodySeg
-			b    strings.Builder
-			cur  = bandSettled
+			segs   []bodySeg
+			b      strings.Builder
+			cur    = bandSettled
+			curCls = classPlain
 		)
 		flush := func() {
 			if b.Len() > 0 {
-				segs = append(segs, bodySeg{text: b.String(), band: cur})
+				segs = append(segs, bodySeg{text: b.String(), band: cur, class: curCls})
 				b.Reset()
 			}
 		}
@@ -278,7 +299,7 @@ func bodyBands(s Stream, lines []bodyLine, t time.Duration) [][]bodySeg {
 		// indent is exempt; the gaps between words stay in their token's run.
 		j, indent := 0, true
 		for _, r := range bl.text {
-			band := bandSettled
+			band, cls := bandSettled, classPlain
 			if indent && r != ' ' {
 				indent = false
 			}
@@ -291,10 +312,20 @@ func bodyBands(s Stream, lines []bodyLine, t time.Duration) [][]bodySeg {
 					band = bandMid
 				}
 			}
+			// A rune the wrapper wrote belongs to no token and has no class;
+			// a space takes its neighbours' so a gap does not split a run.
+			if j < len(bl.src) && !bl.reasoning && classes != nil {
+				if o := bl.src[j]; o >= 0 && o < len(classes) {
+					cls = classes[o]
+				}
+			}
+			if r == ' ' && cls == classPlain {
+				cls = curCls
+			}
 			j++
-			if band != cur {
+			if band != cur || cls != curCls {
 				flush()
-				cur = band
+				cur, curCls = band, cls
 			}
 			b.WriteRune(r)
 		}

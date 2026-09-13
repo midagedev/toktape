@@ -777,7 +777,7 @@ func TestResultModalPaintsByRole(t *testing.T) {
 func TestTheWriteHeadCarriesAFill(t *testing.T) {
 	th := ColourTheme()
 	answer := bodyLine{}
-	if bg := styleBG(bodyStyle(th, answer, bandFresh)); bg == "" {
+	if bg := styleBG(bodyStyle(th, answer, bandFresh, classPlain)); bg == "" {
 		t.Errorf("the freshest answer band paints no fill; the user cannot see where the write head is")
 	}
 	for _, c := range []struct {
@@ -791,13 +791,13 @@ func TestTheWriteHeadCarriesAFill(t *testing.T) {
 		{"settled reasoning", bodyLine{reasoning: true}, bandSettled},
 		{"the answer marker", bodyLine{marker: true}, bandFresh},
 	} {
-		if bg := styleBG(bodyStyle(th, c.bl, c.band)); bg != "" {
+		if bg := styleBG(bodyStyle(th, c.bl, c.band, classPlain)); bg != "" {
 			t.Errorf("%s paints a fill (%s); only the write head may", c.name, bg)
 		}
 	}
 	// The fill is the dark the bars and the graph tracks already use, not a
 	// new colour: one accent hue at the bottom of its lightness range.
-	if got, want := styleBG(bodyStyle(th, answer, bandFresh)), styleHex(th.darkFill); got != want {
+	if got, want := styleBG(bodyStyle(th, answer, bandFresh, classPlain)), styleHex(th.darkFill); got != want {
 		t.Errorf("the write head's fill is %s, want the theme's dark fill %s", got, want)
 	}
 }

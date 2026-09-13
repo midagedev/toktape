@@ -264,7 +264,7 @@ func streamBody(m Model, th Theme, t time.Duration, s Stream, cw, rows int, acti
 	for i, bl := range tail(lines, rows) {
 		l := newLine(th, cw)
 		for _, sg := range bands[first+i] {
-			l.add(bodyStyle(th, bl, sg.band), sg.text)
+			l.add(bodyStyle(th, bl, sg.band, sg.class), sg.text)
 		}
 		out = append(out, l.String())
 		lastIsText = !bl.marker
