@@ -119,6 +119,14 @@ const SplitTolerance = 0.10
 // in millions and each channel is 8 bytes wide. A string that does not parse,
 // or a zero or negative channel count, is unknown — ok is false and the caller
 // prints no ceiling rather than a guessed one.
+//
+// Unless the tape says otherwise. `record --ram-speed DDR5-6000 --ram-channels
+// 2` writes that same pair because the DMI tables could not be read, and
+// recorder.HostRAM.apply records a RAMSource beside it saying whose word it
+// is. So a recorded provenance wins on this branch too, and only a pair with
+// none is the machine's own answer (lead, 2026-09-14, at the seam between this
+// package and those flags: deriving from a number the operator typed and then
+// labelling it "dmi" tells the reader the firmware said it).
 func HostBandwidth(h tape.HostInfo) (bytesPerSec int64, source string, ok bool) {
 	if h.RAMBytesPerSec > 0 {
 		src := h.RAMSource
@@ -134,7 +142,11 @@ func HostBandwidth(h tape.HostInfo) (bytesPerSec int64, source string, ok bool) 
 	if !ok {
 		return 0, "", false
 	}
-	return mts * bytesPerTransfer * int64(h.RAMChannels) * 1_000_000, tape.RAMSourceDMI, true
+	src := h.RAMSource
+	if src == "" {
+		src = tape.RAMSourceDMI
+	}
+	return mts * bytesPerTransfer * int64(h.RAMChannels) * 1_000_000, src, true
 }
 
 // HostBytesPerSec is HostBandwidth without the provenance: the host's RAM

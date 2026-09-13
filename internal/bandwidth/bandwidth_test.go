@@ -720,6 +720,25 @@ func TestHostBandwidth(t *testing.T) {
 			wantOK:     true,
 		},
 		{
+			// The seam between this package and `record --ram-speed /
+			// --ram-channels` (lead, 2026-09-14). Those flags exist because
+			// the DMI tables are root-only, so the pair they write is the
+			// operator's word, and recorder.HostRAM.apply records
+			// RAMSourceStated beside it saying exactly that. Deriving from
+			// the pair and then labelling the result "dmi" would tell the
+			// reader the firmware said it. The recorded provenance wins on
+			// this branch too; only a pair with NO recorded source is the
+			// machine's own answer.
+			name: "a stated speed and channel count stay stated",
+			host: tape.HostInfo{
+				RAMSpeed: "DDR5-6000", RAMChannels: 2,
+				RAMSource: tape.RAMSourceStated,
+			},
+			wantBytes:  96_000_000_000,
+			wantSource: tape.RAMSourceStated,
+			wantOK:     true,
+		},
+		{
 			// A recorded figure beats a derivation even when both are there:
 			// the derivation is the modules' theoretical peak and the run
 			// never reaches it, so preferring it would flatter the ratio.
