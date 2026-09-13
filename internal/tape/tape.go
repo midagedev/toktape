@@ -213,17 +213,46 @@ type ModelInfo struct {
 
 // HostInfo is the hardware line of the card.
 type HostInfo struct {
-	Hostname    string    `json:"hostname,omitempty"`
-	OS          string    `json:"os"` // linux | darwin
-	Kernel      string    `json:"kernel,omitempty"`
-	CPU         string    `json:"cpu,omitempty"` // model name
-	CPUCores    int       `json:"cpu_cores,omitempty"`
-	CPUThreads  int       `json:"cpu_threads,omitempty"`
-	RAMBytes    int64     `json:"ram_bytes"`
-	RAMSpeed    string    `json:"ram_speed,omitempty"` // "DDR5-6000" when readable, else ""
-	RAMChannels int       `json:"ram_channels,omitempty"`
-	GPUs        []GPUInfo `json:"gpus,omitempty"`
+	Hostname    string `json:"hostname,omitempty"`
+	OS          string `json:"os"` // linux | darwin
+	Kernel      string `json:"kernel,omitempty"`
+	CPU         string `json:"cpu,omitempty"` // model name
+	CPUCores    int    `json:"cpu_cores,omitempty"`
+	CPUThreads  int    `json:"cpu_threads,omitempty"`
+	RAMBytes    int64  `json:"ram_bytes"`
+	RAMSpeed    string `json:"ram_speed,omitempty"` // "DDR5-6000" when readable, else ""
+	RAMChannels int    `json:"ram_channels,omitempty"`
+	// RAMBytesPerSec is the host's memory bandwidth, and RAMSource says where
+	// the figure came from. Together they are the host leg of the bandwidth
+	// ceiling, which decides whether the card can print an "of peak" ratio on
+	// an offloaded run — the very case the ratio exists for.
+	//
+	// They are separate from RAMSpeed/RAMChannels because on Linux those two
+	// are never readable: they live in the DMI tables and
+	// /sys/firmware/dmi/tables/DMI is mode 0400 root-only, so a real
+	// recording has no host ceiling at all (TTP-45). The way out is to let
+	// the operator state it — and then the card must never present a stated
+	// figure as an observed one, which is what RAMSource is for. Unknown
+	// stays "" and 0 and prints as "?", as everywhere else.
+	RAMBytesPerSec int64     `json:"ram_bytes_per_sec,omitempty"`
+	RAMSource      string    `json:"ram_source,omitempty"`
+	GPUs           []GPUInfo `json:"gpus,omitempty"`
 }
+
+// Where a host bandwidth figure came from. The card says which, because a
+// theoretical peak, a number the operator typed and a STREAM run are three
+// different claims and only the last one is a measurement of this machine.
+const (
+	// RAMSourceDMI: derived from RAMSpeed × RAMChannels read off the machine
+	// — the theoretical peak of the modules that are actually fitted.
+	RAMSourceDMI = "dmi"
+	// RAMSourceStated: the operator named it (record --ram-gbs / --ram-speed
+	// with --ram-channels). Observed from the user, not from the machine.
+	RAMSourceStated = "stated"
+	// RAMSourceMeasured: a benchmark figure the operator supplied, e.g. what
+	// STREAM reports. Lower than the peak and the honest denominator.
+	RAMSourceMeasured = "measured"
+)
 
 // GPUInfo is static per-device info.
 type GPUInfo struct {
@@ -274,6 +303,23 @@ type DevicePlacement struct {
 	Bytes   int64                 `json:"bytes"`
 	Classes map[TensorClass]int64 `json:"classes"`
 	Layers  string                `json:"layers,omitempty"` // "0-31" / "0-15,attn 16-31" — human summary
+	// ActiveBytesPerToken is what this device is actually read for on one
+	// token — the same question ModelInfo.ActiveBytesPerToken asks of the
+	// whole model, asked of one device's own tensors, so the per-device
+	// figures sum to it exactly.
+	//
+	// It cannot be derived from Classes (TTP-68): a sparse MoE's router
+	// (ffn_gate_inp) and its shared expert sit in ClassExperts and are read
+	// in full every token, so applying the sparse fraction to the class total
+	// under-counts the CPU by 831,160,320 bytes a token on the ws model —
+	// 10.7 %, past bandwidth.SplitTolerance, which made the card print no
+	// "of peak" ratio at all. Only the tensor names carry the distinction,
+	// and they are gone by the time a tape is read. So the recorder answers
+	// the question while it still has them.
+	//
+	// Zero means a tape recorded before this field existed; a reader falls
+	// back to the class-proportion estimate rather than reporting nothing.
+	ActiveBytesPerToken int64 `json:"active_bytes_per_token,omitempty"`
 }
 
 // PlacementSummary is the model's placement across devices.
