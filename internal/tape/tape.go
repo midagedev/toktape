@@ -119,7 +119,11 @@ type RunSummary struct {
 	Cache      CacheSummary    `json:"cache"`
 	Contention ContentionInfo  `json:"contention"`
 	Template   TemplateInfo    `json:"template"`
-	GPUsAtEnd  []GPUSample     `json:"gpus_at_end,omitempty"`
+	// Sampling is how the run's requests were shaped (TTP-55, 2026-09-14).
+	// One run sends one shape, so it is a run-level field even though it is
+	// recorded per request; renderers read a RunSummary and nothing else.
+	Sampling  SamplingSummary `json:"sampling,omitempty"`
+	GPUsAtEnd []GPUSample     `json:"gpus_at_end,omitempty"`
 
 	// Tag and Note label the experiment this run belongs to (`--tag ngl=40
 	// --note "fa on"`). They are the user's words, recorded so the run ledger
@@ -495,6 +499,24 @@ type TemplateInfo struct {
 	RenderedHasThinkClose bool              `json:"rendered_has_think_close"` // "</think>" present in rendered prompt
 	RenderedPromptSHA256  string            `json:"rendered_prompt_sha256,omitempty"`
 	RenderedPromptTokens  int               `json:"rendered_prompt_tokens,omitempty"`
+}
+
+// SamplingSummary is the run-level view of what the requests asked for: the
+// temperature, the thinking switch and the endpoint (TTP-55, 2026-09-14).
+//
+// Measured the same day on one model and one server, the three shapes are 11 %
+// apart — greedy /completion 25.6 tok/s, server-default sampling 24.5, the
+// chat path with thinking on 22.4 — so a card that does not say which one it
+// recorded is not comparable with another card.
+//
+// Temperature is a pointer because 0 is greedy and nil is "nothing was sent,
+// the server's own default applied". Printing llama.cpp's 0.8 for a request
+// that never carried a temperature would be the invented default the schema
+// forbids.
+type SamplingSummary struct {
+	Temperature *float64 `json:"temperature,omitempty"`
+	Thinking    string   `json:"thinking,omitempty"` // "off" | "" (the server decided)
+	Endpoint    string   `json:"endpoint,omitempty"` // EndpointCompletion; "" and EndpointChat are chat
 }
 
 // PromptRecord is the request as sent and the answer as received.
