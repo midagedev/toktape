@@ -34,8 +34,21 @@
 // ActiveBytesPerToken, and internal/recorder/record.go hands the same slice to
 // placement.EstimateVerbose, which buckets it into DevicePlacement.Classes. So
 // the class rule below is a deliberate mirror of internal/placement/active.go
-// rather than a second opinion: the two must agree by construction, and the
-// 10 % check in Ceiling exists to catch it when they do not.
+// rather than a second opinion.
+//
+// The mirror is not exact, and TTP-56 (2026-09-14) found where it breaks.
+// active.go decides sparseness by tensor NAME; DevicePlacement.Classes has no
+// names, only bytes per class, and ClassExperts holds three different things:
+// the stacked per-expert weights (sparse), the MoE router ffn_gate_inp (read in
+// full) and the shared expert _shexp (read in full). activeBytesOn scales all
+// three by used/count and so under-counts every model that has a router or a
+// shared expert — 0.818 GB of a 7.639 GB token on the ws DeepSeek V4.1 Flash
+// recording, 10.71 %, which is over SplitTolerance and is why that run prints
+// no ratio. ExpertsSplit in split.go recovers how many bytes that is from
+// figures the tape already carries; which DEVICE holds them is not recoverable
+// and wants per-device active bytes recorded at record time. Until then the
+// 10 % check does its job, which is to report nothing rather than a wrong
+// ratio.
 //
 // # Unknown is unknown
 //
@@ -158,7 +171,11 @@ func DeviceBytesPerSec(s *tape.RunSummary, device string) int64 {
 //     it is still read in full to produce the logits, and active.go counts it.
 //   - experts count as bytes × used / N, and in full when N is 0 (a dense
 //     model whose FFN was classed as experts) or when used >= N (every expert
-//     routed). That is active.go's own condition.
+//     routed). That is active.go's own condition — but active.go applies the
+//     fraction only to tensors whose NAME is a stacked expert weight, while
+//     this can only apply it to the whole class, router and shared expert
+//     included. That is the known under-count of TTP-56; see the package doc
+//     and ExpertsSplit in split.go.
 //   - embeddings count in full only for a tied model, where the matrix *is*
 //     the output projection; otherwise decoding looks up one row, not the
 //     matrix, and they are excluded.
