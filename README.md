@@ -187,8 +187,8 @@ side by side. Each field is there because it settles an argument.
 - **contended.** Another harness on the box moves decode by more than most of
   the changes people test. The card reads the load average and the other GPU
   processes and labels the run.
-- **Streams.** `8 × 12.1 tok/s = 96.8 tok/s aggregate`, TTFT p50 and p95, and
-  the most slots busy at once.
+- **Streams.** Per-stream rate × N = aggregate, spelled out on the card, with
+  TTFT p50 and p95 and the most slots busy at once.
 
 ## Commands
 

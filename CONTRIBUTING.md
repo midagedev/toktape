@@ -12,9 +12,8 @@ research that led here is under `docs/research/`.
   run. If the tape contains a prompt you would rather not share, say so and
   describe the card instead. `toktape version` and the llama-server build line
   from the card are the other two things every report needs.
-- **Feature requests:** the north star is written at the top of
-  [`CLAUDE.md`](CLAUDE.md): a reader of the money shot must be able to get
-  their own result with one command. Features that add a flag a first-time
+- **Feature requests:** the north star is one sentence. Someone who sees a
+  toktape card posted must be able to get their own with one command. Features that add a flag a first-time
   user has to learn need a strong reason.
 - **Larger changes:** open an issue first so we can agree on the shape before
   you spend the time. Changes to the tape schema in particular are discussed
