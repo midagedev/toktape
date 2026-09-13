@@ -143,6 +143,7 @@ func (r *run) streamRounds(ctx context.Context, rounds [][]server.StreamRequest)
 				MaxTokens: reqs[i].SentMaxTokens(),
 			})
 		}
+		r.observe(sinceOrigin(origin), k+1, witnessStart)
 		// server.RunConcurrent stamps StartedAt against its own call, so a
 		// later round's records are shifted by how long after round 0 it
 		// began: StartedAt is since the run start, never the round start.
@@ -157,6 +158,7 @@ func (r *run) streamRounds(ctx context.Context, rounds [][]server.StreamRequest)
 		got, err := server.RunConcurrent(ctx, r.client, reqs, func(i int) server.StreamHooks {
 			return st.hooks(base + i)
 		})
+		r.observe(time.Since(origin), k+1, witnessEnd)
 		name := r.opts.Rounds[k].Name
 		for i := range got {
 			got[i].Round = k

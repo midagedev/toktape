@@ -41,6 +41,9 @@ type run struct {
 	// roundNames are the names of the rounds that were actually sent, in
 	// order; nil in a single-round run (TTP-31).
 	roundNames []string
+	// witnesses are the contention readings taken at the start and the end
+	// of every measurement round (TTP-36); nil when the server is not local.
+	witnesses []tape.ContentionWitness
 }
 
 // Record performs one run end to end: attach, collect the static picture,
@@ -416,7 +419,10 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 	}
 
 	stopSampling := r.startSampling(ctx, st)
+	r.observe(0, 0, witnessStart)
+	origin := time.Now() // the origin RunConcurrent stamps StartedAt against
 	recs, err := server.RunConcurrent(ctx, r.client, reqs, st.hooks)
+	r.observe(time.Since(origin), 0, witnessEnd)
 	stopSampling()
 
 	if err != nil {

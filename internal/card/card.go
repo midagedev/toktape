@@ -715,7 +715,8 @@ func contendedString(ci tape.ContentionInfo) string {
 // character-for-character the PNG card's rule, because the two renderings of
 // one summary must never disagree about what is known.
 func contentionObserved(ci tape.ContentionInfo) bool {
-	return ci.Contended || ci.LoadAvg1 > 0 || ci.OtherGPUProcs > 0 || len(ci.Reasons) > 0
+	// A witness (TTP-36) is a reading even when every figure in it was quiet.
+	return ci.Contended || ci.LoadAvg1 > 0 || ci.OtherGPUProcs > 0 || len(ci.Reasons) > 0 || len(ci.Witnesses) > 0
 }
 
 func tempString(c float64) string {

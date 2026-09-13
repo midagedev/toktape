@@ -448,7 +448,7 @@ type ContentionInfo struct {
 // ContentionWitness is one reading of how busy the box was (TTP-36).
 type ContentionWitness struct {
 	T        time.Duration `json:"t"`     // since run start
-	Round    int           `json:"round"` // 0 for a single-round run
+	Round    int           `json:"round"` // 1-based (RequestRecord.Round+1) in a --prompts run; 0 for a single-round run
 	Edge     string        `json:"edge"`  // "start" | "end"
 	LoadAvg1 float64       `json:"loadavg1"`
 	// IOSomeAvg10 is /proc/pressure/io "some avg10". nil = unreadable (no PSI

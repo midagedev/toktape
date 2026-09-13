@@ -229,6 +229,10 @@ func lastGPUs(samples []tape.RunSample) []tape.GPUSample {
 // over devices: one foreign process that holds memory on four GPUs is one
 // process, and summing would report it as four and make a quiet host look
 // four times as contended as it is.
+//
+// Witnesses (TTP-36) are readings too: their load averages count toward the
+// peak, a run that has any is judged even with no load and no GPU backend,
+// and gpu.Witnessed adds their IO-pressure and llama-process reasons.
 func (r *run) contention(samples []tape.RunSample) tape.ContentionInfo {
 	var load float64
 	other := 0
@@ -242,13 +246,19 @@ func (r *run) contention(samples []tape.RunSample) tape.ContentionInfo {
 			}
 		}
 	}
+	for _, w := range r.witnesses {
+		if w.LoadAvg1 > load {
+			load = w.LoadAvg1
+		}
+	}
 	// The GPU side counts as observed whenever a real backend is open, even
 	// when it reported no foreign process: that zero is a reading. Only the
 	// Null collector means nothing was looked at.
 	_, noGPUBackend := r.gpus.(gpu.Null)
-	if load == 0 && (r.gpus == nil || noGPUBackend) {
+	if load == 0 && (r.gpus == nil || noGPUBackend) && len(r.witnesses) == 0 {
 		r.warn("host load unknown, contention not judged")
 		return tape.ContentionInfo{}
 	}
-	return gpu.Contention(load, r.host.CPUThreads, other, serverThreads(r.flags))
+	info := gpu.Contention(load, r.host.CPUThreads, other, serverThreads(r.flags))
+	return gpu.Witnessed(info, r.witnesses)
 }
