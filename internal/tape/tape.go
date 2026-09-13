@@ -42,6 +42,14 @@ const (
 	// but labelled "sample", never "decode". (Lesson 2: a 19-token sample is
 	// not a decode rate.)
 	MinDecodeTokens = 32
+	// MinCutTokens is the floor a run's wall-clock budget will not cut under
+	// (TTP-76, 2026-09-14). A budget on a slow box can land a stream under
+	// MinDecodeTokens, and a first run that reports "sample" instead of a
+	// decode rate is the poor first run the budget exists to prevent, so the
+	// clock waits: it cuts once every live stream has this many tokens or has
+	// ended on its own. Twice MinDecodeTokens, so the rate is a rate with room
+	// to spare rather than one sitting on the threshold.
+	MinCutTokens = 2 * MinDecodeTokens
 	// RateTolerance is the allowed relative difference between the client-side
 	// rate and the server's predicted_per_second. (Lesson 1.)
 	RateTolerance = 0.02
@@ -122,8 +130,10 @@ type RunSummary struct {
 	// Sampling is how the run's requests were shaped (TTP-55, 2026-09-14).
 	// One run sends one shape, so it is a run-level field even though it is
 	// recorded per request; renderers read a RunSummary and nothing else.
-	Sampling  SamplingSummary `json:"sampling,omitempty"`
-	GPUsAtEnd []GPUSample     `json:"gpus_at_end,omitempty"`
+	Sampling SamplingSummary `json:"sampling,omitempty"`
+	// Limit is what could end this run's generation and what did (TTP-76).
+	Limit     LimitSummary `json:"limit,omitempty"`
+	GPUsAtEnd []GPUSample  `json:"gpus_at_end,omitempty"`
 
 	// Tag and Note label the experiment this run belongs to (`--tag ngl=40
 	// --note "fa on"`). They are the user's words, recorded so the run ledger
@@ -565,6 +575,36 @@ type SamplingSummary struct {
 	Endpoint    string   `json:"endpoint,omitempty"` // EndpointCompletion; "" and EndpointChat are chat
 }
 
+// LimitSummary is what was allowed to end the generation, and what did
+// (TTP-76, 2026-09-14).
+//
+// A run stops for one of three reasons and the card must be able to say which:
+// the model stopped (EOS), the token cap was reached, or the clock ran out.
+// The first two are the server's own words in PromptRecord.FinishReason. The
+// third has no server word at all — a clock-cut stream is cancelled mid-flight
+// and no final chunk ever arrives — and inventing one would be the default the
+// schema forbids. Hence CutAt here and PromptRecord.Cut per stream, with
+// FinishReason left exactly as the server left it: empty.
+type LimitSummary struct {
+	// For is the wall-clock budget the run was recorded with (`--for 20s`),
+	// measured from the first request going out and not from the first token:
+	// a clip replays the run at 1:1, so this is the number that makes a clip's
+	// length predictable on a machine nobody has measured. 0 = no clock.
+	For time.Duration `json:"for,omitempty"`
+	// MaxTokens is the per-stream token cap the requests actually carried. It
+	// is always sent — a request with no cap generates unbounded, and a clock
+	// that fails then has nothing behind it.
+	MaxTokens int `json:"max_tokens,omitempty"`
+	// MinTokens is the floor that was in force (MinCutTokens); 0 with no clock.
+	MinTokens int `json:"min_tokens,omitempty"`
+	// CutAt is when the clock actually cut, from the same origin as For. 0
+	// means it never did: every stream ended on EOS or on the cap. CutAt
+	// larger than For is honest and expected — the floor held the cut back
+	// until the slowest live stream had MinTokens, so on that box the run is
+	// longer than was asked for and the card should say so.
+	CutAt time.Duration `json:"cut_at,omitempty"`
+}
+
 // PromptRecord is the request as sent and the answer as received.
 type PromptRecord struct {
 	Messages       []Message      `json:"messages"`
@@ -576,6 +616,15 @@ type PromptRecord struct {
 	ReasoningN     int            `json:"reasoning_n,omitempty"`     // reasoning tokens among the predicted ones
 	MaxTokens      int            `json:"max_tokens,omitempty"`      // the generation cap the request was sent with (n_predict / max_tokens); 0 = not recorded
 	FinishReason   string         `json:"finish_reason,omitempty"`
+	// Cut marks a stream the run's clock ended (TTP-76, 2026-09-14). No final
+	// chunk arrived for it, so FinishReason stays empty rather than carrying a
+	// word the server never said; a reader asks Cut first and FinishReason
+	// second. The timings on a cut stream are still the server's own up to the
+	// last chunk received — internal/server/sse.go documents that they ride
+	// every chunk under timings_per_token — so the rate is a measurement and
+	// not an estimate. What truncation costs is the late-run behaviour
+	// (thermal, cache growth), not the rate's validity.
+	Cut bool `json:"cut,omitempty"`
 	// Endpoint is the server path the request went to (TTP-55, 2026-09-14):
 	// EndpointChat, the default, or EndpointCompletion for a raw
 	// /completion request whose prompt was sent verbatim with no template.

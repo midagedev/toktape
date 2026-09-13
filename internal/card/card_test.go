@@ -314,7 +314,12 @@ func TestJSONIsSchemaOrdered(t *testing.T) {
 		"host", "placement", "memory", "concurrency", "timings", "aggregate",
 		// "sampling" joined on 2026-09-14 (TTP-55): what the requests asked
 		// of the sampler, the thinking and the endpoint.
-		"cache", "contention", "template", "sampling", "gpus_at_end",
+		// "limit" joined on 2026-09-14 (TTP-76): what was allowed to end the
+		// generation — the wall-clock budget, the token cap, the floor — and
+		// which of them did. It is a struct with omitempty, which Go does not
+		// honour for structs, so it is emitted as {} on a run that named no
+		// limits, exactly as "sampling" beside it is.
+		"cache", "contention", "template", "sampling", "limit", "gpus_at_end",
 	}
 	if !slices.Equal(keys, want) {
 		t.Errorf("top-level key order =\n%v\nwant\n%v", keys, want)
