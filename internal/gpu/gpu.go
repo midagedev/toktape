@@ -15,7 +15,10 @@ package gpu
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
+	"strings"
 
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -53,14 +56,56 @@ func Open(ctx context.Context) (Collector, []string) {
 // (SSH sidecar) nvidia-smi.
 func OpenWith(ctx context.Context, run Runner) (Collector, []string) {
 	c := &smiCollector{run: run}
-	out, err := c.run(ctx, queryGPUArgs()...)
+	args := queryGPUArgs()
+	out, err := c.run(ctx, args...)
 	if err != nil {
-		return Null{}, []string{fmt.Sprintf("nvidia-smi unavailable (%v), GPU metrics disabled", err)}
+		return Null{}, []string{OpenFailureWarning(args, err)}
 	}
 	if _, err := ParseQueryGPU(out); err != nil {
 		return Null{}, []string{fmt.Sprintf("nvidia-smi output not understood (%v), GPU metrics disabled", err)}
 	}
 	return c, []string{WarnNoNVML}
+}
+
+// OpenFailureWarning is the sentence the card prints when the nvidia-smi
+// backend could not be opened.
+//
+// A machine with no NVIDIA driver is the ordinary case, not a fault, and the
+// old copy reported it by pasting the whole failed command line onto the card:
+// "nvidia-smi unavailable (nvidia-smi --query-gpu=index,name,... : exec: ...)".
+// A reader cannot act on that. The two cases are told apart instead: a missing
+// binary says so in five words, and a real failure keeps one line of the
+// reason, with the argv this package itself chose stripped back off.
+func OpenFailureWarning(args []string, err error) string {
+	if errors.Is(err, exec.ErrNotFound) {
+		return "nvidia-smi not found, GPU metrics disabled"
+	}
+	return fmt.Sprintf("nvidia-smi failed (%s), GPU metrics disabled", failureReason(args, err))
+}
+
+// failureReason is the first line of err with the command prefix ExecRunner
+// added ("nvidia-smi <args>: ") removed, clipped so one warning cannot take
+// three lines of a card that exists to show figures.
+func failureReason(args []string, err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	msg := err.Error()
+	if prefix := "nvidia-smi " + strings.Join(args, " ") + ": "; strings.HasPrefix(msg, prefix) {
+		msg = msg[len(prefix):]
+	}
+	if i := strings.IndexByte(msg, '\n'); i >= 0 {
+		msg = msg[:i]
+	}
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return "unknown"
+	}
+	const maxReason = 60
+	if len(msg) > maxReason {
+		msg = strings.TrimSpace(msg[:maxReason-1]) + "…"
+	}
+	return msg
 }
 
 // Null is the collector for a host with no readable GPU. Every method

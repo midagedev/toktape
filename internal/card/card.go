@@ -277,10 +277,12 @@ func shortGPUName(n string) string {
 }
 
 func ramString(h tape.HostInfo) string {
-	s := unknown + " GB"
-	if h.RAMBytes > 0 {
-		s = fmt.Sprintf("%.0f GB", float64(h.RAMBytes)/gib)
+	// A bare "?" and not "? GB": the unit belongs to a number that was
+	// measured, and "? GB" reads as a quantity of gigabytes nobody counted.
+	if h.RAMBytes == 0 {
+		return unknown
 	}
+	s := fmt.Sprintf("%.0f GB", float64(h.RAMBytes)/gib)
 	// RAM speed is omitted when unknown rather than printed as "?": it is a
 	// nice-to-have detail, not one of the argument-settling fields.
 	if h.RAMSpeed != "" {
@@ -482,14 +484,36 @@ func hostSection(s *tape.RunSummary) []string {
 		}
 	}
 	parts = append(parts, "throttled: "+throttled)
-	// Lesson 6: Contention is always filled in, so it is always printed.
-	parts = append(parts, "contended: "+yesNo(s.Contention.Contended))
+	// Lesson 6: contention is always printed — but "no" is a claim, and a run
+	// that could read neither the host load nor a GPU has not earned it. The
+	// PNG card applies the same rule (internal/card/png contendedPill).
+	parts = append(parts, "contended: "+contendedString(s.Contention))
 
 	lines := wrapJoin(parts, " · ", innerWidth-blockLabelW)
 	if s.Contention.Contended && len(s.Contention.Reasons) > 0 {
 		lines = append(lines, wrapJoin(s.Contention.Reasons, " · ", innerWidth-blockLabelW)...)
 	}
 	return labelled("HOST", blockLabelW, lines)
+}
+
+// contendedString is the contention verdict, or "?" when nothing in it came
+// from a reading.
+//
+// A card that says "contended no" about a run in which nobody looked at the
+// host is worse than one that admits it did not look: the whole point of the
+// card is that a figure on it was observed.
+func contendedString(ci tape.ContentionInfo) string {
+	if !contentionObserved(ci) {
+		return unknown
+	}
+	return yesNo(ci.Contended)
+}
+
+// contentionObserved reports whether anything in ci came from a reading. It is
+// character-for-character the PNG card's rule, because the two renderings of
+// one summary must never disagree about what is known.
+func contentionObserved(ci tape.ContentionInfo) bool {
+	return ci.Contended || ci.LoadAvg1 > 0 || ci.OtherGPUProcs > 0 || len(ci.Reasons) > 0
 }
 
 func tempString(c float64) string {

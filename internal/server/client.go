@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +31,25 @@ import (
 // Discover). It deliberately does not bound Stream, which runs as long as the
 // model generates.
 const DefaultTimeout = 10 * time.Second
+
+// ErrUnreachable and ErrLoading are the two ways attaching can fail, and the
+// caller must tell them apart: one is a mistake the user can fix now, the
+// other is a wait.
+//
+// Measured 2026-09-13: llama-server opens its TCP port and then answers
+// nothing on /props for minutes while it lazily loads a large model. Treating
+// that as "unreachable" — which toktape did — sends a first-time user to fix a
+// URL that was right all along, so Props classifies the three shapes the
+// symptom takes: a refused connection, an explicit 503 or "Loading model"
+// body, and a request that simply never answers.
+var (
+	// ErrUnreachable means nothing is serving there: the connection was
+	// refused, the host is gone, or the answer was not a server we can use.
+	ErrUnreachable = errors.New("server: unreachable")
+	// ErrLoading means a server is there and is not ready yet. Waiting is
+	// the correct response; the wrapped detail says how it announced itself.
+	ErrLoading = errors.New("server: loading the model")
+)
 
 // DefaultCandidates are the base URLs Discover probes when given none, in the
 // order llama-server users most often bind them.
@@ -137,20 +157,101 @@ type Props struct {
 }
 
 // Props reads GET /props.
+//
+// Every failure is classified as ErrUnreachable or ErrLoading (see those
+// variables); nothing else is returned, so a caller can branch on the two with
+// errors.Is and never on a message.
 func (c *Client) Props(ctx context.Context) (*Props, error) {
-	var p Props
-	body, hdr, err := c.get(ctx, "/props")
-	if err != nil {
-		return nil, err
+	body, hdr, status, err := c.getRaw(ctx, "/props")
+	if e := classifyProps(c.baseURL, status, body, err, ctx.Err()); e != nil {
+		return nil, e
 	}
+	var p Props
 	if err := json.Unmarshal(body, &p); err != nil {
-		return nil, fmt.Errorf("server: decode /props: %w", err)
+		return nil, fmt.Errorf("%w: %s: /props is not JSON: %v", ErrUnreachable, c.baseURL, err)
 	}
 	if err := json.Unmarshal(body, &p.Raw); err != nil {
-		return nil, fmt.Errorf("server: decode /props raw: %w", err)
+		return nil, fmt.Errorf("%w: %s: /props is not a JSON object: %v", ErrUnreachable, c.baseURL, err)
 	}
 	p.Headers = hdr
 	return &p, nil
+}
+
+// classifyProps turns one /props attempt into a typed error, or nil when the
+// attempt succeeded. It is a pure function of what the attempt produced so
+// every branch is testable without a server.
+//
+// parentErr is the caller's own context error. A per-call deadline that fired
+// while the caller is still interested is the "answers nothing" case and means
+// loading; the same deadline after the caller gave up is just the cancellation
+// and must not be dressed up as a server state.
+func classifyProps(baseURL string, status int, body []byte, transportErr, parentErr error) error {
+	if parentErr != nil {
+		return fmt.Errorf("%w: %s: %v", ErrUnreachable, baseURL, parentErr)
+	}
+	if transportErr != nil {
+		if errors.Is(transportErr, context.DeadlineExceeded) {
+			return fmt.Errorf("%w: %s: no answer on /props within the timeout", ErrLoading, baseURL)
+		}
+		return fmt.Errorf("%w: %s: %v", ErrUnreachable, baseURL, rootCause(transportErr))
+	}
+	if status >= 200 && status < 300 {
+		return nil
+	}
+	detail := loadingDetail(body)
+	if status == http.StatusServiceUnavailable || detail != "" {
+		if detail == "" {
+			detail = http.StatusText(status)
+		}
+		return fmt.Errorf("%w: %s: %s", ErrLoading, baseURL, detail)
+	}
+	return fmt.Errorf("%w: %s: HTTP %d: %s", ErrUnreachable, baseURL, status,
+		clip(strings.TrimSpace(string(body)), 200))
+}
+
+// rootCause is the innermost error of a chain.
+//
+// A refused connection arrives wrapped four deep — the GET, net/http's URL
+// error, the dial, the syscall — and printing all of it buries the two words
+// that tell the user what to do ("connection refused") under a stack trace in
+// prose. The layers add nothing a reader of this message needs: the operation
+// and the URL are already in the sentence around it.
+func rootCause(err error) error {
+	for {
+		next := errors.Unwrap(err)
+		if next == nil {
+			return err
+		}
+		err = next
+	}
+}
+
+// loadingDetail returns llama-server's own "not ready" sentence when the body
+// is its error envelope and the message says so, else "".
+//
+// The envelope is {"error":{"message":"Loading model","type":...}}. Matching on
+// the message rather than on the status alone is what catches the builds that
+// answer 500 while a model loads.
+func loadingDetail(body []byte) string {
+	var env struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return ""
+	}
+	msg := strings.TrimSpace(env.Error.Message)
+	if msg == "" {
+		return ""
+	}
+	low := strings.ToLower(msg)
+	for _, marker := range []string{"loading model", "model is loading", "loading the model", "not ready"} {
+		if strings.Contains(low, marker) {
+			return msg
+		}
+	}
+	return ""
 }
 
 // CtxSize is n_ctx from the default generation settings, or 0 when the server
@@ -292,7 +393,7 @@ func (c *Client) Discover(ctx context.Context, candidates []string) (string, err
 	}
 	order = append(order, candidates...)
 
-	var firstErr error
+	var firstErr, loadingErr error
 	for _, raw := range order {
 		u := NormalizeBaseURL(raw)
 		if u == "" || seen[u] {
@@ -305,37 +406,59 @@ func (c *Client) Discover(ctx context.Context, candidates []string) (string, err
 			if firstErr == nil {
 				firstErr = err
 			}
+			// A candidate that is loading outranks every refusal: it is a
+			// server, and the caller can wait for it. Reporting the first
+			// refused port instead would tell the user to fix a URL while
+			// the server they meant is two seconds from ready.
+			if loadingErr == nil && errors.Is(err, ErrLoading) {
+				loadingErr = err
+			}
 			continue
 		}
 		return u, nil
 	}
+	if loadingErr != nil {
+		return "", fmt.Errorf("server: discover: %w", loadingErr)
+	}
 	if firstErr == nil {
-		return "", fmt.Errorf("server: discover: no candidates to probe")
+		return "", fmt.Errorf("%w: server: discover: no candidates to probe", ErrUnreachable)
 	}
 	return "", fmt.Errorf("server: discover: no server answered /props at %s: %w", strings.Join(tried, ", "), firstErr)
 }
 
-// get performs a bounded GET and returns the body and response headers.
+// get performs a bounded GET and fails on any non-2xx status.
 func (c *Client) get(ctx context.Context, path string) ([]byte, http.Header, error) {
+	body, hdr, status, err := c.getRaw(ctx, path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, nil, fmt.Errorf("server: GET %s: HTTP %d: %s", path, status, clip(strings.TrimSpace(string(body)), 200))
+	}
+	return body, hdr, nil
+}
+
+// getRaw performs a bounded GET and hands the status code back with the body
+// instead of turning it into an error, so a caller that must tell a 503 from a
+// 500 can. A transport failure is still an error; err and status are never
+// both meaningful.
+func (c *Client) getRaw(ctx context.Context, path string) ([]byte, http.Header, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("server: GET %s: %w", path, err)
+		return nil, nil, 0, fmt.Errorf("server: GET %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, nil, fmt.Errorf("server: GET %s: read body: %w", path, err)
+		return nil, nil, 0, fmt.Errorf("server: GET %s: read body: %w", path, err)
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, nil, fmt.Errorf("server: GET %s: %s: %s", path, resp.Status, clip(strings.TrimSpace(string(body)), 200))
-	}
-	return body, resp.Header, nil
+	return body, resp.Header, resp.StatusCode, nil
 }
 
 // post performs a bounded JSON POST and returns the body.

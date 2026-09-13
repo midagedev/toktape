@@ -3,6 +3,8 @@ package gpu
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -58,9 +60,18 @@ func TestOpenFallsBackToNull(t *testing.T) {
 		wantMsg string
 	}{
 		{
-			name:    "nvidia-smi is not installed",
-			f:       &fakeRunner{gpuErr: errors.New(`exec: "nvidia-smi": executable file not found in $PATH`)},
-			wantMsg: "nvidia-smi unavailable",
+			// The real ExecRunner wraps exec.ErrNotFound, which is what
+			// OpenFailureWarning matches on, so the fake wraps it too.
+			name: "nvidia-smi is not installed",
+			f: &fakeRunner{gpuErr: fmt.Errorf(`nvidia-smi --query-gpu=index: exec: "nvidia-smi": %w`,
+				exec.ErrNotFound)},
+			wantMsg: "nvidia-smi not found, GPU metrics disabled",
+		},
+		{
+			name: "the driver is broken",
+			f: &fakeRunner{gpuErr: errors.New("exit status 9: NVIDIA-SMI has failed because it couldn't " +
+				"communicate with the NVIDIA driver\nMake sure that the latest NVIDIA driver is installed")},
+			wantMsg: "nvidia-smi failed (exit status 9: NVIDIA-SMI has failed",
 		},
 		{
 			name:    "the query returned something we do not understand",
@@ -276,5 +287,47 @@ func TestQueryArgs(t *testing.T) {
 	apps := strings.Join(queryComputeAppsArgs(), " ")
 	if !strings.Contains(apps, "--query-compute-apps=gpu_uuid,pid,used_memory") {
 		t.Errorf("query-compute-apps args: %s", apps)
+	}
+}
+
+// TestOpenFailureWarning pins the two sentences directly: the card prints them
+// verbatim, so their wording is the contract, not an implementation detail.
+func TestOpenFailureWarning(t *testing.T) {
+	args := []string{"--query-gpu=index,name", "--format=csv,noheader,nounits"}
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "missing binary",
+			err:  fmt.Errorf("nvidia-smi %s: %w", strings.Join(args, " "), exec.ErrNotFound),
+			want: "nvidia-smi not found, GPU metrics disabled",
+		},
+		{
+			name: "argv prefix is stripped and the reason is one line",
+			err: fmt.Errorf("nvidia-smi %s: exit status 9: NVIDIA-SMI has failed\nsecond line",
+				strings.Join(args, " ")),
+			want: "nvidia-smi failed (exit status 9: NVIDIA-SMI has failed), GPU metrics disabled",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := OpenFailureWarning(args, tc.err); got != tc.want {
+				t.Errorf("OpenFailureWarning = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A long driver message must not push the figures off the card.
+func TestOpenFailureWarningClips(t *testing.T) {
+	long := errors.New(strings.Repeat("x", 400))
+	got := OpenFailureWarning(nil, long)
+	if len(got) > 120 {
+		t.Errorf("warning is %d chars: %q", len(got), got)
+	}
+	if !strings.HasSuffix(got, "), GPU metrics disabled") {
+		t.Errorf("warning lost its shape: %q", got)
 	}
 }

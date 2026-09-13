@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -126,27 +127,94 @@ func (r *run) emit(ev Event) {
 	}
 }
 
-// attach finds the server and reads /props. This is the only step that can
-// fail the run outright.
+// attach finds the server and reads /props, waiting while the server is
+// loading its model. This is the only step that can fail the run outright.
+//
+// The wait is the difference between a tool that works on a box with a 450 GB
+// model and one that does not: such a server listens long before it answers,
+// and every attempt before the model is resident looks exactly like a wrong
+// URL. See the Options.WaitForModel doc for the measurement.
 func (r *run) attach(ctx context.Context) error {
+	start := time.Now()
+	for {
+		// The caller's own cancellation is checked first and every time
+		// round: a cancelled run must return now, not after one more poll
+		// interval, and its cancellation is not a server state.
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("%w: %v", ErrUnreachable, err)
+		}
+		c, props, err := r.probe(ctx)
+		if err == nil {
+			r.client, r.props = c, props
+			r.kind = server.DetectKind(props)
+			r.emit(Event{Kind: EventDiscovered, Stream: -1, Message: c.BaseURL()})
+			build, _ := server.BuildFromProps(props.BuildInfo)
+			r.emit(Event{Kind: EventProps, Stream: -1, Message: build})
+			return nil
+		}
+
+		reason, waitable := r.waitReason(err)
+		elapsed := time.Since(start)
+		if !waitable {
+			return fmt.Errorf("%w: %v", ErrUnreachable, err)
+		}
+		if elapsed >= r.opts.WaitForModel {
+			// The exit code stays 2: a wrapper script branches on it and
+			// "the server never became ready" is still "could not attach".
+			if r.opts.WaitForModel == 0 {
+				return fmt.Errorf("%w: %v", ErrUnreachable, err)
+			}
+			return fmt.Errorf("%w: gave up after %s: %v",
+				ErrUnreachable, r.opts.WaitForModel.Round(time.Second), err)
+		}
+		r.emit(Event{Kind: EventLoading, Stream: -1, Elapsed: elapsed, Message: reason})
+
+		timer := time.NewTimer(r.opts.LoadingPoll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("%w: %v", ErrUnreachable, ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+// probe is one attach attempt: discovery when no URL was given, then /props.
+//
+// Discovery is redone on every attempt rather than once, because a server that
+// opens its port late is found by scanning the candidates again — re-polling a
+// URL that discovery never produced would wait forever on nothing.
+func (r *run) probe(ctx context.Context) (*server.Client, *server.Props, error) {
 	c := server.New(r.opts.BaseURL)
 	if r.opts.BaseURL == "" {
 		url, err := c.Discover(ctx, r.opts.Candidates)
 		if err != nil {
-			return fmt.Errorf("%w: %v", ErrUnreachable, err)
+			return nil, nil, err
 		}
 		c = c.WithBaseURL(url)
 	}
 	props, err := c.Props(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: %s: %v", ErrUnreachable, c.BaseURL(), err)
+		return nil, nil, err
 	}
-	r.client, r.props = c, props
-	r.kind = server.DetectKind(props)
-	r.emit(Event{Kind: EventDiscovered, Stream: -1, Message: c.BaseURL()})
-	build, _ := server.BuildFromProps(props.BuildInfo)
-	r.emit(Event{Kind: EventProps, Stream: -1, Message: build})
-	return nil
+	return c, props, nil
+}
+
+// waitReason says whether err is worth waiting out, and which sentence the CLI
+// should print while it does.
+//
+// A server that is loading is always worth waiting for. A refused connection
+// is only worth waiting for when the user asked (--wait), because otherwise a
+// mistyped --url would hang for ten minutes instead of failing in a second.
+func (r *run) waitReason(err error) (reason string, waitable bool) {
+	switch {
+	case errors.Is(err, server.ErrLoading):
+		return ReasonLoading, true
+	case r.opts.WaitForStart:
+		return ReasonStarting, true
+	default:
+		return "", false
+	}
 }
 
 // collectModel reads the GGUF header when the model file is on this host.
@@ -169,7 +237,7 @@ func (r *run) collectModel() {
 	// sentence and never a wrapped Go error chain: four lines of
 	// "open ...: no such file" would crowd out the figures the card exists
 	// to show. The path itself is on the tape in Model.Path.
-	r.warn("model file not readable here (%s), model shape and placement unknown", base)
+	r.warn("model file not readable here, shape and placement unknown")
 	r.model = tape.ModelInfo{
 		Path:     path,
 		FileName: base,
@@ -185,7 +253,7 @@ func (r *run) collectProcess() {
 	}
 	pid, err := procmon.FindPID(r.opts.FSRoot, r.props.ModelPath)
 	if err != nil {
-		r.warn("pid not found, no /proc view: memory, page faults and flags unavailable")
+		r.warn("pid not found: no memory, page faults or flags")
 		r.emit(Event{Kind: EventPIDNotFound, Stream: -1})
 		return
 	}
@@ -261,7 +329,7 @@ func (r *run) collectTemplate(ctx context.Context, reqs []server.StreamRequest) 
 		reqs[i].RenderedPrompt = rendered
 	}
 	if failed > 0 {
-		r.warn("/apply-template failed for %d of %d streams: rendered prompt and </think> presence unknown", failed, len(reqs))
+		r.warn("/apply-template failed for %d/%d streams, prompt unknown", failed, len(reqs))
 	}
 	first := reqs[0].RenderedPrompt
 	if first != "" {
@@ -287,7 +355,7 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 	if r.pid > 0 {
 		s, err := procmon.NewSamplerAt(r.opts.FSRoot, r.pid)
 		if err != nil {
-			r.warn("process sampler for pid %d unavailable, no memory or page fault series", r.pid)
+			r.warn("process sampler unavailable, no memory or fault series")
 		} else {
 			sampler = s
 			defer sampler.Close()

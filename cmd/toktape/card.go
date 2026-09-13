@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/midagedev/toktape/internal/card"
+	"github.com/midagedev/toktape/internal/card/png"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -15,13 +17,20 @@ import (
 func runCard(stdout, stderr io.Writer, args []string) int {
 	fs := newFlagSet("card", stderr)
 	var (
-		md     = fs.Bool("md", false, "render Markdown with a llama-bench table")
-		asJSON = fs.Bool("json", false, "render the run summary as JSON")
-		copyTo = fs.Bool("copy", false, "copy the output to the clipboard (OSC 52)")
+		md      = fs.Bool("md", false, "render Markdown with a llama-bench table")
+		asJSON  = fs.Bool("json", false, "render the run summary as JSON")
+		asPNG   = fs.Bool("png", false, "write the share image instead of printing a card")
+		copyTo  = fs.Bool("copy", false, "copy the output to the clipboard (OSC 52)")
+		outPath string
 	)
 	files, err := parseArgs(fs, args)
 	if err != nil {
 		return exitUsage
+	}
+	// With --png a second positional argument is where the image goes. Without
+	// it, a second file is a mistake worth naming rather than ignoring.
+	if *asPNG && len(files) == 2 {
+		outPath, files = files[1], files[:1]
 	}
 	if len(files) != 1 {
 		fmt.Fprintf(stderr, "toktape card: expected one tape file\n\n%s", usageText)
@@ -36,6 +45,10 @@ func runCard(stdout, stderr io.Writer, args []string) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "toktape: %v\n", err)
 		return exitUsage
+	}
+
+	if *asPNG {
+		return writeCardPNG(stdout, stderr, files[0], outPath, &tp.Summary)
 	}
 
 	var out string
@@ -57,6 +70,24 @@ func runCard(stdout, stderr io.Writer, args []string) int {
 	if *copyTo {
 		copyOSC52(stderr, out)
 	}
+	return exitOK
+}
+
+// writeCardPNG renders the share image for a tape.
+//
+// The default destination is next to the tape, named after it, because that is
+// where the recording already put one and a second copy under a different name
+// is how two cards of the same run get posted as if they were two runs. The
+// path is printed to stdout so a script can pick it up.
+func writeCardPNG(stdout, stderr io.Writer, tapePath, outPath string, s *tape.RunSummary) int {
+	if outPath == "" {
+		outPath = strings.TrimSuffix(tapePath, tape.Ext) + ".card.png"
+	}
+	if err := png.Write(outPath, s); err != nil {
+		fmt.Fprintf(stderr, "toktape: %v\n", err)
+		return exitUsage
+	}
+	fmt.Fprintln(stdout, outPath)
 	return exitOK
 }
 

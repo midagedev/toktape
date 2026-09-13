@@ -17,6 +17,16 @@ import (
 // owns the live view).
 const progressTick = time.Second
 
+// spinnerFrames is one Braille cycle. The frame is chosen by elapsed whole
+// seconds, so the line is a function of how long the wait has been and not of
+// how many times it happened to be redrawn.
+var spinnerFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+
+// loadingLineInterval is how often the waiting line is repeated when stderr is
+// not a terminal. A log that gains a line every ten seconds shows the wait is
+// alive; one that gains a line every second shows nothing else.
+const loadingLineInterval = 10 * time.Second
+
 // progress turns the recorder's event stream into the plain stderr lines of
 // the non-interactive run.
 //
@@ -26,6 +36,8 @@ const progressTick = time.Second
 type progress struct {
 	w     io.Writer
 	quiet bool
+	// tty selects the redrawn waiting line over the repeated one.
+	tty bool
 
 	mu         sync.Mutex
 	streams    int
@@ -35,17 +47,27 @@ type progress struct {
 	lastToken  time.Time
 	perStream  map[int]int
 
-	stopCh chan struct{}
-	done   chan struct{}
+	// waiting is the attach wait: the server is there and is not ready. It
+	// is the only state in which the ticker draws something other than the
+	// run, and the only one that leaves an unterminated line on a terminal.
+	waiting    bool
+	waitReason string
+	waitSince  time.Time
+	waitDecade int
+	lineOpen   bool
+	stopCh     chan struct{}
+	done       chan struct{}
 }
 
 func newProgress(w io.Writer, quiet bool) *progress {
 	return &progress{
-		w:         w,
-		quiet:     quiet,
-		perStream: map[int]int{},
-		stopCh:    make(chan struct{}),
-		done:      make(chan struct{}),
+		w:          w,
+		quiet:      quiet,
+		tty:        isTTY(w),
+		perStream:  map[int]int{},
+		waitDecade: -1,
+		stopCh:     make(chan struct{}),
+		done:       make(chan struct{}),
 	}
 }
 
@@ -75,36 +97,45 @@ func (p *progress) start() {
 func (p *progress) stop() {
 	close(p.stopCh)
 	<-p.done
+	p.mu.Lock()
+	p.closeLine()
+	p.mu.Unlock()
 }
 
 // handle receives every recorder event.
+//
+// The whole body runs under the mutex. The events arrive on the recorder's
+// goroutines while the ticker may be writing a line of its own, and two
+// Fprintf calls racing on one stderr interleave mid-line.
 func (p *progress) handle(ev recorder.Event) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if ev.Kind == recorder.EventLoading {
+		if !p.quiet {
+			p.noteWaiting(ev)
+		}
+		return
+	}
+	// Anything else means the wait is over: the redrawn line must be closed
+	// before the next one is written on top of it.
+	p.endWaiting()
+
 	switch ev.Kind {
 	case recorder.EventAttached:
-		// The attach line and the warnings are written from the recorder's
-		// own goroutine while the ticker may be writing a progress line, so
-		// they take the same mutex: two Fprintf calls racing on one stderr
-		// interleave mid-line.
 		if !p.quiet && ev.Summary != nil {
-			p.mu.Lock()
 			fmt.Fprintln(p.w, headerLine(ev.Summary))
-			p.mu.Unlock()
 		}
 	case recorder.EventWarning:
 		if !p.quiet {
-			p.mu.Lock()
 			fmt.Fprintf(p.w, "  ! %s\n", ev.Message)
-			p.mu.Unlock()
 		}
 	case recorder.EventStreamStarted:
-		p.mu.Lock()
 		if ev.Streams > p.streams {
 			p.streams = ev.Streams
 		}
-		p.mu.Unlock()
 	case recorder.EventToken:
 		now := time.Now()
-		p.mu.Lock()
 		if p.firstToken.IsZero() {
 			p.firstToken = now
 		}
@@ -112,8 +143,75 @@ func (p *progress) handle(ev recorder.Event) {
 		p.tokens++
 		p.majTotal += ev.Token.MajFaultsDelta
 		p.perStream[ev.Stream]++
-		p.mu.Unlock()
 	}
+}
+
+// noteWaiting records one attach-wait poll and draws the line. The caller
+// holds the mutex.
+//
+// The origin is reconstructed from the event's own Elapsed rather than from
+// the first event's arrival, so the ticker can redraw the line between polls
+// — the recorder polls every two seconds and a spinner that moved twice a
+// second reads as a program that is working, not one that is stuck.
+func (p *progress) noteWaiting(ev recorder.Event) {
+	p.waiting = true
+	p.waitReason = ev.Message
+	p.waitSince = time.Now().Add(-ev.Elapsed)
+	p.drawWaiting(ev.Elapsed)
+}
+
+// endWaiting closes the waiting line, if one is open. The caller holds the
+// mutex.
+func (p *progress) endWaiting() {
+	if !p.waiting {
+		return
+	}
+	p.waiting = false
+	p.closeLine()
+}
+
+// closeLine terminates an unterminated terminal line. The caller holds the
+// mutex.
+func (p *progress) closeLine() {
+	if p.lineOpen {
+		fmt.Fprintln(p.w)
+		p.lineOpen = false
+	}
+}
+
+// drawWaiting writes the waiting line. The caller holds the mutex.
+func (p *progress) drawWaiting(elapsed time.Duration) {
+	if p.quiet {
+		return
+	}
+	if p.tty {
+		// \r returns to the start and the erase keeps a shorter line from
+		// leaving the tail of a longer one behind it.
+		fmt.Fprintf(p.w, "\r%s\x1b[K", loadingLine(p.waitReason, elapsed))
+		p.lineOpen = true
+		return
+	}
+	decade := int(elapsed / loadingLineInterval)
+	if decade == p.waitDecade {
+		return
+	}
+	p.waitDecade = decade
+	fmt.Fprintln(p.w, loadingLine(p.waitReason, elapsed))
+}
+
+// loadingLine is the sentence a user watches while a server gets ready. It is
+// a pure function of the reason and the elapsed time, which is what lets the
+// ticker redraw it without asking the recorder anything.
+func loadingLine(reason string, elapsed time.Duration) string {
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	frame := spinnerFrames[int(elapsed/time.Second)%len(spinnerFrames)]
+	verb := "server is loading the model"
+	if reason == recorder.ReasonStarting {
+		verb = "waiting for the server to come up"
+	}
+	return fmt.Sprintf("%c %s … %s", frame, verb, elapsed.Round(time.Second))
 }
 
 // line prints one progress line.
@@ -126,6 +224,12 @@ func (p *progress) handle(ev recorder.Event) {
 func (p *progress) line() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// While the server is getting ready the tick redraws that line instead,
+	// which is what advances the spinner between the recorder's polls.
+	if p.waiting {
+		p.drawWaiting(time.Since(p.waitSince))
+		return
+	}
 	// Before the first stream is announced there is nothing to report, and
 	// "stream 1/1" printed during discovery would name a stream count that
 	// has not been decided yet.

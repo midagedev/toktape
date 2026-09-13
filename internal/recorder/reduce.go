@@ -35,7 +35,7 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 	cache := server.CacheVerdict(timings, mem.MajFaultsDecode, agg.TotalPredictedN)
 
 	gpusAtEnd := lastGPUs(samples)
-	contention := gpuContention(samples, r.host, r.flags)
+	contention := r.contention(samples)
 
 	summary := tape.RunSummary{
 		ID:             runID(startedAt, r.model.FileName),
@@ -172,13 +172,21 @@ func lastGPUs(samples []tape.RunSample) []tape.GPUSample {
 	return nil
 }
 
-// gpuContention labels the run busy or not.
+// contention labels the run busy or not, or declines to label it.
+//
+// Declining matters. With no /proc to read the load average from and no GPU
+// backend to count foreign processes with, the inputs to the verdict are both
+// missing — and gpu.Contention would then return its zero value, which prints
+// as "contended: no". That is a claim about a machine nobody measured, and it
+// is exactly the kind of invented default the card exists to avoid. In that
+// case the summary keeps a zero ContentionInfo, which both cards render as
+// "?", and the run says so in a warning.
 //
 // otherGPUProcs is the highest count any single device reported, not the sum
 // over devices: one foreign process that holds memory on four GPUs is one
 // process, and summing would report it as four and make a quiet host look
 // four times as contended as it is.
-func gpuContention(samples []tape.RunSample, host tape.HostInfo, flags tape.ServerFlags) tape.ContentionInfo {
+func (r *run) contention(samples []tape.RunSample) tape.ContentionInfo {
 	var load float64
 	other := 0
 	for _, s := range samples {
@@ -191,5 +199,13 @@ func gpuContention(samples []tape.RunSample, host tape.HostInfo, flags tape.Serv
 			}
 		}
 	}
-	return gpu.Contention(load, host.CPUThreads, other, serverThreads(flags))
+	// The GPU side counts as observed whenever a real backend is open, even
+	// when it reported no foreign process: that zero is a reading. Only the
+	// Null collector means nothing was looked at.
+	_, noGPUBackend := r.gpus.(gpu.Null)
+	if load == 0 && (r.gpus == nil || noGPUBackend) {
+		r.warn("host load unknown, contention not judged")
+		return tape.ContentionInfo{}
+	}
+	return gpu.Contention(load, r.host.CPUThreads, other, serverThreads(r.flags))
 }

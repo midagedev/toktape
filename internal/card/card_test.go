@@ -301,3 +301,42 @@ func TestJSONIsSchemaOrdered(t *testing.T) {
 		t.Errorf("JSON(nil): %v", err)
 	}
 }
+
+// TestUnknownNeverPrintsAsNo: "no" and "? GB" are claims about a machine, and
+// a run that read neither the host load nor the RAM size has not made them.
+// Both renderings of a summary must agree, so the rule is the PNG card's.
+func TestUnknownNeverPrintsAsNo(t *testing.T) {
+	t.Run("contended", func(t *testing.T) {
+		cases := []struct {
+			name string
+			ci   tape.ContentionInfo
+			want string
+		}{
+			{"nothing was read", tape.ContentionInfo{}, "contended: ?"},
+			{"a quiet host was read", tape.ContentionInfo{LoadAvg1: 0.4}, "contended: no"},
+			{"a foreign GPU job", tape.ContentionInfo{OtherGPUProcs: 1, Contended: true,
+				Reasons: []string{"1 other GPU compute process"}}, "contended: yes"},
+			{"a reason without a flag is still a reading",
+				tape.ContentionInfo{Reasons: []string{"loadavg 9.0 > 8.0"}}, "contended: no"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				out := Text(&tape.RunSummary{Concurrency: 1, Contention: tc.ci})
+				if !strings.Contains(out, tc.want) {
+					t.Errorf("card does not contain %q:\n%s", tc.want, out)
+				}
+			})
+		}
+	})
+
+	t.Run("ram", func(t *testing.T) {
+		unknownRig := Text(&tape.RunSummary{Concurrency: 1})
+		if strings.Contains(unknownRig, "? GB") {
+			t.Errorf("an unmeasured RAM size printed as a quantity:\n%s", unknownRig)
+		}
+		known := Text(&tape.RunSummary{Concurrency: 1, Host: tape.HostInfo{RAMBytes: 128 * gib}})
+		if !strings.Contains(known, "128 GB") {
+			t.Errorf("a measured RAM size did not print:\n%s", known)
+		}
+	})
+}

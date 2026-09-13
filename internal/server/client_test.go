@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -246,5 +248,135 @@ func TestNoBaseURL(t *testing.T) {
 	_, err := New("").Props(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "Discover") {
 		t.Fatalf("err = %v, want it to point at Discover", err)
+	}
+}
+
+// loadingBody is the envelope llama-server answers with while a model is
+// still being read off disk.
+const loadingBody = `{"error":{"code":503,"message":"Loading model","type":"unavailable_error"}}`
+
+// TestPropsClassifiesLoading pins the distinction the first-run experience
+// depends on: a server that is not there yet is a mistake, a server that is
+// loading is a wait. Every row is a shape observed or documented upstream.
+func TestPropsClassifiesLoading(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		body    string
+		want    error
+		wantMsg string
+	}{
+		{"loading 503 envelope", http.StatusServiceUnavailable, loadingBody, ErrLoading, "Loading model"},
+		{"loading 503 empty body", http.StatusServiceUnavailable, "", ErrLoading, "Service Unavailable"},
+		{"loading message on 500", http.StatusInternalServerError,
+			`{"error":{"message":"the model is loading"}}`, ErrLoading, "loading"},
+		{"plain 500 is unreachable", http.StatusInternalServerError, "nope", ErrUnreachable, "HTTP 500"},
+		{"404 is unreachable", http.StatusNotFound, "not found", ErrUnreachable, "HTTP 404"},
+		{"ok", http.StatusOK, propsJSON, nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			_, err := New(srv.URL).Props(context.Background())
+			if tc.want == nil {
+				if err != nil {
+					t.Fatalf("Props: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Props error = %v, want %v", err, tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Errorf("Props error = %q, want it to carry %q", err, tc.wantMsg)
+			}
+		})
+	}
+}
+
+// A server that accepted the connection and then said nothing is the 450 GB
+// model case: the port is open, the answer never comes. That is loading, not
+// unreachable — the whole point of the classification.
+func TestPropsHangIsLoading(t *testing.T) {
+	block := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-block
+	}))
+	defer func() { close(block); srv.Close() }()
+
+	_, err := New(srv.URL, WithTimeout(50*time.Millisecond)).Props(context.Background())
+	if !errors.Is(err, ErrLoading) {
+		t.Fatalf("Props error = %v, want ErrLoading", err)
+	}
+}
+
+// A cancelled caller is not a server state. Without this the wait loop would
+// read its own cancellation as "still loading" and keep polling.
+func TestPropsCancelledIsNotLoading(t *testing.T) {
+	block := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-block
+	}))
+	defer func() { close(block); srv.Close() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := New(srv.URL).Props(ctx)
+	if errors.Is(err, ErrLoading) {
+		t.Fatalf("a cancelled Props reported ErrLoading: %v", err)
+	}
+	if !errors.Is(err, ErrUnreachable) {
+		t.Fatalf("Props error = %v, want ErrUnreachable", err)
+	}
+}
+
+// A refused port is unreachable, which is what keeps a typo an immediate
+// failure instead of a ten-minute wait.
+func TestPropsRefusedIsUnreachable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := srv.URL
+	srv.Close()
+	if _, err := New(url).Props(context.Background()); !errors.Is(err, ErrUnreachable) {
+		t.Fatalf("Props error = %v, want ErrUnreachable", err)
+	}
+}
+
+// Discover reports the loading server rather than the first refused port: a
+// user who launched the server and toktape together must be told to wait.
+func TestDiscoverPrefersLoadingOverRefused(t *testing.T) {
+	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+
+	loading := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(loadingBody))
+	}))
+	defer loading.Close()
+
+	_, err := New("").Discover(context.Background(), []string{deadURL, loading.URL})
+	if !errors.Is(err, ErrLoading) {
+		t.Fatalf("Discover error = %v, want ErrLoading", err)
+	}
+}
+
+func TestLoadingDetail(t *testing.T) {
+	cases := []struct{ body, want string }{
+		{loadingBody, "Loading model"},
+		{`{"error":{"message":"Loading model"}}`, "Loading model"},
+		{`{"error":{"message":"model is loading"}}`, "model is loading"},
+		{`{"error":{"message":"context window exceeded"}}`, ""},
+		{`{"error":{"message":""}}`, ""},
+		{`not json`, ""},
+		{``, ""},
+	}
+	for _, tc := range cases {
+		if got := loadingDetail([]byte(tc.body)); got != tc.want {
+			t.Errorf("loadingDetail(%q) = %q, want %q", tc.body, got, tc.want)
+		}
 	}
 }

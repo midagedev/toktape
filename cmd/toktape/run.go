@@ -27,6 +27,7 @@ Usage:
   toktape [flags]                 record a run (the default verb)
   toktape record [flags]          the same, spelled out
   toktape card <tape> [flags]     re-render a card from a run file
+  toktape play <tape> [--speed N] replay a run on the live screen
   toktape ls [--out DIR]          list recorded runs
   toktape compare <a> <b>         diff two runs
   toktape version                 print the version
@@ -37,6 +38,10 @@ Record flags:
   --prompt TEXT         prompt to send; repeatable, cycled to fill -n
   --n-predict N         max tokens per stream (default 256)
   --out DIR             where run files are written (default ~/.toktape/runs)
+  --wait DURATION       how long to wait for a loading model (default 10m,
+                        0 = fail fast; naming it also waits for the server
+                        itself to come up)
+  --tui                 watch the run on the live two-pane screen
   --no-card             do not render or save the card
   --json                print the run summary as JSON instead of the card
   --quiet               no progress lines on stderr
@@ -44,6 +49,7 @@ Record flags:
 Card flags:
   --md                  Markdown: the card in a fence plus a llama-bench table
   --json                the run summary as JSON
+  --png [FILE]          write the 1200x675 share image (default: next to the tape)
   --copy                also copy the output to the clipboard (OSC 52)
 `
 
@@ -65,6 +71,8 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		return runRecord(ctx, stdout, stderr, rest)
 	case "card":
 		return runCard(stdout, stderr, rest)
+	case "play":
+		return runPlay(ctx, stdout, stderr, rest)
 	case "ls":
 		return runLs(stdout, stderr, rest)
 	case "compare":
@@ -78,7 +86,7 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 // verbs are the commands Run dispatches on. The root verb is "record", so
 // `toktape` and `toktape --url ...` both record.
 var verbs = map[string]bool{
-	"record": true, "card": true, "ls": true, "compare": true, "version": true,
+	"record": true, "card": true, "play": true, "ls": true, "compare": true, "version": true,
 }
 
 // splitVerb picks the verb out of the argument list.

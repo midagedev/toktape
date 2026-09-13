@@ -113,11 +113,16 @@ func TestRecordVerbEndToEnd(t *testing.T) {
 	if !strings.Contains(stderr, "→ llama-server at "+srv.URL) {
 		t.Errorf("no attach line on stderr:\n%s", stderr)
 	}
-	if !strings.Contains(stderr, "✓ Tape saved") || !strings.Contains(stderr, "✓ Card saved") {
-		t.Errorf("no saved lines on stderr:\n%s", stderr)
+	// The run ends with the share block: what exists, and what to do with it.
+	for _, want := range []string{"✓ Tape   ", "✓ Card   ", ".card.png", "→ Post it:  toktape card ", "--md --copy"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr is missing %q:\n%s", want, stderr)
+		}
 	}
-	if !strings.Contains(stderr, "Share: `toktape card") {
-		t.Errorf("no share hint on stderr:\n%s", stderr)
+	// The first run of a model has nothing to compare against, and a command
+	// that cannot be run is worse than a missing line.
+	if strings.Contains(stderr, "→ Compare:") {
+		t.Errorf("the first run of a model offered a comparison:\n%s", stderr)
 	}
 
 	// Both artefacts exist and the tape reloads into the same summary.
@@ -129,6 +134,14 @@ func TestRecordVerbEndToEnd(t *testing.T) {
 	if err != nil || len(cards) != 1 {
 		t.Fatalf("card files = %v (err %v), want one card", cards, err)
 	}
+	// The image card is written on every run: it is the thing that gets
+	// posted, and one that has to be asked for does not exist when the user
+	// closes the terminal.
+	images, err := filepath.Glob(filepath.Join(dir, "*.card.png"))
+	if err != nil || len(images) != 1 {
+		t.Fatalf("image cards = %v (err %v), want one", images, err)
+	}
+	checkShareImage(t, images[0])
 	tp, err := tape.Read(tapes[0])
 	if err != nil {
 		t.Fatalf("the saved tape does not reload: %v", err)
@@ -199,6 +212,9 @@ func TestRecordVerbNoCard(t *testing.T) {
 	}
 	if cards, _ := filepath.Glob(filepath.Join(dir, "*.card.txt")); len(cards) != 0 {
 		t.Errorf("--no-card saved %v", cards)
+	}
+	if images, _ := filepath.Glob(filepath.Join(dir, "*.card.png")); len(images) != 0 {
+		t.Errorf("--no-card saved %v", images)
 	}
 	if tapes, _ := filepath.Glob(filepath.Join(dir, "*"+tape.Ext)); len(tapes) != 1 {
 		t.Errorf("--no-card did not save the run file: %v", tapes)

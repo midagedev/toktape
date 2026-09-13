@@ -10,8 +10,44 @@ import (
 )
 
 // ErrUnreachable wraps every failure to reach the server: discovery found
-// nothing, or /props did not answer. The CLI maps it to exit code 2.
-var ErrUnreachable = errors.New("recorder: server unreachable")
+// nothing, /props did not answer, or a server that was loading never became
+// ready. The CLI maps it to exit code 2.
+//
+// The sentence is short because the error it wraps carries the detail: the
+// server package already names the state, the URL and the cause, and a
+// message that says "unreachable" twice is one a user has to read twice.
+var ErrUnreachable = errors.New("recorder: cannot attach")
+
+// Waiting for a server that is not ready yet.
+//
+// Measured 2026-09-13 on a real box: llama-server opened its TCP port and then
+// answered nothing on /props for minutes while it lazily loaded a 450 GB
+// model, and toktape exited "unreachable" after ten seconds. The first run is
+// the one that decides whether anybody uses this tool, so the default is to
+// wait a long time and say so, not to fail fast and be wrong.
+const (
+	// DefaultWaitForModel is how long a run keeps polling a server that is
+	// loading. It is generous because the alternative — giving up on a
+	// correct setup — is the worse mistake.
+	DefaultWaitForModel = 10 * time.Minute
+	// DefaultLoadingPoll is the gap between /props polls while waiting.
+	DefaultLoadingPoll = 2 * time.Second
+	// NoWait is the Options.WaitForModel value that means "fail fast"; it is
+	// what the CLI's `--wait 0` sets. Zero cannot mean it, because zero is
+	// the zero value and the zero value must be the sane default.
+	NoWait = -1 * time.Nanosecond
+)
+
+// Reasons carried in Event.Message for EventLoading. The CLI prints a
+// different verb for each: one is a model being read off disk, the other is a
+// server that has not opened its port yet.
+const (
+	// ReasonLoading: a server answered and said it is not ready, or accepted
+	// the connection and never answered.
+	ReasonLoading = "loading"
+	// ReasonStarting: nothing is listening there yet.
+	ReasonStarting = "starting"
+)
 
 // ErrAllStreamsFailed is returned when no stream produced a usable record.
 // The CLI maps it to exit code 3. Partial failure is not an error: a run in
@@ -68,6 +104,18 @@ type Options struct {
 	// Candidates are the base URLs discovery probes when BaseURL is empty.
 	// nil means server.DefaultCandidates.
 	Candidates []string
+	// WaitForModel is how long attaching keeps retrying a server that is
+	// loading its model. 0 means DefaultWaitForModel; NoWait (any negative
+	// value) means fail on the first attempt.
+	WaitForModel time.Duration
+	// WaitForStart extends that patience to a server that is not listening
+	// yet, for the user who launches llama-server and toktape together. It
+	// is off by default so a typo in --url stays an immediate failure
+	// instead of a ten-minute one.
+	WaitForStart bool
+	// LoadingPoll is the gap between attach attempts while waiting. 0 means
+	// DefaultLoadingPoll.
+	LoadingPoll time.Duration
 }
 
 // EventKind names a step of the run. The CLI prints some of them and the TUI
@@ -77,6 +125,10 @@ type EventKind string
 const (
 	// EventDiscovered fires once the server's base URL is known.
 	EventDiscovered EventKind = "discovered"
+	// EventLoading fires once per attach attempt while the server is not
+	// ready. Elapsed is the time spent waiting so far and Message is
+	// ReasonLoading or ReasonStarting.
+	EventLoading EventKind = "loading"
 	// EventProps fires once /props answered; Message carries the build.
 	EventProps EventKind = "props"
 	// EventPIDFound fires when the local server process was identified.
@@ -120,6 +172,10 @@ type Event struct {
 	Sample tape.RunSample
 	// Summary is filled for EventDone.
 	Summary *tape.RunSummary
+	// Elapsed is filled for EventLoading: how long attaching has been
+	// waiting. It is wall time, not the run's clock, because the wait budget
+	// and the line the user watches are both real seconds.
+	Elapsed time.Duration
 }
 
 // normalize fills the defaults and returns a copy that the run can rely on.
@@ -132,6 +188,15 @@ func (o Options) normalize() Options {
 	}
 	if o.SampleInterval <= 0 {
 		o.SampleInterval = tape.DefaultSampleInterval
+	}
+	switch {
+	case o.WaitForModel == 0:
+		o.WaitForModel = DefaultWaitForModel
+	case o.WaitForModel < 0:
+		o.WaitForModel = 0
+	}
+	if o.LoadingPoll <= 0 {
+		o.LoadingPoll = DefaultLoadingPoll
 	}
 	if o.Concurrency <= 0 {
 		if len(o.Prompts) > 0 {
