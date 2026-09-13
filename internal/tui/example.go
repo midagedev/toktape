@@ -21,10 +21,22 @@ import (
 // The token count is 80 per stream rather than the 30 of a smaller fixture
 // because the two have to agree: at 12.1 tok/s, 30 tokens are over in 2.4 s,
 // and every frame after that would be the same frozen screen.
-func ExampleTape() *tape.Tape {
-	const (
+func ExampleTape() *tape.Tape { return ExampleTapeN(8) }
+
+// ExampleTapeN is ExampleTape with a chosen stream count (2..8). The four
+// stream form is the README hero (user, 2026-09-13: eight tiles are too
+// busy for a clip; four read well). Thinking streams keep their three
+// states at any count: the second stream thinks briefly, the third is still
+// thinking mid-run, the last never stops.
+func ExampleTapeN(streams int) *tape.Tape {
+	if streams < 2 {
+		streams = 2
+	}
+	if streams > 8 {
 		streams = 8
-		tokens  = 80
+	}
+	const (
+		tokens = 80
 		// promptTotal is the whole prompt; promptCache is the leading part the
 		// server's prefix cache already held. Eight agent sessions share a
 		// system prompt, so a partial hit is the ordinary case, and it is the
@@ -53,6 +65,8 @@ func ExampleTape() *tape.Tape {
 	summary.Contention.Reasons = []string{"loadavg 12.3 > cores 16"}
 	summary.Contention.LoadAvg1 = 12.3
 
+	summary.Concurrency = streams
+	summary.Server.NSlots = streams
 	tp := &tape.Tape{Schema: tape.SchemaVersion, Summary: summary}
 
 	runEnd := time.Duration(0)
@@ -123,7 +137,7 @@ func ExampleTape() *tape.Tape {
 		// and plain answering (the rest). Real agent workloads run thinking
 		// models, so a screen that only ever shows the last state is showing
 		// the uncommon case.
-		reasoningN := exampleReasoningN(i, tokens)
+		reasoningN := exampleReasoningN(i, streams, tokens)
 		words := exampleWords(i, tokens, reasoningN)
 		at := ttft
 		for k := 0; k < tokens; k++ {
@@ -370,13 +384,17 @@ var itlJitter = []float64{0.86, 1.14, 0.94, 1.06, 0.90, 1.10, 0.96, 1.04}
 // At roughly 12 tok/s the first two counts put the crossings either side of
 // midRun; a change to perStream, tokens or midRun moves them, which
 // TestExampleTapeShowsEveryThinkingState is there to catch.
-func exampleReasoningN(i, n int) int {
+func exampleReasoningN(i, streams, n int) int {
+	brief, mid, cut := 1, 4, 6
+	if streams < 8 {
+		brief, mid, cut = 1, 2, streams-1
+	}
 	switch i {
-	case 1:
+	case brief:
 		return 10
-	case 4:
+	case mid:
 		return n / 5
-	case 6:
+	case cut:
 		return n
 	default:
 		return 0
