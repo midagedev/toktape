@@ -73,7 +73,9 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	sched := render.NewSchedule(render.RunEnd(tp), HeroFPS, 0, true)
+	// The same schedule the renderer built, poster frame included, so the
+	// line this prints is the file it just wrote.
+	sched := render.NewSchedule(render.RunEnd(tp), HeroFPS, 0, true).WithPoster()
 	fmt.Printf("hero %s — %d bytes, %d frames, %v at %d fps (%v)\n",
 		*out, fi.Size(), sched.Count, sched.Duration.Round(time.Millisecond), sched.FPS,
 		time.Since(start).Round(time.Millisecond))
