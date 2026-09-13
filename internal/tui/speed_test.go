@@ -9,7 +9,7 @@ import (
 // speedPane is the SPEED section of a frame, as plain text.
 func speedPane(t *testing.T, m Model, at time.Duration) string {
 	t.Helper()
-	return strings.Join(speedRows(m, PlainTheme(), at, rightW-2), "\n")
+	return strings.Join(speedRows(m, PlainTheme(), at, rightWidth(120)-2), "\n")
 }
 
 // 2026-09-13: fixing the leak below re-baselined six rows of the golden frames

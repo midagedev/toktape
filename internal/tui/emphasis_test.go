@@ -65,6 +65,7 @@ func emphasisFrames(t *testing.T) []emphasisFrame {
 		{"n4-120x36", ModelAt(ExampleTapeN(4), midRun), midRun, 120, 36},
 		{"n8-120x36", ModelAt(ExampleTapeN(8), midRun), midRun, 120, 36},
 		{"n4-160x48", ModelAt(ExampleTapeN(4), midRun), midRun, 160, 48},
+		{"n4-156x38", ModelAt(ExampleTapeN(4), midRun), midRun, 156, 38},
 		{"n4-120x36-t0", ModelAt(ExampleTapeN(4), 0), 0, 120, 36},
 		{"n4-120x36-done", ModelAt(ExampleTapeN(4), doneAt), doneAt, 120, 36},
 	}
@@ -138,7 +139,7 @@ func TestAccentIsReserved(t *testing.T) {
 // plus its aggregate row when the run has more than one stream. A figure that
 // has not been measured prints "?" and carries no digits, so it is not counted.
 func visibleRates(m Model, at time.Duration, w, h int) int {
-	g := m.Grid.resolve(w-2-1-rightW-2, h-chromeH)
+	g := m.Grid.resolve(w-2-1-rightWidth(w)-2, h-chromeH)
 	n := 0
 	for i, s := range m.Streams {
 		if i >= g.cells() {

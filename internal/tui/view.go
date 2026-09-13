@@ -10,21 +10,31 @@ import (
 	"github.com/midagedev/toktape/internal/tape"
 )
 
-// Screen geometry. The right pane is a fixed 30 columns because every figure
-// in it is tabular, and a pane that reflows turns a comparison of two runs
-// into a spot-the-difference puzzle; the left pane takes whatever is left.
+// Screen geometry. The right pane's width is a function of the screen width
+// alone (rightWidth), never of the content: every figure in it is tabular, and
+// a pane that reflowed with what it shows would turn a comparison of two runs
+// into a spot-the-difference puzzle. Two runs at one size still line up cell
+// for cell. The left pane takes whatever is left.
 const (
 	// MinWidth and MinHeight are the smallest screen the layout is designed
 	// for. Below them View draws a single message rather than a broken frame.
 	MinWidth  = 100
 	MinHeight = 30
 
-	// rightW is the width of the machine pane, its side gutters included.
-	rightW = 30
 	// chromeH is the rows View spends on the top border, the divider, the
 	// footer and the bottom border.
 	chromeH = 4
 )
+
+// rightWidth is the machine pane's width, side gutters included, on a screen
+// w columns wide: 30 up to 120 columns, then one more column for every four
+// the screen gains, up to 44.
+//
+// 2026-09-13 (TTP-41): it used to be a fixed 30. At the mp4's 156×38 every
+// extra column went to the stream tiles and the lower half of the right pane
+// stayed blank, which added emptiness rather than density (user: "우리도 좀더
+// 이런 조밀한 느낌이면 좋겠어"). At or below 120 columns nothing moved.
+func rightWidth(w int) int { return min(44, 30+max(0, (w-120)/4)) }
 
 // View renders one frame of m at clip time t into a w×h block of text.
 //
@@ -44,14 +54,15 @@ func View(m Model, t time.Duration, w, h int) string {
 	th := m.Theme
 	inner := w - 2
 	bodyH := h - chromeH
-	leftW := inner - 1 - rightW
+	paneW := rightWidth(w)
+	leftW := inner - 1 - paneW
 
 	var body []string
 	split := m.Err == ""
 	var pane paneLayout
 	if split {
 		pane = leftPane(m, th, t, leftW-2, bodyH)
-		right := rightPane(m, th, t, rightW-2, bodyH)
+		right := rightPane(m, th, t, paneW-2, bodyH)
 		bar := th.paint(th.dim, "│")
 		for i := 0; i < bodyH; i++ {
 			row := pane.rows[i]
@@ -81,7 +92,7 @@ func View(m Model, t time.Duration, w, h int) string {
 		}
 	}
 
-	divider := "├" + repeat('─', leftW) + "┴" + repeat('─', rightW) + "┤"
+	divider := "├" + repeat('─', leftW) + "┴" + repeat('─', paneW) + "┤"
 	if !split {
 		divider = "├" + repeat('─', inner) + "┤"
 	} else if pane.vruleAtBottom {

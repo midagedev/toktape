@@ -42,15 +42,17 @@ Flags:
   --frames DIR     write the PNG frame sequence into DIR
   --duration D     length of the clip (default: derived, 10s–12s)
   --fps N          frame rate (default 30)
-  --size WxH       terminal size in cells (default 120x36)
+  --size WxH       terminal size in cells (default 156x38 for --mp4 and --frames, 120x36 for --gif and --cast)
   --out DIR        where to look for the newest run (default ~/.toktape/runs)
 `
 
 // runRender turns a tape into the clip you post.
 //
-// Every output is the same pipeline with a different encoder at the end, so
-// one invocation can write all four and they are guaranteed to be the same
-// frames. The tape is the record here as everywhere: nothing is recomputed,
+// Every output is the same pipeline with a different encoder at the end. Without
+// --size each output takes its own default size — 1920×1080 for the mp4 and
+// the frames, the smaller inline size for the GIF and the cast — so one
+// invocation writing all four is guaranteed the same frames only when --size
+// is given. The tape is the record here as everywhere: nothing is recomputed,
 // the run is only replayed.
 func runRender(stdout, stderr io.Writer, args []string) int {
 	fs := newFlagSet("render", stderr)

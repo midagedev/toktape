@@ -180,7 +180,7 @@ func paneGeometry(w, h int) (cw, bodyH int) {
 		h = MinHeight
 	}
 	inner := w - 2
-	return inner - 1 - rightW - 2, h - chromeH
+	return inner - 1 - rightWidth(w) - 2, h - chromeH
 }
 
 func clampInt(v, lo, hi int) int {

@@ -117,13 +117,13 @@ func TestAutoGridDoesNotMoveWhenTheRunEnds(t *testing.T) {
 // the package: the page maths works out the pane's size on its own, and if it
 // ever disagreed with View the footer would name a page the pane never drew.
 func TestPaneGeometryMatchesView(t *testing.T) {
-	for _, sz := range []struct{ w, h int }{{100, 30}, {101, 31}, {120, 36}, {140, 40}, {199, 33}} {
+	for _, sz := range []struct{ w, h int }{{100, 30}, {101, 31}, {120, 36}, {140, 40}, {156, 38}, {199, 33}} {
 		cw, bodyH := paneGeometry(sz.w, sz.h)
 		// The same expressions View uses, spelled out so a change there fails
 		// here rather than silently splitting the two.
 		inner := sz.w - 2
 		wantH := sz.h - chromeH
-		wantW := inner - 1 - rightW - 2
+		wantW := inner - 1 - rightWidth(sz.w) - 2
 		if cw != wantW || bodyH != wantH {
 			t.Errorf("%dx%d: paneGeometry = %dx%d, View lays out %dx%d", sz.w, sz.h, cw, bodyH, wantW, wantH)
 		}

@@ -23,12 +23,14 @@ func TestResourceGraphHeight(t *testing.T) {
 		{120, 36, 4, 3},
 		{120, 36, 8, 3},
 		{140, 40, 4, 3},
+		{156, 38, 4, 3},
 		{160, 48, 4, 3},
 	} {
 		t.Run(fmt.Sprintf("%dx%d-n%d", c.w, c.h, c.n), func(t *testing.T) {
 			m := ModelAt(ExampleTapeN(c.n), midRun)
 			rows := c.h - chromeH
-			lines, got := rightPaneLines(m, PlainTheme(), midRun, rightW-2, rows)
+			cw := rightWidth(c.w) - 2
+			lines, got := rightPaneLines(m, PlainTheme(), midRun, cw, rows)
 			if got != c.want {
 				t.Errorf("graph height %d, want %d", got, c.want)
 			}
@@ -36,7 +38,7 @@ func TestResourceGraphHeight(t *testing.T) {
 				t.Errorf("the pane is %d lines at height %d and has %d rows; fitRows would cut it", len(lines), got, rows)
 			}
 			if got < resourceHeights[0] {
-				if taller := buildRightPane(m, PlainTheme(), midRun, rightW-2, got+1); len(taller) <= rows {
+				if taller := buildRightPane(m, PlainTheme(), midRun, cw, got+1); len(taller) <= rows {
 					t.Errorf("height %d fits in %d rows (%d lines) and was not chosen", got+1, rows, len(taller))
 				}
 			}
@@ -48,7 +50,7 @@ func TestResourceGraphHeight(t *testing.T) {
 // every line under it.
 func resourceBlock(t *testing.T, m Model, at time.Duration, h int) []string {
 	t.Helper()
-	lines := buildRightPane(m, PlainTheme(), at, rightW-2, h)
+	lines := buildRightPane(m, PlainTheme(), at, rightWidth(120)-2, h)
 	for i, l := range lines {
 		if strings.HasPrefix(l, "RESOURCES") {
 			return lines[i:]

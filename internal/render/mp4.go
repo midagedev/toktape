@@ -30,7 +30,7 @@ func MP4(tp *tape.Tape, opts Options, out string) error {
 	if err != nil {
 		return fmt.Errorf("render: mp4 needs ffmpeg on PATH (install it, or use GIF): %w", err)
 	}
-	o := opts.withDefaults()
+	o := opts.withVideoDefaults()
 
 	dir, err := os.MkdirTemp("", "toktape-frames-")
 	if err != nil {

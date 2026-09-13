@@ -28,7 +28,8 @@ import (
 
 // Defaults for Options. The frame size is the one the TUI is designed around
 // (tui.MinWidth × tui.MinHeight is the floor; 120×36 is the shape the panes
-// were laid out in).
+// were laid out in). It is the default for the GIF, the asciicast and
+// FrameImage; the mp4 and the frame sequence default to VideoWidth×VideoHeight.
 const (
 	DefaultWidth  = 120
 	DefaultHeight = 36
@@ -54,13 +55,27 @@ const (
 	// pixels — so the extra 80 kB buys nothing but a taller frame. The mp4
 	// keeps DefaultFontSize; it has no such ceiling.
 	GIFFontSize = 13
+
+	// VideoWidth and VideoHeight are the frame size MP4 and Frames use when
+	// Options leaves it unset (TTP-41, user 2026-09-13: "영상의 기본 화면
+	// 컬럼 라인수를 좀 늘리는게 좋겠지?"). A cell is 12×27 px at
+	// DefaultFontSize and the frame adds 48×54 px of padding, so 156×38 cells
+	// is exactly 1920×1080 — 16:9 at a size X, Reddit and YouTube play without
+	// scaling. Measured on the four-stream example at 12 s: 120×36 is
+	// 1488×1026, 144×40 is 1776×1134, 160×45 is 1968×1270. The GIF keeps
+	// DefaultWidth×DefaultHeight: it is posted inline, has a 1.5 MB budget and
+	// has to stay legible on a phone (see GIFFontSize).
+	VideoWidth  = 156
+	VideoHeight = 38
 )
 
 // Options configure a clip. The zero value is valid and means "every default".
 type Options struct {
 	// Width and Height are the terminal size in cells. Below
 	// tui.MinWidth×tui.MinHeight the TUI draws its "make the window bigger"
-	// frame, so the renderer refuses those sizes instead.
+	// frame, so the renderer refuses those sizes instead. Zero means
+	// VideoWidth×VideoHeight in MP4 and Frames and DefaultWidth×DefaultHeight
+	// everywhere else.
 	Width, Height int
 	// FPS is the frame rate of the clip.
 	FPS int
@@ -95,6 +110,19 @@ func (o Options) withDefaults() Options {
 		o.FontSize = DefaultFontSize
 	}
 	return o
+}
+
+// withVideoDefaults is withDefaults for the video paths (MP4, Frames): an
+// unset size is VideoWidth×VideoHeight rather than the GIF's
+// DefaultWidth×DefaultHeight. A size the caller gave is used as given.
+func (o Options) withVideoDefaults() Options {
+	if o.Width == 0 {
+		o.Width = VideoWidth
+	}
+	if o.Height == 0 {
+		o.Height = VideoHeight
+	}
+	return o.withDefaults()
 }
 
 // validate rejects a geometry the TUI cannot draw. A frame smaller than the

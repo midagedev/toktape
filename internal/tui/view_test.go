@@ -75,18 +75,27 @@ func goldenModel(t *testing.T, at time.Duration) Model {
 // byte-identical to the previous goldens (checked column by column); the
 // graph contract is pinned in graph_test.go and the pane's height choice in
 // resources_test.go, both added, nothing relaxed.
+//
+// 2026-09-13 TTP-41: the right pane grows past 120 columns (rightWidth), so
+// the 140x40 frames were re-baselined with the pane split five columns further
+// left and nothing else changed; the 100x30 frames are byte-identical. 156x38
+// is the mp4's 1920x1080 and joins the table at mid-run and done.
 func TestViewGolden(t *testing.T) {
-	sizes := []struct{ w, h int }{{100, 30}, {140, 40}}
-	offsets := []struct {
+	type offset struct {
 		name string
 		at   time.Duration
+	}
+	all := []offset{{"t0", 0}, {"mid", midRun}, {"done", doneAt}}
+	sizes := []struct {
+		w, h    int
+		offsets []offset
 	}{
-		{"t0", 0},
-		{"mid", midRun},
-		{"done", doneAt},
+		{100, 30, all},
+		{140, 40, all},
+		{156, 38, all[1:]},
 	}
 	for _, sz := range sizes {
-		for _, off := range offsets {
+		for _, off := range sz.offsets {
 			name := fmt.Sprintf("%dx%d-%s", sz.w, sz.h, off.name)
 			t.Run(name, func(t *testing.T) {
 				got := View(goldenModel(t, off.at), off.at, sz.w, sz.h)
@@ -97,12 +106,25 @@ func TestViewGolden(t *testing.T) {
 	}
 }
 
+// TestRightWidth pins the machine pane's width against the screen's: fixed
+// at 30 through 120 columns, so nothing at or below the GIF's size moves, then
+// a column for every four, capped at 44 (TTP-41).
+func TestRightWidth(t *testing.T) {
+	for _, c := range []struct{ w, want int }{
+		{100, 30}, {120, 30}, {140, 35}, {156, 39}, {160, 40}, {176, 44}, {240, 44},
+	} {
+		if got := rightWidth(c.w); got != c.want {
+			t.Errorf("rightWidth(%d) = %d, want %d", c.w, got, c.want)
+		}
+	}
+}
+
 // TestViewGeometry pins the contract every frame has to meet at every size the
 // layout claims to support: exactly h lines, every one exactly w columns, and
 // the vertical borders in the same column on every body row.
 func TestViewGeometry(t *testing.T) {
 	sizes := []struct{ w, h int }{
-		{100, 30}, {101, 31}, {120, 36}, {140, 40}, {160, 50}, {199, 33},
+		{100, 30}, {101, 31}, {120, 36}, {140, 40}, {156, 38}, {160, 50}, {199, 33},
 	}
 	states := []struct {
 		name string

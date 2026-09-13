@@ -15,14 +15,15 @@ import (
 const FramePattern = "frame_%05d.png"
 
 // Frames renders every frame of the clip into dir as frame_00000.png,
-// frame_00001.png, … and returns the paths it wrote, in order.
+// frame_00001.png, … and returns the paths it wrote, in order. An unset size
+// is VideoWidth×VideoHeight, the 1920×1080 the mp4 is encoded from.
 //
 // dir is created if it does not exist. Existing frames with the same names are
 // overwritten; frames left over from a longer previous clip are not removed,
 // because deleting files a caller did not name is not this function's
 // business — MP4 renders into a directory of its own for exactly that reason.
 func Frames(tp *tape.Tape, opts Options, dir string) ([]string, error) {
-	o, sched, err := prepare(tp, opts)
+	o, sched, err := prepare(tp, opts.withVideoDefaults())
 	if err != nil {
 		return nil, err
 	}
@@ -36,8 +37,8 @@ func Frames(tp *tape.Tape, opts Options, dir string) ([]string, error) {
 		return nil, fmt.Errorf("render: frame directory %s: %w", dir, err)
 	}
 
-	// One image buffer and one encoder for the whole sequence: at 120×36 and a
-	// 20 px cell a frame is 1488×1026, and allocating that 331 times is pure
+	// One image buffer and one encoder for the whole sequence: at 156×38 and a
+	// 20 px cell a frame is 1920×1080, and allocating that 331 times is pure
 	// garbage. BestSpeed is the right level here — these PNGs exist to be
 	// handed to ffmpeg and deleted, and the default level triples the wall
 	// time of an mp4 render for a file nobody keeps.
