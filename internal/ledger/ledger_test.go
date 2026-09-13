@@ -48,9 +48,9 @@ func TestColumnsAreUnique(t *testing.T) {
 func TestFromTapeSingleStream(t *testing.T) {
 	tp := tapeOf(card.Example())
 	want := map[string]string{
-		"id":           "20260913-142530-llama3.3-70b",
-		"tape":         "20260913-142530-llama3.3-70b.tape",
-		"model":        "Llama 3.3 70B",
+		"id":           "20260913-142530-r1-distill-llama-70b",
+		"tape":         "20260913-142530-r1-distill-llama-70b.tape",
+		"model":        "R1 Distill Llama 70B",
 		"quant":        "Q4_K_M",
 		"params":       "70553706496",
 		"size_gb":      "42.5",

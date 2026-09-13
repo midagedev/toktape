@@ -241,7 +241,7 @@ func TestHeaderLine(t *testing.T) {
 	got := headerLine(card.Example())
 	for _, want := range []string{
 		"→ llama-server at http://127.0.0.1:8080 (b3650)",
-		"Llama 3.3 70B Q4_K_M",
+		"R1 Distill Llama 70B Q4_K_M",
 		"pid 48213",
 	} {
 		if !strings.Contains(got, want) {

@@ -220,7 +220,7 @@ func TestLogVerbExportsLeaveUnknownsEmpty(t *testing.T) {
 // with a note that contains a comma and a quote left intact.
 func TestLogVerbCSVAndJSON(t *testing.T) {
 	dir := t.TempDir()
-	s := sweepRun("20260913-100000-llama3.3-70b", "ngl=40", "40", 41.2)
+	s := sweepRun("20260913-100000-r1-distill-llama-70b", "ngl=40", "40", 41.2)
 	s.Note = `one, two "three"`
 	// A tensor-override pattern with a pipe in it, which is what the markdown
 	// escaping below is about. The example rig splits by layer and carries no

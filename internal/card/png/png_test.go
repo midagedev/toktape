@@ -490,7 +490,7 @@ func TestConcurrentHeroShowsBothFigures(t *testing.T) {
 		"hero.left.sub1":     "8 × 9.1 tok/s per stream",
 		"hero.left.eyebrow":  "AGGREGATE DECODE",
 		"hero.right.number":  "2927",
-		"hero.right.sub1":    "8 × 610 tok/s per stream",
+		"hero.right.sub1":    "610 tok/s per stream", // 2026-09-13: no "N ×" for prefill, it is not a product
 		"hero.right.eyebrow": "AGGREGATE PREFILL",
 	}
 	for id, want := range checks {

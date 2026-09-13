@@ -188,8 +188,10 @@ func (c *content) buildHero(s *tape.RunSummary) {
 			eyebrow: "aggregate prefill",
 			number:  formatRate(a.AggregatePromptPerSecond),
 			unit:    "tok/s",
-			sub1: fmt.Sprintf("%d × %s per stream",
-				streams, formatRateUnit(t.PromptPerSecond)),
+			// No "N ×" here, unlike decode: prefill is batched server-wide, so
+			// N × the per-request prompt rate is not the aggregate, and printing
+			// it as a product was false arithmetic on the card (lead, 2026-09-13).
+			sub1: fmt.Sprintf("%s per stream", formatRateUnit(t.PromptPerSecond)),
 			sub2: joinParts(" · ",
 				"TTFT p50 "+formatMs(a.TTFTp50Ms),
 				"p95 "+formatMs(a.TTFTp95Ms),

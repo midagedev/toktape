@@ -49,7 +49,11 @@ func main() {
 		Height:   *h,
 		FPS:      *fps,
 		FontSize: *size,
-		TapePath: "~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape",
+		// Derived from the run being drawn, not written out: a hardcoded
+		// path went stale the moment the example model changed and put a
+		// tape name in the footer that names no run in the clip
+		// (2026-09-13, TTP-28).
+		TapePath: "~/.toktape/runs/" + tp.Summary.ID + tape.Ext,
 	}
 	sched := render.NewSchedule(render.RunEnd(tp), *fps, 0)
 

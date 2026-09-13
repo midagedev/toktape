@@ -19,7 +19,7 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 // and the slower numbers that came out of it.
 func modified() *tape.RunSummary {
 	s := *card.Example()
-	s.ID = "20260913-151212-llama3.3-70b"
+	s.ID = "20260913-151212-r1-distill-llama-70b"
 	s.Server.Build = "b3701"
 	s.Server.Commit = "f9e8d7c"
 	s.Server.Flags.FlashAttn = "off"
@@ -44,7 +44,7 @@ func modified() *tape.RunSummary {
 }
 
 // 2026-09-13 TTP-28: re-baselined. The left-hand run is card.Example(), which
-// became the Llama 3.3 70B fixture, so every figure the diff quotes moved. What
+// became the R1 Distill Llama 70B fixture, so every figure the diff quotes moved. What
 // the test asserts — that a difference is shown and an equality is not — is
 // unchanged, and the -ot pair the diff needs is now built inside this file
 // rather than borrowed from the example, which no longer carries one.

@@ -20,34 +20,30 @@ toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.ta
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ toktape v0.1.0                       20260913-150210-qwen3.5-35b-a3b │
+│ toktape v0.1.0                          20260913-150210-llama3.3-70b │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MODEL    Qwen3.5-35B-A3B-UD-Q4_K_M.gguf · UD-Q4_K_M · 19.8 GiB       │
+│ MODEL    Llama-3.3-70B-Instruct-Q4_K_M.gguf · Q4_K_M · 42.5 GiB      │
 │ ENGINE   llama-server b3650 (a1b2c3d) · linux 6.8.0-45-generic       │
 │          workstation                                                 │
 │ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        12.1 tok/s · ≈ 16 GB/s, 1% of peak                     │
-│ Prefill       1980 tok/s · TTFT 210 ms · 512 prompt tokens           │
-│ Context       32768 (512 in / 128 out)                               │
-│ Prefix cache  0% hit (0/512) · cold                                  │
-│ Streams       8 × 12.1 tok/s = 96.8 tok/s aggregate                  │
-│               TTFT p50 210 ms p95 480 ms · slots busy max 8          │
+│ Decode        9.1 tok/s · ≈ 410 GB/s, 22% of peak                    │
+│ Prefill       610 tok/s · TTFT 810 ms · 512 prompt tokens            │
+│ Context       16384 (512 in / 307 out)                               │
+│ Prefix cache  25% hit (128/512) · warm                               │
+│ Streams       8 × 9.1 tok/s = 72.9 tok/s aggregate                   │
+│               TTFT p50 810 ms p95 1050 ms · slots busy max 8         │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MEMORY   GPU0 [████░░░░░░] 9.6/24.0 GiB                              │
-│          GPU1 [████░░░░░░] 9.2/24.0 GiB                              │
-│          weights 13.5 | kv 3.0 | compute 0.9 GiB                     │
-│          Host RSS 3.4 GiB (file 2.9 / anon 0.5)                      │
-│          Page faults 1.4 maj/token (1420 during decode)              │
+│ MEMORY   GPU0 [██████████] 23.8/24.0 GiB                             │
+│          GPU1 [██████████] 22.8/24.0 GiB                             │
+│          weights 42.5 | kv 2.6 | compute 1.5 GiB                     │
+│          Host RSS 1.2 GiB (file 0.8 / anon 0.4)                      │
+│          Page faults 0.0 maj/token (0 during decode)                 │
 ├──────────────────────────────────────────────────────────────────────┤
-│ HOST     GPU0 71°C 340 W · GPU1 69°C 330 W · throttled: no           │
+│ HOST     GPU0 71°C 348 W · GPU1 67°C 318 W · throttled: no           │
 │          contended: no                                               │
 ├──────────────────────────────────────────────────────────────────────┤
-│ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0          │
-│          --load-mode mmap -ncmoe 12 -t 16                            │
-│          -ot blk\.(3[6-9]|4[0-7])\.ffn_.*_exps=CPU                   │
-├──────────────────────────────────────────────────────────────────────┤
-│ ! cold run: 1.4 major faults per token during decode                 │
+│ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0 -t 16    │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │
 └──────────────────────────────────────────────────────────────────────┘

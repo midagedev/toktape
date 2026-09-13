@@ -15,10 +15,21 @@ import (
 // the audience owns and whose numbers they already know, so every figure below
 // can be checked against their own logs.
 //
+// 2026-09-13, later the same day: the model is DeepSeek-R1-Distill-Llama-70B
+// rather than Llama-3.3-70B-Instruct. The two are the same dense Llama
+// architecture at the same parameter count, so every figure in the derivation
+// below is unchanged, but the fixture's streams think before they answer and
+// Llama 3.3 emits no reasoning_content. A screen showing three thinking states
+// on a model that has none teaches the reader something false about the tool,
+// which is the one thing a fixture must not do. The distill is also a model
+// this audience actually runs at this quant.
+//
 // The derivation, so a reviewer can check the arithmetic rather than trust it:
 //
-//	file         Llama-3.3-70B-Instruct-Q4_K_M.gguf, 42.52 GiB, 70.55 B
-//	             params, 80 layers, dense. (Hugging Face lists the quant as
+//	file         DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf, 42.52 GiB, 70.55 B
+//	             params, 80 layers, dense: a distill of the Llama 3.3 70B
+//	             architecture, so the placement and the rates below are the
+//	             ones that model reaches. (Hugging Face lists the quant as
 //	             "42.52 GB"; the card's unit is GiB and the fixture keeps the
 //	             figure, so weights + KV + buffers still add up to what the
 //	             two devices report.)
@@ -61,7 +72,7 @@ import (
 func Example() *tape.RunSummary {
 	started := time.Date(2026, 9, 13, 14, 25, 30, 0, time.UTC)
 	return &tape.RunSummary{
-		ID:             "20260913-142530-llama3.3-70b",
+		ID:             "20260913-142530-r1-distill-llama-70b",
 		ToktapeVersion: "0.1.0",
 		StartedAt:      started,
 		FinishedAt:     started.Add(18963 * time.Millisecond),
@@ -83,7 +94,7 @@ func Example() *tape.RunSummary {
 			// Other empty so the golden FLAGS row stays the named set.
 			Args: []string{
 				"/usr/local/bin/llama-server",
-				"-m", "/models/Llama-3.3-70B-Instruct-Q4_K_M.gguf",
+				"-m", "/models/DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
 				"-c", "16384",
 				"--parallel", "8",
 				"-ngl", "99",
@@ -107,9 +118,9 @@ func Example() *tape.RunSummary {
 			CtxSize: 16384,
 		},
 		Model: tape.ModelInfo{
-			Path:      "/models/Llama-3.3-70B-Instruct-Q4_K_M.gguf",
-			FileName:  "Llama-3.3-70B-Instruct-Q4_K_M.gguf",
-			Name:      "Llama 3.3 70B",
+			Path:      "/models/DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
+			FileName:  "DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
+			Name:      "R1 Distill Llama 70B",
 			Arch:      "llama",
 			Quant:     "Q4_K_M",
 			FileBytes: 45655502848, // 42.52 GiB
@@ -237,7 +248,7 @@ func Example() *tape.RunSummary {
 func ExampleConcurrent() *tape.RunSummary {
 	s := Example()
 	started := time.Date(2026, 9, 13, 15, 2, 10, 0, time.UTC)
-	s.ID = "20260913-150210-llama3.3-70b"
+	s.ID = "20260913-150210-r1-distill-llama-70b"
 	s.StartedAt = started
 	s.FinishedAt = started.Add(36007 * time.Millisecond)
 	s.Concurrency = 8

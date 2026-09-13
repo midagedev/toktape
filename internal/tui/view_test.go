@@ -52,7 +52,7 @@ func goldenModel(t *testing.T, at time.Duration) Model {
 // wording). Again a different layout rather than a loosened assertion.
 //
 // 2026-09-13 TTP-28: re-baselined once more. The example is now a dense
-// Llama 3.3 70B on two 3090s running 320-token answers, so every figure in
+// R1 Distill Llama 70B on two 3090s running 320-token answers, so every figure in
 // these frames moved, and the emphasis contract demoted the sparklines, the
 // section titles, the bars and the tile headers out of the accent (see
 // TestOnlyTheRateIsAccent). A third different set of frames, not a loosened

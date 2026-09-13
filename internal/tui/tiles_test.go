@@ -49,7 +49,7 @@ func truncatedTape(k int) *tape.Tape {
 // 표시해야 될 지표에 대해서 좀 잘 생각해 보자").
 //
 // 2026-09-13 TTP-28: re-baselined once more. The example is now a dense
-// Llama 3.3 70B on two 3090s running 320-token answers, so every figure in
+// R1 Distill Llama 70B on two 3090s running 320-token answers, so every figure in
 // these frames moved, and the emphasis contract demoted the sparklines, the
 // section titles, the bars and the tile headers out of the accent (see
 // TestOnlyTheRateIsAccent). A third different set of frames, not a loosened

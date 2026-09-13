@@ -44,7 +44,7 @@ func unknownsSummary() *tape.RunSummary {
 }
 
 // 2026-09-13 TTP-28: the example and example-concurrent goldens were
-// re-baselined. The fixture is now a dense Llama 3.3 70B Q4_K_M fully offloaded
+// re-baselined. The fixture is now a dense R1 Distill Llama 70B Q4_K_M fully offloaded
 // to two 3090s, which is the rig the launch post is about; the derivation is
 // the comment block in example.go. The other four fixtures are built in this
 // file and did not move.

@@ -15,7 +15,7 @@ import (
 // the prompt cached", "paste your command") are answered by this text and by
 // nothing else on the card.
 //
-// 2026-09-13 TTP-28: re-baselined for the new example — Llama 3.3 70B dense,
+// 2026-09-13 TTP-28: re-baselined for the new example — R1 Distill Llama 70B dense,
 // eight streams at 320 tokens. The words the test exists for are unchanged;
 // what moved is the model, the flags and the figures quoted inside them.
 func TestReproduceGolden(t *testing.T) {
@@ -128,7 +128,7 @@ func TestReproduceWithoutAnArgvSaysSo(t *testing.T) {
 // checkable, so the block names the file and the verb that replays it.
 func TestReproduceNamesTheTape(t *testing.T) {
 	block := Reproduce(ExampleConcurrent())
-	want := "20260913-150210-llama3.3-70b" + tape.Ext
+	want := "20260913-150210-r1-distill-llama-70b" + tape.Ext
 	if !strings.Contains(block, want) {
 		t.Errorf("block does not name the tape %q:\n%s", want, block)
 	}
