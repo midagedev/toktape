@@ -367,6 +367,7 @@ type PromptRecord struct {
 	Completion     string         `json:"completion"`                // concatenated answer token text (reasoning excluded)
 	Reasoning      string         `json:"reasoning,omitempty"`       // concatenated reasoning_content text
 	ReasoningN     int            `json:"reasoning_n,omitempty"`     // reasoning tokens among the predicted ones
+	MaxTokens      int            `json:"max_tokens,omitempty"`      // the generation cap the request was sent with (n_predict / max_tokens); 0 = not recorded
 	FinishReason   string         `json:"finish_reason,omitempty"`
 }
 
