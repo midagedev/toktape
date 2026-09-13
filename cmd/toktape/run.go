@@ -28,6 +28,7 @@ Usage:
   toktape record [flags]          the same, spelled out
   toktape card <tape> [flags]     re-render a card from a run file
   toktape play <tape> [--speed N] replay a run on the live screen
+  toktape render [tape] [flags]   render a run as a GIF, mp4, asciicast or frames
   toktape ls [--out DIR]          list recorded runs
   toktape log [--out DIR]         the experiment ledger of every run
   toktape compare <a> <b>         diff two runs
@@ -76,6 +77,8 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		return runCard(stdout, stderr, rest)
 	case "play":
 		return runPlay(ctx, stdout, stderr, rest)
+	case "render":
+		return runRender(stdout, stderr, rest)
 	case "ls":
 		return runLs(stdout, stderr, rest)
 	case "log":

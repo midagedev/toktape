@@ -6,7 +6,9 @@ toktape attaches to a llama-server you already have running, records one run
 into a `.tape` file, and prints a card that says where the model sits, what the
 process actually touched, and how fast the request really was.
 
-<p align="center"><img src="assets/hero.gif" width="800"></p>
+<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording 8 concurrent streams"></p>
+
+<p align="center"><em>Eight streams at once, replayed from a tape through the same renderer <code>toktape render</code> uses — no terminal recorder involved.</em></p>
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -133,6 +135,7 @@ by side. Each field is there because it settles an argument.
 | `ls` | list the runs you have recorded | `toktape ls --out ~/.toktape/runs` |
 | `log` | the experiment ledger of every run | `toktape log --sort decode` |
 | `compare` | diff two runs, metrics and flags | `toktape compare a.tape b.tape` |
+| `render` | render a run as a clip | `toktape render ~/.toktape/runs/<id>.tape` |
 
 Record flags: `--url`, `-n` / `--concurrency`, `--prompt` (repeatable, cycled to
 fill `-n`), `--n-predict`, `--out`, `--tag`, `--note`, `--no-card`, `--json`,
@@ -166,6 +169,29 @@ every export, so the numeric columns import as numbers:
 ```sh
 sqlite3 runs.db ".import --tsv ~/.toktape/runs/runs.tsv runs"
 duckdb -c "select tag, decode_tok_s from read_csv('~/.toktape/runs/runs.tsv')"
+```
+
+### Make your own clip
+
+The image at the top of this page is not a screen recording. It is a tape,
+replayed frame by frame, and any tape you have renders the same way.
+
+```sh
+toktape render ~/.toktape/runs/<id>.tape
+```
+
+That writes `<id>.gif` beside the tape and prints the path. With no tape named
+at all, the newest run in `~/.toktape/runs` is used, so `toktape render` on its
+own turns the run you just recorded into something you can attach to a post.
+
+Render flags: `--gif FILE`, `--mp4 FILE` (needs ffmpeg on `PATH`), `--cast
+FILE` for an asciicast v2 recording, `--frames DIR` for the PNG sequence.
+`--duration`, `--fps` and `--size WxH` shape the clip; the defaults are a ten
+to twelve second clip at 30 fps on a 120×36 screen. Name several outputs at
+once and they all come out of the same frames.
+
+```sh
+toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
 ```
 
 ## How it measures
@@ -212,7 +238,6 @@ Roadmap:
 - `ab URL1 URL2` — two servers, one prompt, side by side.
 - PNG card renderer is in the tree (`internal/card/png`, 1200x675, bundled
   fonts); the CLI flag is coming.
-- Headless replay from a tape to GIF and mp4.
 
 ## The `.tape` format
 
@@ -231,6 +256,18 @@ Roadmap:
 `./scripts/check.sh` is the gate: gofmt, build, vet, a Linux cross-build, and
 the tests. Run it before opening a pull request. Code, comments and every
 user-facing string are English; the design documents under `docs/` are Korean.
+
+The hero clip at the top of this page is committed, and it is regenerated from
+the example run by one command:
+
+```sh
+go run ./internal/render/cmd/hero
+```
+
+It writes `assets/hero.gif` with the library's defaults and prints the size and
+frame count. `go run ./internal/render/cmd/rendershot` writes the same clip
+plus a few stills into `scratch/`, which is what a look-and-adjust round on the
+TUI uses.
 
 ## License
 
