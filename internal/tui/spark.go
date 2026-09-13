@@ -173,7 +173,7 @@ func barCells(frac float64, w int) (filled, empty string) {
 		return "", ""
 	}
 	if math.IsNaN(frac) || frac <= 0 {
-		return "", repeat('█', w)
+		return "", repeat(barGlyph, w)
 	}
 	if frac > 1 {
 		frac = 1
@@ -185,8 +185,20 @@ func barCells(frac float64, w int) (filled, empty string) {
 	if n > w {
 		n = w
 	}
-	return repeat('█', n), repeat('█', w-n)
+	return repeat(barGlyph, n), repeat(barGlyph, w-n)
 }
+
+// barGlyph is the cell every placement bar is drawn with, the filled part and
+// the empty remainder alike (TTP-49, user 2026-09-14: "우측 패널 상단에 램
+// 그래프들이 너무 뭉쳐서 하나의 차트처럼 보이는 문제").
+//
+// It was the full block. The placement section stacks a bar per GPU, one for
+// the host and one for the VRAM split with its legend under it, and a full
+// block touches the cell above it, so on a real two-GPU rig with its experts
+// in RAM the bars came out as one rectangle with notches in it. Three quarters
+// of a cell from the bottom leaves a seam of ground between every pair of
+// stacked bars; the shades still say filled from empty, as they did.
+const barGlyph = '▆'
 
 // segmentBar splits a w-cell bar into three shades in proportion to parts,
 // which need not sum to total; whatever is left over draws as empty cells.
@@ -202,7 +214,7 @@ func segmentBar(parts []float64, total float64, w int) []string {
 		return out
 	}
 	if total <= 0 {
-		out[len(parts)] = repeat('█', w)
+		out[len(parts)] = repeat(barGlyph, w)
 		return out
 	}
 	// Largest remainder, with a floor of one cell for any part that was
@@ -255,8 +267,8 @@ func segmentBar(parts []float64, total float64, w int) []string {
 	// lightness, the same way the filled and empty halves of a plain bar are
 	// separated. Shade-glyph shares (▓, ▒) read as hatching, not as volume.
 	for i := range parts {
-		out[i] = repeat('█', n[i])
+		out[i] = repeat(barGlyph, n[i])
 	}
-	out[len(parts)] = repeat('█', w-used)
+	out[len(parts)] = repeat(barGlyph, w-used)
 	return out
 }

@@ -1,9 +1,9 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 1/4                           done │ stream 2/4                           done │ PLACEMENT ────────────────── │
-│ 12.5 tok/s ██▇▇▇██▇ ttft 630 ms · 296/320 │ 12.5 tok/s █▇▇███▇▇ ttft 690 ms · 301/320 │ GPU0 ███████████████   23.8G │
-│ ▏ rather than the maximum, which is why   │ ▏ 슬롯마다 전체 컨텍스트를 따로 잡는다.   │ GPU1 ███████████████   22.8G │
-│ ▏ adding a card raises the memory you     │ ▏ 어느 쪽인지 모르면 메모리 계산이 여덟   │ vram ███████████████   46.6G │
-│ ▏ can fill but not the speed at which     │ ▏ 배 틀린다. 실행 로그에 슬롯 하나가 몇   │      █ weights  █ kv  █ buf  │
+│ 12.5 tok/s ██▇▇▇██▇ ttft 630 ms · 296/320 │ 12.5 tok/s █▇▇███▇▇ ttft 690 ms · 301/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
+│ ▏ rather than the maximum, which is why   │ ▏ 슬롯마다 전체 컨텍스트를 따로 잡는다.   │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
+│ ▏ adding a card raises the memory you     │ ▏ 어느 쪽인지 모르면 메모리 계산이 여덟   │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ ▏ can fill but not the speed at which     │ ▏ 배 틀린다. 실행 로그에 슬롯 하나가 몇   │      ▆ weights  ▆ kv  ▆ buf  │
 │ ▏ one session is answered. What it does   │ ▏ 토큰을 갖는지가 찍히니 그 줄을 먼저     │                              │
 │ ▏ raise is how many sessions you can      │ ▏ 확인하고, 거기서 나온 숫자로 캐시       │ MEMORY ───────────────────── │
 │ ▏ serve at once, and that is usually      │ ▏ 크기를 다시 계산해 보라. 화면           │ rss       1.2G file     0.8G │

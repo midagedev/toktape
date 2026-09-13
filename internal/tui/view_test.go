@@ -497,8 +497,9 @@ func firstAnswerWord(frame string) string {
 	return ""
 }
 
-// TestBarsUseOneGlyph: the filled and empty halves of a bar are the same solid
-// block and differ only in colour, so a hatch glyph can never creep back in.
+// TestBarsUseOneGlyph: the filled and empty halves of a bar are the same glyph
+// and differ only in colour, so a hatch glyph can never creep back in. The
+// glyph is barGlyph (TTP-49, 2026-09-14), no longer the full block.
 func TestBarsUseOneGlyph(t *testing.T) {
 	th := ColourTheme()
 	m := goldenModel(t, midRun)
@@ -509,7 +510,7 @@ func TestBarsUseOneGlyph(t *testing.T) {
 			t.Errorf("the frame still draws a bar with the hatch glyph %q", bad)
 		}
 	}
-	if !strings.Contains(frame, sgrPrefix(th, th.darkFill)+"█") {
+	if !strings.Contains(frame, sgrPrefix(th, th.darkFill)+string(barGlyph)) {
 		t.Error("no bar remainder is drawn in the dark fill colour")
 	}
 }

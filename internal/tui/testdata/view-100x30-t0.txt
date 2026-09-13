@@ -1,9 +1,9 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────┐
 │ stream 1/8 prefill ████████████ │ stream 2/8 prefill ████████████ │ PLACEMENT ────────────────── │
-│ ? tok/s    ttft ?               │ ? tok/s    ttft ?               │ GPU0 ███████████████   22.5G │
-│ ▏ ◐ waiting for the first token │ ▏ ◐ waiting for the first token │ GPU1 ███████████████   21.5G │
-│                                 │                                 │ vram ███████████████   46.6G │
-│                                 │                                 │      █ weights  █ kv  █ buf  │
+│ ? tok/s    ttft ?               │ ? tok/s    ttft ?               │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.5G │
+│ ▏ ◐ waiting for the first token │ ▏ ◐ waiting for the first token │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.5G │
+│                                 │                                 │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│                                 │                                 │      ▆ weights  ▆ kv  ▆ buf  │
 │                                 │                                 │                              │
 ├─────────────────────────────────┼─────────────────────────────────┤ MEMORY ───────────────────── │
 │ stream 3/8 prefill ████████████ │ stream 4/8 prefill ████████████ │ rss       1.2G file     0.8G │

@@ -177,17 +177,19 @@ func flat(n int, v float64) []float64 {
 }
 
 func TestBarCells(t *testing.T) {
+	// 2026-09-14 (TTP-49): the glyph moved from the full block to ▆ so that
+	// stacked bars keep a seam between them; every count is unchanged.
 	tests := []struct {
 		frac         float64
 		w            int
 		full, hollow string
 	}{
-		{0, 10, "", "██████████"},
-		{-1, 10, "", "██████████"},
-		{0.01, 10, "█", "█████████"}, // a little is never nothing
-		{0.5, 10, "█████", "█████"},
-		{1, 10, "██████████", ""},
-		{2, 10, "██████████", ""},
+		{0, 10, "", "▆▆▆▆▆▆▆▆▆▆"},
+		{-1, 10, "", "▆▆▆▆▆▆▆▆▆▆"},
+		{0.01, 10, "▆", "▆▆▆▆▆▆▆▆▆"}, // a little is never nothing
+		{0.5, 10, "▆▆▆▆▆", "▆▆▆▆▆"},
+		{1, 10, "▆▆▆▆▆▆▆▆▆▆", ""},
+		{2, 10, "▆▆▆▆▆▆▆▆▆▆", ""},
 		{0.5, 0, "", ""},
 	}
 	for _, tc := range tests {
@@ -222,7 +224,7 @@ func TestSegmentBarKeepsEverySharePresent(t *testing.T) {
 
 func TestSegmentBarUnknownTotal(t *testing.T) {
 	segs := segmentBar([]float64{0, 0, 0}, 0, 6)
-	if segs[3] != "██████" {
+	if segs[3] != "▆▆▆▆▆▆" {
 		t.Errorf("an unmeasured split drew %q, want six empty cells", segs[3])
 	}
 }

@@ -1,9 +1,9 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 1/4                         answer │ stream 2/4                         answer │ PLACEMENT ────────────────── │
-│ 12.5 tok/s ▇▇███▇▇█ ttft 630 ms · 143/320 │ 12.5 tok/s ▇▇███▇▇█ ttft 690 ms · 142/320 │ GPU0 ███████████████   23.1G │
-│ ▏ memory bandwidth problem wearing a      │ ▏ 벌을 곱하고, 거기에 KV 헤드가           │ GPU1 ███████████████   22.1G │
-│ ▏ compute costume, and the arithmetic     │ ▏ 차지하는 채널 수와 컨텍스트 토큰 수를   │ vram ███████████████   46.6G │
-│ ▏ is simple enough to do in your head.    │ ▏ 곱한 다음, 원소 하나가 몇               │      █ weights  █ kv  █ buf  │
+│ 12.5 tok/s ▇▇███▇▇█ ttft 630 ms · 143/320 │ 12.5 tok/s ▇▇███▇▇█ ttft 690 ms · 142/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.1G │
+│ ▏ memory bandwidth problem wearing a      │ ▏ 벌을 곱하고, 거기에 KV 헤드가           │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.1G │
+│ ▏ compute costume, and the arithmetic     │ ▏ 차지하는 채널 수와 컨텍스트 토큰 수를   │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ ▏ is simple enough to do in your head.    │ ▏ 곱한 다음, 원소 하나가 몇               │      ▆ weights  ▆ kv  ▆ buf  │
 │ ▏ Take the bytes the model has to touch   │ ▏ 바이트인지를 곱하면 된다. 팔십          │                              │
 │ ▏ per token, multiply by the tokens per   │ ▏ 레이어짜리 칠십억 단위 모델이 만 육천   │ MEMORY ───────────────────── │
 │ ▏ second you are getting, and compare     │ ▏ 토큰을 잡으면 반정밀도로는 오           │ rss       1.2G file     0.8G │

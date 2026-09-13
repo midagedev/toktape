@@ -1,9 +1,9 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────────────────────────┐
 │ stream 1/8                                  done │ stream 2/8                                   done │ PLACEMENT ─────────────────────── │
-│ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 630 ms · 296/320    │ 9.1 tok/s  ▇▇███▇▇███▇▇ ttft 690 ms · 301/320     │ GPU0 ████████████████████   23.8G │
-│ ▏ usually the thing people actually want.        │ ▏ 캐시 크기를 다시 계산해 보라. 화면 오른쪽의     │ GPU1 ████████████████████   22.8G │
-│ ▏ Tensor parallelism would split each matrix     │ ▏ 메모리 칸이 그 계산과 실제 장치 사용량을        │ vram ████████████████████   46.6G │
-│ ▏ instead of each layer and let both devices     │ ▏ 나란히 보여 주는 이유도 그것이다. 두 값이       │      █ weights  █ kv  █ buf       │
+│ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 630 ms · 296/320    │ 9.1 tok/s  ▇▇███▇▇███▇▇ ttft 690 ms · 301/320     │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
+│ ▏ usually the thing people actually want.        │ ▏ 캐시 크기를 다시 계산해 보라. 화면 오른쪽의     │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
+│ ▏ Tensor parallelism would split each matrix     │ ▏ 메모리 칸이 그 계산과 실제 장치 사용량을        │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ ▏ instead of each layer and let both devices     │ ▏ 나란히 보여 주는 이유도 그것이다. 두 값이       │      ▆ weights  ▆ kv  ▆ buf       │
 │ ▏ work together on the same token, but it        │ ▏ 어긋나면 설정이 생각과 다르게 잡혀 있다는       │                                   │
 │ ▏ wants a fast link between them and it is not   │ ▏ 뜻이고, 그때는 속도를 재기 전에 배치부터        │ MEMORY ────────────────────────── │
 │ ▏ what this server does                          │ ▏ 고쳐야 한다. 실제로 자리가 모자랄 때 손대는     │ rss         1.2G file        0.8G │

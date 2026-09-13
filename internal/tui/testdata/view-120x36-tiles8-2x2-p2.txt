@@ -1,9 +1,9 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 5/8                         answer │ stream 6/8                         answer │ PLACEMENT ────────────────── │
-│ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │ GPU0 ███████████████   22.9G │
-│ ▏ 실행이 크게 빨라지면 첫 실행이          │ ▏ source of half the confusion about      │ GPU1 ███████████████   21.9G │
-│ ▏ 차가웠던 것이고, 그러면 페이지 캐시     │ ▏ quality. In the common mixed schemes    │ vram ███████████████   46.6G │
-│ ▏ 이야기만 하면 끝난다. 여기서 토큰당     │ ▏ the file is built tensor by tensor,     │      █ weights  █ kv  █ buf  │
+│ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
+│ ▏ 실행이 크게 빨라지면 첫 실행이          │ ▏ source of half the confusion about      │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+│ ▏ 차가웠던 것이고, 그러면 페이지 캐시     │ ▏ quality. In the common mixed schemes    │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ ▏ 이야기만 하면 끝난다. 여기서 토큰당     │ ▏ the file is built tensor by tensor,     │      ▆ weights  ▆ kv  ▆ buf  │
 │ ▏ 메이저 폴트 값을 같이 보게 하면         │ ▏ and different tensors get different     │                              │
 │ ▏ 추측이 측정으로 바뀐다. 그 다음이       │ ▏ treatment. The attention projections    │ MEMORY ───────────────────── │
 │ ▏ 다른 프로세스다. 로드 평균과 다른       │ ▏ and the feed forward matrices that      │ rss       1.2G file     0.8G │

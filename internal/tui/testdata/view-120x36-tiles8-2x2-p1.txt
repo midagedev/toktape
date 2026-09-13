@@ -1,9 +1,9 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 1/8                         answer │ stream 2/8                         answer │ PLACEMENT ────────────────── │
-│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 104/320 │ 9.1 tok/s  ██▇▇▇██▇ ttft 690 ms · 103/320 │ GPU0 ███████████████   22.9G │
-│ ▏ single one of those bytes is read       │ ▏ 크기가 정해지고 그 뒤로는 변하지        │ GPU1 ███████████████   21.9G │
-│ ▏ again for every token you generate.     │ ▏ 않지만, KV 캐시는 슬롯마다 따로         │ vram ███████████████   46.6G │
-│ ▏ That one sentence explains most of      │ ▏ 잡히고 컨텍스트 길이에 정비례해서       │      █ weights  █ kv  █ buf  │
+│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 104/320 │ 9.1 tok/s  ██▇▇▇██▇ ttft 690 ms · 103/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
+│ ▏ single one of those bytes is read       │ ▏ 크기가 정해지고 그 뒤로는 변하지        │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+│ ▏ again for every token you generate.     │ ▏ 않지만, KV 캐시는 슬롯마다 따로         │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ ▏ That one sentence explains most of      │ ▏ 잡히고 컨텍스트 길이에 정비례해서       │      ▆ weights  ▆ kv  ▆ buf  │
 │ ▏ what you are seeing. Decoding is not    │ ▏ 자란다. 그래서 같은 모델을 같은         │                              │
 │ ▏ compute bound on this rig. It is a      │ ▏ 카드에 올려도 컨텍스트를 네 배로        │ MEMORY ───────────────────── │
 │ ▏ memory bandwidth problem wearing a      │ ▏ 늘리면 갑자기 자리가 모자란다. 계산은   │ rss       1.2G file     0.8G │

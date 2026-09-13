@@ -168,7 +168,7 @@ func placementRows(m Model, th Theme, t time.Duration, cw int) []string {
 			st    lipgloss.Style
 			label string
 		}{{th.accentMuted, " weights  "}, {th.accentLow, " kv  "}, {th.dim, " buf"}} {
-			l2.add(key.st, "█")
+			l2.add(key.st, string(barGlyph))
 			l2.add(th.dim, key.label)
 		}
 		out = append(out, l2.String())

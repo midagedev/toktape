@@ -1,9 +1,9 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────┐
 │ stream 1/8                 done │ stream 2/8                 done │ PLACEMENT ────────────────── │
-│ 9.1 tok/s  ttft 630 ms          │ 9.1 tok/s  ttft 690 ms          │ GPU0 ███████████████   23.8G │
-│ ▏ the same token, but it        │ ▏ 그때는 속도를 재기 전에       │ GPU1 ███████████████   22.8G │
-│ ▏ wants a fast link between     │ ▏ 배치부터 고쳐야 한다.         │ vram ███████████████   46.6G │
-│ ▏ them and it is not what       │ ▏ 실제로 자리가 모자랄 때       │      █ weights  █ kv  █ buf  │
+│ 9.1 tok/s  ttft 630 ms          │ 9.1 tok/s  ttft 690 ms          │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
+│ ▏ the same token, but it        │ ▏ 그때는 속도를 재기 전에       │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
+│ ▏ wants a fast link between     │ ▏ 배치부터 고쳐야 한다.         │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ ▏ them and it is not what       │ ▏ 실제로 자리가 모자랄 때       │      ▆ weights  ▆ kv  ▆ buf  │
 │ ▏ this server does              │ ▏ 손대는                        │                              │
 ├─────────────────────────────────┼─────────────────────────────────┤ MEMORY ───────────────────── │
 │ stream 3/8                 done │ stream 4/8                 done │ rss       1.2G file     0.8G │
