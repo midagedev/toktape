@@ -212,6 +212,8 @@ func ExampleTapeN(streams int) *tape.Tape {
 	tp.Summary.Aggregate.WallMs = msOf(runEnd)
 	tp.Summary.Aggregate.TotalPredictedN = streams * tokens
 	tp.Summary.Aggregate.TotalPromptN = streams * (promptTotal - promptCache)
+	tp.Summary.Aggregate.Streams = streams
+	tp.Summary.Aggregate.SlotsBusyMax = streams
 	tp.Summary.Aggregate.PerStreamPredictedPerSecond = perStreamMean
 	tp.Summary.Aggregate.AggregatePredictedPerSecond = rateSum
 	tp.Summary.FinishedAt = tp.Summary.StartedAt.Add(runEnd)
