@@ -492,7 +492,14 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 	if placed > 0 {
 		placedStr = formatGiB(placed)
 	}
+	// The shape first (2026-09-14): a model entirely on the cards and one
+	// whose experts sit in system memory are two different machines, and the
+	// reader needs that word before the bar under it means anything. Nothing
+	// when the placement was not derived.
 	c.placedSum = placedStr + " placed · host RSS " + rss
+	if word := layoutWord(s.Placement); word != "" {
+		c.placedSum = word + " · " + c.placedSum
+	}
 
 	c.pills = []pill{majFaultPill(s, c.hasProcMem), cachePill(s.Cache), contendedPill(s.Contention)}
 	if p, ok := answerCutPill(s); ok {
@@ -993,4 +1000,19 @@ func flagsLine(srv tape.ServerInfo) string {
 		base = append(base, "-ot "+p)
 	}
 	return strings.Join(base, "  ")
+}
+
+// layoutWord names where the weights live, in the reader's words rather than
+// the schema's. The text and the rules are internal/tui's twin (layoutWord
+// there) and tape.Layout's doc says why unified memory is not among them yet.
+func layoutWord(p tape.PlacementSummary) string {
+	switch tape.Layout(p).Shape {
+	case tape.ShapeVRAM:
+		return "all in VRAM"
+	case tape.ShapeHost:
+		return "all in host RAM"
+	case tape.ShapeOffload:
+		return "offloaded"
+	}
+	return ""
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -279,5 +280,67 @@ func TestModalAlarmsWhenTheRunIsCold(t *testing.T) {
 	}
 	if got, want := shadeAt(false), styleHex(th.darkFill); got != want {
 		t.Errorf("a warm run's paged share is %s, want the empty shade %s", got, want)
+	}
+}
+
+// TestModalSaysWhereTheWeightsLive (2026-09-14, user: "통합메모리 계열인지 순수
+// vram인지 오프로딩인지 좀 더 명확하게 갈리도록 … 모델도 모델 크기와 양자화가
+// 잘 나와야 되고 날짜도").
+//
+// Three different machines produce three different cards, and the reader has
+// to be told which before the rates mean anything. The model line carries the
+// quant and the size with the name, and the run carries its date.
+func TestModalSaysWhereTheWeightsLive(t *testing.T) {
+	const gib = 1 << 30
+	base := ModelAt(ExampleTapeN(2), doneAt)
+	base.Mode = ModeCard
+	base.Summary.Model.FileBytes = 440 * gib
+	base.Summary.Model.Quant = "Q3_K_M"
+	base.Summary.StartedAt = time.Date(2026, 9, 14, 7, 4, 58, 0, time.Local)
+
+	frameOf := func(devices []tape.DevicePlacement) string {
+		m := base
+		m.Summary.Placement = tape.PlacementSummary{Devices: devices}
+		return card.StripANSI(View(m, doneAt, 120, 36))
+	}
+
+	gpu := []tape.DevicePlacement{{Device: "GPU0", Bytes: 40 * gib}}
+	host := []tape.DevicePlacement{{Device: tape.DeviceCPU, Bytes: 388 * gib}}
+	for name, tc := range map[string]struct {
+		devices []tape.DevicePlacement
+		want    string
+		absent  string
+	}{
+		"all on the cards":  {gpu, "all in VRAM", "offloaded"},
+		"all in host RAM":   {host, "all in host RAM", "offloaded"},
+		"experts offloaded": {append(append([]tape.DevicePlacement{}, gpu...), host...), "offloaded · 9% in VRAM · 91% in host RAM", "all in VRAM"},
+	} {
+		got := frameOf(tc.devices)
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("%s: the modal does not say %q:\n%s", name, tc.want, got)
+		}
+		if strings.Contains(got, tc.absent) {
+			t.Errorf("%s: the modal says %q as well", name, tc.absent)
+		}
+	}
+
+	// A placement nobody derived says nothing rather than guessing a shape.
+	if got := frameOf(nil); strings.Contains(got, "in VRAM") || strings.Contains(got, "offloaded") {
+		t.Errorf("an underived placement was given a shape:\n%s", got)
+	}
+
+	full := frameOf(gpu)
+	for _, want := range []string{"Q3_K_M", "440G", "2026-09-14"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("the modal does not carry %q:\n%s", want, full)
+		}
+	}
+
+	// No StartedAt, no date: a made-up day on a card is worse than none.
+	undated := base
+	undated.Summary.StartedAt = time.Time{}
+	undated.Summary.Placement = tape.PlacementSummary{Devices: gpu}
+	if got := card.StripANSI(View(undated, doneAt, 120, 36)); strings.Contains(got, "2026-09-14") {
+		t.Errorf("an undated run was given a date:\n%s", got)
 	}
 }

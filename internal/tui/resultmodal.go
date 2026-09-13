@@ -26,12 +26,34 @@ func resultModal(m Model, th Theme, boxW int) []string {
 	inner := boxW - 4
 	s := m.Summary
 	var rows []string
+	var title string
 
 	// The title sits in the top rule, the way charm draws a titled box, so the
 	// box opens on the model's name rather than on a blank row.
-	title := " " + strings.Join(nonEmpty(modelName(s.Model), s.Model.Quant), " ") + " "
-	title = truncate(title, boxW-6)
-	rows = append(rows, th.paint(th.dim, "┌─")+th.paint(th.text, title)+th.paint(th.dim, repeat('─', boxW-3-width(title))+"┐"))
+	//
+	// Name, quant and size, in that order (user, 2026-09-14: "모델도 모델
+	// 크기와 양자화가 잘 나와야 되고"). The three together are what identifies
+	// a run's model to someone comparing cards: the same name at two quants is
+	// two different machines' worth of bytes, and the size is the figure every
+	// "will it fit" question starts from.
+	title = " " + strings.Join(nonEmpty(modelName(s.Model), s.Model.Quant, fmtG(s.Model.FileBytes)), " · ") + " "
+	// The date rides the other end of the same rule (user, 2026-09-14:
+	// "날짜도"). A card with no date is undatable evidence — engines move
+	// weekly, and last spring's rate is a different claim from today's — and
+	// the rule is the one place on the modal with room for it. The footer's ID
+	// begins with the same day, but as an identifier nobody reads as a date.
+	// Omitted rather than faked when the tape carries no time.
+	var dateSeg string
+	if !s.StartedAt.IsZero() {
+		dateSeg = " " + s.StartedAt.Local().Format("2006-01-02") + " "
+	}
+	title = truncate(title, boxW-6-width(dateSeg))
+	fill := boxW - 3 - width(title) - width(dateSeg)
+	if fill < 0 {
+		fill = 0
+	}
+	rows = append(rows, th.paint(th.dim, "┌─")+th.paint(th.text, title)+
+		th.paint(th.dim, repeat('─', fill))+th.paint(th.textMid, dateSeg)+th.paint(th.dim, "┐"))
 
 	line := func(s string) {
 		rows = append(rows, th.paint(th.dim, "│")+" "+pad(s, inner)+" "+th.paint(th.dim, "│"))
@@ -71,6 +93,20 @@ func resultModal(m Model, th Theme, boxW int) []string {
 		l := newLine(th, inner)
 		l.space(2)
 		l.addTrunc(th.textMid, s)
+		line(l.String())
+	}
+	// One word for where the weights live, over the bar that shows it (user,
+	// 2026-09-14: "통합메모리 계열인지 순수 vram인지 오프로딩인지 … 성격이 많이
+	// 다르니까"). A bar is a proportion and a reader has to decode it; the
+	// sentence is the thing they needed before any of the rates above meant
+	// anything.
+	if lay := tape.Layout(s.Placement); lay.Shape != tape.ShapeUnknown {
+		l := newLine(th, inner)
+		l.space(2)
+		l.add(th.text, layoutWord(lay))
+		if rest := layoutDetail(lay); rest != "" {
+			l.addTrunc(th.textMid, rest)
+		}
 		line(l.String())
 	}
 	// The modal is the run's last frame, so the residency it names is the run's
@@ -253,4 +289,34 @@ func placementLines(th Theme, p tape.PlacementSummary, res tape.HostResidency, c
 		}
 	}
 	return []string{bar.String(), l.String()}
+}
+
+// layoutWord is the one word the modal leads the placement with.
+//
+// They are the reader's words, not the schema's: "offloaded" is what the
+// forums call a model whose experts sit in system memory, and "all in VRAM" is
+// the state everyone is trying to reach. tape.Layout's doc says why unified
+// memory is not among them yet.
+func layoutWord(lay tape.MemoryLayout) string {
+	switch lay.Shape {
+	case tape.ShapeVRAM:
+		return "all in VRAM"
+	case tape.ShapeHost:
+		return "all in host RAM"
+	case tape.ShapeOffload:
+		return "offloaded"
+	}
+	return ""
+}
+
+// layoutDetail is the split that follows the word, for the only shape that has
+// one to give. The share is of the placed bytes, so it answers "how much of
+// this model is on the cards" and not "how full are the cards" — the bar under
+// it answers the second.
+func layoutDetail(lay tape.MemoryLayout) string {
+	if lay.Shape != tape.ShapeOffload {
+		return ""
+	}
+	return fmt.Sprintf(" · %s in VRAM · %s in host RAM",
+		fmtPct(lay.VRAMShare), fmtPct(1-lay.VRAMShare))
 }
