@@ -25,16 +25,15 @@ import (
 // on it; the frame spends a column on the same gutter for the same reason.
 const tileGutter = 3
 
-// tileMinBody is the answer budget below which a tile gives up its sparkline
-// footer. One line of a reply says less than nothing, so the footer's row goes
-// to the body before the body is cut to it. Neither of the two rows above the
-// body is ever dropped: one names the stream and the other reports its rate.
-const tileMinBody = 2
-
 // tileChromeRows is what a full tile spends on something other than the
-// answer: the header, the stat line under it and the sparkline footer. The
-// automatic grid budgets with it (grid.go), so the two cannot drift.
-const tileChromeRows = 3
+// answer: the header and the stat line under it. The automatic grid budgets
+// with it (grid.go), so the two cannot drift.
+//
+// 2026-09-13 (TTP-29): three rows, until the sparkline footer moved into the
+// stat line and its row went to the answer. The degradation rule that used to
+// drop that footer before the body went with it — there is nothing left in a
+// tile to drop.
+const tileChromeRows = 2
 
 // tilePane draws one page of m.Streams as a grid and returns exactly rows
 // lines of cw columns, footer included.
@@ -205,12 +204,12 @@ func tileRule(th Theme, cw int, above, below []int) string {
 	return th.paint(th.dim, string(line))
 }
 
-// tile draws one stream inside its own rectangle: the stream header, the
-// answer, and a footer that says how evenly this one stream is decoding.
+// tile draws one stream inside its own rectangle: the stream header, the stat
+// line that reports how fast it is decoding, and the answer.
 //
-// It always returns exactly rows lines of cw columns. A tile with too little
-// room for tileMinBody lines of answer drops the footer rather than the
-// answer, and one with no room at all keeps the header.
+// It always returns exactly rows lines of cw columns. Every row past the two
+// of chrome is answer: a tile has nothing else to spend them on since the
+// sparkline joined the stat line (TTP-29).
 //
 // active is the index of the stream whose tile is highlighted, not a flag: the
 // grid hands the same value to every tile.
@@ -223,77 +222,9 @@ func tile(m Model, th Theme, t time.Duration, s Stream, cw, rows, active int) []
 	if rows == 1 {
 		return []string{streamHeader(m, th, s, cw, true, on)}
 	}
-	if rows == 2 {
-		// Identity and the figure. Below this a tile is a label, not a tile,
-		// but the two rows it can afford are the two that report something.
-		return []string{streamHeader(m, th, s, cw, true, on), tileStatLine(th, s, cw)}
-	}
-	body := rows - tileChromeRows
-	if body < tileMinBody {
-		// No footer: the row it would have taken is worth more as an answer.
-		return fitRows(streamBlock(m, th, t, s, cw, rows-2, true, on), blank, rows)
-	}
-	out := streamBlock(m, th, t, s, cw, body, true, on)
-	out = append(out, tileFooter(th, s, cw, on))
-	return fitRows(out, blank, rows)
-}
-
-// tileAvgW is the field reserved at the right of the footer for its label.
-//
-// It is a field rather than the label's own width so that the sparkline's
-// right-hand end sits at the same column in every frame. A bar whose edge
-// moved by one whenever the mean crossed 10 or 100 tok/s would read as the
-// line twitching, which is exactly what a sparkline must not do.
-const tileAvgW = 10
-
-// tileFooter is the bottom line of a tile: this stream's own decode rate as a
-// scrolling sparkline, and the mean of the window it draws.
-//
-// The run-wide latency strip along the bottom of the screen answers "is the
-// server even"; this answers "is *this slot* even", which is the question a
-// concurrent run exists to raise. The sparkline is anchored to the right, so
-// it scrolls left under a fixed edge as tokens arrive instead of growing out
-// of its label.
-//
-// The label is the mean of the cells beside it and not the stream's median
-// gap: the median moved up to the stat line with the rest of the figures
-// (2026-09-13, user decision), and a shape wants the average of what it shows
-// written next to it rather than a statistic from somewhere else.
-func tileFooter(th Theme, s Stream, cw int, active bool) string {
-	l := newLine(th, cw)
-	gutter(l, th, active)
-
-	barW := l.left() - tileAvgW
-	var rates []float64
-	if barW > 0 {
-		rates = streamRates(s, barW)
-		cells := Sparkline(rates, barW, 0)
-		l.space(barW - len(cells))
-		// Muted, not the accent: the tile's one lit figure is the rate two
-		// rows above, and a full-accent sparkline is the larger shape of the
-		// two (TTP-28).
-		writeCells(l, th, cells, cellPalette{base: th.accentMuted, warn: th.warn, bad: th.warn})
-	}
-	label := fmtRate(mean(rates)) + " avg"
-	if width(label) > l.left() {
-		return l.String()
-	}
-	l.gapTo(width(label))
-	l.add(th.dim, label)
-	return l.String()
-}
-
-// mean is the arithmetic mean of vals, or 0 for an empty window — which every
-// formatter here prints as "?", because no sample is not a zero sample.
-func mean(vals []float64) float64 {
-	if len(vals) == 0 {
-		return 0
-	}
-	sum := 0.0
-	for _, v := range vals {
-		sum += v
-	}
-	return sum / float64(len(vals))
+	// Two rows is identity and the figure. Below that a tile is a label, not
+	// a tile, but the rows it can afford are the ones that report something.
+	return fitRows(streamBlock(m, th, t, s, cw, rows-tileChromeRows, true, on), blank, rows)
 }
 
 // spliceRune replaces the i-th rune of s with r. s must carry no escape

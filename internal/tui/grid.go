@@ -41,7 +41,13 @@ const (
 	// autoBodyLines is the answer budget an automatic row count guarantees
 	// every tile. Fewer than four lines and a tile shows a phrase rather than
 	// a reply.
-	autoBodyLines = 4
+	//
+	// 2026-09-13 (TTP-29): four, until the sparkline footer moved into the
+	// stat line. The row it freed goes to the answer rather than to another
+	// grid row — tileChromeRows fell by one and this rose by one, so a pane
+	// of a given height holds the same tiles and each one says one line more.
+	// Reversing that is a matter of putting this back to four.
+	autoBodyLines = 5
 )
 
 // String renders a grid the way --grid takes it.
@@ -69,8 +75,8 @@ func (g Grid) resolve(cw, bodyH int) Grid {
 		}
 	}
 	if rows <= 0 {
-		// A tile is a header, a stat line, its answer and its sparkline
-		// footer, and every row after the first also costs the rule above it.
+		// A tile is a header, a stat line and its answer, and every row after
+		// the first also costs the rule above it.
 		per := tileChromeRows + autoBodyLines
 		rows = (bodyH + 1) / (per + 1)
 	}

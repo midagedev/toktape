@@ -1,38 +1,38 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────────────────────────┐
 │ stream 1/8                                     done │ stream 2/8                                     done │ PLACEMENT ────────────────── │
-│ 9.1 tok/s  ttft 630 ms · 296/320 · p50 111 ms       │ 9.1 tok/s  ttft 690 ms · 301/320 · p50 111 ms       │ GPU0 ███████████████   23.8G │
-│ ▏ Tensor parallelism would split each matrix        │ ▏ 오른쪽의 메모리 칸이 그 계산과 실제 장치          │ GPU1 ███████████████   22.8G │
-│ ▏ instead of each layer and let both devices work   │ ▏ 사용량을 나란히 보여 주는 이유도 그것이다. 두     │ vram ███████████████   46.6G │
-│ ▏ together on the same token, but it wants a fast   │ ▏ 값이 어긋나면 설정이 생각과 다르게 잡혀 있다는    │      █ weights  █ kv  █ buf  │
-│ ▏ link between them and it is not what this         │ ▏ 뜻이고, 그때는 속도를 재기 전에 배치부터 고쳐야   │                              │
-│ ▏ server does                                       │ ▏ 한다. 실제로 자리가 모자랄 때 손대는              │ MEMORY ───────────────────── │
-│ ▏ █▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇   9.1 avg │ ▏ ▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇   9.1 avg │ rss       1.2G file     0.8G │
+│ 9.1 tok/s  █▇▇█▇██▇▇▇██▇ ttft 630 ms · 296/320      │ 9.1 tok/s  █▇▇███▇▇███▇▇ ttft 690 ms · 301/320      │ GPU0 ███████████████   23.8G │
+│ ▏ that is usually the thing people actually want.   │ ▏ 나온 숫자로 캐시 크기를 다시 계산해 보라. 화면    │ GPU1 ███████████████   22.8G │
+│ ▏ Tensor parallelism would split each matrix        │ ▏ 오른쪽의 메모리 칸이 그 계산과 실제 장치          │ vram ███████████████   46.6G │
+│ ▏ instead of each layer and let both devices work   │ ▏ 사용량을 나란히 보여 주는 이유도 그것이다. 두     │      █ weights  █ kv  █ buf  │
+│ ▏ together on the same token, but it wants a fast   │ ▏ 값이 어긋나면 설정이 생각과 다르게 잡혀 있다는    │                              │
+│ ▏ link between them and it is not what this         │ ▏ 뜻이고, 그때는 속도를 재기 전에 배치부터 고쳐야   │ MEMORY ───────────────────── │
+│ ▏ server does                                       │ ▏ 한다. 실제로 자리가 모자랄 때 손대는              │ rss       1.2G file     0.8G │
 ├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ virt     48.0G anon     0.4G │
 │ stream 3/8                                     done │ stream 4/8                                     done │ maj/tok                  0.0 │
-│ 9.1 tok/s  ttft 750 ms · 306/320 · p50 111 ms       │ 9.1 tok/s  ttft 810 ms · 311/320 · p50 110 ms       │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ decode batch, and while a slot is doing that it   │ ▏ several agents share a preamble, send them to     │                              │
-│ ▏ competes with the sessions already generating.    │ ▏ the same server so they share the slot that       │ SPEED ────────────────────── │
-│ ▏ That is why time to first token spreads out as    │ ▏ holds it. And when you cannot avoid a change,     │ prefill            610 tok/s │
-│ ▏ the slots fill, and why a burst of arrivals       │ ▏ make it late rather than early, because the       │ decode             9.1 tok/s │
-│ ▏ makes ongoing streams                             │ ▏ cost is not the size                              │ ttft      810 ms · 25% cache │
-│ ▏ ▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇   9.1 avg │ ▏ ▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │ 8 streams     72.9 tok/s agg │
+│ 9.1 tok/s  ▇▇▇██▇▇█▇██▇▇ ttft 750 ms · 306/320      │ 9.1 tok/s  ▇█▇██▇▇▇██▇▇▇ ttft 810 ms · 311/320      │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ prompt to chew through before it can join the     │ ▏ letting a hash map decide the order for you. If   │                              │
+│ ▏ decode batch, and while a slot is doing that it   │ ▏ several agents share a preamble, send them to     │ SPEED ────────────────────── │
+│ ▏ competes with the sessions already generating.    │ ▏ the same server so they share the slot that       │ prefill            610 tok/s │
+│ ▏ That is why time to first token spreads out as    │ ▏ holds it. And when you cannot avoid a change,     │ decode             9.1 tok/s │
+│ ▏ the slots fill, and why a burst of arrivals       │ ▏ make it late rather than early, because the       │ ttft      810 ms · 25% cache │
+│ ▏ makes ongoing streams                             │ ▏ cost is not the size                              │ 8 streams     72.9 tok/s agg │
 ├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤                              │
 │ stream 5/8                                     done │ stream 6/8                                     done │ HOST ─────────────────────── │
-│ 9.1 tok/s  ttft 870 ms · 316/320 · p50 110 ms       │ 9.1 tok/s  ttft 930 ms · 300/320 · p50 110 ms       │ load      3.1 · contended no │
-│ ▏ 한 번만 재지 말라. 같은 조건으로 세 번 돌려서     │ ▏ not change the arithmetic the device does: the    │ GPU0         71°C  348W  98% │
-│ ▏ 가운데 값을 쓰고, 세 값이 서로 많이 다르면 그     │ ▏ weights are unpacked on the fly and multiplied    │ GPU1         67°C  318W  94% │
+│ 9.1 tok/s  ▇███▇▇███▇▇██ ttft 870 ms · 316/320      │ 9.1 tok/s  ▇██▇▇▇██▇▇█▇█ ttft 930 ms · 300/320      │ load      3.1 · contended no │
+│ ▏ 차이 나는 이유가 대부분 여기에 있다. 마지막으로   │ ▏ people out. The first is that quantisation does   │ GPU0         71°C  348W  98% │
+│ ▏ 한 번만 재지 말라. 같은 조건으로 세 번 돌려서     │ ▏ not change the arithmetic the device does: the    │ GPU1         67°C  318W  94% │
+│ ▏ 가운데 값을 쓰고, 세 값이 서로 많이 다르면 그     │ ▏ weights are unpacked on the fly and multiplied    │                              │
 │ ▏ 사실 자체를 기록하라. 흔들리는 측정은 평균을 낼   │ ▏ at a higher precision, so the speed gain comes    │                              │
 │ ▏ 대상이 아니라 원인을 찾아야 할 증상이다. 이       │ ▏ from moving fewer bytes rather than from doing    │                              │
 │ ▏ 도구가 실행마다                                   │ ▏ cheaper multiplications. The                      │                              │
-│ ▏ ▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇   9.1 avg │ ▏ ██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇█   9.2 avg │                              │
 ├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤                              │
 │ stream 7/8 · thinking · cut                         │ stream 8/8                                     done │                              │
-│ 9.1 tok/s  ttft 990 ms · 320/320 · p50 111 ms       │ 9.1 tok/s  ttft 1050 ms · 310/320 · p50 110 ms      │                              │
+│ 9.1 tok/s  ▇██▇▇█▇██▇▇▇█ ttft 990 ms · 320/320      │ 9.1 tok/s  ██▇▇▇██▇▇▇██▇ ttft 1050 ms · 310/320     │                              │
+│ ▏ been spent on the other sequences. The            │ ▏ touch. That is where the never loaded figure on   │                              │
 │ ▏ technique wants an idle machine with one stream   │ ▏ the card comes from, and it is why the figure     │                              │
 │ ▏ on it. Their message says agents, which means     │ ▏ is absent rather than zero when a model is        │                              │
 │ ▏ concurrency, which means my whole break even      │ ▏ fully offloaded. The counter that does matter     │                              │
 │ ▏ calculation is answering                          │ ▏ during                                            │                              │
-│ ▏ ▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇█   9.1 avg │ ▏ █▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇   9.1 avg │                              │
 │                                                                                                           │                              │
 │ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card                        │                              │
 ├───────────────────────────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤

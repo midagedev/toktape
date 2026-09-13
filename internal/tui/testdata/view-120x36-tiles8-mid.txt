@@ -1,36 +1,36 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 1/8                         answer │ stream 2/8                         answer │ PLACEMENT ────────────────── │
-│ 9.1 tok/s  ttft 630 ms · 104/320          │ 9.1 tok/s  ttft 690 ms · 103/320          │ GPU0 ███████████████   22.9G │
-│ ▏ per token, multiply by the tokens per   │ ▏ 곱한 다음, 원소 하나가 몇               │ GPU1 ███████████████   21.9G │
-│ ▏ second you are getting, and compare     │ ▏ 바이트인지를 곱하면 된다. 팔십          │ vram ███████████████   46.6G │
-│ ▏ the result against what your cards      │ ▏ 레이어짜리 칠십억 단위 모델이 만 육천   │      █ weights  █ kv  █ buf  │
-│ ▏ can actually move. If the two figures   │ ▏ 토큰을 잡으면 반정밀도로는 오           │                              │
-│ ▏ are▍                                    │ ▏ 기가바이트가 넘고,▍                     │ MEMORY ───────────────────── │
-│ ▏ █▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇   9.1 avg │ ▏ █▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇   9.1 avg │ rss       1.2G file     0.8G │
+│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 104/320 │ 9.1 tok/s  ██▇▇▇██▇ ttft 690 ms · 103/320 │ GPU0 ███████████████   22.9G │
+│ ▏ Take the bytes the model has to touch   │ ▏ 차지하는 채널 수와 컨텍스트 토큰 수를   │ GPU1 ███████████████   21.9G │
+│ ▏ per token, multiply by the tokens per   │ ▏ 곱한 다음, 원소 하나가 몇               │ vram ███████████████   46.6G │
+│ ▏ second you are getting, and compare     │ ▏ 바이트인지를 곱하면 된다. 팔십          │      █ weights  █ kv  █ buf  │
+│ ▏ the result against what your cards      │ ▏ 레이어짜리 칠십억 단위 모델이 만 육천   │                              │
+│ ▏ can actually move. If the two figures   │ ▏ 토큰을 잡으면 반정밀도로는 오           │ MEMORY ───────────────────── │
+│ ▏ are▍                                    │ ▏ 기가바이트가 넘고,▍                     │ rss       1.2G file     0.8G │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ virt     48.0G anon     0.4G │
 │ stream 3/8                         answer │ stream 4/8                         answer │ maj/tok                  0.0 │
-│ 9.1 tok/s  ttft 750 ms · 103/320          │ 9.1 tok/s  ttft 810 ms · 102/320          │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ is batched across them. The expensive   │ ▏ message, a timestamp you helpfully      │                              │
-│ ▏ part is amortised eight ways. What is   │ ▏ injected, a tool list whose order       │ SPEED ────────────────────── │
-│ ▏ not amortised is the attention step,    │ ▏ comes out of a map and therefore        │ prefill            610 tok/s │
-│ ▏ where every sequence▍                   │ ▏ changes between▍                        │ decode             9.1 tok/s │
-│ ▏ ▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇   9.1 avg │ ▏ ▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇   9.1 avg │ ttft      810 ms · 25% cache │
+│ 9.1 tok/s  ██▇███▇▇ ttft 750 ms · 103/320 │ 9.1 tok/s  ██▇███▇▇ ttft 810 ms · 102/320 │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ sequence, because the matrix multiply   │ ▏ was. One extra space in your system     │                              │
+│ ▏ is batched across them. The expensive   │ ▏ message, a timestamp you helpfully      │ SPEED ────────────────────── │
+│ ▏ part is amortised eight ways. What is   │ ▏ injected, a tool list whose order       │ prefill            610 tok/s │
+│ ▏ not amortised is the attention step,    │ ▏ comes out of a map and therefore        │ decode             9.1 tok/s │
+│ ▏ where every sequence▍                   │ ▏ changes between▍                        │ ttft      810 ms · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
 │ stream 5/8                         answer │ stream 6/8                         answer │                              │
-│ 9.1 tok/s  ttft 870 ms · 102/320          │ 9.1 tok/s  ttft 930 ms · 101/320          │ HOST ─────────────────────── │
-│ ▏ ▸ answer                                │ ▏ because an error there lands on every   │ load      3.1 · contended no │
-│ ▏ 숫자를 재기 전에 기계가 조용한지부터    │ ▏ token rather than being averaged away   │ GPU0         69°C  343W  98% │
-│ ▏ 확인하는 습관이 결국 시간을 아껴        │ ▏ inside a layer. That is why two files   │ GPU1         65°C  313W  94% │
+│ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │ HOST ─────────────────────── │
+│ ▏ 여기까지가                              │ ▏ are usually kept at a higher width,     │ load      3.1 · contended no │
+│ ▏ ▸ answer                                │ ▏ because an error there lands on every   │ GPU0         69°C  343W  98% │
+│ ▏ 숫자를 재기 전에 기계가 조용한지부터    │ ▏ token rather than being averaged away   │ GPU1         65°C  313W  94% │
+│ ▏ 확인하는 습관이 결국 시간을 아껴        │ ▏ inside a layer. That is why two files   │                              │
 │ ▏ 준다. 다른 프로세스가 같은 카드를▍      │ ▏ with the same label can▍                │                              │
-│ ▏ ▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │ ▏ ▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │                              │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
 │ stream 7/8 · thinking                     │ stream 8/8                         answer │                              │
-│ 9.1 tok/s  ttft 990 ms · 101/320          │ 9.1 tok/s  ttft 1050 ms · 100/320         │                              │
+│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1050 ms          │                              │
+│ ▏ its own forward passes cost, one per    │ ▏ file backed page can be dropped and     │                              │
 │ ▏ proposed token. So for a draft that     │ ▏ read back later. So the resident        │                              │
 │ ▏ is a tenth the size, proposing four     │ ▏ figure tells you what this process      │                              │
 │ ▏ tokens costs about four tenths of a     │ ▏ has touched recently and what the       │                              │
 │ ▏ step plus the one step▍                 │ ▏ kernel has chosen to▍                   │                              │
-│ ▏ █▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │ ▏ █▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -1,26 +1,27 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 5/8                         answer │ stream 6/8                         answer │ PLACEMENT ────────────────── │
-│ 9.1 tok/s  ttft 870 ms · 102/320          │ 9.1 tok/s  ttft 930 ms · 101/320          │ GPU0 ███████████████   22.9G │
-│ ▏ 차가웠던 것이고, 그러면 페이지 캐시     │ ▏ quality. In the common mixed schemes    │ GPU1 ███████████████   21.9G │
-│ ▏ 이야기만 하면 끝난다. 여기서 토큰당     │ ▏ the file is built tensor by tensor,     │ vram ███████████████   46.6G │
-│ ▏ 메이저 폴트 값을 같이 보게 하면         │ ▏ and different tensors get different     │      █ weights  █ kv  █ buf  │
-│ ▏ 추측이 측정으로 바뀐다. 그 다음이       │ ▏ treatment. The attention projections    │                              │
-│ ▏ 다른 프로세스다. 로드 평균과 다른       │ ▏ and the feed forward matrices that      │ MEMORY ───────────────────── │
-│ ▏ 연산 프로세스 수를 같이 보라고 하면     │ ▏ dominate the file size take the low     │ rss       1.2G file     0.8G │
-│ ▏ 되는데, 화면에 이미 둘 다 있으니        │ ▏ bit width the name advertises. The      │ virt     48.0G anon     0.4G │
-│ ▏ 어디를 보라고만 말하면 된다.            │ ▏ embedding table and the output head     │ maj/tok                  0.0 │
-│ ▏ 여기까지가                              │ ▏ are usually kept at a higher width,     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ ▸ answer                                │ ▏ because an error there lands on every   │                              │
-│ ▏ 숫자를 재기 전에 기계가 조용한지부터    │ ▏ token rather than being averaged away   │ SPEED ────────────────────── │
-│ ▏ 확인하는 습관이 결국 시간을 아껴        │ ▏ inside a layer. That is why two files   │ prefill            610 tok/s │
-│ ▏ 준다. 다른 프로세스가 같은 카드를▍      │ ▏ with the same label can▍                │ decode             9.1 tok/s │
-│ ▏ ▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │ ▏ ▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │ ttft      810 ms · 25% cache │
+│ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │ GPU0 ███████████████   22.9G │
+│ ▏ 실행이 크게 빨라지면 첫 실행이          │ ▏ source of half the confusion about      │ GPU1 ███████████████   21.9G │
+│ ▏ 차가웠던 것이고, 그러면 페이지 캐시     │ ▏ quality. In the common mixed schemes    │ vram ███████████████   46.6G │
+│ ▏ 이야기만 하면 끝난다. 여기서 토큰당     │ ▏ the file is built tensor by tensor,     │      █ weights  █ kv  █ buf  │
+│ ▏ 메이저 폴트 값을 같이 보게 하면         │ ▏ and different tensors get different     │                              │
+│ ▏ 추측이 측정으로 바뀐다. 그 다음이       │ ▏ treatment. The attention projections    │ MEMORY ───────────────────── │
+│ ▏ 다른 프로세스다. 로드 평균과 다른       │ ▏ and the feed forward matrices that      │ rss       1.2G file     0.8G │
+│ ▏ 연산 프로세스 수를 같이 보라고 하면     │ ▏ dominate the file size take the low     │ virt     48.0G anon     0.4G │
+│ ▏ 되는데, 화면에 이미 둘 다 있으니        │ ▏ bit width the name advertises. The      │ maj/tok                  0.0 │
+│ ▏ 어디를 보라고만 말하면 된다.            │ ▏ embedding table and the output head     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ 여기까지가                              │ ▏ are usually kept at a higher width,     │                              │
+│ ▏ ▸ answer                                │ ▏ because an error there lands on every   │ SPEED ────────────────────── │
+│ ▏ 숫자를 재기 전에 기계가 조용한지부터    │ ▏ token rather than being averaged away   │ prefill            610 tok/s │
+│ ▏ 확인하는 습관이 결국 시간을 아껴        │ ▏ inside a layer. That is why two files   │ decode             9.1 tok/s │
+│ ▏ 준다. 다른 프로세스가 같은 카드를▍      │ ▏ with the same label can▍                │ ttft      810 ms · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
 │ stream 7/8 · thinking                     │ stream 8/8                         answer │                              │
-│ 9.1 tok/s  ttft 990 ms · 101/320          │ 9.1 tok/s  ttft 1050 ms · 100/320         │ HOST ─────────────────────── │
-│ ▏ let me work it rather than quoting      │ ▏ The server maps the model file rather   │ load      3.1 · contended no │
-│ ▏ the number I half remember. Each        │ ▏ than reading it into its own memory.    │ GPU0         69°C  343W  98% │
-│ ▏ verification pass costs roughly one     │ ▏ A mapping costs address space, not      │ GPU1         65°C  313W  94% │
+│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1050 ms          │ HOST ─────────────────────── │
+│ ▏ before I can answer that properly, so   │ ▏ of confused bug reports comes from.     │ load      3.1 · contended no │
+│ ▏ let me work it rather than quoting      │ ▏ The server maps the model file rather   │ GPU0         69°C  343W  98% │
+│ ▏ the number I half remember. Each        │ ▏ than reading it into its own memory.    │ GPU1         65°C  313W  94% │
+│ ▏ verification pass costs roughly one     │ ▏ A mapping costs address space, not      │                              │
 │ ▏ ordinary decoding step, because the     │ ▏ pages. Pages appear in the resident     │                              │
 │ ▏ cost is reading the weights and a       │ ▏ set when they are touched, and they     │                              │
 │ ▏ batch of four candidate tokens reads    │ ▏ can leave again whenever the kernel     │                              │
@@ -30,7 +31,6 @@
 │ ▏ is a tenth the size, proposing four     │ ▏ figure tells you what this process      │                              │
 │ ▏ tokens costs about four tenths of a     │ ▏ has touched recently and what the       │                              │
 │ ▏ step plus the one step▍                 │ ▏ kernel has chosen to▍                   │                              │
-│ ▏ █▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │ ▏ █▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  page 2/2 · ←/→  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

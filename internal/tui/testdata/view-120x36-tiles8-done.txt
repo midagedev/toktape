@@ -1,34 +1,34 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 1/8                           done │ stream 2/8                           done │ PLACEMENT ────────────────── │
-│ 9.1 tok/s  ttft 630 ms · 296/320          │ 9.1 tok/s  ttft 690 ms · 301/320          │ GPU0 ███████████████   23.8G │
-│ ▏ both devices work together on the       │ ▏ 생각과 다르게 잡혀 있다는 뜻이고,       │ GPU1 ███████████████   22.8G │
-│ ▏ same token, but it wants a fast link    │ ▏ 그때는 속도를 재기 전에 배치부터        │ vram ███████████████   46.6G │
-│ ▏ between them and it is not what this    │ ▏ 고쳐야 한다. 실제로 자리가 모자랄 때    │      █ weights  █ kv  █ buf  │
-│ ▏ server does                             │ ▏ 손대는                                  │                              │
-│ ▏ █▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇   9.1 avg │ ▏ █▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇   9.1 avg │ MEMORY ───────────────────── │
+│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 296/320 │ 9.1 tok/s  █▇▇███▇▇ ttft 690 ms · 301/320 │ GPU0 ███████████████   23.8G │
+│ ▏ matrix instead of each layer and let    │ ▏ 그것이다. 두 값이 어긋나면 설정이       │ GPU1 ███████████████   22.8G │
+│ ▏ both devices work together on the       │ ▏ 생각과 다르게 잡혀 있다는 뜻이고,       │ vram ███████████████   46.6G │
+│ ▏ same token, but it wants a fast link    │ ▏ 그때는 속도를 재기 전에 배치부터        │      █ weights  █ kv  █ buf  │
+│ ▏ between them and it is not what this    │ ▏ 고쳐야 한다. 실제로 자리가 모자랄 때    │                              │
+│ ▏ server does                             │ ▏ 손대는                                  │ MEMORY ───────────────────── │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ rss       1.2G file     0.8G │
 │ stream 3/8                           done │ stream 4/8                           done │ virt     48.0G anon     0.4G │
-│ 9.1 tok/s  ttft 750 ms · 306/320          │ 9.1 tok/s  ttft 810 ms · 311/320          │ maj/tok                  0.0 │
-│ ▏ generating. That is why time to first   │ ▏ share the slot that holds it. And       │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ token spreads out as the slots fill,    │ ▏ when you cannot avoid a change, make    │                              │
-│ ▏ and why a burst of arrivals makes       │ ▏ it late rather than early, because      │ SPEED ────────────────────── │
-│ ▏ ongoing streams                         │ ▏ the cost is not the size                │ prefill            610 tok/s │
-│ ▏ ▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇   9.1 avg │ ▏ ▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │ decode             9.1 tok/s │
+│ 9.1 tok/s  ▇▇█▇██▇▇ ttft 750 ms · 306/320 │ 9.1 tok/s  █▇███▇▇█ ttft 810 ms · 311/320 │ maj/tok                  0.0 │
+│ ▏ it competes with the sessions already   │ ▏ send them to the same server so they    │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ generating. That is why time to first   │ ▏ share the slot that holds it. And       │                              │
+│ ▏ token spreads out as the slots fill,    │ ▏ when you cannot avoid a change, make    │ SPEED ────────────────────── │
+│ ▏ and why a burst of arrivals makes       │ ▏ it late rather than early, because      │ prefill            610 tok/s │
+│ ▏ ongoing streams                         │ ▏ the cost is not the size                │ decode             9.1 tok/s │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ ttft      810 ms · 25% cache │
 │ stream 5/8                           done │ stream 6/8                           done │ 8 streams     72.9 tok/s agg │
-│ 9.1 tok/s  ttft 870 ms · 316/320          │ 9.1 tok/s  ttft 930 ms · 300/320          │                              │
-│ ▏ 쓰고, 세 값이 서로 많이 다르면 그       │ ▏ precision, so the speed gain comes      │ HOST ─────────────────────── │
-│ ▏ 사실 자체를 기록하라. 흔들리는 측정은   │ ▏ from moving fewer bytes rather than     │ load      3.1 · contended no │
-│ ▏ 평균을 낼 대상이 아니라 원인을 찾아야   │ ▏ from doing cheaper multiplications.     │ GPU0         71°C  348W  98% │
-│ ▏ 할 증상이다. 이 도구가 실행마다         │ ▏ The                                     │ GPU1         67°C  318W  94% │
-│ ▏ ▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇   9.1 avg │ ▏ ▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇█   9.1 avg │                              │
+│ 9.1 tok/s  ▇███▇▇██ ttft 870 ms · 316/320 │ 9.1 tok/s  ▇██▇▇█▇█ ttft 930 ms · 300/320 │                              │
+│ ▏ 조건으로 세 번 돌려서 가운데 값을       │ ▏ fly and multiplied at a higher          │ HOST ─────────────────────── │
+│ ▏ 쓰고, 세 값이 서로 많이 다르면 그       │ ▏ precision, so the speed gain comes      │ load      3.1 · contended no │
+│ ▏ 사실 자체를 기록하라. 흔들리는 측정은   │ ▏ from moving fewer bytes rather than     │ GPU0         71°C  348W  98% │
+│ ▏ 평균을 낼 대상이 아니라 원인을 찾아야   │ ▏ from doing cheaper multiplications.     │ GPU1         67°C  318W  94% │
+│ ▏ 할 증상이다. 이 도구가 실행마다         │ ▏ The                                     │                              │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
 │ stream 7/8 · thinking · cut               │ stream 8/8                           done │                              │
-│ 9.1 tok/s  ttft 990 ms · 320/320          │ 9.1 tok/s  ttft 1050 ms · 310/320         │                              │
+│ 9.1 tok/s  █▇██▇▇▇█ ttft 990 ms · 320/320 │ 9.1 tok/s  ██▇▇███▇ ttft 1050 ms          │                              │
+│ ▏ Their message says agents, which        │ ▏ is why the figure is absent rather      │                              │
 │ ▏ means concurrency, which means my       │ ▏ than zero when a model is fully         │                              │
 │ ▏ whole break even calculation is         │ ▏ offloaded. The counter that does        │                              │
 │ ▏ answering                               │ ▏ matter during                           │                              │
-│ ▏ ▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇█   9.2 avg │ ▏ ██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇   9.1 avg │                              │
 │                                                                                       │                              │
 │ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card    │                              │
 ├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤

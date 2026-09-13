@@ -16,9 +16,13 @@ import (
 // 2026-09-13: "각 pane마다 핵심적으로 tok/s가 표시가 안 되는데, 표시해야 될 지표에
 // 대해서 좀 잘 생각해 보자"). The header is now identity and state, and the rate
 // has a row of its own directly under it, in the accent and in bold, with the
-// figures that qualify it dim and behind it:
+// figures that qualify it dim and behind it.
 //
-//	12.1 tok/s ttft 250 ms · 80/128 · p50 86 ms
+// The stream's own rate graph joined them there (TTP-29, user 2026-09-13:
+// "팬의 스파크와 실제 스탯이 상하로 분리되어서 보기 힘든데"). The number and the
+// shape are the same measurement, so they are read together or not at all:
+//
+//	12.1 tok/s ▂▃▃▂▃▂▃▂ ttft 250 ms · 80/128
 //
 // The stat line exists from t = 0, before there is a rate to print, so that
 // the first decoded token changes a figure and not the layout.
@@ -32,19 +36,49 @@ import (
 // ten) plus the space that separates it from what follows.
 const tileRateW = 11
 
+// The sparkline's geometry (TTP-29, user 2026-09-13: "한 라인 다 먹기에는 토큰
+// 오르락내리락이 너무 적어서 별 의미 없는 듯하니 반 줄 정도로 줄이자").
+//
+// tileSparkMax caps the graph at two dozen columns: past that a decode rate
+// that moves by a token or two per second is a wide flat band, which is what
+// the full-width footer looked like. tileSparkMin is the width below which it
+// stops being a line at all — under eight cells the scroll is a flicker — so a
+// tile that cannot spare eight draws none.
+const (
+	tileSparkMax = 24
+	tileSparkMin = 8
+)
+
+// tileSparkW is how many cells of sparkline a cw-column tile may spend: half
+// the tile, less the rate field it follows and the space before the figures
+// after it, capped at tileSparkMax. Zero means the tile has no room for a
+// graph the reader could read.
+func tileSparkW(cw int) int {
+	w := cw/2 - tileRateW - 1
+	if w > tileSparkMax {
+		w = tileSparkMax
+	}
+	if w < tileSparkMin {
+		return 0
+	}
+	return w
+}
+
 // minP50Intervals is how many inter-token gaps a stream must have before its
 // median is printed. Under it the figure would move every frame and describe
 // nothing; "?" is the honest reading (CLAUDE.md: an unobserved value prints
 // "?", never a plausible default).
 const minP50Intervals = 8
 
-// tileStatLine is the tile's hero row: this stream's decode rate, then the
-// figures that qualify it.
+// tileStatLine is the tile's hero row: this stream's decode rate, the last few
+// seconds of it as a graph, then the figures that qualify it.
 //
 // It always returns exactly cw columns. What it gives up as the tile narrows,
-// in order: the median, then the token count, then the TTFT. The rate itself
-// never goes — a tile without it is not reporting anything — and nothing is
-// ever half-printed, because a clipped number reads as a wrong number.
+// in order: the median, the token count, the graph, then the TTFT. The rate
+// itself never goes — a tile without it is not reporting anything — and
+// nothing is ever half-printed, because a clipped number reads as a wrong
+// number. The graph outlives the count and dies before the TTFT: a shape says
+// more than a third figure and less than a measurement.
 //
 // The rate is bold accent on every tile, active or not. Painting the inactive
 // ones plain would make the hero figure dimmest on the seven tiles a reader
@@ -67,13 +101,45 @@ func tileStatLine(th Theme, s Stream, cw int) string {
 	}
 	l.addRaw(th.accentBold, rate)
 	l.space(tileRateW - width(rate))
-	for _, tail := range statTails(s) {
-		if tail.reserve <= l.left() {
-			l.addRaw(th.dim, tail.text)
-			break
+	for _, tail := range statTails(s, tileSparkW(cw)) {
+		if tail.reserve > l.left() {
+			continue
 		}
+		if tail.spark > 0 {
+			writeTileSpark(l, th, s, tail.spark)
+			l.space(1)
+		}
+		l.addRaw(th.dim, tail.text)
+		break
 	}
 	return l.String()
+}
+
+// writeTileSpark draws this stream's last w instantaneous decode rates as a
+// sparkline, with only the newest cell lit.
+//
+// The graph is anchored to its right-hand end: a stream with fewer samples
+// than cells pads on the left, so the line scrolls under a fixed edge instead
+// of growing out of the rate beside it.
+//
+// One bright cell, and it is the last one (TTP-29, user 2026-09-13:
+// "스파크라인도 마지막 것만 밝게 하고 이전 것은 어둡게 하고"). The rest wear the
+// muted accent the emphasis contract gives every shape (TTP-28): a whole line
+// in the full accent was the loudest thing in the tile. The lit cell is not a
+// second reading of the glow on the body text — it is the write head of the
+// graph, which is why it is a fixed column rather than a fading tail.
+func writeTileSpark(l *lineBuf, th Theme, s Stream, w int) {
+	cells := Sparkline(streamRates(s, w), w, 0)
+	l.space(w - len(cells))
+	if len(cells) == 0 {
+		// No gap to measure yet. The cells stay blank rather than drawing a
+		// flat line at zero, which would be a rate nobody observed
+		// (CLAUDE.md).
+		return
+	}
+	older, newest := cells[:len(cells)-1], cells[len(cells)-1:]
+	writeCells(l, th, older, cellPalette{base: th.accentMuted, warn: th.accentMuted, bad: th.accentMuted})
+	writeCells(l, th, newest, cellPalette{base: th.accent, warn: th.accent, bad: th.accent})
 }
 
 // statTail is one candidate for the dim half of the stat line: the text to
@@ -89,6 +155,10 @@ func tileStatLine(th Theme, s Stream, cw int) string {
 type statTail struct {
 	text    string
 	reserve int
+	// spark is how many cells of sparkline this candidate draws before its
+	// text, or zero for the candidates that have given the graph up. reserve
+	// already counts it and the space after it.
+	spark int
 }
 
 // The widths the growing parts are reserved against: a millisecond figure of
@@ -99,15 +169,32 @@ const (
 	p50NominalW  = 10 // "p50 250 ms"
 )
 
-// statTails are the dim qualifiers of the stat line, widest first. The last
+// statTails is everything the stat line may carry after the rate, widest
+// first: the graph of sw cells and the dim qualifiers behind it. The last
 // entry is empty, so a tile with room for the rate alone always finds a fit.
-func statTails(s Stream) []statTail {
+//
+// The ladder is one priority order and not two (TTP-29): the median goes
+// first, then the count, then the graph, then the TTFT. There is deliberately
+// no "count without the graph" rung — a tile that could not hold the count
+// beside the graph does not get the count back by dropping it, or the same
+// tile would print a different pair of figures at two adjacent widths.
+func statTails(s Stream, sw int) []statTail {
 	parts := []statTail{
 		reserved("ttft "+streamTTFTFigure(s), ttftNominalW),
 		reserved(streamCountFigure(s), countNominalW(s)),
 		reserved("p50 "+streamP50Figure(s), p50NominalW),
 	}
-	out := make([]statTail, 0, len(parts)+1)
+	out := make([]statTail, 0, len(parts)+2)
+	if sw > 0 {
+		for n := len(parts); n > 0; n-- {
+			tail := joinStat(parts[:n])
+			tail.spark = sw
+			tail.reserve += sw + 1
+			out = append(out, tail)
+		}
+		// The graph gives way here, and the TTFT alone is what is left.
+		return append(out, parts[0], statTail{})
+	}
 	for n := len(parts); n > 0; n-- {
 		out = append(out, joinStat(parts[:n]))
 	}

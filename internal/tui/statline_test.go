@@ -16,7 +16,14 @@ import (
 // figure while it is decoding, and the server's own figure once it is done.
 func TestStatLineLeadsWithTheRate(t *testing.T) {
 	th := PlainTheme()
-	const cw = 60
+	// 2026-09-13 (TTP-29): 60 columns, until the sparkline joined this row and
+	// took the space the median used to sit in. The width is raised rather
+	// than the expectations lowered — this test is about which figures a tile
+	// prints and which it refuses to guess, not about how narrow a tile can
+	// be, and TestStatLineDegradesInOrder owns the latter. 67 is the narrowest
+	// tile that still carries all four; 85 is the one-tile-wide pane at 120
+	// columns.
+	const cw = 85
 
 	// t = 0: the prompt is still being evaluated. There is no rate, no first
 	// token and no median, and every one of them says so rather than printing
@@ -115,26 +122,41 @@ func TestStatLineDegradesInOrder(t *testing.T) {
 	// rather than the printed ones (see TestStatLineDoesNotReflowAsFiguresGrow)
 	// and so they are wider than the figures look: the median needs "p50 250
 	// ms" and the count needs room for "320/320", whatever this frame prints.
+	//
+	// 2026-09-13 (TTP-29): the graph is now one of the parts, and it takes
+	// nineteen columns at the sizes a tile is usually drawn at, so the median
+	// survives only on a tile 67 columns or wider. The expectations moved with
+	// the layout; nothing here was relaxed.
 	tests := []struct {
 		cw    int
+		spark bool
 		parts []string
 		gone  []string
 	}{
-		{60, []string{"tok/s", "ttft", "/320", "p50"}, nil},
-		{45, []string{"tok/s", "ttft", "/320", "p50"}, nil},
-		{44, []string{"tok/s", "ttft", "/320"}, []string{"p50"}},
-		{32, []string{"tok/s", "ttft", "/320"}, []string{"p50"}},
-		{31, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
-		{30, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
-		{24, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
-		{22, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
-		{21, []string{"tok/s"}, []string{"p50", "/320", "ttft"}},
-		{18, []string{"tok/s"}, []string{"p50", "/320", "ttft"}},
+		{85, true, []string{"tok/s", "ttft", "/320", "p50"}, nil},
+		{67, true, []string{"tok/s", "ttft", "/320", "p50"}, nil},
+		{66, true, []string{"tok/s", "ttft", "/320"}, []string{"p50"}},
+		{60, true, []string{"tok/s", "ttft", "/320"}, []string{"p50"}},
+		{45, true, []string{"tok/s", "ttft", "/320"}, []string{"p50"}},
+		{44, true, []string{"tok/s", "ttft", "/320"}, []string{"p50"}},
+		{41, true, []string{"tok/s", "ttft", "/320"}, []string{"p50"}},
+		{40, true, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
+		{39, false, []string{"tok/s", "ttft", "/320"}, []string{"p50"}},
+		{32, false, []string{"tok/s", "ttft", "/320"}, []string{"p50"}},
+		{31, false, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
+		{30, false, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
+		{24, false, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
+		{22, false, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
+		{21, false, []string{"tok/s"}, []string{"p50", "/320", "ttft"}},
+		{18, false, []string{"tok/s"}, []string{"p50", "/320", "ttft"}},
 	}
 	for _, tc := range tests {
 		got := tileStatLine(th, s, tc.cw)
 		if width(got) != tc.cw {
 			t.Fatalf("the stat line at %d columns is %d wide: %q", tc.cw, width(got), got)
+		}
+		if drawn := strings.ContainsAny(got, string(sparkRunes)); drawn != tc.spark {
+			t.Errorf("the stat line at %d columns draws a graph = %v, want %v: %q", tc.cw, drawn, tc.spark, got)
 		}
 		for _, want := range tc.parts {
 			if !strings.Contains(got, want) {
@@ -148,15 +170,37 @@ func TestStatLineDegradesInOrder(t *testing.T) {
 		}
 	}
 
-	// The order itself, at every width rather than at four of them: a part
-	// that has gone never comes back on a narrower line, and no part outlives
-	// the one before it.
-	var dropped [4]int
+	// The order itself, at every width rather than at a dozen of them: a part
+	// that has gone never comes back on a narrower line.
+	//
+	// 2026-09-13 (TTP-29): the graph has a minimum size — under eight cells it
+	// is a flicker, not a line — so it is not simply the third rung of a
+	// priority ladder. On a tile too narrow to hold eight cells there is no
+	// graph to give up, and the count takes the room instead. That is one
+	// seam, at one width, and it is named here rather than papered over: below
+	// it the ladder is the one this test has always pinned, above it the graph
+	// outranks the count. Every other part still only ever goes away.
+	//
+	// The seam is derived, not typed: it is the narrowest tile the width
+	// formula gives a graph to, so a change to tileRateW or tileSparkMin moves
+	// the carve-out with it instead of leaving it at a stale column.
+	seam := 1
+	for cw := 1; cw <= 90; cw++ {
+		if tileSparkW(cw) > 0 {
+			seam = cw
+			break
+		}
+	}
+	if tileSparkW(seam) == 0 || tileSparkW(seam-1) != 0 {
+		t.Fatalf("the seam came out at %d columns, which draws no graph", seam)
+	}
+	var dropped [5]int
 	for cw := 90; cw >= 1; cw-- {
 		got := tileStatLine(th, s, cw)
-		present := [4]bool{
+		present := [5]bool{
 			strings.Contains(got, "tok/s") || strings.Contains(got, fmtRate(streamRate(s))),
 			strings.Contains(got, "ttft"),
+			strings.ContainsAny(got, string(sparkRunes)),
 			strings.Contains(got, "/320"),
 			strings.Contains(got, "p50"),
 		}
@@ -165,14 +209,22 @@ func TestStatLineDegradesInOrder(t *testing.T) {
 				dropped[i] = cw
 				continue
 			}
-			if dropped[i] != 0 {
+			if dropped[i] != 0 && !(i == 3 && cw == seam-1 && dropped[i] == seam) {
 				t.Fatalf("part %d came back at %d columns, having gone at %d: %q", i, cw, dropped[i], got)
 			}
+			dropped[i] = 0
 		}
-		for i := 1; i < len(present); i++ {
-			if present[i] && !present[i-1] {
-				t.Fatalf("the stat line at %d columns kept part %d without part %d: %q", cw, i, i-1, got)
-			}
+		// No part outlives the one before it. The graph is left out of this
+		// chain, because below the seam there is none to outlive: the rest of
+		// the ladder is rate, ttft, count, median at every width.
+		if present[2] && !present[1] {
+			t.Fatalf("the stat line at %d columns kept its graph without its ttft: %q", cw, got)
+		}
+		if present[1] && !present[0] {
+			t.Fatalf("the stat line at %d columns kept its ttft without its rate: %q", cw, got)
+		}
+		if present[4] && !present[3] {
+			t.Fatalf("the stat line at %d columns kept its median without its count: %q", cw, got)
 		}
 	}
 
@@ -317,39 +369,12 @@ func TestPromptMaxTokensReadsEitherSpelling(t *testing.T) {
 	}
 }
 
-// TestFooterLabelIsTheWindowMean: the figure beside a sparkline is the average
-// of the cells it is beside, within what one decimal can say. A shape and a
-// number that disagree are two claims, and the reader cannot tell which one to
-// believe.
-func TestFooterLabelIsTheWindowMean(t *testing.T) {
-	for _, at := range []time.Duration{midRun, 3 * time.Second, doneAt} {
-		for i, s := range ModelAt(ExampleTapeN(4), at).Streams {
-			const cw = 41
-			line := tileFooter(PlainTheme(), s, cw, false)
-			want := mean(streamRates(s, cw-2-tileAvgW))
-			got, ok := footerMean(line)
-			if !ok {
-				t.Fatalf("at %v stream %d has no footer label: %q", at, i, line)
-			}
-			if diff := got - want; diff > 0.05 || diff < -0.05 {
-				t.Errorf("at %v stream %d labels its sparkline %.2f, want %.2f", at, i, got, want)
-			}
-		}
-	}
-}
-
-// footerMean reads the "11.8 avg" label back off a tile footer.
-func footerMean(line string) (float64, bool) {
-	fields := strings.Fields(line)
-	if len(fields) < 2 || fields[len(fields)-1] != "avg" {
-		return 0, false
-	}
-	v, err := strconv.ParseFloat(fields[len(fields)-2], 64)
-	if err != nil {
-		return 0, false
-	}
-	return v, true
-}
+// The footer's "11.8 avg" label had a test here that read the figure back off
+// the tile's last row and compared it with the mean of the cells beside it.
+// Both are gone (TTP-29): the graph moved into the stat line and the number
+// beside it is the live rate, which the emphasis gate already pins.
+// TestStatLineSparkIsTheStreamsOwnWindow (tilespark_test.go) is what replaced
+// the shape-and-number agreement it was checking.
 
 // TestPromptMaxTokensPrefersTheRecordedField: the cap has a field of its own on
 // tape.PromptRecord now (the recorder fills it with what the request was sent

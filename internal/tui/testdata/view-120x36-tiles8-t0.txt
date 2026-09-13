@@ -1,36 +1,36 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 1/8   prefill ████████████ 128/512 │ stream 2/8   prefill ████████████ 128/512 │ PLACEMENT ────────────────── │
-│ ? tok/s    ttft ? · 0/320                 │ ? tok/s    ttft ? · 0/320                 │ GPU0 ███████████████   22.5G │
+│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ GPU0 ███████████████   22.5G │
 │ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │ GPU1 ███████████████   21.5G │
 │                                           │                                           │ vram ███████████████   46.6G │
 │                                           │                                           │      █ weights  █ kv  █ buf  │
 │                                           │                                           │                              │
 │                                           │                                           │ MEMORY ───────────────────── │
-│ ▏                                   ? avg │ ▏                                   ? avg │ rss       1.2G file     0.8G │
+│                                           │                                           │ rss       1.2G file     0.8G │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ virt     48.0G anon     0.4G │
 │ stream 3/8   prefill ████████████ 128/512 │ stream 4/8   prefill ████████████ 128/512 │ maj/tok                  0.0 │
-│ ? tok/s    ttft ? · 0/320                 │ ? tok/s    ttft ? · 0/320                 │                              │
+│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │                              │
 │ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │                              │
 │                                           │                                           │ SPEED ────────────────────── │
 │                                           │                                           │ prefill ◐            ? tok/s │
 │                                           │                                           │ decode               ? tok/s │
-│ ▏                                   ? avg │ ▏                                   ? avg │ ttft           ? · 25% cache │
+│                                           │                                           │ ttft           ? · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams        ? tok/s agg │
 │ stream 5/8   prefill ████████████ 128/512 │ stream 6/8   prefill ████████████ 128/512 │                              │
-│ ? tok/s    ttft ? · 0/320                 │ ? tok/s    ttft ? · 0/320                 │ HOST ─────────────────────── │
+│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ HOST ─────────────────────── │
 │ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │ load      3.1 · contended no │
 │                                           │                                           │ GPU0         68°C  340W  98% │
 │                                           │                                           │ GPU1         64°C  310W  94% │
 │                                           │                                           │                              │
-│ ▏                                   ? avg │ ▏                                   ? avg │                              │
+│                                           │                                           │                              │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
 │ stream 7/8   prefill ████████████ 128/512 │ stream 8/8   prefill ████████████ 128/512 │                              │
-│ ? tok/s    ttft ? · 0/320                 │ ? tok/s    ttft ? · 0/320                 │                              │
+│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │                              │
 │ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │                              │
 │                                           │                                           │                              │
 │                                           │                                           │                              │
 │                                           │                                           │                              │
-│ ▏                                   ? avg │ ▏                                   ? avg │                              │
+│                                           │                                           │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency                                                                               p50 ?  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

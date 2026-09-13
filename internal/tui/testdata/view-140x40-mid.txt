@@ -1,40 +1,40 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────────────────────────┐
 │ stream 1/8                                   answer │ stream 2/8                                   answer │ PLACEMENT ────────────────── │
-│ 9.1 tok/s  ttft 630 ms · 104/320 · p50 111 ms       │ 9.1 tok/s  ttft 690 ms · 103/320 · p50 111 ms       │ GPU0 ███████████████   22.9G │
-│ ▏ costume, and the arithmetic is simple enough to   │ ▏ 모자란다. 계산은 어렵지 않다. 레이어 수에 키와    │ GPU1 ███████████████   21.9G │
-│ ▏ do in your head. Take the bytes the model has     │ ▏ 값 두 벌을 곱하고, 거기에 KV 헤드가 차지하는      │ vram ███████████████   46.6G │
-│ ▏ to touch per token, multiply by the tokens per    │ ▏ 채널 수와 컨텍스트 토큰 수를 곱한 다음, 원소      │      █ weights  █ kv  █ buf  │
-│ ▏ second you are getting, and compare the result    │ ▏ 하나가 몇 바이트인지를 곱하면 된다. 팔십          │                              │
-│ ▏ against what your cards can actually move. If     │ ▏ 레이어짜리 칠십억 단위 모델이 만 육천 토큰을      │ MEMORY ───────────────────── │
-│ ▏ the two figures are▍                              │ ▏ 잡으면 반정밀도로는 오 기가바이트가 넘고,▍        │ rss       1.2G file     0.8G │
-│ ▏ █▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇   9.1 avg │ ▏ █▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇   9.1 avg │ virt     48.0G anon     0.4G │
+│ 9.1 tok/s  █▇▇█▇██▇▇▇██▇ ttft 630 ms · 104/320      │ 9.1 tok/s  █▇▇█▇██▇▇▇██▇ ttft 690 ms · 103/320      │ GPU0 ███████████████   22.9G │
+│ ▏ is a memory bandwidth problem wearing a compute   │ ▏ 컨텍스트를 네 배로 늘리면 갑자기 자리가           │ GPU1 ███████████████   21.9G │
+│ ▏ costume, and the arithmetic is simple enough to   │ ▏ 모자란다. 계산은 어렵지 않다. 레이어 수에 키와    │ vram ███████████████   46.6G │
+│ ▏ do in your head. Take the bytes the model has     │ ▏ 값 두 벌을 곱하고, 거기에 KV 헤드가 차지하는      │      █ weights  █ kv  █ buf  │
+│ ▏ to touch per token, multiply by the tokens per    │ ▏ 채널 수와 컨텍스트 토큰 수를 곱한 다음, 원소      │                              │
+│ ▏ second you are getting, and compare the result    │ ▏ 하나가 몇 바이트인지를 곱하면 된다. 팔십          │ MEMORY ───────────────────── │
+│ ▏ against what your cards can actually move. If     │ ▏ 레이어짜리 칠십억 단위 모델이 만 육천 토큰을      │ rss       1.2G file     0.8G │
+│ ▏ the two figures are▍                              │ ▏ 잡으면 반정밀도로는 오 기가바이트가 넘고,▍        │ virt     48.0G anon     0.4G │
 ├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ maj/tok                  0.0 │
 │ stream 3/8                                   answer │ stream 4/8                                   answer │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ 9.1 tok/s  ttft 750 ms · 103/320 · p50 111 ms       │ 9.1 tok/s  ttft 810 ms · 102/320 · p50 111 ms       │                              │
-│ ▏ produces eight tokens from it, one for each       │ ▏ everything after it is evaluated again, however   │ SPEED ────────────────────── │
-│ ▏ sequence, because the matrix multiply is          │ ▏ small the difference was. One extra space in      │ prefill            610 tok/s │
-│ ▏ batched across them. The expensive part is        │ ▏ your system message, a timestamp you helpfully    │ decode             9.1 tok/s │
-│ ▏ amortised eight ways. What is not amortised is    │ ▏ injected, a tool list whose order comes out of    │ ttft      810 ms · 25% cache │
-│ ▏ the attention step, where every sequence▍         │ ▏ a map and therefore changes between▍              │ 8 streams     72.8 tok/s agg │
-│ ▏ ▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇   9.1 avg │ ▏ ▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇   9.1 avg │                              │
+│ 9.1 tok/s  ▇▇█▇██▇▇▇██▇▇ ttft 750 ms · 103/320      │ 9.1 tok/s  ▇▇█▇██▇▇▇██▇▇ ttft 810 ms · 102/320      │                              │
+│ ▏ are busy it reads that same set once and          │ ▏ first position that differs ends the reuse, and   │ SPEED ────────────────────── │
+│ ▏ produces eight tokens from it, one for each       │ ▏ everything after it is evaluated again, however   │ prefill            610 tok/s │
+│ ▏ sequence, because the matrix multiply is          │ ▏ small the difference was. One extra space in      │ decode             9.1 tok/s │
+│ ▏ batched across them. The expensive part is        │ ▏ your system message, a timestamp you helpfully    │ ttft      810 ms · 25% cache │
+│ ▏ amortised eight ways. What is not amortised is    │ ▏ injected, a tool list whose order comes out of    │ 8 streams     72.8 tok/s agg │
+│ ▏ the attention step, where every sequence▍         │ ▏ a map and therefore changes between▍              │                              │
 ├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ HOST ─────────────────────── │
 │ stream 5/8                                   answer │ stream 6/8                                   answer │ load      3.1 · contended no │
-│ 9.1 tok/s  ttft 870 ms · 102/320 · p50 110 ms       │ 9.1 tok/s  ttft 930 ms · 101/320 · p50 110 ms       │ GPU0         69°C  343W  98% │
-│ ▏ 여기까지가                                        │ ▏ embedding table and the output head are usually   │ GPU1         65°C  313W  94% │
+│ 9.1 tok/s  ▇█▇██▇▇▇██▇▇▇ ttft 870 ms · 102/320      │ 9.1 tok/s  ▇█▇██▇▇▇██▇▇▇ ttft 930 ms · 101/320      │ GPU0         69°C  343W  98% │
+│ ▏ 이미 둘 다 있으니 어디를 보라고만 말하면 된다.    │ ▏ low bit width the name advertises. The            │ GPU1         65°C  313W  94% │
+│ ▏ 여기까지가                                        │ ▏ embedding table and the output head are usually   │                              │
 │ ▏ ▸ answer                                          │ ▏ kept at a higher width, because an error there    │                              │
 │ ▏ 숫자를 재기 전에 기계가 조용한지부터 확인하는     │ ▏ lands on every token rather than being averaged   │                              │
 │ ▏ 습관이 결국 시간을 아껴 준다. 다른 프로세스가     │ ▏ away inside a layer. That is why two files with   │                              │
 │ ▏ 같은 카드를▍                                      │ ▏ the same label can▍                               │                              │
-│ ▏ ▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │ ▏ ▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │                              │
 ├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤                              │
 │ stream 7/8 · thinking                               │ stream 8/8                                   answer │                              │
-│ 9.1 tok/s  ttft 990 ms · 101/320 · p50 110 ms       │ 9.1 tok/s  ttft 1050 ms · 100/320 · p50 110 ms      │                              │
+│ 9.1 tok/s  █▇██▇▇▇██▇▇▇█ ttft 990 ms · 101/320      │ 9.1 tok/s  █▇██▇▇▇██▇▇▇█ ttft 1050 ms · 100/320     │                              │
+│ ▏ batch of four candidate tokens reads them once.   │ ▏ resident set when they are touched, and they      │                              │
 │ ▏ The draft costs whatever its own forward passes   │ ▏ can leave again whenever the kernel needs the     │                              │
 │ ▏ cost, one per proposed token. So for a draft      │ ▏ memory, because a clean file backed page can be   │                              │
 │ ▏ that is a tenth the size, proposing four tokens   │ ▏ dropped and read back later. So the resident      │                              │
 │ ▏ costs about four tenths of a step plus the one    │ ▏ figure tells you what this process has touched    │                              │
 │ ▏ step▍                                             │ ▏ recently and what the kernel has chosen to▍       │                              │
-│ ▏ ▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │ ▏ ▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │                              │
 ├─────────────────────────────────────────────────────┴─────────────────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

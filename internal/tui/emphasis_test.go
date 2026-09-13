@@ -41,6 +41,12 @@ func accentShades() map[string]bool {
 
 // rateFigure is what a stat line leads with: a decode rate, or the "?" that
 // stands in for one that has not been measured yet.
+//
+// The sparkline that follows it on the same row (TTP-29) is not a figure: its
+// runes are block elements and isFigureRune matches digits and the decimal
+// point, so the digit gate below neither counts the graph nor has to make an
+// exception for it. The one lit cell in it is the accent, and
+// TestAccentIsReserved is where that is allowed for.
 var rateFigure = regexp.MustCompile(`^(\?|[0-9]+(\.[0-9]+)?) tok/s`)
 
 type emphasisFrame struct {
@@ -116,10 +122,10 @@ func TestAccentIsReserved(t *testing.T) {
 					if row[rn.from].fg != styleHex(ColourTheme().accent) {
 						continue // a demoted shade; the contract allows those
 					}
-					if within(spans, rn) || reservedChrome(rows, y, rn) {
+					if within(spans, rn) || reservedChrome(rows, y, rn) || sparkWriteHead(rows, y, rn) {
 						continue
 					}
-					t.Errorf("%q at row %d col %d wears the full accent, which is reserved for the rate figures, the brand, the active gutter, the cursor, the spinner and the prefill bar\n%s",
+					t.Errorf("%q at row %d col %d wears the full accent, which is reserved for the rate figures, the brand, the active gutter, the cursor, the spinner, the prefill bar and one sparkline cell per stat line\n%s",
 						rn.text, y, rn.from, rowContext(rows, y))
 				}
 			}
@@ -231,6 +237,43 @@ func reservedChrome(rows [][]pcell, y int, rn run) bool {
 		return true
 	}
 	return false
+}
+
+// sparkWriteHead is the one lit cell of a tile's rate graph: the newest
+// sample, at the right-hand end of the sparkline on that tile's stat line.
+//
+// 2026-09-13 (TTP-29) — this is an addition to the accent contract, not a
+// relaxation of it, and it is written as tightly as the thing it admits. One
+// cell, exactly one rune, and only a sparkline rune (U+2581–U+2588: the tile
+// gutter ▏ and the cursor ▍ are outside that range and are covered by
+// reservedChrome above). It must sit on a row whose tile header is directly
+// above it, and nothing of the graph may follow it — the cell to its right is
+// blank or the segment ends there. A second lit cell, a lit cell in the middle
+// of the line, or a lit graph anywhere but a stat line all still fail.
+//
+// FAIL-first: before the write head was painted, no accent block rune appeared
+// on a stat line at all, and with the footer's full-accent line this predicate
+// admitted nothing (the footer was muted end to end, and it was thirty cells
+// wide, not one).
+//
+// Why it earns the accent when no other shape does: the user asked for the
+// newest sample to be the bright one ("스파크라인도 마지막 것만 밝게 하고 이전
+// 것은 어둡게 하고"), and one cell of hue is how a graph says which end is now.
+// The rest of the line stays in the muted accent the emphasis contract gives
+// every shape.
+func sparkWriteHead(rows [][]pcell, y int, rn run) bool {
+	if rn.to-rn.from != 1 || len([]rune(rn.text)) != 1 {
+		return false
+	}
+	r := []rune(rn.text)[0]
+	if r < '▁' || r > '█' {
+		return false
+	}
+	if y == 0 || !strings.HasPrefix(segmentAt(rows[y-1], rn.from), "stream") {
+		return false
+	}
+	next := rn.to
+	return next >= len(rows[y]) || rows[y][next].r == ' ' || rows[y][next].r == '│'
 }
 
 // run is a horizontal run of same-coloured cells on one row.

@@ -57,6 +57,15 @@ func goldenModel(t *testing.T, at time.Duration) Model {
 // section titles, the bars and the tile headers out of the accent (see
 // TestOnlyTheRateIsAccent). A third different set of frames, not a loosened
 // assertion: the gates above them were added, not relaxed.
+//
+// 2026-09-13 TTP-29: re-baselined again, for the sparkline. The tile's footer
+// row is gone and its graph sits on the stat line, right after the rate it
+// belongs to, at half the tile's width with only its newest cell lit (user,
+// after watching the hero clip: "팬의 스파크와 실제 스탯이 상하로 분리되어서 보기
+// 힘든데 이것도 개선해보자 … 반 줄 정도로 줄이자"). The row the footer gave up is
+// answer text in every one of these frames, so each tile says one line more.
+// Different frames again, and the three gates in tilespark_test.go that pin the
+// graph's place, its exclusivity and its width were added, not relaxed.
 func TestViewGolden(t *testing.T) {
 	sizes := []struct{ w, h int }{{100, 30}, {140, 40}}
 	offsets := []struct {
@@ -581,16 +590,24 @@ func TestDoneStateFillsThePane(t *testing.T) {
 		}
 
 		// The row above the saved-tape line is the grid's last tile row, and
-		// that tile's own footer is the last thing in it: the grid reaches the
-		// footer rather than trailing off into space.
+		// what is in it is answer: the grid reaches the bottom of the pane
+		// rather than trailing off into space.
 		//
-		// 2026-09-13: the footer's label is the window's mean rate rather than
-		// the stream's p50, and it dropped the "tok/s" the unit was spelled
-		// out in (stat-line track, user decision). The row this looks for is
-		// the same row.
+		// 2026-09-13 (TTP-29): that row used to be the tile's sparkline
+		// footer, found by its " avg" label. The footer is gone — the graph
+		// moved into the stat line — so the row is a line of the reply, marked
+		// by the gutter every answer row carries, and it draws none of the
+		// sparkline runes the footer used to. The second half doubles as the
+		// "the footer really is gone" check on the done frame.
 		last := lines[len(lines)-3]
-		if !strings.Contains(last, " avg") {
-			t.Errorf("%dx%d: the bottom tile row does not end on its sparkline: %q", sz.w, sz.h, last)
+		if !strings.Contains(last, "▏") {
+			t.Errorf("%dx%d: the bottom tile row is not a line of answer: %q", sz.w, sz.h, last)
+		}
+		for _, r := range last {
+			if r >= '▁' && r <= '█' {
+				t.Errorf("%dx%d: the bottom tile row still draws a sparkline: %q", sz.w, sz.h, last)
+				break
+			}
 		}
 	}
 }

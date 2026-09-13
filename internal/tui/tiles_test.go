@@ -54,6 +54,15 @@ func truncatedTape(k int) *tape.Tape {
 // section titles, the bars and the tile headers out of the accent (see
 // TestOnlyTheRateIsAccent). A third different set of frames, not a loosened
 // assertion: the gates above them were added, not relaxed.
+//
+// 2026-09-13 TTP-29: re-baselined again, for the sparkline. The tile's footer
+// row is gone and its graph sits on the stat line, right after the rate it
+// belongs to, at half the tile's width with only its newest cell lit (user,
+// after watching the hero clip: "팬의 스파크와 실제 스탯이 상하로 분리되어서 보기
+// 힘든데 이것도 개선해보자 … 반 줄 정도로 줄이자"). The row the footer gave up is
+// answer text in every one of these frames, so each tile says one line more.
+// Different frames again, and the three gates in tilespark_test.go that pin the
+// graph's place, its exclusivity and its width were added, not relaxed.
 func TestTileGolden(t *testing.T) {
 	cases := []struct {
 		name string
@@ -315,15 +324,16 @@ func TestTileRulesJoinTheFrame(t *testing.T) {
 	}
 }
 
-// TestTileFooterIsAlive: every tile ends with its own rate sparkline and the
-// mean of the window it draws, which is what makes a grid a comparison rather
-// than four copies of the same screen.
+// TestTileRateIsAlive: every tile reports its own decode rate and draws its
+// own graph of it, which is what makes a grid a comparison rather than four
+// copies of the same screen.
 //
-// 2026-09-13: the footer's label was this stream's p50 and is now the mean
-// rate of the cells beside it; the median moved up to the stat line (user
-// decision, "각 pane마다 핵심적으로 tok/s가 표시가 안 되는데"). The assertions
-// name the new label, and TestTileStatLine pins where the p50 went.
-func TestTileFooterIsAlive(t *testing.T) {
+// 2026-09-13 (TTP-29): the graph used to be a full-width footer with the
+// window's mean beside it, on the tile's last row. Both rows are now one row:
+// the footer is gone and the sparkline follows the rate on the stat line (user:
+// "팬의 스파크와 실제 스탯이 상하로 분리되어서 보기 힘든데"). The assertions name
+// the stat line; tilespark_test.go pins the graph itself.
+func TestTileRateIsAlive(t *testing.T) {
 	at := 3 * time.Second
 	m := tileModel(t, 4, at, DefaultGrid, 0)
 	frame := View(m, at, tileW, tileH)
@@ -331,57 +341,35 @@ func TestTileFooterIsAlive(t *testing.T) {
 	if got := strings.Count(frame, " tok/s"); got < len(m.Streams) {
 		t.Errorf("%d tok/s figures in the frame, want at least one per tile (%d)", got, len(m.Streams))
 	}
-	if got := strings.Count(frame, " avg"); got < len(m.Streams) {
-		t.Errorf("%d footer labels in the frame, want one per tile (%d)", got, len(m.Streams))
+	if strings.Contains(frame, " avg") {
+		t.Error("a tile still carries the footer's mean label; the footer row is gone")
 	}
 	if !strings.ContainsAny(frame, string(sparkRunes)) {
 		t.Error("no sparkline glyph in a mid-run tile frame")
 	}
 
-	// A stream with no token yet has nothing to plot and says so rather than
-	// printing a zero it never measured (CLAUDE.md).
-	if got := tileFooter(PlainTheme(), Stream{}, 40, false); !strings.Contains(got, "? avg") {
-		t.Errorf("an unstarted stream's footer = %q, want an unknown mean", got)
+	// A stream with no token yet has nothing to plot and prints no rate
+	// rather than a zero it never measured (CLAUDE.md).
+	if got := tileStatLine(PlainTheme(), Stream{}, 41); !strings.HasPrefix(got, unknown+" tok/s") {
+		t.Errorf("an unstarted stream's stat line = %q, want an unknown rate", got)
 	}
-
-	// The label is the mean of the cells drawn beside it, not a figure from
-	// somewhere else: a shape and a number that disagree are two claims.
-	for i, s := range m.Streams {
-		line := tileFooter(PlainTheme(), s, 41, false)
-		barW := 41 - 2 - tileAvgW
-		want := mean(streamRates(s, barW))
-		if !strings.Contains(line, fmtRate(want)+" avg") {
-			t.Errorf("stream %d footer %q does not name the window mean %.2f", i, line, want)
-		}
-	}
-
-	// The sparkline scrolls: as the run advances, the tile's cells change.
-	early := tileFooter(PlainTheme(), m.Streams[0], 40, false)
-	later := tileFooter(PlainTheme(), ModelAt(ExampleTapeN(4), 5*time.Second).Streams[0], 40, false)
-	if early == later {
-		t.Error("a tile footer is identical at 3 s and at 5 s; the sparkline does not scroll")
+	if got := tileStatLine(PlainTheme(), Stream{}, 41); strings.ContainsAny(got, string(sparkRunes)) {
+		t.Errorf("an unstarted stream's stat line draws a graph of nothing: %q", got)
 	}
 }
 
-// TestTileDropsTheFooterBeforeTheAnswer: a tile with no room for a readable
-// answer gives up its sparkline line first and its header never.
-func TestTileDropsTheFooterBeforeTheAnswer(t *testing.T) {
+// TestTileSpendsEveryRowPastItsChromeOnTheAnswer: a tile is a header, a stat
+// line and answer all the way down. There is nothing else left in it to drop.
+func TestTileSpendsEveryRowPastItsChromeOnTheAnswer(t *testing.T) {
 	m := tileModel(t, 4, midRun, DefaultGrid, 0)
 	s := m.Streams[0]
 	th := PlainTheme()
 
-	roomy := tile(m, th, midRun, s, 41, 8, 0)
-	if len(roomy) != 8 {
-		t.Fatalf("a roomy tile is %d rows, want 8", len(roomy))
-	}
-	if !strings.Contains(roomy[len(roomy)-1], " avg") {
-		t.Errorf("a roomy tile has no sparkline footer: %q", roomy[len(roomy)-1])
-	}
-
-	// 2026-09-13: a tile now spends three rows on chrome rather than two, so
-	// the footer survives from four rows up instead of three, and the marker
-	// this looks for is the footer's own label (user decision: stat line).
-	for rows := 1; rows <= 4; rows++ {
+	// 2026-09-13 (TTP-29): this used to assert the opposite — that a tile
+	// with fewer than tileMinBody lines of answer gave up its footer. The
+	// footer and the rule went together, and the row the rule saved is the
+	// row the body gained at every size.
+	for rows := 1; rows <= 8; rows++ {
 		got := tile(m, th, midRun, s, 41, rows, 0)
 		if len(got) != rows {
 			t.Fatalf("a %d-row tile came back %d rows", rows, len(got))
@@ -390,12 +378,19 @@ func TestTileDropsTheFooterBeforeTheAnswer(t *testing.T) {
 			t.Errorf("a %d-row tile dropped its header: %q", rows, got[0])
 		}
 		if strings.Contains(strings.Join(got, "\n"), " avg") {
-			t.Errorf("a %d-row tile kept its footer instead of the answer:\n%s", rows, strings.Join(got, "\n"))
+			t.Errorf("a %d-row tile drew a footer:\n%s", rows, strings.Join(got, "\n"))
 		}
 		// The rate outlives everything but the name: a tile reporting nothing
 		// is not a smaller tile, it is a different one.
 		if rows >= 2 && !strings.Contains(got[1], "tok/s") {
 			t.Errorf("a %d-row tile dropped its stat line: %q", rows, got[1])
+		}
+		// Every row past the two of chrome is answer, and the gutter is what
+		// says so.
+		for i := tileChromeRows; i < rows; i++ {
+			if !strings.HasPrefix(got[i], "▏") {
+				t.Errorf("a %d-row tile's row %d is not answer: %q", rows, i, got[i])
+			}
 		}
 	}
 }
