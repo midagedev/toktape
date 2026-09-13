@@ -14,6 +14,11 @@ type Stat struct {
 	State     string // field 3
 	MinFaults uint64 // field 10, minflt, cumulative
 	MajFaults uint64 // field 12, majflt, cumulative
+	// UTime and STime are the process's cumulative user and system CPU time
+	// in clock ticks (USER_HZ, see ClockTicks). Their sum over the tick is
+	// tape.MemSample.CPUSeconds (TTP-39).
+	UTime uint64 // field 14, utime
+	STime uint64 // field 15, stime
 }
 
 // ParseStat parses one /proc/<pid>/stat line.
@@ -38,16 +43,22 @@ func ParseStat(data []byte) (Stat, error) {
 	st.PID = pid
 
 	f := strings.Fields(s[closeIdx+1:])
-	const majfltIdx = 12 - 3 // field 12 at index 9
-	if len(f) <= majfltIdx {
-		return Stat{}, fmt.Errorf("procmon: stat: want at least 12 fields, got %d", len(f)+2)
+	const stimeIdx = 15 - 3 // field 15 at index 12, the last one read
+	if len(f) <= stimeIdx {
+		return Stat{}, fmt.Errorf("procmon: stat: want at least 15 fields, got %d", len(f)+2)
 	}
 	st.State = f[0]
 	if st.MinFaults, err = strconv.ParseUint(f[10-3], 10, 64); err != nil {
 		return Stat{}, fmt.Errorf("procmon: stat: minflt field: %w", err)
 	}
-	if st.MajFaults, err = strconv.ParseUint(f[majfltIdx], 10, 64); err != nil {
+	if st.MajFaults, err = strconv.ParseUint(f[12-3], 10, 64); err != nil {
 		return Stat{}, fmt.Errorf("procmon: stat: majflt field: %w", err)
+	}
+	if st.UTime, err = strconv.ParseUint(f[14-3], 10, 64); err != nil {
+		return Stat{}, fmt.Errorf("procmon: stat: utime field: %w", err)
+	}
+	if st.STime, err = strconv.ParseUint(f[stimeIdx], 10, 64); err != nil {
+		return Stat{}, fmt.Errorf("procmon: stat: stime field: %w", err)
 	}
 	return st, nil
 }

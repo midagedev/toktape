@@ -17,19 +17,19 @@
 │ ▏ 준다. 다른 프로세스가 같은 카드를▍      │ ▏ with the same label can▍                │ ttft      810 ms · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
 │ stream 7/8 · thinking                     │ stream 8/8                         answer │                              │
-│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1.05 s · 100/320 │ HOST ─────────────────────── │
-│ ▏ before I can answer that properly, so   │ ▏ of confused bug reports comes from.     │ load      3.1 · contended no │
-│ ▏ let me work it rather than quoting      │ ▏ The server maps the model file rather   │ GPU0         69°C  343W  98% │
-│ ▏ the number I half remember. Each        │ ▏ than reading it into its own memory.    │ GPU1         65°C  313W  94% │
-│ ▏ verification pass costs roughly one     │ ▏ A mapping costs address space, not      │                              │
-│ ▏ ordinary decoding step, because the     │ ▏ pages. Pages appear in the resident     │                              │
-│ ▏ cost is reading the weights and a       │ ▏ set when they are touched, and they     │                              │
-│ ▏ batch of four candidate tokens reads    │ ▏ can leave again whenever the kernel     │                              │
-│ ▏ them once. The draft costs whatever     │ ▏ needs the memory, because a clean       │                              │
-│ ▏ its own forward passes cost, one per    │ ▏ file backed page can be dropped and     │                              │
-│ ▏ proposed token. So for a draft that     │ ▏ read back later. So the resident        │                              │
-│ ▏ is a tenth the size, proposing four     │ ▏ figure tells you what this process      │                              │
-│ ▏ tokens costs about four tenths of a     │ ▏ has touched recently and what the       │                              │
+│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1.05 s · 100/320 │ RESOURCES ───── contended no │
+│ ▏ before I can answer that properly, so   │ ▏ of confused bug reports comes from.     │ CPU  6%  1.9 cores  load 3.1 │
+│ ▏ let me work it rather than quoting      │ ▏ The server maps the model file rather   │                              │
+│ ▏ the number I half remember. Each        │ ▏ than reading it into its own memory.    │                              │
+│ ▏ verification pass costs roughly one     │ ▏ A mapping costs address space, not      │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│ ▏ ordinary decoding step, because the     │ ▏ pages. Pages appear in the resident     │ GPU0         90%  69°C  343W │
+│ ▏ cost is reading the weights and a       │ ▏ set when they are touched, and they     │ ▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆ │
+│ ▏ batch of four candidate tokens reads    │ ▏ can leave again whenever the kernel     │ ████████████████████████████ │
+│ ▏ them once. The draft costs whatever     │ ▏ needs the memory, because a clean       │ ████████████████████████████ │
+│ ▏ its own forward passes cost, one per    │ ▏ file backed page can be dropped and     │ GPU1         83%  65°C  313W │
+│ ▏ proposed token. So for a draft that     │ ▏ read back later. So the resident        │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
+│ ▏ is a tenth the size, proposing four     │ ▏ figure tells you what this process      │ ████████████████████████████ │
+│ ▏ tokens costs about four tenths of a     │ ▏ has touched recently and what the       │ ████████████████████████████ │
 │ ▏ step plus the one step▍                 │ ▏ kernel has chosen to▍                   │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  page 2/2 · ←/→  q quit · p prompt │

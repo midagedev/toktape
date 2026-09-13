@@ -17,19 +17,19 @@
 │ ▏ the slots fill, and why a burst of arrivals       │ ▏ make it late rather than early, because the       │ ttft      810 ms · 25% cache │
 │ ▏ makes ongoing streams                             │ ▏ cost is not the size                              │ 8 streams     72.9 tok/s agg │
 ├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤                              │
-│ stream 5/8                                     done │ stream 6/8                                     done │ HOST ─────────────────────── │
-│ 9.1 tok/s  ▇███▇▇███▇▇██ ttft 870 ms · 316/320      │ 9.1 tok/s  ▇██▇▇▇██▇▇█▇█ ttft 930 ms · 300/320      │ load      3.1 · contended no │
-│ ▏ 차이 나는 이유가 대부분 여기에 있다. 마지막으로   │ ▏ people out. The first is that quantisation does   │ GPU0         71°C  348W  98% │
-│ ▏ 한 번만 재지 말라. 같은 조건으로 세 번 돌려서     │ ▏ not change the arithmetic the device does: the    │ GPU1         67°C  318W  94% │
-│ ▏ 가운데 값을 쓰고, 세 값이 서로 많이 다르면 그     │ ▏ weights are unpacked on the fly and multiplied    │                              │
-│ ▏ 사실 자체를 기록하라. 흔들리는 측정은 평균을 낼   │ ▏ at a higher precision, so the speed gain comes    │                              │
-│ ▏ 대상이 아니라 원인을 찾아야 할 증상이다. 이       │ ▏ from moving fewer bytes rather than from doing    │                              │
-│ ▏ 도구가 실행마다                                   │ ▏ cheaper multiplications. The                      │                              │
-├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤                              │
-│ stream 7/8 · thinking · cut                         │ stream 8/8                                     done │                              │
-│ 9.1 tok/s  ▇██▇▇█▇██▇▇▇█ ttft 990 ms · 320/320      │ 9.1 tok/s  ██▇▇▇██▇▇▇██▇ ttft 1.05 s · 310/320      │                              │
-│ ▏ been spent on the other sequences. The            │ ▏ touch. That is where the never loaded figure on   │                              │
-│ ▏ technique wants an idle machine with one stream   │ ▏ the card comes from, and it is why the figure     │                              │
+│ stream 5/8                                     done │ stream 6/8                                     done │ RESOURCES ───── contended no │
+│ 9.1 tok/s  ▇███▇▇███▇▇██ ttft 870 ms · 316/320      │ 9.1 tok/s  ▇██▇▇▇██▇▇█▇█ ttft 930 ms · 300/320      │ CPU  0%  0.1 cores  load 3.1 │
+│ ▏ 차이 나는 이유가 대부분 여기에 있다. 마지막으로   │ ▏ people out. The first is that quantisation does   │                              │
+│ ▏ 한 번만 재지 말라. 같은 조건으로 세 번 돌려서     │ ▏ not change the arithmetic the device does: the    │                              │
+│ ▏ 가운데 값을 쓰고, 세 값이 서로 많이 다르면 그     │ ▏ weights are unpacked on the fly and multiplied    │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁ │
+│ ▏ 사실 자체를 기록하라. 흔들리는 측정은 평균을 낼   │ ▏ at a higher precision, so the speed gain comes    │ GPU0          3%  71°C  348W │
+│ ▏ 대상이 아니라 원인을 찾아야 할 증상이다. 이       │ ▏ from moving fewer bytes rather than from doing    │ ▆▅▅▅▄▇▆▆▅▅▄▄▆▆▄▄▁▁▂▂▂        │
+│ ▏ 도구가 실행마다                                   │ ▏ cheaper multiplications. The                      │ █████████████████████▇▇▅▅▇   │
+├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ ██████████████████████████▂▂ │
+│ stream 7/8 · thinking · cut                         │ stream 8/8                                     done │ GPU1          3%  67°C  318W │
+│ 9.1 tok/s  ▇██▇▇█▇██▇▇▇█ ttft 990 ms · 320/320      │ 9.1 tok/s  ██▇▇▇██▇▇▇██▇ ttft 1.05 s · 310/320      │ ▄▄▃▃▅▅▅▄▄▃▃▅▅▄▃▂ ▂▁          │
+│ ▏ been spent on the other sequences. The            │ ▏ touch. That is where the never loaded figure on   │ █████████████████████▅▅▃▆▆   │
+│ ▏ technique wants an idle machine with one stream   │ ▏ the card comes from, and it is why the figure     │ ██████████████████████████▂▂ │
 │ ▏ on it. Their message says agents, which means     │ ▏ is absent rather than zero when a model is        │                              │
 │ ▏ concurrency, which means my whole break even      │ ▏ fully offloaded. The counter that does matter     │                              │
 │ ▏ calculation is answering                          │ ▏ during                                            │                              │

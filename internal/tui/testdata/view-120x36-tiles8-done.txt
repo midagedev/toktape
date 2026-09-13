@@ -17,19 +17,19 @@
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ ttft      810 ms · 25% cache │
 │ stream 5/8                           done │ stream 6/8                           done │ 8 streams     72.9 tok/s agg │
 │ 9.1 tok/s  ▇███▇▇██ ttft 870 ms · 316/320 │ 9.1 tok/s  ▇██▇▇█▇█ ttft 930 ms · 300/320 │                              │
-│ ▏ 조건으로 세 번 돌려서 가운데 값을       │ ▏ fly and multiplied at a higher          │ HOST ─────────────────────── │
-│ ▏ 쓰고, 세 값이 서로 많이 다르면 그       │ ▏ precision, so the speed gain comes      │ load      3.1 · contended no │
-│ ▏ 사실 자체를 기록하라. 흔들리는 측정은   │ ▏ from moving fewer bytes rather than     │ GPU0         71°C  348W  98% │
-│ ▏ 평균을 낼 대상이 아니라 원인을 찾아야   │ ▏ from doing cheaper multiplications.     │ GPU1         67°C  318W  94% │
-│ ▏ 할 증상이다. 이 도구가 실행마다         │ ▏ The                                     │                              │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
-│ stream 7/8 · thinking · cut               │ stream 8/8                           done │                              │
-│ 9.1 tok/s  █▇██▇▇▇█ ttft 990 ms · 320/320 │ 9.1 tok/s  ██▇▇███▇ ttft 1.05 s · 310/320 │                              │
-│ ▏ Their message says agents, which        │ ▏ is why the figure is absent rather      │                              │
-│ ▏ means concurrency, which means my       │ ▏ than zero when a model is fully         │                              │
-│ ▏ whole break even calculation is         │ ▏ offloaded. The counter that does        │                              │
-│ ▏ answering                               │ ▏ matter during                           │                              │
-│                                                                                       │                              │
+│ ▏ 조건으로 세 번 돌려서 가운데 값을       │ ▏ fly and multiplied at a higher          │ RESOURCES ───── contended no │
+│ ▏ 쓰고, 세 값이 서로 많이 다르면 그       │ ▏ precision, so the speed gain comes      │ CPU  0%  0.1 cores  load 3.1 │
+│ ▏ 사실 자체를 기록하라. 흔들리는 측정은   │ ▏ from moving fewer bytes rather than     │                              │
+│ ▏ 평균을 낼 대상이 아니라 원인을 찾아야   │ ▏ from doing cheaper multiplications.     │                              │
+│ ▏ 할 증상이다. 이 도구가 실행마다         │ ▏ The                                     │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁ │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ GPU0          3%  71°C  348W │
+│ stream 7/8 · thinking · cut               │ stream 8/8                           done │ ▆▅▅▅▄▇▆▆▅▅▄▄▆▆▄▄▁▁▂▂▂        │
+│ 9.1 tok/s  █▇██▇▇▇█ ttft 990 ms · 320/320 │ 9.1 tok/s  ██▇▇███▇ ttft 1.05 s · 310/320 │ █████████████████████▇▇▅▅▇   │
+│ ▏ Their message says agents, which        │ ▏ is why the figure is absent rather      │ ██████████████████████████▂▂ │
+│ ▏ means concurrency, which means my       │ ▏ than zero when a model is fully         │ GPU1          3%  67°C  318W │
+│ ▏ whole break even calculation is         │ ▏ offloaded. The counter that does        │ ▄▄▃▃▅▅▅▄▄▃▃▅▅▄▃▂ ▂▁          │
+│ ▏ answering                               │ ▏ matter during                           │ █████████████████████▅▅▃▆▆   │
+│                                                                                       │ ██████████████████████████▂▂ │
 │ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card    │                              │
 ├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ██▏▏▏▏▏▏▏▏▏▏▏█████▏▏▏▏▏▏▏▏▏▏▏█████▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏██▏▏  p50 116 ms  c card · p prompt · q quit │

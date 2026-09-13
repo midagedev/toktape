@@ -17,13 +17,13 @@
 │ 9.1 tok/s  ttft 870 ms          │ 9.1 tok/s  ttft 930 ms          │ ttft      810 ms · 25% cache │
 │ ▏ 조용한지부터 확인하는         │ ▏ averaged away inside a        │ 8 streams     72.8 tok/s agg │
 │ ▏ 습관이 결국 시간을 아껴       │ ▏ layer. That is why two        │                              │
-│ ▏ 준다. 다른 프로세스가 같은    │ ▏ files with the same label     │ HOST ─────────────────────── │
-│ ▏ 카드를▍                       │ ▏ can▍                          │ load      3.1 · contended no │
-├─────────────────────────────────┼─────────────────────────────────┤ GPU0         69°C  343W  98% │
-│ stream 7/8 · thinking           │ stream 8/8               answer │ GPU1         65°C  313W  94% │
-│ 9.1 tok/s  ttft 990 ms          │ 9.1 tok/s  ttft 1.05 s          │                              │
-│ ▏ size, proposing four tokens   │ ▏ process has touched           │                              │
-│ ▏ costs about four tenths of    │ ▏ recently and what the         │                              │
+│ ▏ 준다. 다른 프로세스가 같은    │ ▏ files with the same label     │ RESOURCES ───── contended no │
+│ ▏ 카드를▍                       │ ▏ can▍                          │ CPU  6%  1.9 cores  load 3.1 │
+├─────────────────────────────────┼─────────────────────────────────┤ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ stream 7/8 · thinking           │ stream 8/8               answer │ GPU0         90%  69°C  343W │
+│ 9.1 tok/s  ttft 990 ms          │ 9.1 tok/s  ttft 1.05 s          │ ▇▇▇▇▇▇█▇▇▇▇▇█▇▇▇▇▇▇█▇▇▇▇▇█▇▇ │
+│ ▏ size, proposing four tokens   │ ▏ process has touched           │ GPU1         83%  65°C  313W │
+│ ▏ costs about four tenths of    │ ▏ recently and what the         │ ▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇ │
 │ ▏ a step plus the one step▍     │ ▏ kernel has chosen to▍         │                              │
 ├─────────────────────────────────┴─────────────────────────────────┴──────────────────────────────┤
 │ token latency ████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  q quit · p prompt │

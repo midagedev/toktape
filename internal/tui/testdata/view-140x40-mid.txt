@@ -17,19 +17,19 @@
 │ ▏ batched across them. The expensive part is        │ ▏ your system message, a timestamp you helpfully    │ ttft      810 ms · 25% cache │
 │ ▏ amortised eight ways. What is not amortised is    │ ▏ injected, a tool list whose order comes out of    │ 8 streams     72.8 tok/s agg │
 │ ▏ the attention step, where every sequence▍         │ ▏ a map and therefore changes between▍              │                              │
-├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ HOST ─────────────────────── │
-│ stream 5/8                                   answer │ stream 6/8                                   answer │ load      3.1 · contended no │
-│ 9.1 tok/s  ▇█▇██▇▇▇██▇▇▇ ttft 870 ms · 102/320      │ 9.1 tok/s  ▇█▇██▇▇▇██▇▇▇ ttft 930 ms · 101/320      │ GPU0         69°C  343W  98% │
-│ ▏ 이미 둘 다 있으니 어디를 보라고만 말하면 된다.    │ ▏ low bit width the name advertises. The            │ GPU1         65°C  313W  94% │
-│ ▏ 여기까지가                                        │ ▏ embedding table and the output head are usually   │                              │
-│ ▏ ▸ answer                                          │ ▏ kept at a higher width, because an error there    │                              │
-│ ▏ 숫자를 재기 전에 기계가 조용한지부터 확인하는     │ ▏ lands on every token rather than being averaged   │                              │
-│ ▏ 습관이 결국 시간을 아껴 준다. 다른 프로세스가     │ ▏ away inside a layer. That is why two files with   │                              │
-│ ▏ 같은 카드를▍                                      │ ▏ the same label can▍                               │                              │
-├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤                              │
-│ stream 7/8 · thinking                               │ stream 8/8                                   answer │                              │
-│ 9.1 tok/s  █▇██▇▇▇██▇▇▇█ ttft 990 ms · 101/320      │ 9.1 tok/s  █▇██▇▇▇██▇▇▇█ ttft 1.05 s · 100/320      │                              │
-│ ▏ batch of four candidate tokens reads them once.   │ ▏ resident set when they are touched, and they      │                              │
+├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ RESOURCES ───── contended no │
+│ stream 5/8                                   answer │ stream 6/8                                   answer │ CPU  6%  1.9 cores  load 3.1 │
+│ 9.1 tok/s  ▇█▇██▇▇▇██▇▇▇ ttft 870 ms · 102/320      │ 9.1 tok/s  ▇█▇██▇▇▇██▇▇▇ ttft 930 ms · 101/320      │                              │
+│ ▏ 이미 둘 다 있으니 어디를 보라고만 말하면 된다.    │ ▏ low bit width the name advertises. The            │                              │
+│ ▏ 여기까지가                                        │ ▏ embedding table and the output head are usually   │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│ ▏ ▸ answer                                          │ ▏ kept at a higher width, because an error there    │ GPU0         90%  69°C  343W │
+│ ▏ 숫자를 재기 전에 기계가 조용한지부터 확인하는     │ ▏ lands on every token rather than being averaged   │ ▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆ │
+│ ▏ 습관이 결국 시간을 아껴 준다. 다른 프로세스가     │ ▏ away inside a layer. That is why two files with   │ ████████████████████████████ │
+│ ▏ 같은 카드를▍                                      │ ▏ the same label can▍                               │ ████████████████████████████ │
+├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ GPU1         83%  65°C  313W │
+│ stream 7/8 · thinking                               │ stream 8/8                                   answer │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
+│ 9.1 tok/s  █▇██▇▇▇██▇▇▇█ ttft 990 ms · 101/320      │ 9.1 tok/s  █▇██▇▇▇██▇▇▇█ ttft 1.05 s · 100/320      │ ████████████████████████████ │
+│ ▏ batch of four candidate tokens reads them once.   │ ▏ resident set when they are touched, and they      │ ████████████████████████████ │
 │ ▏ The draft costs whatever its own forward passes   │ ▏ can leave again whenever the kernel needs the     │                              │
 │ ▏ cost, one per proposed token. So for a draft      │ ▏ memory, because a clean file backed page can be   │                              │
 │ ▏ that is a tenth the size, proposing four tokens   │ ▏ dropped and read back later. So the resident      │                              │

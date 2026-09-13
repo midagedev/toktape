@@ -35,24 +35,35 @@ func TestParseStat(t *testing.T) {
 			// so a Fields split of the whole line reads utime as majflt.
 			name: "comm with spaces and parens",
 			in:   "1234 (llama-server (cuda)) S 1 1234 1234 0 -1 4194560 987654 0 12345 0 456789 12345 0 0 20 0 97 0 8675309",
-			want: procmon.Stat{PID: 1234, Comm: "llama-server (cuda)", State: "S", MinFaults: 987654, MajFaults: 12345},
+			want: procmon.Stat{PID: 1234, Comm: "llama-server (cuda)", State: "S", MinFaults: 987654, MajFaults: 12345, UTime: 456789, STime: 12345},
 		},
 		{
 			name: "plain comm",
 			in:   "42 (bash) S 1 42 42 34816 42 4194304 1234 0 5 0 10 20 0 0 20 0 1 0 900",
-			want: procmon.Stat{PID: 42, Comm: "bash", State: "S", MinFaults: 1234, MajFaults: 5},
+			want: procmon.Stat{PID: 42, Comm: "bash", State: "S", MinFaults: 1234, MajFaults: 5, UTime: 10, STime: 20},
 		},
 		{
 			name: "comm that is only a paren",
 			in:   "7 ()) R 1 7 7 0 -1 4194560 1 0 2 0 3 4 0 0 20 0 1 0 5",
-			want: procmon.Stat{PID: 7, Comm: ")", State: "R", MinFaults: 1, MajFaults: 2},
+			want: procmon.Stat{PID: 7, Comm: ")", State: "R", MinFaults: 1, MajFaults: 2, UTime: 3, STime: 4},
 		},
 		{
 			name: "trailing newline",
 			in:   "9 (server) S 1 9 9 0 -1 0 11 0 22 0 1 2 0 0 20 0 1 0 3\n",
-			want: procmon.Stat{PID: 9, Comm: "server", State: "S", MinFaults: 11, MajFaults: 22},
+			want: procmon.Stat{PID: 9, Comm: "server", State: "S", MinFaults: 11, MajFaults: 22, UTime: 1, STime: 2},
+		},
+		{
+			// A real llama-server line after a few minutes of decoding, all 52
+			// fields: utime (14) and stime (15) are far apart, so a parser that
+			// swapped or shifted them fails here.
+			name: "cpu time",
+			in:   "2718 (llama-server) R 2701 2718 2701 34817 2718 4194560 3371528 0 60612 0 1829417 34211 0 0 20 0 97 0 1204555 412316860416 14680064 18446744073709551615 94207382573056 94207392108544 140729128386256 0 0 0 0 4096 16800975 0 0 0 17 12 0 0 3 0 0 94207392534288 94207393042592 94207421337600 140729128394639 140729128394839 140729128394839 140729128398287 0",
+			want: procmon.Stat{PID: 2718, Comm: "llama-server", State: "R", MinFaults: 3371528, MajFaults: 60612, UTime: 1829417, STime: 34211},
 		},
 		{name: "no comm", in: "1234 llama-server S 1", wantErr: true},
+		// Twelve fields reach majflt but not utime and stime.
+		{name: "no cpu time", in: "1 (a) S 1 1 1 0 -1 0 1 0 2 0", wantErr: true},
+		{name: "non-numeric stime", in: "1 (a) S 1 1 1 0 -1 0 1 0 2 0 1 x 0 0 20 0 1 0 3", wantErr: true},
 		{name: "truncated", in: "1234 (llama-server) S 1 1234 1234 0", wantErr: true},
 		{name: "empty", in: "", wantErr: true},
 		{name: "non-numeric majflt", in: "1 (a) S 1 1 1 0 -1 0 1 0 x 0 1 2 0 0 20 0 1 0 3", wantErr: true},
@@ -271,6 +282,8 @@ func TestReadMem(t *testing.T) {
 		SwapBytes:     1048576 * kB,
 		MajFaults:     12345,
 		MinFaults:     987654,
+		// utime 456789 + stime 12345 ticks over USER_HZ.
+		CPUSeconds: 4691.34,
 	}
 	if got != want {
 		t.Errorf("ReadMem =\n got %+v\nwant %+v", got, want)

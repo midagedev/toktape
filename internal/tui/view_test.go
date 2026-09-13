@@ -66,6 +66,15 @@ func goldenModel(t *testing.T, at time.Duration) Model {
 // answer text in every one of these frames, so each tile says one line more.
 // Different frames again, and the three gates in tilespark_test.go that pin the
 // graph's place, its exclusivity and its width were added, not relaxed.
+//
+// 2026-09-13 TTP-39: re-baselined for the right pane only. HOST became
+// RESOURCES — a header and a fixed-ceiling braille utilisation graph for CPU
+// and for each GPU, the load average folded into the CPU header and the
+// contended tag onto the title rule (user: "cpu(ram) gpu0 gpu1 각 리소스 별로
+// 스파크를 더 이쁘게 … 한 3줄로"). Every column left of the pane's border is
+// byte-identical to the previous goldens (checked column by column); the
+// graph contract is pinned in graph_test.go and the pane's height choice in
+// resources_test.go, both added, nothing relaxed.
 func TestViewGolden(t *testing.T) {
 	sizes := []struct{ w, h int }{{100, 30}, {140, 40}}
 	offsets := []struct {
@@ -405,7 +414,7 @@ func TestColourHierarchy(t *testing.T) {
 		{dim, "PLACEMENT", "a section title"},
 		{dim, "MEMORY", "a section title"},
 		{dim, "SPEED", "a section title"},
-		{dim, "HOST", "a section title"},
+		{dim, "RESOURCES", "a section title"},
 		{body, answer, "answer text"},
 		{text, "stream 1", "a tile header"},
 		{dim, "maj/tok", "a label"},

@@ -17,19 +17,19 @@
 │                                                     │                                                     │ ttft           ? · 25% cache │
 │                                                     │                                                     │ 8 streams        ? tok/s agg │
 │                                                     │                                                     │                              │
-├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ HOST ─────────────────────── │
-│ stream 5/8 prefill ████████████ 128/512 · cache 128 │ stream 6/8 prefill ████████████ 128/512 · cache 128 │ load      3.1 · contended no │
-│ ? tok/s                  ttft ? · 0/320             │ ? tok/s                  ttft ? · 0/320             │ GPU0         68°C  340W  98% │
-│ ▏ ◐ waiting for the first token                     │ ▏ ◐ waiting for the first token                     │ GPU1         64°C  310W  94% │
-│                                                     │                                                     │                              │
-│                                                     │                                                     │                              │
-│                                                     │                                                     │                              │
-│                                                     │                                                     │                              │
-│                                                     │                                                     │                              │
-├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤                              │
-│ stream 7/8 prefill ████████████ 128/512 · cache 128 │ stream 8/8 prefill ████████████ 128/512 · cache 128 │                              │
+├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ RESOURCES ───── contended no │
+│ stream 5/8 prefill ████████████ 128/512 · cache 128 │ stream 6/8 prefill ████████████ 128/512 · cache 128 │ CPU     ?  ? cores  load 3.1 │
 │ ? tok/s                  ttft ? · 0/320             │ ? tok/s                  ttft ? · 0/320             │                              │
 │ ▏ ◐ waiting for the first token                     │ ▏ ◐ waiting for the first token                     │                              │
+│                                                     │                                                     │                              │
+│                                                     │                                                     │ GPU0        100%  68°C  340W │
+│                                                     │                                                     │                            █ │
+│                                                     │                                                     │                            █ │
+│                                                     │                                                     │                            █ │
+├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ GPU1        100%  64°C  310W │
+│ stream 7/8 prefill ████████████ 128/512 · cache 128 │ stream 8/8 prefill ████████████ 128/512 · cache 128 │                            █ │
+│ ? tok/s                  ttft ? · 0/320             │ ? tok/s                  ttft ? · 0/320             │                            █ │
+│ ▏ ◐ waiting for the first token                     │ ▏ ◐ waiting for the first token                     │                            █ │
 │                                                     │                                                     │                              │
 │                                                     │                                                     │                              │
 │                                                     │                                                     │                              │

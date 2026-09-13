@@ -17,19 +17,19 @@
 │ ▏ holds the lower half▍                   │ ▏ 여덟 비트로 저장하는 것은▍              │ ttft      690 ms · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 4 streams     50.0 tok/s agg │
 │ stream 3/4                         answer │ stream 4/4 · thinking                     │                              │
-│ 12.5 tok/s ▇▇███▇▇█ ttft 750 ms · 141/320 │ 12.5 tok/s ▇███▇▇██ ttft 810 ms · 141/320 │ HOST ─────────────────────── │
-│ ▏ is that the right number depends on     │ ▏ mistake by a wide margin. Second        │ load      3.1 · contended no │
-│ ▏ whether a person or an agent is         │ ▏ possibility: the prompt is stable but   │ GPU0         69°C  344W  98% │
-│ ▏ waiting. I should also mention the      │ ▏ the serialisation is not. Tool          │ GPU1         65°C  314W  94% │
-│ ▏ prefill interference, because their     │ ▏ definitions coming out of a hash map    │                              │
-│ ▏ stutter complaint sounds like           │ ▏ land in a different order between       │                              │
-│ ▏ arrivals landing on a busy server       │ ▏ processes, and nothing in their own     │                              │
-│ ▏ rather than a decoding problem. Keep    │ ▏ code looks like a change even though    │                              │
-│ ▏ it short and lead with the mechanism.   │ ▏ the bytes differ. Third possibility:    │                              │
-│ ▏ One thing                               │ ▏ the prompt and the serialisation are    │                              │
-│ ▏ ▸ answer                                │ ▏ both stable but the request went to a   │                              │
-│ ▏ The number that changes when you send   │ ▏ different slot, so the cache that       │                              │
-│ ▏ eight requests at once is not the one   │ ▏ holds the prefix belongs to another     │                              │
+│ 12.5 tok/s ▇▇███▇▇█ ttft 750 ms · 141/320 │ 12.5 tok/s ▇███▇▇██ ttft 810 ms · 141/320 │ RESOURCES ───── contended no │
+│ ▏ is that the right number depends on     │ ▏ mistake by a wide margin. Second        │ CPU  6%  1.9 cores  load 3.1 │
+│ ▏ whether a person or an agent is         │ ▏ possibility: the prompt is stable but   │                              │
+│ ▏ waiting. I should also mention the      │ ▏ the serialisation is not. Tool          │                              │
+│ ▏ prefill interference, because their     │ ▏ definitions coming out of a hash map    │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│ ▏ stutter complaint sounds like           │ ▏ land in a different order between       │ GPU0         90%  69°C  344W │
+│ ▏ arrivals landing on a busy server       │ ▏ processes, and nothing in their own     │ ▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆ │
+│ ▏ rather than a decoding problem. Keep    │ ▏ code looks like a change even though    │ ████████████████████████████ │
+│ ▏ it short and lead with the mechanism.   │ ▏ the bytes differ. Third possibility:    │ ████████████████████████████ │
+│ ▏ One thing                               │ ▏ the prompt and the serialisation are    │ GPU1         83%  65°C  314W │
+│ ▏ ▸ answer                                │ ▏ both stable but the request went to a   │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
+│ ▏ The number that changes when you send   │ ▏ different slot, so the cache that       │ ████████████████████████████ │
+│ ▏ eight requests at once is not the one   │ ▏ holds the prefix belongs to another     │ ████████████████████████████ │
 │ ▏ most benchmarks print. Each▍            │ ▏ sequence and this one starts▍           │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏  p50 81 ms  q quit · p prompt │

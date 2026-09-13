@@ -132,6 +132,11 @@ type Model struct {
 	// use. The zero value chooses one from the room the pane has; ModelAt
 	// sets DefaultGrid, so a replayed tape lays out the way the run did.
 	Grid Grid
+	// seen is which resource series the whole tape measured, set by ModelAt
+	// (see resourceSeen). nil for a live model, which decides from its
+	// samples so far.
+	seen *resourceSeen
+
 	// Page is which page of tiles is on screen, from zero. It is ordinary
 	// model state rather than something the view remembers, so a replay of a
 	// tape shows the page the model names and the same (m, t) always draws
@@ -241,6 +246,7 @@ func ModelAt(tp *tape.Tape, at time.Duration) Model {
 		}
 		m.Samples = append(m.Samples, sm)
 	}
+	m.seen = seenIn(tp.Samples)
 	return m
 }
 

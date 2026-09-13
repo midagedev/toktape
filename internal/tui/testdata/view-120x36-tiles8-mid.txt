@@ -17,19 +17,19 @@
 │ ▏ where every sequence▍                   │ ▏ changes between▍                        │ ttft      810 ms · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
 │ stream 5/8                         answer │ stream 6/8                         answer │                              │
-│ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │ HOST ─────────────────────── │
-│ ▏ 여기까지가                              │ ▏ are usually kept at a higher width,     │ load      3.1 · contended no │
-│ ▏ ▸ answer                                │ ▏ because an error there lands on every   │ GPU0         69°C  343W  98% │
-│ ▏ 숫자를 재기 전에 기계가 조용한지부터    │ ▏ token rather than being averaged away   │ GPU1         65°C  313W  94% │
-│ ▏ 확인하는 습관이 결국 시간을 아껴        │ ▏ inside a layer. That is why two files   │                              │
-│ ▏ 준다. 다른 프로세스가 같은 카드를▍      │ ▏ with the same label can▍                │                              │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
-│ stream 7/8 · thinking                     │ stream 8/8                         answer │                              │
-│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1.05 s · 100/320 │                              │
-│ ▏ its own forward passes cost, one per    │ ▏ file backed page can be dropped and     │                              │
-│ ▏ proposed token. So for a draft that     │ ▏ read back later. So the resident        │                              │
-│ ▏ is a tenth the size, proposing four     │ ▏ figure tells you what this process      │                              │
-│ ▏ tokens costs about four tenths of a     │ ▏ has touched recently and what the       │                              │
+│ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │ RESOURCES ───── contended no │
+│ ▏ 여기까지가                              │ ▏ are usually kept at a higher width,     │ CPU  6%  1.9 cores  load 3.1 │
+│ ▏ ▸ answer                                │ ▏ because an error there lands on every   │                              │
+│ ▏ 숫자를 재기 전에 기계가 조용한지부터    │ ▏ token rather than being averaged away   │                              │
+│ ▏ 확인하는 습관이 결국 시간을 아껴        │ ▏ inside a layer. That is why two files   │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│ ▏ 준다. 다른 프로세스가 같은 카드를▍      │ ▏ with the same label can▍                │ GPU0         90%  69°C  343W │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ ▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆ │
+│ stream 7/8 · thinking                     │ stream 8/8                         answer │ ████████████████████████████ │
+│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1.05 s · 100/320 │ ████████████████████████████ │
+│ ▏ its own forward passes cost, one per    │ ▏ file backed page can be dropped and     │ GPU1         83%  65°C  313W │
+│ ▏ proposed token. So for a draft that     │ ▏ read back later. So the resident        │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
+│ ▏ is a tenth the size, proposing four     │ ▏ figure tells you what this process      │ ████████████████████████████ │
+│ ▏ tokens costs about four tenths of a     │ ▏ has touched recently and what the       │ ████████████████████████████ │
 │ ▏ step plus the one step▍                 │ ▏ kernel has chosen to▍                   │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  q quit · p prompt │

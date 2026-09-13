@@ -319,18 +319,64 @@ func exampleProgress(i int) []tape.PromptProgress {
 	return out
 }
 
+// exampleCPUBase is the CPU time the example server had spent before the run
+// began, in seconds: it loaded a model and served earlier requests, so its
+// counter does not start at zero, and a zero would read as "not read".
+const exampleCPUBase = 1843.2
+
 // exampleSamples takes one host reading every tape.DefaultSampleInterval. VRAM
 // climbs as the KV cache fills, and nothing else moves much: the run is GPU
 // bound on a quiet machine, which is the picture the card reports.
+//
+// Utilisation and CPU time are shaped like a real run (TTP-39), so the
+// resource graphs have something true-looking to draw: the GPUs pinned during
+// prefill, working in proportion to the busy slots with a little jitter while
+// they decode, and idle once the last token is out; the server process using
+// a core or so throughout. Every figure is a function of the sample index k,
+// so the tape is the same on every build.
 func exampleSamples(tp *tape.Tape, runEnd time.Duration) []tape.RunSample {
 	var out []tape.RunSample
 	end := tp.Summary.GPUsAtEnd
-	for t := time.Duration(0); t <= runEnd; t += tape.DefaultSampleInterval {
-		frac := float64(t) / float64(runEnd)
+	lastToken := time.Duration(0)
+	for _, req := range tp.Requests {
+		if n := len(req.Tokens); n > 0 && req.StartedAt+req.Tokens[n-1].T > lastToken {
+			lastToken = req.StartedAt + req.Tokens[n-1].T
+		}
+	}
+	cpu := exampleCPUBase
+	k := 0
+	// The sampler keeps reading until the recorder stops it, which is after
+	// the last token: two readings past it show the devices going idle. frac
+	// holds at 1 there, so the fields that ramp over the run do not overshoot.
+	last := max(runEnd, lastToken+2*tape.DefaultSampleInterval)
+	streams := tp.Summary.Concurrency
+	if streams <= 0 {
+		streams = len(tp.Requests)
+	}
+	for t := time.Duration(0); t <= last; t, k = t+tape.DefaultSampleInterval, k+1 {
+		frac := min(1, float64(t)/float64(runEnd))
 		mem := tp.Summary.Memory.AtEnd
 		mem.MinFaults = uint64(128402 + 900*frac)
+		mem.CPUSeconds = cpu
+		// busy is the share of the streams still decoding. A rounds tape
+		// counts every round's streams, so it is capped at one.
+		busy := min(1, float64(slotsBusyAt(tp, t))/float64(max(1, streams)))
+		prefill := tokensBefore(tp, t) == 0
+		finished := t > lastToken
+		cores := 0.6 + 1.2*busy + 0.05*float64((k*13)%5)
+		if finished {
+			cores = 0.1
+		}
+		cpu += cores * tape.DefaultSampleInterval.Seconds()
 		var gpus []tape.GPUSample
 		for i, g := range end {
+			util := 52 + 36*busy - 5*float64(i) + float64((k*37+i*11)%13-6)
+			switch {
+			case prefill:
+				util = 100
+			case finished:
+				util = 3
+			}
 			// The KV cache is what grows during the run; the weights were
 			// resident before the first request arrived.
 			kv := int64(float64(tp.Summary.Placement.VRAMKVBytes) / float64(len(end)))
@@ -338,7 +384,7 @@ func exampleSamples(tp *tape.Tape, runEnd time.Duration) []tape.RunSample {
 				Index:     i,
 				UsedBytes: g.UsedBytes - kv + int64(float64(kv)*frac),
 				ProcBytes: g.ProcBytes - kv + int64(float64(kv)*frac),
-				UtilPct:   g.UtilPct,
+				UtilPct:   max(0, min(100, util)),
 				TempC:     g.TempC - 3 + 3*frac,
 				PowerW:    g.PowerW - 8 + 8*frac,
 				ClockMHz:  g.ClockMHz + int(60*(1-frac)),

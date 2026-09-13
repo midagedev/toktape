@@ -17,19 +17,19 @@
 │ ▏ are▍                                    │ ▏ 기가바이트가 넘고,▍                     │ ttft      810 ms · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
 │ stream 3/8                         answer │ stream 4/8                         answer │                              │
-│ 9.1 tok/s  ██▇███▇▇ ttft 750 ms · 103/320 │ 9.1 tok/s  ██▇███▇▇ ttft 810 ms · 102/320 │ HOST ─────────────────────── │
-│ ▏ gets slower and the server as a whole   │ ▏ for a slot, and when the next request   │ load      3.1 · contended no │
-│ ▏ gets faster, and both of those are      │ ▏ arrives it compares the new token       │ GPU0         69°C  343W  98% │
-│ ▏ the same fact seen from two ends.       │ ▏ sequence with the old one from the      │ GPU1         65°C  313W  94% │
-│ ▏ During decoding the engine reads the    │ ▏ beginning. Every position that          │                              │
-│ ▏ entire set of weights to produce one    │ ▏ matches is reused. The first position   │                              │
-│ ▏ token. If eight slots are busy it       │ ▏ that differs ends the reuse, and        │                              │
-│ ▏ reads that same set once and produces   │ ▏ everything after it is evaluated        │                              │
-│ ▏ eight tokens from it, one for each      │ ▏ again, however small the difference     │                              │
-│ ▏ sequence, because the matrix multiply   │ ▏ was. One extra space in your system     │                              │
-│ ▏ is batched across them. The expensive   │ ▏ message, a timestamp you helpfully      │                              │
-│ ▏ part is amortised eight ways. What is   │ ▏ injected, a tool list whose order       │                              │
-│ ▏ not amortised is the attention step,    │ ▏ comes out of a map and therefore        │                              │
+│ 9.1 tok/s  ██▇███▇▇ ttft 750 ms · 103/320 │ 9.1 tok/s  ██▇███▇▇ ttft 810 ms · 102/320 │ RESOURCES ───── contended no │
+│ ▏ gets slower and the server as a whole   │ ▏ for a slot, and when the next request   │ CPU  6%  1.9 cores  load 3.1 │
+│ ▏ gets faster, and both of those are      │ ▏ arrives it compares the new token       │                              │
+│ ▏ the same fact seen from two ends.       │ ▏ sequence with the old one from the      │                              │
+│ ▏ During decoding the engine reads the    │ ▏ beginning. Every position that          │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│ ▏ entire set of weights to produce one    │ ▏ matches is reused. The first position   │ GPU0         90%  69°C  343W │
+│ ▏ token. If eight slots are busy it       │ ▏ that differs ends the reuse, and        │ ▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆ │
+│ ▏ reads that same set once and produces   │ ▏ everything after it is evaluated        │ ████████████████████████████ │
+│ ▏ eight tokens from it, one for each      │ ▏ again, however small the difference     │ ████████████████████████████ │
+│ ▏ sequence, because the matrix multiply   │ ▏ was. One extra space in your system     │ GPU1         83%  65°C  313W │
+│ ▏ is batched across them. The expensive   │ ▏ message, a timestamp you helpfully      │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
+│ ▏ part is amortised eight ways. What is   │ ▏ injected, a tool list whose order       │ ████████████████████████████ │
+│ ▏ not amortised is the attention step,    │ ▏ comes out of a map and therefore        │ ████████████████████████████ │
 │ ▏ where every sequence▍                   │ ▏ changes between▍                        │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  page 1/2 · ←/→  q quit · p prompt │

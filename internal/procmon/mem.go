@@ -40,6 +40,7 @@ func memSample(st Status, s Stat) tape.MemSample {
 		SwapBytes:     st.SwapBytes,
 		MajFaults:     s.MajFaults,
 		MinFaults:     s.MinFaults,
+		CPUSeconds:    float64(s.UTime+s.STime) / ClockTicks,
 	}
 }
 

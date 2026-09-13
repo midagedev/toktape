@@ -7,17 +7,24 @@
 // that is the same layout with the palette on. The two must differ only in
 // escape sequences, which is the invariant the package's colour test pins and
 // which this command re-checks before it exits.
+//
+// -png adds a third file per frame, the same instant rasterised by the clip
+// renderer (render.FrameImage), so a look question is one command away from a
+// still instead of a whole clip render (TTP-39).
 package main
 
 import (
 	"flag"
 	"fmt"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/midagedev/toktape/internal/card"
+	"github.com/midagedev/toktape/internal/render"
+	"github.com/midagedev/toktape/internal/tape"
 	"github.com/midagedev/toktape/internal/tui"
 )
 
@@ -38,6 +45,7 @@ func main() {
 	// rounds of -n streams in one tape, the shape `record --prompts` writes.
 	// 0 or 1 is the ordinary single-round example.
 	rounds := flag.Int("rounds", 0, "sequential prompt rounds (2..3) instead of one; 0 = the single-round example")
+	pngOut := flag.Bool("png", false, "also write each frame as a PNG, rasterised the way the clip renderer draws it")
 	flag.Parse()
 
 	grid, err := tui.ParseGrid(*gridSpec)
@@ -91,6 +99,11 @@ func main() {
 	if len(extras) > 0 {
 		offsets = extras
 	}
+	if *pngOut && (grid.String() != tui.DefaultGrid.String() || *page != 0) {
+		// render.FrameText cuts the model with ModelAt, which lays tiles out
+		// on the default grid from page one; the PNG would not be this frame.
+		fmt.Println("note: -png draws the default grid, page 0; the PNGs do not follow -grid/-page")
+	}
 	bad := 0
 	for _, off := range offsets {
 		plain := tui.ModelAt(tp, off.at)
@@ -105,6 +118,9 @@ func main() {
 		base := filepath.Join(*out, fmt.Sprintf("%dx%d-n%d%s-%s-p%d-%s", *w, *h, *n, tag, grid.String(), *page, off.name))
 		write(base+".txt", p)
 		write(base+".ansi", c)
+		if *pngOut {
+			writePNG(base+".png", tp, *w, *h, plain.TapePath, render.Frame{At: off.at, Anim: off.at, Mode: tui.ModeLive})
+		}
 		bad += check(base+".txt", p, *w, *h)
 		if card.StripANSI(c) != p {
 			fmt.Printf("FAIL %s.ansi: stripping the palette does not reproduce the plain frame\n", base)
@@ -129,6 +145,9 @@ func main() {
 		base := filepath.Join(*out, fmt.Sprintf("%dx%d-n%d%s-%s-p%d-%s", *w, *h, *n, tag, grid.String(), *page, extra.name))
 		write(base+".txt", plain)
 		write(base+".ansi", colour)
+		if *pngOut {
+			writePNG(base+".png", tp, *w, *h, done.TapePath, render.Frame{At: doneAt, Anim: doneAt, Mode: extra.mode})
+		}
 		bad += check(base+".txt", plain, *w, *h)
 		if card.StripANSI(colour) != plain {
 			fmt.Printf("FAIL %s.ansi: stripping the palette does not reproduce the plain frame\n", base)
@@ -189,6 +208,27 @@ func check(name, frame string, w, h int) int {
 	fmt.Printf("%s %-52s rows=%d want %d  width min=%d max=%d want %d\n",
 		status, filepath.Base(name), len(lines), h, minW, maxW, w)
 	return bad
+}
+
+// writePNG rasterises one instant of tp through the clip renderer. At is the
+// run instant the model is cut at and Anim the t handed to tui.View; tuidump
+// dumps a tape at the instant it names, so the two are the same.
+func writePNG(name string, tp *tape.Tape, w, h int, tapePath string, f render.Frame) {
+	img, err := render.FrameImage(tp, render.Options{Width: w, Height: h, TapePath: tapePath}, f)
+	if err != nil {
+		fail(err)
+	}
+	out, err := os.Create(name)
+	if err != nil {
+		fail(err)
+	}
+	if err := png.Encode(out, img); err != nil {
+		out.Close()
+		fail(fmt.Errorf("encode %s: %w", name, err))
+	}
+	if err := out.Close(); err != nil {
+		fail(fmt.Errorf("close %s: %w", name, err))
+	}
 }
 
 func write(name, content string) {

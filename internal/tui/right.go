@@ -10,13 +10,36 @@ import (
 )
 
 // rightPane renders the machine: where the model sits, what the process is
-// actually touching, how fast the server is answering, and whether the box was
-// busy while it did.
+// actually touching, how fast the server is answering, and what the host's
+// resources were doing while it did.
 //
 // It always returns exactly rows lines of exactly cw columns. Sections are
-// ordered so the reader's eye runs placement → memory → speed → host, which is
-// the causal order of the question the tool exists to answer.
+// ordered so the reader's eye runs placement → memory → speed → resources,
+// which is the causal order of the question the tool exists to answer.
 func rightPane(m Model, th Theme, t time.Duration, cw, rows int) []string {
+	lines, _ := rightPaneLines(m, th, t, cw, rows)
+	return fitRows(lines, strings.Repeat(" ", cw), rows)
+}
+
+// rightPaneLines builds the pane at the tallest resource graph that fits and
+// reports the height it chose (TTP-39). Every section but RESOURCES keeps all
+// its lines at every height; only the graphs give way, all resources alike,
+// from three rows down to none. The pane is built and measured rather than
+// sized from a table, so a section that grows a row moves the choice with it.
+func rightPaneLines(m Model, th Theme, t time.Duration, cw, rows int) ([]string, int) {
+	var out []string
+	h := 0
+	for _, h = range resourceHeights {
+		out = buildRightPane(m, th, t, cw, h)
+		if len(out) <= rows {
+			break
+		}
+	}
+	return out, h
+}
+
+// buildRightPane is the pane at resource graph height h, untruncated.
+func buildRightPane(m Model, th Theme, t time.Duration, cw, h int) []string {
 	var out []string
 	blank := strings.Repeat(" ", cw)
 	// A section title is dim small caps carrying a dim rule out to the panel
@@ -27,27 +50,41 @@ func rightPane(m Model, th Theme, t time.Duration, cw, rows int) []string {
 	// are four invitations to look, and the pane has exactly one figure worth
 	// looking at first (TTP-28, user 2026-09-13). A heading names a region; it
 	// is not the thing in it, so it wears what every other label wears.
-	section := func(title string) {
+	//
+	// A tag, when there is one, sits at the right end of the rule: a verdict
+	// about the whole section that used to spend a line of its own.
+	section := func(title, tag string, tagSt lipgloss.Style) {
 		if len(out) > 0 {
 			out = append(out, blank)
 		}
 		l := newLine(th, cw)
 		l.add(th.dim, title)
 		l.space(1)
-		l.add(th.dim, repeat('─', l.left()))
+		if tag == "" {
+			l.add(th.dim, repeat('─', l.left()))
+		} else {
+			l.add(th.dim, repeat('─', l.left()-width(tag)-1))
+			l.space(1)
+			l.add(tagSt, tag)
+		}
 		out = append(out, l.String())
 	}
 
-	section("PLACEMENT")
+	section("PLACEMENT", "", th.dim)
 	out = append(out, placementRows(m, th, t, cw)...)
-	section("MEMORY")
+	section("MEMORY", "", th.dim)
 	out = append(out, memoryRows(m, th, t, cw)...)
-	section("SPEED")
+	section("SPEED", "", th.dim)
 	out = append(out, speedRows(m, th, t, cw)...)
-	section("HOST")
-	out = append(out, hostRows(m, th, t, cw)...)
-
-	return fitRows(out, blank, rows)
+	// A contended run is tagged amber rather than hidden (handover lesson 6).
+	contended := m.Summary.Contention.Contended
+	tag := "contended no"
+	if contended {
+		tag = "contended yes"
+	}
+	section("RESOURCES", tag, styleFor(th, contended))
+	out = append(out, resourceRows(m, th, t, cw, h)...)
+	return out
 }
 
 // barRow is the shape every device line shares: a five-column label, a bar,
@@ -432,48 +469,6 @@ func (m Model) prefilling() bool {
 		}
 	}
 	return false
-}
-
-// hostRows is the "are these numbers even valid" section: load, other GPU
-// processes, and per-device temperature and power. A contended run is tagged
-// amber rather than hidden (handover lesson 6).
-func hostRows(m Model, th Theme, t time.Duration, cw int) []string {
-	var out []string
-	load := m.Summary.Contention.LoadAvg1
-	if cur, _ := m.sampleAt(t); cur != nil && cur.LoadAvg1 > 0 {
-		load = cur.LoadAvg1
-	}
-	contended := m.Summary.Contention.Contended
-	l := newLine(th, cw)
-	l.add(th.dim, "load")
-	loadTxt := fmtFloat1(load)
-	tag := "contended no"
-	if contended {
-		tag = "contended yes"
-	}
-	l.gapTo(width(loadTxt) + 3 + width(tag))
-	l.add(th.text, loadTxt)
-	l.add(th.dim, " · ")
-	l.add(styleFor(th, contended), tag)
-	out = append(out, l.String())
-
-	samples := m.Summary.GPUsAtEnd
-	if cur, _ := m.sampleAt(t); cur != nil && len(cur.GPUs) > 0 {
-		samples = cur.GPUs
-	}
-	for _, g := range samples {
-		temp, power, util := tempStr(g.TempC), powerStr(g.PowerW), utilStr(g.UtilPct)
-		l := newLine(th, cw)
-		l.add(th.dim, fmt.Sprintf("GPU%d", g.Index))
-		l.gapTo(width(temp) + 2 + width(power) + 2 + width(util))
-		l.add(styleFor(th, g.Throttled), temp)
-		l.space(2)
-		l.add(th.text, power)
-		l.space(2)
-		l.add(th.dim, util)
-		out = append(out, l.String())
-	}
-	return out
 }
 
 func tempStr(c float64) string {

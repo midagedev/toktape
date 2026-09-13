@@ -17,19 +17,19 @@
 │                                           │                                           │ ttft           ? · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 4 streams        ? tok/s agg │
 │ stream 3/4   prefill ████████████ 128/512 │ stream 4/4   prefill ████████████ 128/512 │                              │
-│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ HOST ─────────────────────── │
-│ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │ load      3.1 · contended no │
-│                                           │                                           │ GPU0         68°C  340W  98% │
-│                                           │                                           │ GPU1         64°C  310W  94% │
+│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ RESOURCES ───── contended no │
+│ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │ CPU     ?  ? cores  load 3.1 │
 │                                           │                                           │                              │
 │                                           │                                           │                              │
 │                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
+│                                           │                                           │ GPU0        100%  68°C  340W │
+│                                           │                                           │                            █ │
+│                                           │                                           │                            █ │
+│                                           │                                           │                            █ │
+│                                           │                                           │ GPU1        100%  64°C  310W │
+│                                           │                                           │                            █ │
+│                                           │                                           │                            █ │
+│                                           │                                           │                            █ │
 │                                           │                                           │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency                                                                               p50 ?  q quit · p prompt │

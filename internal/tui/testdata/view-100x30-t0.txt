@@ -17,13 +17,13 @@
 │ ? tok/s    ttft ?               │ ? tok/s    ttft ?               │ ttft           ? · 25% cache │
 │ ▏ ◐ waiting for the first token │ ▏ ◐ waiting for the first token │ 8 streams        ? tok/s agg │
 │                                 │                                 │                              │
-│                                 │                                 │ HOST ─────────────────────── │
-│                                 │                                 │ load      3.1 · contended no │
-├─────────────────────────────────┼─────────────────────────────────┤ GPU0         68°C  340W  98% │
-│ stream 7/8 prefill ████████████ │ stream 8/8 prefill ████████████ │ GPU1         64°C  310W  94% │
-│ ? tok/s    ttft ?               │ ? tok/s    ttft ?               │                              │
-│ ▏ ◐ waiting for the first token │ ▏ ◐ waiting for the first token │                              │
-│                                 │                                 │                              │
+│                                 │                                 │ RESOURCES ───── contended no │
+│                                 │                                 │ CPU     ?  ? cores  load 3.1 │
+├─────────────────────────────────┼─────────────────────────────────┤                              │
+│ stream 7/8 prefill ████████████ │ stream 8/8 prefill ████████████ │ GPU0        100%  68°C  340W │
+│ ? tok/s    ttft ?               │ ? tok/s    ttft ?               │                            █ │
+│ ▏ ◐ waiting for the first token │ ▏ ◐ waiting for the first token │ GPU1        100%  64°C  310W │
+│                                 │                                 │                            █ │
 │                                 │                                 │                              │
 ├─────────────────────────────────┴─────────────────────────────────┴──────────────────────────────┤
 │ token latency                                                           p50 ?  q quit · p prompt │

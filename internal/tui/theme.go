@@ -95,6 +95,13 @@ const (
 // lipgloss measures with its own width function, and this package owns
 // layout. Styles set a foreground, and at most the bold attribute, which
 // changes no widths. TestColourMatchesPlain pins that invariant.
+//
+// The one exception is the resource graph (TTP-39, 2026-09-13): graphTrack and
+// graphRidge also set a background, colDarkFill, because a partial block's
+// unlit part shows the cell background and a ridge drawn on the terminal's
+// ground floated free of its own track. A background changes no width either,
+// and the track itself is spaces, so a plain rendering shows no slab where a
+// graph is empty.
 type Theme struct {
 	colour bool
 
@@ -123,6 +130,12 @@ type Theme struct {
 	textMid   lipgloss.Style
 	textMuted lipgloss.Style
 	dimMid    lipgloss.Style
+
+	// graphTrack is the unlit part of a resource graph's measured columns,
+	// painted as spaces; graphRidge is a column's topmost lit cell. Both sit
+	// on colDarkFill (see the exception above).
+	graphTrack lipgloss.Style
+	graphRidge lipgloss.Style
 }
 
 // PlainTheme returns the theme that emits no escape sequences. It is the zero
@@ -165,6 +178,8 @@ func ColourTheme() Theme {
 			textMid:     fg(colTextMid),
 			textMuted:   fg(colTextMuted),
 			dimMid:      fg(colDimMid),
+			graphTrack:  r.NewStyle().Background(lipgloss.Color(colDarkFill)),
+			graphRidge:  fg(colAccentMid).Background(lipgloss.Color(colDarkFill)),
 		}
 	})
 	return colourTheme
