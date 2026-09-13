@@ -272,10 +272,17 @@ func bodyBands(s Stream, lines []bodyLine, t time.Duration) [][]bodySeg {
 				b.Reset()
 			}
 		}
-		j := 0
+		// A line's leading indent never glows (2026-09-14, seen on a real
+		// code tape): a tab-expanded indent carries the newest token's source
+		// offset, and the fill drew a blank slab before the code. Only the
+		// indent is exempt; the gaps between words stay in their token's run.
+		j, indent := 0, true
 		for _, r := range bl.text {
 			band := bandSettled
-			if j < len(bl.src) {
+			if indent && r != ' ' {
+				indent = false
+			}
+			if j < len(bl.src) && !indent {
 				switch o := bl.src[j]; {
 				case o < 0:
 				case o >= freshStart:

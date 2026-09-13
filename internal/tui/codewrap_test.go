@@ -111,3 +111,32 @@ func TestBandsFollowTheSourceThroughCode(t *testing.T) {
 		t.Errorf("the mid band spells %q, want the token before it %q", got, "}")
 	}
 }
+
+// TestTheIndentDoesNotGlow: the write head's fill stops at a line's indent
+// (TTP-47 × TTP-48, 2026-09-14). Seen on the real deepseek code tape: a fresh
+// token "\t\tgo func" carried its tab-expanded spaces at source offsets
+// >= freshStart, so the fill painted an eight-column blank slab before the
+// code. Leading indent is layout, not a token the reader is watching arrive.
+func TestTheIndentDoesNotGlow(t *testing.T) {
+	const at = 10 * time.Second
+	var s Stream
+	for _, tk := range []struct {
+		age  time.Duration
+		text string
+	}{
+		{3 * time.Second, "func main() {\n"},
+		{50 * time.Millisecond, "\t\tgo func"},
+	} {
+		s.Tokens = append(s.Tokens, Token{T: at - tk.age, Text: tk.text})
+		s.Text += tk.text
+	}
+	lines := streamTextLines(s, 40)
+	bands := bodyBands(s, lines, at)
+	last := bands[len(bands)-1]
+	if len(last) < 2 || last[0].band != bandSettled || last[0].text != "        " {
+		t.Fatalf("the indent should be a settled run of 8 spaces before the fresh code, got %+v", last)
+	}
+	if last[1].band != bandFresh || last[1].text != "go func" {
+		t.Fatalf("the fresh run should be the code alone, got %+v", last)
+	}
+}
