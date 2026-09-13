@@ -312,7 +312,9 @@ func TestJSONIsSchemaOrdered(t *testing.T) {
 	want := []string{
 		"id", "toktape_version", "started_at", "finished_at", "server", "model",
 		"host", "placement", "memory", "concurrency", "timings", "aggregate",
-		"cache", "contention", "template", "gpus_at_end",
+		// "sampling" joined on 2026-09-14 (TTP-55): what the requests asked
+		// of the sampler, the thinking and the endpoint.
+		"cache", "contention", "template", "sampling", "gpus_at_end",
 	}
 	if !slices.Equal(keys, want) {
 		t.Errorf("top-level key order =\n%v\nwant\n%v", keys, want)
@@ -719,12 +721,15 @@ func TestDraftRow(t *testing.T) {
 // ticket the denominator was the sum of both cards and the card printed 42 %,
 // a ratio against a number no layer-split run can reach.
 //
-// ExampleSharded()'s placement puts 36.5 GB of attention on the GPUs while its
-// own ActiveBytesPerToken says a whole token is 21.7 GB. The two disagree, so
-// there is no honest ceiling and the clause is dropped rather than guessed
-// (CLAUDE.md: never fix a disagreement by picking the nicer number). Its
-// fixture is rebuilt from a real recording under a separate ticket, and this
-// assertion flips then.
+// ExampleSharded() used to say a whole token was 21.7 GB while its own
+// placement listed 41.3 GB of dense weights plus a 383.3 GB expert stack, so
+// the two accounts of one tensor list disagreed by 59 % and no honest ceiling
+// existed; the clause was dropped rather than guessed. 2026-09-14 (TTP-46):
+// the fixture's ActiveBytesPerToken is now the figure its placement produces,
+// so the ratio exists and this assertion flips, as its previous form said it
+// would. What it pins now is the other half of the same rule — a mixed
+// placement is measured against the bus the bytes actually crossed (TTP-56),
+// which for this run is the host's 460.8 GB/s and not the GPUs'.
 func TestOfPeakIsMeasuredAgainstThePlacement(t *testing.T) {
 	got := Text(Example())
 	if !strings.Contains(got, "84% of peak") {
@@ -733,8 +738,9 @@ func TestOfPeakIsMeasuredAgainstThePlacement(t *testing.T) {
 	}
 
 	sharded := Text(ExampleSharded())
-	if strings.Contains(sharded, "of peak") {
-		t.Errorf("ExampleSharded(): the placement and ActiveBytesPerToken disagree, so\n"+
-			"no ratio may be printed at all, got:\n%s", sharded)
+	if !strings.Contains(sharded, "≈ 331 GB/s from RAM, 72% of peak") {
+		t.Errorf("ExampleSharded(): a placement split between host RAM and VRAM is\n"+
+			"measured against the host bus, want %q in:\n%s",
+			"≈ 331 GB/s from RAM, 72% of peak", sharded)
 	}
 }

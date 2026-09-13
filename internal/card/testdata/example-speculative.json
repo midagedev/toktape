@@ -68,18 +68,18 @@
     "n_experts": 128,
     "n_experts_used": 8,
     "ctx_train": 131072,
-    "active_bytes_per_token": 6720000000
+    "active_bytes_per_token": 7791339110
   },
   "host": {
     "hostname": "workstation",
     "os": "linux",
     "kernel": "6.8.0-45-generic",
-    "cpu": "AMD Ryzen 9 7950X",
-    "cpu_cores": 16,
-    "cpu_threads": 32,
-    "ram_bytes": 68719476736,
-    "ram_speed": "DDR5-6000",
-    "ram_channels": 2,
+    "cpu": "AMD Ryzen Threadripper PRO 7975WX",
+    "cpu_cores": 32,
+    "cpu_threads": 64,
+    "ram_bytes": 274877906944,
+    "ram_speed": "DDR5-5200",
+    "ram_channels": 8,
     "gpus": [
       {
         "index": 0,
@@ -171,7 +171,7 @@
     "itl_p50_ms": 52.6,
     "itl_p95_ms": 58.1,
     "itl_p99_ms": 71,
-    "effective_bw_bps": 127680000000
+    "effective_bw_bps": 148035443090
   },
   "aggregate": {
     "streams": 4,
@@ -201,6 +201,11 @@
     "rendered_has_think_close": false,
     "rendered_prompt_sha256": "3d81f04ac6b25e79f0a1c8d3b6e5074a2c9f1b8d4e6a03157c2d9b4f6e8a0135",
     "rendered_prompt_tokens": 512
+  },
+  "sampling": {
+    "temperature": 0,
+    "thinking": "off",
+    "endpoint": "completion"
   },
   "gpus_at_end": [
     {

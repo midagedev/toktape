@@ -4,20 +4,25 @@
 │ MODEL    DeepSeek-V4.1-Flash-Q4_K_M.gguf · Q4_K_M · 46.0 GiB         │
 │ ENGINE   ik_llama.cpp 7b79b229 · linux 6.8.0-45-generic              │
 │          workstation                                                 │
-│ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
+│ RIG      2× RTX 3090 24G · AMD Ryzen Threadripper PRO 7975WX         │
+│          256 GB DDR5-5200                                            │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        19.0 tok/s · ≈ 128 GB/s                                │
-│ Prefill       817 tok/s · TTFT 640 ms · 512 prompt tokens            │
+│ Decode        76.0 tok/s aggregate · 19.0 tok/s each                 │
+│               ≈ 200 GB/s from RAM, 60% of peak                       │
+│ Prefill       2130 tok/s aggregate · 817 tok/s each                  │
+│               TTFT p50 640 ms · 512 prompt tokens                    │
 │ Draft         DSpark-0.6B-Q8_0.gguf · n_max 3                        │
 │               60% accepted (174/290)                                 │
 │ Context       16384 (512 in / 68 out)                                │
 │ Prefix cache  25% hit (128/512) · warm                               │
+│ Sampling      greedy (temp 0) · thinking off · /completion           │
 │ Streams       4 × 19.0 tok/s = 76.0 tok/s aggregate                  │
 │               TTFT p50 640 ms p95 720 ms · slots busy max 4          │
 ├──────────────────────────────────────────────────────────────────────┤
 │ MEMORY   GPU0 [███░░░░░░░] 6.2/24.0 GiB                              │
 │          GPU1 [██░░░░░░░░] 5.3/24.0 GiB                              │
 │          weights 6.7 | kv 2.4 | compute 1.4 GiB                      │
+│          Host placed 39.3 GiB (all in RAM)                           │
 │          Host RSS 42.1 GiB (file 41.2 / anon 0.9)                    │
 │          Page faults 0.0 maj/token (0 during decode)                 │
 ├──────────────────────────────────────────────────────────────────────┤

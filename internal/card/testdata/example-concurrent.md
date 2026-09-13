@@ -8,10 +8,13 @@
 │          workstation                                                 │
 │ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        9.1 tok/s · ≈ 410 GB/s, 44% of peak                    │
-│ Prefill       610 tok/s · TTFT 810 ms · 512 prompt tokens            │
+│ Decode        72.9 tok/s aggregate · 9.1 tok/s each                  │
+│               ≈ 410 GB/s, 44% of peak                                │
+│ Prefill       2927 tok/s aggregate · 610 tok/s each                  │
+│               TTFT p50 810 ms · 512 prompt tokens                    │
 │ Context       16384 (512 in / 307 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
+│ Sampling      temp default · chat                                    │
 │ Streams       8 × 9.1 tok/s = 72.9 tok/s aggregate                   │
 │               TTFT p50 810 ms p95 1050 ms · slots busy max 8         │
 ├──────────────────────────────────────────────────────────────────────┤

@@ -60,6 +60,11 @@ import (
 // It is what the Draft row of the text card, the draft clause of the PNG hero
 // and compare's "draft accepted" row are drawn from, and the goldens under
 // testdata pin all three.
+// exampleGreedy is the temperature ExampleSpeculative sent. It is a variable
+// because tape.SamplingSummary.Temperature is a pointer: 0 is greedy and nil
+// is "nothing was sent".
+var exampleGreedy = 0.0
+
 func ExampleSpeculative() *tape.RunSummary {
 	started := time.Date(2026, 9, 13, 16, 14, 20, 0, time.UTC)
 	draftN, draftAccepted := 290, 174
@@ -124,21 +129,37 @@ func ExampleSpeculative() *tape.RunSummary {
 			NExperts:     128,
 			NExpertsUsed: 8,
 			CtxTrain:     131072,
-			// Attention, the shared expert and the norms (4.0 GB) plus the
-			// eight experts a token routes to (8/128 of 43.5 GB). The
-			// embedding table is a row lookup and is not counted.
-			ActiveBytesPerToken: 6720000000,
+			// Every dense tensor the placement lists — attention on both
+			// cards (3.22 GB) and the output projection (1.93 GB) — plus the
+			// eight experts a token routes to, 8/128 of the 42.20 GB stack.
+			// The embedding table is a row lookup and is not counted; this
+			// model has output.weight, so it is not tied.
+			//
+			// It was 6.72 GB until 2026-09-14, which assumed 4.0 GB of dense
+			// weights where the placement lists 5.15, so the fixture's two
+			// accounts of one tensor list disagreed by 13.8 % and every
+			// bandwidth ratio derived from it was refused (TTP-46). The
+			// placement is the more detailed of the two, so it wins.
+			ActiveBytesPerToken: 7791339110,
 		},
 		Host: tape.HostInfo{
-			Hostname:    "workstation",
-			OS:          "linux",
-			Kernel:      "6.8.0-45-generic",
-			CPU:         "AMD Ryzen 9 7950X",
-			CPUCores:    16,
-			CPUThreads:  32,
-			RAMBytes:    68719476736, // 64 GiB
-			RAMSpeed:    "DDR5-6000",
-			RAMChannels: 2,
+			Hostname: "workstation",
+			OS:       "linux",
+			Kernel:   "6.8.0-45-generic",
+			// Eight channels, not a desktop's two (2026-09-14). The run
+			// this fixture describes reads 2.64 GB of experts out of host RAM
+			// for every token at 76 tok/s aggregate, which is 200 GB/s: a
+			// dual-channel DDR5-6000 bus peaks at 96 and the fixture was
+			// asking it for 209 % of that. TTP-56's RAM-side clause is what
+			// exposed it. Anyone running a MoE with its experts in system
+			// memory buys the channels, which is why the ws box in the real
+			// recordings is a Threadripper PRO too.
+			CPU:         "AMD Ryzen Threadripper PRO 7975WX",
+			CPUCores:    32,
+			CPUThreads:  64,
+			RAMBytes:    274877906944, // 256 GiB
+			RAMSpeed:    "DDR5-5200",
+			RAMChannels: 8,
 			GPUs:        exampleGPUs(),
 		},
 		Placement: tape.PlacementSummary{
@@ -214,7 +235,7 @@ func ExampleSpeculative() *tape.RunSummary {
 			ITLp50Ms:                      52.6,
 			ITLp95Ms:                      58.1,
 			ITLp99Ms:                      71.0,
-			EffectiveBandwidthBytesPerSec: 127680000000, // 6.72 GB/token × 19.0 tok/s
+			EffectiveBandwidthBytesPerSec: 148035443090, // 7.79 GB/token × 19.0 tok/s
 		},
 		Aggregate: tape.AggregateTimings{
 			Streams:                     4,
@@ -235,6 +256,13 @@ func ExampleSpeculative() *tape.RunSummary {
 			Label:       tape.CacheWarm,
 		},
 		Contention: tape.ContentionInfo{LoadAvg1: 5.4},
+		// A benchmark run: greedy, thinking off, and the raw path, which is
+		// the shape that answers "what does this engine actually do" (TTP-55).
+		Sampling: tape.SamplingSummary{
+			Temperature: &exampleGreedy,
+			Thinking:    "off",
+			Endpoint:    tape.EndpointCompletion,
+		},
 		Template: tape.TemplateInfo{
 			ChatTemplate:         "deepseek3",
 			RenderedPromptSHA256: "3d81f04ac6b25e79f0a1c8d3b6e5074a2c9f1b8d4e6a03157c2d9b4f6e8a0135",

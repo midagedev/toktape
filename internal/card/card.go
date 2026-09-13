@@ -327,18 +327,10 @@ func speedSection(s *tape.RunSummary) []string {
 	if t.DecodeLabel == "sample" {
 		decodeLabel = "Sample"
 	}
-	decodeParts := []string{formatRateUnit(t.PredictedPerSecond)}
-	if bw := bandwidthString(s); bw != "" {
-		decodeParts = append(decodeParts, bw)
-	}
-	out = append(out, field(decodeLabel, speedLabelW, " · ", decodeParts...)...)
+	out = append(out, field(decodeLabel, speedLabelW, " · ", decodeParts(s)...)...)
 
 	promptTotal := promptTokens(s)
-	out = append(out, field("Prefill", speedLabelW, " · ",
-		formatRateUnit(t.PromptPerSecond),
-		"TTFT "+formatMs(t.TTFTMs),
-		formatInt(promptTotal)+" prompt tokens",
-	)...)
+	out = append(out, field("Prefill", speedLabelW, " · ", prefillParts(s, promptTotal)...)...)
 
 	if parts := draftParts(s); len(parts) > 0 {
 		out = append(out, field("Draft", speedLabelW, " · ", parts...)...)
@@ -350,12 +342,82 @@ func speedSection(s *tape.RunSummary) []string {
 
 	out = append(out, labelled("Prefix cache", speedLabelW, []string{cacheString(s.Cache)})...)
 
+	// What the request asked for, which is worth a tenth of the rate above it
+	// (TTP-55): greedy against server-default sampling against a thinking
+	// model left to think are three different numbers for one engine. Absent
+	// on a tape that did not record its endpoint, rather than guessed.
+	if parts := samplingParts(s); len(parts) > 0 {
+		out = append(out, field("Sampling", speedLabelW, " · ", parts...)...)
+	}
+
 	if s.Concurrency > 1 {
 		out = append(out, streamLines(s)...)
 	}
 	out = append(out, roundsLines(s)...)
 	out = append(out, sweepLines(s)...)
 	return out
+}
+
+// decodeParts is the fields of the Decode row, and it leads with the same kind
+// of figure the Prefill row leads with (2026-09-14). TTP-59 made Prefill lead
+// with the box's aggregate under concurrency; leaving Decode on the per-stream
+// mean would have left one card whose two rate rows mean different things by
+// the same word — the ambiguity the user named as "개별 tps때문에 병렬세션에서
+// 좀 애매하게 느껴진다". The right pane and the result modal already lead with
+// the aggregate on both rates.
+//
+// The per-stream mean is kept beside it, and the Streams block below still
+// carries the full arithmetic; nothing is dropped, only reordered.
+func decodeParts(s *tape.RunSummary) []string {
+	t := s.Timings
+	var parts []string
+	if s.Concurrency > 1 && s.Aggregate.AggregatePredictedPerSecond > 0 {
+		parts = append(parts,
+			formatRateUnit(s.Aggregate.AggregatePredictedPerSecond)+" aggregate",
+			formatRateUnit(t.PredictedPerSecond)+" each")
+	} else {
+		parts = append(parts, formatRateUnit(t.PredictedPerSecond))
+	}
+	if bw := bandwidthString(s); bw != "" {
+		parts = append(parts, bw)
+	}
+	return parts
+}
+
+// prefillParts is the fields of the Prefill row.
+//
+// On a run of several streams the row leads with the box's aggregate rather
+// than the per-stream mean (TTP-59, 2026-09-14). tape.TimingsSummary is the
+// mean over the requests once Concurrency > 1 (internal/recorder/reduce.go),
+// and the first figure on the row is what a reader takes for "what this box
+// does": the code tape's card said 13.0 tok/s while the server was putting
+// 24.2 through. The PNG card has led with the aggregate since TTP-28; this is
+// the text card saying the same thing, with the per-stream mean kept beside it
+// as the "each" figure, the way the right pane's decode rows are shaped.
+//
+// TTFT becomes the median over the streams there, which is the figure the
+// Streams block below already prints — the single run-level TTFT of a
+// concurrent run is a mean of times that started together and is not a
+// reader's "how long until something appeared".
+//
+// The prompt-token count is the per-request total either way, unchanged: it
+// says how long the prompt was, not how many the run sent.
+func prefillParts(s *tape.RunSummary, promptTotal int) []string {
+	t := s.Timings
+	if s.Concurrency <= 1 {
+		return []string{
+			formatRateUnit(t.PromptPerSecond),
+			"TTFT " + formatMs(t.TTFTMs),
+			formatInt(promptTotal) + " prompt tokens",
+		}
+	}
+	a := s.Aggregate
+	return []string{
+		formatRateUnit(a.AggregatePromptPerSecond) + " aggregate",
+		formatRateUnit(t.PromptPerSecond) + " each",
+		"TTFT p50 " + formatMs(a.TTFTp50Ms),
+		formatInt(promptTotal) + " prompt tokens",
+	}
 }
 
 // maxRoundsListed is how many rounds the Prompts row names before it says how
@@ -635,6 +697,24 @@ func promptTokens(s *tape.RunSummary) int {
 // most of a token off the host bus. internal/bandwidth owns that arithmetic
 // and omits the clause entirely when it is not derivable.
 func bandwidthString(s *tape.RunSummary) string {
+	// On a placement split between host RAM and VRAM, one figure over all of
+	// them is not a bandwidth against any ceiling that exists (TTP-56,
+	// 2026-09-14). The ws run printed "≈ 155 GB/s" for a box whose host bus
+	// tops out at 115.8 GB/s; the 155 is three buses' traffic added together
+	// and divided by one second, and the host side of it — the side that was
+	// actually the wall — was 65.5. So a mixed placement names the bus, and
+	// the reader can put the figure next to a STREAM number themselves.
+	if r, ok := bandwidth.RAM(s); ok {
+		out := "≈ " + formatGBs(r.BytesPerSec) + " from RAM"
+		// The percentage only when the CPU's share is provably the whole of
+		// what it reads. A model whose router or shared expert might sit in
+		// host RAM gives a figure that can only be low, and a ratio computed
+		// from it would be a claim the tape cannot support (RAMSide.Exact).
+		if r.Exact && r.OfPeak > 0 {
+			out += ", " + formatPct(r.OfPeak) + " of peak"
+		}
+		return out
+	}
 	if s.Timings.EffectiveBandwidthBytesPerSec <= 0 {
 		return ""
 	}
@@ -719,10 +799,36 @@ func memorySection(s *tape.RunSummary) []string {
 			formatGiBNum(p.VRAMWeightsBytes), formatGiBNum(p.VRAMKVBytes), formatGiBNum(p.VRAMComputeBytes)))
 	}
 
-	// Lesson 3: RSS is not "loaded". Both of these lines need a /proc view to
-	// mean anything; without one a zero would be a lie, so print "?".
 	m := s.Memory
 	hasProc := m.AtEnd.RSSBytes > 0
+
+	// What is on the CPU, and how much of it is actually in RAM (TTP-63, user
+	// 2026-09-14: "cpu 388g 찍혀있는데 이게 ram이랑 nvme랑 구분이 안되나?").
+	// A CPU placement is llama.cpp's backend assignment, not a residency: on
+	// the ws rig 388.1 GiB is placed on a 252 GB box, and the difference is
+	// read from the model file on every touch — which is what the Page faults
+	// line below counts. tape.Residency derives the split; it is never
+	// re-derived here, so this line, the pane, the modal and the PNG print the
+	// same figures.
+	//
+	// The word is "disk", not "NVMe": what was observed is that the pages are
+	// not resident and come back from the file. The medium behind that file is
+	// not in the tape, and naming it would be printing something nobody
+	// measured.
+	if r := tape.Residency(s.Placement, m.AtEnd); r.Placed > 0 {
+		switch {
+		case !r.Ok:
+			lines = append(lines, "Host placed "+formatGiB(r.Placed))
+		case r.Paged == 0:
+			lines = append(lines, "Host placed "+formatGiB(r.Placed)+" (all in RAM)")
+		default:
+			lines = append(lines, fmt.Sprintf("Host placed %s (%s in RAM / %s on disk)",
+				formatGiB(r.Placed), formatGiBNum(r.Resident), formatGiBNum(r.Paged)))
+		}
+	}
+
+	// Lesson 3: RSS is not "loaded". Both of these lines need a /proc view to
+	// mean anything; without one a zero would be a lie, so print "?".
 	if hasProc {
 		lines = append(lines, fmt.Sprintf("Host RSS %s (file %s / anon %s)",
 			formatGiB(m.AtEnd.RSSBytes), formatGiBNum(m.AtEnd.RSSFileBytes), formatGiBNum(m.AtEnd.RSSAnonBytes)))
@@ -807,6 +913,10 @@ func hostSection(s *tape.RunSummary) []string {
 	if s.Contention.Contended && len(s.Contention.Reasons) > 0 {
 		lines = append(lines, wrapJoin(s.Contention.Reasons, " · ", innerWidth-blockLabelW)...)
 	}
+	// The machine changed under the run, which is not contention: a perfectly
+	// quiet box throttles too (TTP-57). Nothing when it did not change, and
+	// nothing on a tape whose witnesses carry no operating point.
+	lines = append(lines, conditionsLines(s)...)
 	return labelled("HOST", blockLabelW, lines)
 }
 

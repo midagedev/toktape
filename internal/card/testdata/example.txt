@@ -11,6 +11,7 @@
 │ Prefill       610 tok/s · TTFT 630 ms · 512 prompt tokens            │
 │ Context       16384 (512 in / 320 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
+│ Sampling      temp default · chat                                    │
 ├──────────────────────────────────────────────────────────────────────┤
 │ MEMORY   GPU0 [██████████] 23.8/24.0 GiB                             │
 │          GPU1 [██████████] 22.8/24.0 GiB                             │

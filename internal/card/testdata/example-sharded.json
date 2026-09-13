@@ -64,7 +64,7 @@
     "n_experts": 256,
     "n_experts_used": 8,
     "ctx_train": 163840,
-    "active_bytes_per_token": 21700000000
+    "active_bytes_per_token": 53317992448
   },
   "host": {
     "hostname": "bigram",
@@ -165,7 +165,7 @@
     "itl_p50_ms": 144.9,
     "itl_p95_ms": 158,
     "itl_p99_ms": 174.2,
-    "effective_bw_bps": 149730000000
+    "effective_bw_bps": 367894147891
   },
   "aggregate": {
     "streams": 4,
@@ -196,6 +196,7 @@
     "rendered_prompt_sha256": "4d1f8a3c9b2e57061d8c3a7f2b4e69015c8d3a7f1b9e24605c7d1a3f8b2e4960",
     "rendered_prompt_tokens": 512
   },
+  "sampling": {},
   "gpus_at_end": [
     {
       "index": 0,

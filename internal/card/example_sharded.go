@@ -117,7 +117,13 @@ func ExampleSharded() *tape.RunSummary {
 			// Attention, the shared expert and the eight routed experts a
 			// token actually touches. The embedding table is a row lookup and
 			// the other 248 experts are not read.
-			ActiveBytesPerToken: 21700000000,
+			// The placement's dense classes (41.34 GB) plus 8 of 256 experts
+			// from the 383.33 GB stack. It was 21.70 GB until 2026-09-14,
+			// which no reading of this placement produces — the two accounts
+			// of one tensor list disagreed by 59 % and every ratio derived
+			// from it was refused (TTP-46). The placement wins: it is the
+			// detailed one.
+			ActiveBytesPerToken: 53317992448,
 		},
 		Host: tape.HostInfo{
 			Hostname:    "bigram",
@@ -196,7 +202,7 @@ func ExampleSharded() *tape.RunSummary {
 			ITLp50Ms:                      144.9,
 			ITLp95Ms:                      158.0,
 			ITLp99Ms:                      174.2,
-			EffectiveBandwidthBytesPerSec: 149730000000, // 21.70 GB/token × 6.9 tok/s
+			EffectiveBandwidthBytesPerSec: 367894147891, // 53.32 GB/token × 6.9 tok/s
 		},
 		Aggregate: tape.AggregateTimings{
 			Streams:         4,

@@ -224,6 +224,10 @@ func Example() *tape.RunSummary {
 			Label:       tape.CacheWarm,
 		},
 		Contention: tape.ContentionInfo{LoadAvg1: 3.1},
+		// The request's shape (TTP-55): this run sent no temperature, so the
+		// server's own sampler was in effect and the card says "temp default"
+		// rather than a number nobody chose.
+		Sampling: tape.SamplingSummary{Endpoint: tape.EndpointChat},
 		Template: tape.TemplateInfo{
 			ChatTemplate:         "llama3",
 			RenderedPromptSHA256: "9f2c4b1a8d5e6037c1a9b2d4e8f70516a3c9d2b4e6f8017a3c5d9e2b4f6a8017",

@@ -28,10 +28,13 @@ stream or for eight at once.
 │          workstation                                                 │
 │ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        9.1 tok/s · ≈ 410 GB/s, 44% of peak                    │
-│ Prefill       610 tok/s · TTFT 810 ms · 512 prompt tokens            │
+│ Decode        72.9 tok/s aggregate · 9.1 tok/s each                  │
+│               ≈ 410 GB/s, 44% of peak                                │
+│ Prefill       2927 tok/s aggregate · 610 tok/s each                  │
+│               TTFT p50 810 ms · 512 prompt tokens                    │
 │ Context       16384 (512 in / 307 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
+│ Sampling      temp default · chat                                    │
 │ Streams       8 × 9.1 tok/s = 72.9 tok/s aggregate                   │
 │               TTFT p50 810 ms p95 1050 ms · slots busy max 8         │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -208,6 +211,23 @@ speculative `n_max`, all in one tape, with a card line per value), `--n-predict`
 (default `~/.toktape/runs`), `--tag`, `--note`, `--wait`, `--tui`,
 `--grid COLSxROWS` (default `2x4`, `0` fits the terminal), `--no-card`,
 `--json`, `--quiet`.
+
+**Sampling and the endpoint.** How the request is shaped moves the number as
+much as the flags the server was started with. On one reasoning model, twenty
+prompts and one machine, greedy decoding on the raw endpoint ran 25.6 tok/s,
+the server's default sampling on the same endpoint 24.5, and the chat endpoint
+with thinking left on 22.4. So `record` names all three: `--temp N` sets the
+sampling temperature (`--temp 0` is greedy; leave it off and the server's own
+default stays in effect), `--no-think` asks a reasoning model not to think by
+sending the engine's `enable_thinking` switch, `--endpoint chat|completion`
+chooses between the templated chat route and posting the prompt verbatim to
+`/completion` with no template around it, and `--param key=value` (repeatable)
+merges anything else the build honours — `--param seed=7`, `--param
+top_k=40`, `--param cache_prompt=false` — with the value read as JSON when it
+is JSON and as a string otherwise. `--no-think` is a chat setting: thinking
+belongs to the template, and a raw prompt has none. Whatever is sent is
+recorded in the tape and named on the card, so two cards are comparable or
+they say why they are not.
 
 **Card:** `--md` (the card in a fence plus a llama-bench compatible table),
 `--json` (the run summary), `--png [FILE]` (1200×675 share image), `--copy`

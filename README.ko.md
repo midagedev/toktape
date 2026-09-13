@@ -28,10 +28,13 @@ toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.ta
 │          workstation                                                 │
 │ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        9.1 tok/s · ≈ 410 GB/s, 44% of peak                    │
-│ Prefill       610 tok/s · TTFT 810 ms · 512 prompt tokens            │
+│ Decode        72.9 tok/s aggregate · 9.1 tok/s each                  │
+│               ≈ 410 GB/s, 44% of peak                                │
+│ Prefill       2927 tok/s aggregate · 610 tok/s each                  │
+│               TTFT p50 810 ms · 512 prompt tokens                    │
 │ Context       16384 (512 in / 307 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
+│ Sampling      temp default · chat                                    │
 │ Streams       8 × 9.1 tok/s = 72.9 tok/s aggregate                   │
 │               TTFT p50 810 ms p95 1050 ms · slots busy max 8         │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -204,6 +207,21 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 `~/.toktape/runs`), `--tag`, `--note`, `--wait`, `--tui`,
 `--grid COLSxROWS`(기본 `2x4`, `0`이면 터미널에 맞춤), `--no-card`,
 `--json`, `--quiet`.
+
+**샘플링과 엔드포인트.** 요청을 어떤 모양으로 보내느냐는 서버를 어떤 플래그로
+띄웠느냐만큼 수치를 움직입니다. 같은 추론 모델, 같은 프롬프트 20개, 같은 머신에서
+raw 엔드포인트에 greedy로 보낸 쪽이 25.6 tok/s, 같은 엔드포인트에 서버 기본
+샘플링이 24.5, 채팅 엔드포인트에 thinking을 켠 채로가 22.4였습니다. 그래서 `record`가
+셋 다 이름을 붙입니다. `--temp N`은 샘플링 온도(`--temp 0`이 greedy이고, 지정하지
+않으면 서버 자신의 기본값이 그대로 쓰입니다), `--no-think`는 엔진의
+`enable_thinking` 스위치를 보내 추론 모델에게 생각하지 말라고 요청하고,
+`--endpoint chat|completion`은 템플릿을 씌우는 채팅 경로와 프롬프트를 그대로
+`/completion`에 던지는 경로 중 하나를 고르며, `--param key=value`(반복 가능)는 그
+빌드가 받는 나머지를 그대로 실어 보냅니다 — `--param seed=7`, `--param top_k=40`,
+`--param cache_prompt=false`. 값은 JSON으로 읽히면 JSON으로, 아니면 문자열로
+보냅니다. `--no-think`는 채팅 쪽 설정입니다. thinking은 템플릿의 것이고 raw
+프롬프트에는 템플릿이 없습니다. 보낸 것은 테이프에 그대로 남고 카드에 이름이 찍히니,
+두 카드는 비교되거나 왜 비교할 수 없는지를 말합니다.
 
 **card:** `--md`(펜스 안의 카드와 llama-bench 호환 표), `--json`(실행 요약),
 `--png [FILE]`(1200×675 공유 이미지), `--copy`(OSC 52로 클립보드에도 복사).

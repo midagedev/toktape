@@ -8,8 +8,10 @@
 │ RIG      2× RTX 3090 24G · AMD EPYC 9354 32-Core Processor           │
 │          768 GB DDR5-4800                                            │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        6.9 tok/s · ≈ 150 GB/s                                 │
-│ Prefill       172 tok/s · TTFT 2650 ms · 512 prompt tokens           │
+│ Decode        27.6 tok/s aggregate · 6.9 tok/s each                  │
+│               ≈ 331 GB/s from RAM, 72% of peak                       │
+│ Prefill       496 tok/s aggregate · 172 tok/s each                   │
+│               TTFT p50 2650 ms · 512 prompt tokens                   │
 │ Context       16384 (512 in / 248 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
 │ Streams       4 × 6.9 tok/s = 27.6 tok/s aggregate                   │
@@ -18,6 +20,7 @@
 │ MEMORY   GPU0 [██████████] 23.9/24.0 GiB                             │
 │          GPU1 [██████████] 23.6/24.0 GiB                             │
 │          weights 43.0 | kv 3.0 | compute 1.5 GiB                     │
+│          Host placed 357.0 GiB (all in RAM)                          │
 │          Host RSS 359.0 GiB (file 357.0 / anon 2.0)                  │
 │          Page faults 0.0 maj/token (0 during decode)                 │
 ├──────────────────────────────────────────────────────────────────────┤

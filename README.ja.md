@@ -29,10 +29,13 @@ toktape は、すでに起動している llama-server にアタッチし、1 �
 │          workstation                                                 │
 │ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        9.1 tok/s · ≈ 410 GB/s, 44% of peak                    │
-│ Prefill       610 tok/s · TTFT 810 ms · 512 prompt tokens            │
+│ Decode        72.9 tok/s aggregate · 9.1 tok/s each                  │
+│               ≈ 410 GB/s, 44% of peak                                │
+│ Prefill       2927 tok/s aggregate · 610 tok/s each                  │
+│               TTFT p50 810 ms · 512 prompt tokens                    │
 │ Context       16384 (512 in / 307 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
+│ Sampling      temp default · chat                                    │
 │ Streams       8 × 9.1 tok/s = 72.9 tok/s aggregate                   │
 │               TTFT p50 810 ms p95 1050 ms · slots busy max 8         │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -210,6 +213,22 @@ speculative `n_max` の値ごとに 1 回ずつ流して同じテープに記録
 `~/.toktape/runs`）、`--tag`、`--note`、`--wait`、`--tui`、
 `--grid COLSxROWS`（既定 `2x4`、`0` で端末に合わせる）、`--no-card`、
 `--json`、`--quiet`。
+
+**サンプリングとエンドポイント。** リクエストの形は、サーバーを起動したときの
+フラグと同じくらい数値を動かします。同じ推論モデル、同じ 20 個のプロンプト、同じ
+マシンで、raw エンドポイントに greedy で送ると 25.6 tok/s、同じエンドポイントで
+サーバー既定のサンプリングだと 24.5、チャットエンドポイントで thinking を有効に
+したままだと 22.4 でした。そこで `record` は三つとも名前を付けます。`--temp N` は
+サンプリング温度（`--temp 0` が greedy。指定しなければサーバー自身の既定がそのまま
+効きます）、`--no-think` はエンジンの `enable_thinking` スイッチを送って推論モデルに
+考えないよう頼み、`--endpoint chat|completion` はテンプレートを適用するチャット経路と
+プロンプトをそのまま `/completion` に送る経路を選び、`--param key=value`（繰り返し
+可）はそのビルドが受け付ける残りをそのまま載せます — `--param seed=7`、
+`--param top_k=40`、`--param cache_prompt=false`。値は JSON として読めれば JSON、
+そうでなければ文字列として送ります。`--no-think` はチャット側の設定です。thinking は
+テンプレートのものであり、raw プロンプトにテンプレートはありません。送ったものは
+テープにそのまま残り、カードに名前が出るので、二枚のカードは比較できるか、なぜ
+比較できないかを語ります。
 
 **card:** `--md`（フェンス内のカードと llama-bench 互換の表）、`--json`（実行
 サマリー）、`--png [FILE]`（1200×675 の共有画像）、`--copy`（OSC 52 で

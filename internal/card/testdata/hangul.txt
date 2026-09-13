@@ -11,10 +11,12 @@
 │ Prefill       610 tok/s · TTFT 630 ms · 512 prompt tokens            │
 │ Context       16384 (512 in / 320 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
+│ Sampling      temp default · chat                                    │
 ├──────────────────────────────────────────────────────────────────────┤
 │ MEMORY   GPU0 [██████████] 23.8/24.0 GiB                             │
 │          GPU1 [██████████] 22.8/24.0 GiB                             │
 │          weights 42.5 | kv 2.6 | compute 1.5 GiB                     │
+│          Host placed 84.6 GiB (0.8 in RAM / 83.8 on disk)            │
 │          Host RSS 1.2 GiB (file 0.8 / anon 0.4)                      │
 │          Never loaded 84.6 GiB (ngram tables)                        │
 │          Page faults 0.0 maj/token (0 during decode)                 │
