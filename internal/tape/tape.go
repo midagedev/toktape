@@ -100,6 +100,11 @@ type RunSummary struct {
 	Template   TemplateInfo     `json:"template"`
 	GPUsAtEnd  []GPUSample      `json:"gpus_at_end,omitempty"`
 
+	// Tag and Note label the experiment this run belongs to (`--tag ngl=40
+	// --note "fa on"`). They are the user's words, recorded so the run ledger
+	// (`toktape log`) can group a sweep; empty when not given.
+	Tag  string `json:"tag,omitempty"`
+	Note string `json:"note,omitempty"`
 	// Warnings are human-readable caveats the card prints verbatim
 	// ("nvml unavailable, VRAM from nvidia-smi", "pid not found, no /proc view").
 	Warnings []string `json:"warnings,omitempty"`
