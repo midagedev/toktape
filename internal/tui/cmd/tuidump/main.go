@@ -25,33 +25,46 @@ func main() {
 	out := flag.String("out", "scratch/frames", "directory to write frames into")
 	w := flag.Int("w", 120, "frame width in columns")
 	h := flag.Int("h", 36, "frame height in rows")
+	n := flag.Int("n", 8, "concurrent streams")
+	gridSpec := flag.String("grid", tui.DefaultGrid.String(), "tile grid per page as COLSxROWS (0 = fit)")
+	page := flag.Int("page", 0, "which page of tiles to dump, from zero")
 	flag.Parse()
 
+	grid, err := tui.ParseGrid(*gridSpec)
+	if err != nil {
+		fail(err)
+	}
+
+	// 0.5 s is the first frame with tokens in it, 3.0 s falls inside the
+	// example's page-in burst so every sparkline has a dip to draw, and 8.0 s
+	// is the finished run.
 	offsets := []struct {
 		name string
 		at   time.Duration
 	}{
 		{"t0.0s", 0},
+		{"t0.5s", 500 * time.Millisecond},
 		{"t1.5s", 1500 * time.Millisecond},
-		{"t4.0s", 4 * time.Second},
+		{"t3.0s", 3 * time.Second},
 		{"t8.0s-done", 8 * time.Second},
 	}
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fail(err)
 	}
-	tp := tui.ExampleTape()
+	tp := tui.ExampleTapeN(*n)
 	bad := 0
 	for _, off := range offsets {
 		plain := tui.ModelAt(tp, off.at)
 		plain.TapePath = "~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape"
+		plain.Grid, plain.Page = grid, *page
 		colour := plain
 		colour.Theme = tui.ColourTheme()
 
 		p := tui.View(plain, off.at, *w, *h)
 		c := tui.View(colour, off.at, *w, *h)
 
-		base := filepath.Join(*out, fmt.Sprintf("%dx%d-%s", *w, *h, off.name))
+		base := filepath.Join(*out, fmt.Sprintf("%dx%d-n%d-%s-p%d-%s", *w, *h, *n, grid.String(), *page, off.name))
 		write(base+".txt", p)
 		write(base+".ansi", c)
 		bad += check(base+".txt", p, *w, *h)
@@ -65,6 +78,7 @@ func main() {
 	// never reaches on its own, so they get their own frames.
 	done := tui.ModelAt(tp, 8*time.Second)
 	done.TapePath = "~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape"
+	done.Grid, done.Page = grid, *page
 	for _, extra := range []struct {
 		name string
 		mode tui.Mode
@@ -74,7 +88,7 @@ func main() {
 		plain := tui.View(m, 8*time.Second, *w, *h)
 		m.Theme = tui.ColourTheme()
 		colour := tui.View(m, 8*time.Second, *w, *h)
-		base := filepath.Join(*out, fmt.Sprintf("%dx%d-%s", *w, *h, extra.name))
+		base := filepath.Join(*out, fmt.Sprintf("%dx%d-n%d-%s-p%d-%s", *w, *h, *n, grid.String(), *page, extra.name))
 		write(base+".txt", plain)
 		write(base+".ansi", colour)
 		bad += check(base+".txt", plain, *w, *h)

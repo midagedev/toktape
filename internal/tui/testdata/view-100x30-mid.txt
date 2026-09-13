@@ -1,30 +1,30 @@
 ┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────┐
-│ stream 1/8                               12.1 tok/s · ttft 210 ms │ PLACEMENT ────────────────── │
-│ ▏ The page fault spike you are seeing is the expert tensors       │ GPU0 ███████████████    9.4G │
-│ ▏ being read back from NVMe.▍                                     │ GPU1 ███████████████    9.6G │
-│ stream 2/8                               12.0 tok/s · ttft 250 ms │ CPU  ███████████████    6.3G │
-│ ▏ ▸ answer                                                        │ vram ███████████████   17.4G │
-│ ▏ 레이어 배치를 바꾸면 디코드 속도가▍                             │      █ weights  █ kv  █ buf  │
-│ stream 3/8                               12.1 tok/s · ttft 290 ms │ never loaded           84.6G │
-│ ▏ Flash attention changes the compute buffer size, not the        │                              │
-│ ▏ weights. When the buffer grows past▍                            │ MEMORY ───────────────────── │
-│ stream 4/8                               12.2 tok/s · ttft 330 ms │ rss       9.0G file     8.3G │
-│ ▏ Prefix caching only helps when the system prompt is byte        │ virt     40.0G anon     1.1G │
-│ ▏ identical. A single changed character▍                          │ maj/tok                  0.0 │
-│ stream 5/8 · thinking                    12.2 tok/s · ttft 370 ms │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ 측정이 흔들린다고 했으니 먼저 기계가 조용했는지 묻는 게 맞다.   │                              │
-│ ▏ 잡음이 신호보다 크면 나머지 숫자는▍                             │ SPEED ────────────────────── │
-│ stream 6/8                               12.0 tok/s · ttft 410 ms │ prefill           2253 tok/s │
-│ ▏ The aggregate rate is what the server does; the per stream      │ decode            12.1 tok/s │
-│ ▏ rate is what▍                                                   │ ttft      330 ms · 25% cache │
-│ stream 7/8 · thinking                    12.1 tok/s · ttft 450 ms │ 8 streams     97.0 tok/s agg │
-│ ▏ Speculative decoding, acceptance rate. I need the break even    │                              │
-│ ▏ point before I can▍                                             │ HOST ─────────────────────── │
-│ stream 8/8                               12.1 tok/s · ttft 490 ms │ load     4.9 · contended yes │
-│ ▏ RSS is not loaded. Under mmap the resident set is what this     │ GPU0         61°C  292W  90% │
-│ ▏ process▍                                                        │ GPU1         61°C  292W  90% │
-│                                                                   │                              │
-│                                                                   │                              │
-├───────────────────────────────────────────────────────────────────┴──────────────────────────────┤
+│ stream 1/8           12.1 tok/s │ stream 2/8           12.0 tok/s │ PLACEMENT ────────────────── │
+│ ▏ The page fault spike you      │ ▏ 전문가 텐서가                 │ GPU0 ███████████████    9.4G │
+│ ▏ are seeing is the expert      │ ▏ ▸ answer                      │ GPU1 ███████████████    9.6G │
+│ ▏ tensors being read back       │ ▏ 레이어 배치를 바꾸면 디코드   │ CPU  ███████████████    6.3G │
+│ ▏ from NVMe.▍                   │ ▏ 속도가▍                       │ vram ███████████████   17.4G │
+│ ▏ tok/s ▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │ ▏ tok/s ▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │      █ weights  █ kv  █ buf  │
+├─────────────────────────────────┼─────────────────────────────────┤ never loaded           84.6G │
+│ stream 3/8           12.1 tok/s │ stream 4/8           12.2 tok/s │                              │
+│ ▏ Flash attention changes the   │ ▏ Prefix caching only helps     │ MEMORY ───────────────────── │
+│ ▏ compute buffer size, not      │ ▏ when the system prompt is     │ rss       9.0G file     8.3G │
+│ ▏ the weights. When the         │ ▏ byte identical. A single      │ virt     40.0G anon     1.1G │
+│ ▏ buffer grows past▍            │ ▏ changed character▍            │ maj/tok                  0.0 │
+│ ▏ tok/s █▆▇▇█▆▇▇█▆▇▇  p50 79 ms │ ▏ tok/s ▆▇▇█▆▇▇█▆▇▇█  p50 79 ms │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+├─────────────────────────────────┼─────────────────────────────────┤                              │
+│ stream 5 · thinking  12.2 tok/s │ stream 6/8           12.0 tok/s │ SPEED ────────────────────── │
+│ ▏ 측정이 흔들린다고 했으니      │ ▏ The aggregate rate is what    │ prefill           2253 tok/s │
+│ ▏ 먼저 기계가 조용했는지 묻는   │ ▏ the server does; the per      │ decode            12.1 tok/s │
+│ ▏ 게 맞다. 잡음이 신호보다      │ ▏ stream rate is what▍          │ ttft      330 ms · 25% cache │
+│ ▏ 크면 나머지 숫자는▍           │                                 │ 8 streams     97.0 tok/s agg │
+│ ▏ tok/s ▆▇▇█▆▇▇█▆▇▇█  p50 79 ms │ ▏ tok/s ▇▇█▆▇▇█▆▇▇█▆  p50 86 ms │                              │
+├─────────────────────────────────┼─────────────────────────────────┤ HOST ─────────────────────── │
+│ stream 7 · thinking  12.1 tok/s │ stream 8/8           12.1 tok/s │ load     4.9 · contended yes │
+│ ▏ acceptance rate. I need the   │ ▏ RSS is not loaded. Under      │ GPU0         61°C  292W  90% │
+│ ▏ break even point before I     │ ▏ mmap the resident set is      │ GPU1         61°C  292W  90% │
+│ ▏ can▍                          │ ▏ what this process▍            │                              │
+│ ▏ tok/s ▇▇█▆▇▇█▆▇▇█▆  p50 79 ms │ ▏ tok/s ▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │                              │
+├─────────────────────────────────┴─────────────────────────────────┴──────────────────────────────┤
 │ token latency                                       █▏▏▏████▏▏▏▏██  p50 91 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘

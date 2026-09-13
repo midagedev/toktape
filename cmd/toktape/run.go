@@ -27,7 +27,7 @@ Usage:
   toktape [flags]                 record a run (the default verb)
   toktape record [flags]          the same, spelled out
   toktape card <tape> [flags]     re-render a card from a run file
-  toktape play <tape> [--speed N] replay a run on the live screen
+  toktape play <tape> [--speed N] [--grid CxR]  replay a run on the live screen
   toktape render [tape] [flags]   render a run as a GIF, mp4, asciicast or frames
   toktape ls [--out DIR]          list recorded runs
   toktape log [--out DIR]         the experiment ledger of every run
@@ -46,6 +46,8 @@ Record flags:
                         0 = fail fast; naming it also waits for the server
                         itself to come up)
   --tui                 watch the run on the live two-pane screen
+  --grid COLSxROWS      tiles per page on the live screen (default 2x4;
+                        0 fits the grid to the terminal). ←/→ change page
   --no-card             do not render or save the card
   --json                print the run summary as JSON instead of the card
   --quiet               no progress lines on stderr

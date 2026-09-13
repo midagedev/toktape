@@ -133,6 +133,11 @@ func (m Model) Apply(e Event) Model {
 			done := ModelAt(e.Tape, maxDur(e.T, tapeEnd(e.Tape)))
 			done.Mode = m.Mode
 			done.Theme = m.Theme
+			// The grid and the page are the reader's, not the tape's: a run
+			// that finishes must not jump back to page one or to a layout the
+			// viewer did not choose.
+			done.Grid = m.Grid
+			done.Page = m.Page
 			done.PID = m.PID
 			done.TapePath = e.TapePath
 			done.Done = true

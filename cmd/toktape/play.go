@@ -21,6 +21,7 @@ import (
 func runPlay(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	fs := newFlagSet("play", stderr)
 	speed := fs.Float64("speed", 1, "replay speed multiplier (4 plays four times as fast)")
+	grid := fs.String("grid", tui.DefaultGrid.String(), "tile grid per page as COLSxROWS (0 = fit to the terminal)")
 	files, err := parseArgs(fs, args)
 	if err != nil {
 		return exitUsage
@@ -31,6 +32,11 @@ func runPlay(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	}
 	if *speed <= 0 {
 		fmt.Fprintf(stderr, "toktape play: --speed must be positive, got %v\n", *speed)
+		return exitUsage
+	}
+	parsedGrid, err := tui.ParseGrid(*grid)
+	if err != nil {
+		fmt.Fprintf(stderr, "toktape play: --%v\n", err)
 		return exitUsage
 	}
 	tp, err := tape.Read(files[0])
@@ -46,6 +52,7 @@ func runPlay(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	p := &player{
 		tp:      tp,
 		speed:   *speed,
+		grid:    parsedGrid,
 		theme:   tui.ColourTheme(),
 		path:    tildePath(files[0]),
 		end:     tapeDuration(tp),
@@ -103,14 +110,19 @@ func tapeDuration(tp *tape.Tape) time.Duration {
 // player is the bubbletea shell for a replay. It owns the wall clock and
 // nothing else; every frame comes from playModel and tui.View.
 type player struct {
-	tp      *tape.Tape
-	speed   float64
-	theme   tui.Theme
-	path    string
-	end     time.Duration
-	wall    time.Duration
-	start   time.Time
-	w, h    int
+	tp    *tape.Tape
+	speed float64
+	grid  tui.Grid
+	theme tui.Theme
+	path  string
+	end   time.Duration
+	wall  time.Duration
+	start time.Time
+	w, h  int
+	// page is which page of tiles the viewer has stepped to. It lives here
+	// rather than in the model because the model is rebuilt from the tape on
+	// every frame; the view takes it as ordinary model state.
+	page    int
 	playing bool
 	quit    bool
 }
@@ -141,6 +153,10 @@ func (p *player) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// frame on screen stays the frame the viewer paused on.
 			p.playing = !p.playing
 			p.start = time.Now().Add(-p.wallAtPause())
+		case "left", "h", "[":
+			p.page = p.pageAfter(-1)
+		case "right", "l", "]":
+			p.page = p.pageAfter(1)
 		}
 		return p, nil
 	case playTickMsg:
@@ -156,19 +172,38 @@ func (p *player) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // the clock continuous across a pause.
 func (p *player) wallAtPause() time.Duration { return p.wall }
 
-func (p *player) View() string {
-	if p.quit {
-		return ""
-	}
-	w, h := p.w, p.h
+// pageAfter is the page d steps away, clamped by the model's own page count so
+// the keys can never step past the last stream.
+func (p *player) pageAfter(d int) int {
+	m, _ := playModel(p.tp, p.wall, p.speed)
+	m.Grid = p.grid
+	m.Page = p.page
+	w, h := p.size()
+	return m.PageAfter(d, w, h)
+}
+
+// size is the screen the replay draws on, before the terminal has said how big
+// it is.
+func (p *player) size() (w, h int) {
+	w, h = p.w, p.h
 	if w <= 0 {
 		w = tui.MinWidth
 	}
 	if h <= 0 {
 		h = tui.MinHeight
 	}
+	return w, h
+}
+
+func (p *player) View() string {
+	if p.quit {
+		return ""
+	}
+	w, h := p.size()
 	m, clip := playModel(p.tp, p.wall, p.speed)
 	m.Theme = p.theme
 	m.TapePath = p.path
+	m.Grid = p.grid
+	m.Page = p.page
 	return tui.View(m, clip, w, h)
 }

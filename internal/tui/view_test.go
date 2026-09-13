@@ -30,6 +30,14 @@ func goldenModel(t *testing.T, at time.Duration) Model {
 	return m
 }
 
+// TestViewGolden pins whole frames of the eight-stream example at the two
+// sizes the layout is designed around.
+//
+// 2026-09-13: these six frames were re-baselined. The stacked per-stream list
+// they used to show was replaced by the tile grid (user decision, TTP-24 spec
+// change: "리스트 레이아웃 아예 버리고 싶어, 다 카드로 하고"). The list goldens are
+// gone rather than loosened — no assertion here was weakened, the layout under
+// them is a different one.
 func TestViewGolden(t *testing.T) {
 	sizes := []struct{ w, h int }{{100, 30}, {140, 40}}
 	offsets := []struct {
@@ -253,23 +261,33 @@ func checkFrame(t *testing.T, frame string, w, h int) {
 	}
 }
 
-// separatorColumn returns the display column of the pane separator: the second
-// "│" on a body row, counting in display columns so a Hangul answer shifts it
-// if and only if the width maths is wrong.
+// separatorColumn returns the display column of the pane separator, counting
+// in display columns so a Hangul answer shifts it if and only if the width
+// maths is wrong.
+//
+// It is the second-to-last vertical mark on the row: the answer pane now draws
+// rules of its own between the tile columns, so "the second │" is one of those
+// rather than the separator, while the last mark is always the frame's own
+// right border. A rule row carries ┤ there instead of │, which is the same
+// column and the same claim.
+//
+// 2026-09-13: rewritten when the list layout was replaced by the tile grid.
+// The assertion is unchanged — the border may not move by one column — only
+// the way the border is located.
 func separatorColumn(line string) int {
 	plain := card.StripANSI(line)
-	seen := 0
+	var cols []int
 	col := 0
 	for _, r := range plain {
-		if r == '│' {
-			seen++
-			if seen == 2 {
-				return col
-			}
+		if r == '│' || r == '┤' {
+			cols = append(cols, col)
 		}
 		col += runeWidth(r)
 	}
-	return -1
+	if len(cols) < 2 {
+		return -1
+	}
+	return cols[len(cols)-2]
 }
 
 func compareGolden(t *testing.T, name, got string) {
@@ -454,50 +472,45 @@ func TestPrefillFrameShowsProgress(t *testing.T) {
 }
 
 // TestDoneStateFillsThePane: once nothing is moving, empty rows below the last
-// answer are wasted screen. The rows are shared out across the streams, which
-// is the frame a reader lands on at the end of a clip.
+// answer are wasted screen. The grid spends every row it is given, so the only
+// blank the pane may end on is the done footer's own spacer.
 func TestDoneStateFillsThePane(t *testing.T) {
 	for _, sz := range []struct{ w, h int }{{100, 30}, {120, 36}, {140, 40}, {160, 50}} {
 		m := goldenModel(t, doneAt)
 		if !m.Done {
 			t.Fatal("the fixture is not finished at the done offset")
 		}
-		bodyH := sz.h - chromeH
-		lines := leftPane(m, PlainTheme(), doneAt, sz.w-33-2, bodyH)
+		cw, bodyH := paneGeometry(sz.w, sz.h)
+		pane := leftPane(m, PlainTheme(), doneAt, cw, bodyH)
+		lines := paneText(pane)
+		if len(lines) != bodyH {
+			t.Fatalf("%dx%d: the pane is %d rows, want %d", sz.w, sz.h, len(lines), bodyH)
+		}
 
 		blanks := 0
 		for i := len(lines) - 1; i >= 0 && strings.TrimSpace(lines[i]) == ""; i-- {
 			blanks++
 		}
-		// The done footer is a blank spacer and the saved-tape line, so one
-		// trailing blank belongs to it; anything beyond that is waste.
 		if blanks > 0 {
 			t.Errorf("%dx%d: %d blank rows at the bottom of the answer pane", sz.w, sz.h, blanks)
 		}
 
-		n := len(m.Streams)
-		_, budget, gap := streamLayout(n, bodyH-2, true)
-		if gap != 0 {
-			t.Errorf("%dx%d: the done layout still spends rows on gaps", sz.w, sz.h)
-		}
-		lo, hi := budget[0], budget[0]
-		for _, k := range budget {
-			lo, hi = min(lo, k), max(hi, k)
-		}
-		if hi-lo > 1 {
-			t.Errorf("%dx%d: line budgets range %d..%d; the remainder is not shared evenly",
-				sz.w, sz.h, lo, hi)
-		}
-		if used := n + sum(budget); used != bodyH-2 {
-			t.Errorf("%dx%d: the layout uses %d of %d rows", sz.w, sz.h, used, bodyH-2)
+		// The row above the saved-tape line is the grid's last tile row, and
+		// that tile's own footer is the last thing in it: the grid reaches the
+		// footer rather than trailing off into space.
+		last := lines[len(lines)-3]
+		if !strings.Contains(last, "tok/s") {
+			t.Errorf("%dx%d: the bottom tile row does not end on its sparkline: %q", sz.w, sz.h, last)
 		}
 	}
 }
 
-func sum(v []int) int {
-	n := 0
-	for _, x := range v {
-		n += x
+// paneText is the answer pane's rows as plain strings, for the tests that care
+// about what it said rather than about how View joins its rules to the frame.
+func paneText(p paneLayout) []string {
+	out := make([]string, len(p.rows))
+	for i, row := range p.rows {
+		out[i] = row.text
 	}
-	return n
+	return out
 }

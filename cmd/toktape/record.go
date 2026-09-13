@@ -17,6 +17,7 @@ import (
 	"github.com/midagedev/toktape/internal/recorder"
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
+	"github.com/midagedev/toktape/internal/tui"
 )
 
 // defaultNPredict caps the answer so the zero-config run finishes in a few
@@ -69,6 +70,7 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 		asJSON      = fs.Bool("json", false, "print the run summary as JSON")
 		quiet       = fs.Bool("quiet", false, "no progress lines on stderr")
 		useTUI      = fs.Bool("tui", false, "watch the run on the live two-pane screen")
+		grid        = fs.String("grid", tui.DefaultGrid.String(), "tile grid per page as COLSxROWS (0 = fit to the terminal)")
 		wait        = fs.Duration("wait", recorder.DefaultWaitForModel,
 			"how long to wait for a server that is still loading its model (0 = fail fast)")
 		// tag and note label the experiment this run belongs to. They are
@@ -103,6 +105,12 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 		WaitForStart: flagSet(fs, "wait") && *wait > 0,
 	}
 	opts = pinCollectors(opts)
+	parsedGrid, err := tui.ParseGrid(*grid)
+	if err != nil {
+		fmt.Fprintf(stderr, "toktape record: --%v\n", err)
+		return exitUsage
+	}
+	recordGrid = parsedGrid
 	recordLabels = runLabels{tag: *tag, note: *note}
 	cfg := recordConfig{outDir: *outDir, card: !*noCard, asJSON: *asJSON, quiet: *quiet}
 

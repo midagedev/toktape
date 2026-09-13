@@ -1,0 +1,535 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/midagedev/toktape/internal/card"
+	"github.com/midagedev/toktape/internal/tape"
+)
+
+// tileW and tileH are the size the hero clip is captured at, and therefore the
+// size the tile goldens pin.
+const (
+	tileW = 120
+	tileH = 36
+)
+
+// tileModel is a model of n streams at a chosen grid and page.
+func tileModel(t *testing.T, n int, at time.Duration, g Grid, page int) Model {
+	t.Helper()
+	m := ModelAt(ExampleTapeN(n), at)
+	m.TapePath = "~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape"
+	m.Grid, m.Page = g, page
+	return m
+}
+
+// truncatedTape is ExampleTapeN cut to the first k requests, which is how the
+// counts the fixture does not generate on its own (one stream, three streams)
+// are tested.
+func truncatedTape(k int) *tape.Tape {
+	tp := ExampleTapeN(max(k, 2))
+	tp.Requests = tp.Requests[:k]
+	return tp
+}
+
+// TestTileGolden pins the frames the hero clip is cut from: four streams in a
+// grid, eight streams on one page of the default grid, and eight streams split
+// over two pages of a 2×2 grid.
+func TestTileGolden(t *testing.T) {
+	cases := []struct {
+		name string
+		n    int
+		grid Grid
+		page int
+		at   time.Duration
+	}{
+		{"tiles-t0", 4, DefaultGrid, 0, 0},
+		{"tiles-mid", 4, DefaultGrid, 0, midRun},
+		{"tiles-done", 4, DefaultGrid, 0, doneAt},
+		{"tiles8-t0", 8, DefaultGrid, 0, 0},
+		{"tiles8-mid", 8, DefaultGrid, 0, midRun},
+		{"tiles8-done", 8, DefaultGrid, 0, doneAt},
+		{"tiles8-2x2-p1", 8, Grid{2, 2}, 0, midRun},
+		{"tiles8-2x2-p2", 8, Grid{2, 2}, 1, midRun},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := tileModel(t, c.n, c.at, c.grid, c.page)
+			got := View(m, c.at, tileW, tileH)
+			checkFrame(t, got, tileW, tileH)
+			compareGolden(t, fmt.Sprintf("view-%dx%d-%s.txt", tileW, tileH, c.name), got)
+		})
+	}
+}
+
+// TestTileFrameIsExactlyWide is the width contract of the track: a grid splits
+// the pane into tiles and draws its own rules across it, so every one of those
+// columns is a chance to be one off. Every ANSI-stripped row of every tile
+// frame is exactly the frame width, coloured or not.
+func TestTileFrameIsExactlyWide(t *testing.T) {
+	for _, n := range []int{4, 8} {
+		for _, at := range []time.Duration{0, 500 * time.Millisecond, midRun, 3 * time.Second, doneAt} {
+			m := tileModel(t, n, at, DefaultGrid, 0)
+			plain := View(m, at, tileW, tileH)
+			checkFrame(t, plain, tileW, tileH)
+
+			m.Theme = ColourTheme()
+			coloured := View(m, at, tileW, tileH)
+			for i, line := range strings.Split(coloured, "\n") {
+				if got := card.Width(line); got != tileW {
+					t.Errorf("n=%d at=%v coloured row %d is %d columns, want %d: %q",
+						n, at, i, got, tileW, card.StripANSI(line))
+				}
+			}
+			if got := card.StripANSI(coloured); got != plain {
+				t.Errorf("n=%d at=%v: stripping the palette does not reproduce the plain frame", n, at)
+				diffLines(t, plain, got)
+			}
+		}
+	}
+}
+
+// TestTileCountsRender: every stream count from one to eight has its own grid
+// shape — a full-width tile, a single split row, a split row over a spanning
+// tile, a 2×2, and on up to pages — and all of them have to come out as a whole
+// frame at every size the layout supports. The odd widths are deliberate: an
+// uneven column split is exactly where a rounding mistake hides.
+func TestTileCountsRender(t *testing.T) {
+	sizes := []struct{ w, h int }{
+		{100, 30}, {101, 31}, {120, 36}, {140, 40}, {160, 50}, {199, 33},
+	}
+	grids := []Grid{DefaultGrid, {}, {1, 1}, {2, 2}, {1, 4}, {4, 8}}
+	for n := 1; n <= 8; n++ {
+		tp := truncatedTape(n)
+		for _, sz := range sizes {
+			for _, g := range grids {
+				for _, at := range []time.Duration{0, midRun, doneAt} {
+					name := fmt.Sprintf("n%d-%dx%d-%s-%v", n, sz.w, sz.h, g, at)
+					t.Run(name, func(t *testing.T) {
+						m := ModelAt(tp, at)
+						m.Grid = g
+						if got := len(m.Streams); got != n {
+							t.Fatalf("the fixture has %d streams, want %d", got, n)
+						}
+						for page := 0; page < m.PageCount(sz.w, sz.h); page++ {
+							m.Page = page
+							checkFrame(t, View(m, at, sz.w, sz.h), sz.w, sz.h)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+// TestPagesCoverEveryStreamOnce is the contract pagination rests on: across
+// the pages every stream is drawn exactly once, and a tile names its stream by
+// its place in the run, not by its place on the page.
+func TestPagesCoverEveryStreamOnce(t *testing.T) {
+	for _, g := range []Grid{DefaultGrid, {2, 2}, {1, 3}, {4, 1}} {
+		m := tileModel(t, 8, midRun, g, 0)
+		pages := m.PageCount(tileW, tileH)
+		seen := map[int]int{}
+		for page := 0; page < pages; page++ {
+			m.Page = page
+			frame := card.StripANSI(View(m, midRun, tileW, tileH))
+			for i := 1; i <= len(m.Streams); i++ {
+				// The index is global — the sixth stream is "stream 6"
+				// wherever it is drawn — so a reader can say which slot a
+				// tile belongs to without counting pages. The "/8" after it
+				// is dropped on a tile too narrow to hold it, which is why
+				// this counts the name alone.
+				seen[i] += headerCount(frame, i)
+			}
+		}
+		for i := 1; i <= 8; i++ {
+			if seen[i] != 1 {
+				t.Errorf("grid %s: stream %d appears on %d pages, want exactly 1", g, i, seen[i])
+			}
+		}
+		if want := (8 + g.cells() - 1) / g.cells(); pages != want {
+			t.Errorf("grid %s: %d pages, want %d", g, pages, want)
+		}
+	}
+
+	// The second page of a 2×2 grid is the back half of the run, by name.
+	m := tileModel(t, 8, midRun, Grid{2, 2}, 1)
+	frame := card.StripANSI(View(m, midRun, tileW, tileH))
+	for _, want := range []string{"stream 5/8", "stream 6/8", "stream 7/8", "stream 8/8"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("page 2 of a 2x2 grid does not show %q:\n%s", want, frame)
+		}
+	}
+	for _, unwanted := range []string{"stream 1/8", "stream 4/8"} {
+		if strings.Contains(frame, unwanted) {
+			t.Errorf("page 2 of a 2x2 grid still shows %q", unwanted)
+		}
+	}
+}
+
+// headerCount is how many stream headers in frame name stream i, matching the
+// index exactly so that "stream 1" never counts "stream 18".
+func headerCount(frame string, i int) int {
+	want := fmt.Sprintf("stream %d", i)
+	n := 0
+	for at := 0; ; {
+		j := strings.Index(frame[at:], want)
+		if j < 0 {
+			return n
+		}
+		j += at
+		rest := frame[j+len(want):]
+		if rest == "" || rest[0] < '0' || rest[0] > '9' {
+			n++
+		}
+		at = j + len(want)
+	}
+}
+
+// TestPageIsClampedAndReversible: the keys can never step off either end, and
+// a page beyond the count renders the last page rather than an empty pane.
+func TestPageIsClampedAndReversible(t *testing.T) {
+	m := tileModel(t, 8, midRun, Grid{2, 2}, 0)
+	if got := m.PageCount(tileW, tileH); got != 2 {
+		t.Fatalf("page count = %d, want 2", got)
+	}
+	if got := m.PageAfter(-1, tileW, tileH); got != 0 {
+		t.Errorf("stepping back from page 1 gave %d, want 0", got)
+	}
+	if got := m.PageAfter(1, tileW, tileH); got != 1 {
+		t.Errorf("stepping forward gave %d, want 1", got)
+	}
+	m.Page = 1
+	if got := m.PageAfter(1, tileW, tileH); got != 1 {
+		t.Errorf("stepping past the last page gave %d, want 1", got)
+	}
+
+	// A page out of range is drawn as the last one, not as nothing.
+	m.Page = 99
+	frame := card.StripANSI(View(m, midRun, tileW, tileH))
+	if !strings.Contains(frame, "stream 8/8") {
+		t.Errorf("a page beyond the end did not fall back to the last page:\n%s", frame)
+	}
+	if !strings.Contains(frame, "page 2/2") {
+		t.Errorf("the footer does not name the clamped page:\n%s", frame)
+	}
+}
+
+// TestFooterNamesThePage: a paginated run says so on the footer, and a run
+// that fits on one page does not spend the room.
+func TestFooterNamesThePage(t *testing.T) {
+	one := View(tileModel(t, 8, midRun, DefaultGrid, 0), midRun, tileW, tileH)
+	if strings.Contains(one, "page 1/1") {
+		t.Error("a single-page run still printed a page indicator")
+	}
+	two := card.StripANSI(View(tileModel(t, 8, midRun, Grid{2, 2}, 0), midRun, tileW, tileH))
+	if !strings.Contains(two, "page 1/2 · ←/→") {
+		t.Errorf("no page indicator on a two-page run:\n%s", two)
+	}
+	// The strip beside it keeps a usable width even at the smallest screen
+	// with the longest hints.
+	m := tileModel(t, 8, doneAt, Grid{2, 2}, 0)
+	small := card.StripANSI(View(m, doneAt, MinWidth, MinHeight))
+	if !strings.Contains(small, "page 1/2") {
+		t.Errorf("no page indicator at the minimum screen:\n%s", small)
+	}
+	if !strings.Contains(small, "c card · p prompt · q quit") {
+		t.Errorf("the key hints were squeezed out at the minimum screen:\n%s", small)
+	}
+}
+
+// TestTileRulesJoinTheFrame: the horizontal rule between two grid rows reaches
+// the frame at both ends, and the column rule crosses it with a junction. A
+// dangling ┼ at an outer edge, or a rule that stops a column short of the
+// border, is the flaw the track contract names.
+func TestTileRulesJoinTheFrame(t *testing.T) {
+	m := tileModel(t, 4, midRun, DefaultGrid, 0)
+	frame := View(m, midRun, tileW, tileH)
+	lines := strings.Split(frame, "\n")
+
+	rules := 0
+	for i, line := range lines[1 : len(lines)-3] {
+		if !strings.Contains(line, "┼") {
+			continue
+		}
+		rules++
+		rs := []rune(line)
+		if rs[0] != '├' {
+			t.Errorf("body row %d starts with %q, want ├", i+1, string(rs[0]))
+		}
+		if !strings.Contains(line, "┤") {
+			t.Errorf("body row %d does not meet the pane separator with ┤: %q", i+1, line)
+		}
+		if rs[len(rs)-1] != '│' {
+			t.Errorf("body row %d ends with %q, want │", i+1, string(rs[len(rs)-1]))
+		}
+	}
+	if rules != 1 {
+		t.Errorf("%d rule rows in a four-stream frame, want 1", rules)
+	}
+
+	// Four streams put a column rule in the bottom grid row, so the divider
+	// under the pane closes it with a ┴ rather than letting it dangle.
+	divider := lines[len(lines)-3]
+	if got := strings.Count(divider, "┴"); got != 2 {
+		t.Errorf("the divider has %d ┴ junctions, want 2 (the pane split and the tile column): %q",
+			got, divider)
+	}
+
+	// Three streams spread the bottom row over the whole pane, so there is no
+	// column rule to close there and the divider keeps the pane split alone.
+	odd := ModelAt(truncatedTape(3), midRun)
+	oddLines := strings.Split(View(odd, midRun, tileW, tileH), "\n")
+	if got := strings.Count(oddLines[len(oddLines)-3], "┴"); got != 1 {
+		t.Errorf("the divider under a spanning bottom tile has %d ┴ junctions, want 1", got)
+	}
+	// Where that spanning row meets the row above it, the rule closes the
+	// column above with ┴ and starts nothing below.
+	joined := false
+	for _, line := range oddLines {
+		if strings.Contains(line, "┴") && strings.HasPrefix(line, "├") {
+			joined = true
+		}
+	}
+	if !joined {
+		t.Error("the rule above a spanning tile does not close the column above it")
+	}
+}
+
+// TestTileFooterIsAlive: every tile ends with its own rate sparkline and its
+// own p50, which is what makes a grid a comparison rather than four copies of
+// the same screen.
+func TestTileFooterIsAlive(t *testing.T) {
+	at := 3 * time.Second
+	m := tileModel(t, 4, at, DefaultGrid, 0)
+	frame := View(m, at, tileW, tileH)
+
+	if got := strings.Count(frame, "tok/s "); got < len(m.Streams) {
+		t.Errorf("%d tok/s labels in the frame, want at least one per tile (%d)", got, len(m.Streams))
+	}
+	if got := strings.Count(frame, "p50 "); got < len(m.Streams) {
+		t.Errorf("%d p50 figures in the frame, want at least one per tile (%d)", got, len(m.Streams))
+	}
+	if !strings.ContainsAny(frame, string(sparkRunes)) {
+		t.Error("no sparkline glyph in a mid-run tile frame")
+	}
+
+	// A stream with no token yet has nothing to plot and says so rather than
+	// printing a zero it never measured (CLAUDE.md).
+	if got := tileFooter(PlainTheme(), Stream{}, 40, false); !strings.Contains(got, "p50 ?") {
+		t.Errorf("an unstarted stream's footer = %q, want an unknown p50", got)
+	}
+
+	// The sparkline scrolls: as the run advances, the tile's cells change.
+	early := tileFooter(PlainTheme(), m.Streams[0], 40, false)
+	later := tileFooter(PlainTheme(), ModelAt(ExampleTapeN(4), 5*time.Second).Streams[0], 40, false)
+	if early == later {
+		t.Error("a tile footer is identical at 3 s and at 5 s; the sparkline does not scroll")
+	}
+}
+
+// TestTileDropsTheFooterBeforeTheAnswer: a tile with no room for a readable
+// answer gives up its sparkline line first and its header never.
+func TestTileDropsTheFooterBeforeTheAnswer(t *testing.T) {
+	m := tileModel(t, 4, midRun, DefaultGrid, 0)
+	s := m.Streams[0]
+	th := PlainTheme()
+
+	roomy := tile(m, th, midRun, s, 41, 8, 0)
+	if len(roomy) != 8 {
+		t.Fatalf("a roomy tile is %d rows, want 8", len(roomy))
+	}
+	if !strings.Contains(roomy[len(roomy)-1], "tok/s") {
+		t.Errorf("a roomy tile has no sparkline footer: %q", roomy[len(roomy)-1])
+	}
+
+	for rows := 1; rows <= 3; rows++ {
+		got := tile(m, th, midRun, s, 41, rows, 0)
+		if len(got) != rows {
+			t.Fatalf("a %d-row tile came back %d rows", rows, len(got))
+		}
+		if !strings.Contains(got[0], "stream 1") {
+			t.Errorf("a %d-row tile dropped its header: %q", rows, got[0])
+		}
+		if strings.Contains(strings.Join(got, "\n"), "p50 ") {
+			t.Errorf("a %d-row tile kept its footer instead of the answer:\n%s", rows, strings.Join(got, "\n"))
+		}
+	}
+}
+
+// TestTileThinkingStates mirrors TestExampleTapeShowsEveryThinkingState for the
+// grid: the badge and the answer marker have to survive the move from a
+// full-width block to a tile, because the hero clip is the four-stream run.
+func TestTileThinkingStates(t *testing.T) {
+	mid := tileModel(t, 4, midRun, DefaultGrid, 0)
+	var thinkingNow, crossed int
+	for _, s := range mid.Streams {
+		if thinkingBadge(s) == "thinking" {
+			thinkingNow++
+		}
+		for _, bl := range streamTextLines(s, 38) {
+			if bl.marker {
+				crossed++
+				break
+			}
+		}
+	}
+	if thinkingNow == 0 {
+		t.Errorf("no stream is thinking at %v", midRun)
+	}
+	if crossed == 0 {
+		t.Errorf("no stream has crossed the answer marker at %v", midRun)
+	}
+
+	frame := View(mid, midRun, tileW, tileH)
+	if !strings.Contains(frame, "· thinking") {
+		t.Errorf("no thinking badge in the tile frame at %v:\n%s", midRun, frame)
+	}
+	if !strings.Contains(frame, answerMarker) {
+		t.Errorf("no %q marker in the tile frame at %v:\n%s", answerMarker, midRun, frame)
+	}
+
+	done := tileModel(t, 4, doneAt, DefaultGrid, 0)
+	var cut int
+	for _, s := range done.Streams {
+		if thinkingBadge(s) == "thinking · cut" {
+			cut++
+		}
+	}
+	if cut != 1 {
+		t.Errorf("%d streams read \"thinking · cut\" at %v, want 1", cut, doneAt)
+	}
+	if got := View(done, doneAt, tileW, tileH); !strings.Contains(got, "thinking · cut") {
+		t.Errorf("no cut badge in the final tile frame:\n%s", got)
+	}
+}
+
+// TestTileHeaderDropsTTFTWhenNarrow: a tile is a fraction of the pane, and a
+// clipped figure reads as a wrong figure. The header gives up the TTFT, then
+// the stream count, and keeps the rate.
+func TestTileHeaderDropsTTFTWhenNarrow(t *testing.T) {
+	m := tileModel(t, 4, midRun, DefaultGrid, 0)
+	s := m.Streams[0]
+	th := PlainTheme()
+
+	wide := streamHeader(m, th, s, 85, true, false)
+	if !strings.Contains(wide, "ttft") {
+		t.Errorf("the full-pane header dropped the ttft: %q", wide)
+	}
+	// A tile at the minimum screen is 31 wide; a badged header at the hero
+	// size is 41 wide with 21 of them already spent on name and state.
+	narrow := []string{
+		streamHeader(m, th, s, 31, true, false),
+		streamHeader(m, th, m.Streams[len(m.Streams)-1], 41, true, false),
+	}
+	for _, got := range narrow {
+		if strings.Contains(got, "ttft") {
+			t.Errorf("a narrow header kept the ttft and must have cut something: %q", got)
+		}
+		if !strings.Contains(got, "tok/s") {
+			t.Errorf("a narrow header dropped the rate: %q", got)
+		}
+	}
+	if !strings.Contains(narrow[1], "· thinking") {
+		t.Errorf("the badged header lost its badge instead of the ttft: %q", narrow[1])
+	}
+	// Nothing may be half-printed at any width the header can be asked for.
+	for w := 12; w <= 85; w++ {
+		got := streamHeader(m, th, s, w, true, false)
+		if width(got) != w {
+			t.Fatalf("header at width %d is %d columns: %q", w, width(got), got)
+		}
+		if strings.Contains(got, "tok/") && !strings.Contains(got, "tok/s") {
+			t.Errorf("header at width %d printed a cut unit: %q", w, got)
+		}
+	}
+}
+
+// TestTileWidthsFillThePane: the tile widths and the rules between them account
+// for every column of the pane, at every column count and every width.
+func TestTileWidthsFillThePane(t *testing.T) {
+	for cw := 20; cw <= 140; cw++ {
+		for k := 1; k <= MaxGridCols; k++ {
+			widths, rules := tileWidths(cw, k)
+			if len(widths) != k {
+				t.Fatalf("tileWidths(%d, %d) gave %d widths", cw, k, len(widths))
+			}
+			if len(rules) != k-1 {
+				t.Fatalf("tileWidths(%d, %d) gave %d rules, want %d", cw, k, len(rules), k-1)
+			}
+			total := tileGutter * (k - 1)
+			for _, w := range widths {
+				if w < 1 {
+					t.Fatalf("tileWidths(%d, %d) gave a tile of %d columns", cw, k, w)
+				}
+				total += w
+			}
+			if total != cw && cw >= k+tileGutter*(k-1) {
+				t.Errorf("tileWidths(%d, %d) covers %d columns", cw, k, total)
+			}
+			// Each rule sits one gutter past the tile before it.
+			at := 0
+			for i, col := range rules {
+				at += widths[i]
+				if col != at+1 {
+					t.Errorf("tileWidths(%d, %d) rule %d at column %d, want %d", cw, k, i, col, at+1)
+				}
+				at += tileGutter
+			}
+		}
+	}
+}
+
+// TestTileHeightsShareTheRemainder: the odd row goes to the top, and the grid
+// spends every row it was given.
+func TestTileHeightsShareTheRemainder(t *testing.T) {
+	tests := []struct {
+		avail, n int
+		want     []int
+	}{
+		{30, 2, []int{15, 15}},
+		{31, 2, []int{16, 15}},
+		{10, 3, []int{4, 3, 3}},
+		{0, 2, []int{0, 0}},
+	}
+	for _, tc := range tests {
+		got := tileHeights(tc.avail, tc.n)
+		if len(got) != len(tc.want) {
+			t.Fatalf("tileHeights(%d, %d) = %v, want %v", tc.avail, tc.n, got, tc.want)
+		}
+		for i := range tc.want {
+			if got[i] != tc.want[i] {
+				t.Errorf("tileHeights(%d, %d) = %v, want %v", tc.avail, tc.n, got, tc.want)
+				break
+			}
+		}
+	}
+}
+
+// TestStreamRatesSkipTheFirstToken: a stream's own sparkline is built from its
+// inter-token gaps, and the gap before the first token is the TTFT — a
+// different measurement, and counting it would draw the prefill as a slow
+// decode (handover lesson 1).
+func TestStreamRatesSkipTheFirstToken(t *testing.T) {
+	s := Stream{Tokens: []Token{
+		{T: 500 * time.Millisecond, ITL: 0},
+		{T: 600 * time.Millisecond, ITL: 100 * time.Millisecond},
+		{T: 650 * time.Millisecond, ITL: 50 * time.Millisecond},
+	}}
+	if got := streamITLs(s); len(got) != 2 || got[0] != 100 || got[1] != 50 {
+		t.Errorf("streamITLs = %v, want [100 50]", got)
+	}
+	got := streamRates(s, 8)
+	if len(got) != 2 || got[0] != 10 || got[1] != 20 {
+		t.Errorf("streamRates = %v, want [10 20] tok/s", got)
+	}
+	if got := streamRates(s, 1); len(got) != 1 || got[0] != 20 {
+		t.Errorf("streamRates(w=1) = %v, want the newest gap alone", got)
+	}
+	if got := streamRates(Stream{}, 8); len(got) != 0 {
+		t.Errorf("streamRates of an unstarted stream = %v, want none", got)
+	}
+}

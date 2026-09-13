@@ -25,6 +25,10 @@ type Options struct {
 	// Colour turns the palette on. Off renders the same layout with no escape
 	// sequences, which is what the golden tests compare.
 	Colour bool
+	// Grid is the largest tile arrangement one page of the answer pane may
+	// use. The zero value lets the screen choose one from the room it has;
+	// the CLI passes tui.DefaultGrid unless --grid says otherwise.
+	Grid Grid
 }
 
 // Run drives the live screen until the context is cancelled, the event channel
@@ -40,7 +44,7 @@ func Run(ctx context.Context, opts Options) error {
 		th = ColourTheme()
 	}
 	p := &program{
-		model:  Model{Theme: th, Mode: ModeLive},
+		model:  Model{Theme: th, Mode: ModeLive, Grid: opts.Grid},
 		events: opts.Events,
 		w:      opts.Width,
 		h:      opts.Height,
@@ -135,6 +139,12 @@ func (p *program) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case p.model.Done:
 				p.model.Mode = ModeCard
 			}
+		case "left", "h", "[":
+			w, h := p.size()
+			p.model.Page = p.model.PageAfter(-1, w, h)
+		case "right", "l", "]":
+			w, h := p.size()
+			p.model.Page = p.model.PageAfter(1, w, h)
 		}
 		return p, nil
 	case tickMsg:
@@ -155,16 +165,24 @@ func (p *program) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return p, nil
 }
 
-func (p *program) View() string {
-	if p.quit {
-		return ""
-	}
-	w, h := p.w, p.h
+// size is the screen the program draws on, before the terminal has said how
+// big it is. Paging asks for it too, because how many pages a run takes
+// depends on how much room the pane has.
+func (p *program) size() (w, h int) {
+	w, h = p.w, p.h
 	if w <= 0 {
 		w = MinWidth
 	}
 	if h <= 0 {
 		h = MinHeight
 	}
+	return w, h
+}
+
+func (p *program) View() string {
+	if p.quit {
+		return ""
+	}
+	w, h := p.size()
 	return View(p.model, p.t, w, h)
 }

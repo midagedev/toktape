@@ -114,6 +114,16 @@ type Model struct {
 
 	Mode  Mode
 	Theme Theme
+
+	// Grid is the largest tile arrangement one page of the answer pane may
+	// use. The zero value chooses one from the room the pane has; ModelAt
+	// sets DefaultGrid, so a replayed tape lays out the way the run did.
+	Grid Grid
+	// Page is which page of tiles is on screen, from zero. It is ordinary
+	// model state rather than something the view remembers, so a replay of a
+	// tape shows the page the model names and the same (m, t) always draws
+	// the same frame.
+	Page int
 }
 
 // ModelAt builds the state of tp as of clip time at: every token, sample and
@@ -122,7 +132,7 @@ type Model struct {
 // This is what makes replay possible (decision 10) — the same function the
 // GIF/mp4 track will step through, frame by frame.
 func ModelAt(tp *tape.Tape, at time.Duration) Model {
-	m := Model{At: at, Mode: ModeLive}
+	m := Model{At: at, Mode: ModeLive, Grid: DefaultGrid}
 	if tp == nil {
 		return m
 	}
@@ -269,6 +279,43 @@ func (m Model) latencySeries(w int) []float64 {
 	// fault sparkline above keeps the mean, because faults per token is a rate
 	// and its average is the quantity the label names.
 	return bucketMaxima(vals, per)
+}
+
+// streamITLs is one stream's inter-token latencies in milliseconds, oldest
+// first.
+//
+// The first token of a stream contributes nothing: its gap is the TTFT, a
+// different measurement, and averaging the two is how a prefill gets counted
+// as decode (handover lesson 1). Unlike latencySeries this is one stream's own
+// history, un-bucketed — a tile is asking about one slot, not about the run.
+func streamITLs(s Stream) []float64 {
+	out := make([]float64, 0, len(s.Tokens))
+	for _, tk := range s.Tokens {
+		if tk.ITL <= 0 {
+			continue
+		}
+		out = append(out, float64(tk.ITL)/float64(time.Millisecond))
+	}
+	return out
+}
+
+// streamRates is the last w instantaneous decode rates of one stream, in
+// tokens per second: the reciprocal of each gap above.
+//
+// A rate rather than a latency because the tile's label is tok/s and the
+// reader is comparing tiles: on a rate sparkline the stall the run took is a
+// dip, and a starving slot is visibly lower than its neighbours. Reading the
+// same picture off latencies would mean inverting it by eye.
+func streamRates(s Stream, w int) []float64 {
+	ms := streamITLs(s)
+	if w > 0 && len(ms) > w {
+		ms = ms[len(ms)-w:]
+	}
+	out := make([]float64, len(ms))
+	for i, v := range ms {
+		out[i] = float64(time.Second/time.Millisecond) / v
+	}
+	return out
 }
 
 // bucketMeans reduces vals to one mean per consecutive group of per values.

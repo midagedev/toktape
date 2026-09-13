@@ -9,112 +9,97 @@ import (
 	"github.com/midagedev/toktape/internal/tape"
 )
 
-// leftPane renders the answers: one block per concurrent stream, each with its
-// own rate and the last few lines of what it has said.
+// paneRow is one row of the answer pane.
 //
-// It always returns exactly rows lines of exactly cw columns.
-func leftPane(m Model, th Theme, t time.Duration, cw, rows int) []string {
-	out := make([]string, 0, rows)
+// Almost every row is plain content that View frames with a space gutter on
+// each side. A rule row is the horizontal line between two rows of tiles: it
+// has to reach the frame on both sides, so View draws its gutters as rule and
+// its borders as junctions instead of as "│".
+type paneRow struct {
+	text string
+	rule bool
+}
+
+// paneLayout is the answer pane, plus what View needs in order to join the
+// pane's own chrome into the frame around it.
+type paneLayout struct {
+	rows []paneRow
+	// vrules are the display columns, inside the pane's content, of the rules
+	// between the tile columns of the bottom grid row; empty when the pane
+	// draws none.
+	vrules []int
+	// vruleAtBottom says those rules reach the pane's last row, which is where
+	// the frame's divider runs and therefore where it needs a ┴.
+	//
+	// There is deliberately no vruleAtTop. The row above the pane is the title
+	// bar, which is not chrome with a gap in it: it carries the run's identity
+	// and the shimmer that sweeps the rest of the rule. At the sizes this
+	// layout is drawn at the model name still covers the rule's column, and
+	// where it does not, a junction would sit in the shimmer's path. Either
+	// way a ┬ there breaks something the reader is looking at, so the column
+	// rule starts at the first tile header instead.
+	vruleAtBottom bool
+
+	// page is the page of tiles drawn, from zero, and pages how many there
+	// are. The footer prints them; View takes them from here rather than
+	// recomputing the grid, so one frame can never disagree with itself.
+	page, pages int
+}
+
+// plainRows wraps content lines that need no junctions.
+func plainRows(lines []string) paneLayout {
+	out := make([]paneRow, len(lines))
+	for i, line := range lines {
+		out[i] = paneRow{text: line}
+	}
+	return paneLayout{rows: out, page: 0, pages: 1}
+}
+
+// leftPane renders the answers as a page of tiles, one tile per concurrent
+// stream, each with its own rate and the last few lines of what it has said.
+//
+// It always returns exactly rows lines of exactly cw columns. The grid is
+// resolved here, from the pane's full height: the done footer comes off
+// afterwards so that a run finishing cannot change the page size.
+func leftPane(m Model, th Theme, t time.Duration, cw, rows int) paneLayout {
 	blank := strings.Repeat(" ", cw)
 
 	if len(m.Streams) == 0 {
-		out = append(out, blank)
 		l := newLine(th, cw)
 		l.add(th.accent, spinnerAt(t)+" ")
 		l.add(th.dim, "waiting for the first request")
-		out = append(out, l.String())
-		return fitRows(out, blank, rows)
+		return plainRows(fitRows([]string{blank, l.String()}, blank, rows))
 	}
 
+	g := m.Grid.resolve(cw, rows)
 	avail := rows
 	var footer []string
 	if m.Done {
 		footer = doneFooter(m, th, cw)
 		avail -= len(footer)
 	}
-
-	n := len(m.Streams)
-	shown, bodyLines, gap := streamLayout(n, avail, m.Done)
-	active := m.activeStream()
-
-	for i := 0; i < shown; i++ {
-		s := m.Streams[i]
-		if i > 0 && gap > 0 {
-			out = append(out, blank)
-		}
-		out = append(out, streamHeader(m, th, s, cw, i == 0 || n > 1, s.Index == active))
-		out = append(out, streamBody(m, th, t, s, cw, bodyLines[i], s.Index == active)...)
-	}
-	if shown < n {
-		l := newLine(th, cw)
-		l.add(th.dim, fmt.Sprintf("  +%d more streams", n-shown))
-		out = append(out, l.String())
-	}
-	out = fitRows(out, blank, avail)
-	return append(out, footer...)
+	return tilePane(m, th, t, g, cw, avail, footer)
 }
 
-// streamLayout decides how many streams to show and how many answer lines each
-// one gets.
+// streamBlock is one stream as both layouts draw it: the header, then rows
+// lines of what it has said.
 //
-// While the run is live every stream gets the same budget — three lines, then
-// two, then one — because a block that grew as its neighbour finished would
-// make the text jump around under the reader's eye. Once the run is over
-// nothing moves again, so the rows are shared out instead and the pane fills
-// with the tail of every answer, the odd rows going to the streams at the top.
-func streamLayout(n, avail int, done bool) (shown int, bodyLines []int, gap int) {
-	switch {
-	case n < 1:
-		return 0, nil, 0
-	case n == 1:
-		return 1, []int{max(1, avail-1)}, 0
-	}
-	// One header per stream comes off the top whatever the state.
-	if body := avail - n; done && body >= n {
-		lines := make([]int, n)
-		base, extra := body/n, body%n
-		for i := range lines {
-			lines[i] = base
-			if i < extra {
-				lines[i]++
-			}
-		}
-		return n, lines, 0
-	}
-	// Live, or a pane too short to give every finished stream a line: answer
-	// lines are worth more than breathing room, so the per-stream budget is
-	// the outer choice and the blank line between blocks is given up first.
-	for k := 3; k >= 1; k-- {
-		for _, g := range []int{1, 0} {
-			if n*(1+k)+(n-1)*g <= avail {
-				return n, uniform(n, k), g
-			}
-		}
-	}
-	shown = avail / 2
-	if shown < 1 {
-		shown = 1
-	}
-	if shown > n {
-		shown = n
-	}
-	if shown < n {
-		shown-- // leave a row for the "+N more" line
-		if shown < 1 {
-			shown = 1
-		}
-	}
-	return shown, uniform(shown, 1), 0
-}
-
-// uniform is the same line budget for every stream.
-func uniform(n, k int) []int {
-	out := make([]int, n)
-	for i := range out {
-		out[i] = k
+// It is the unit the list and the grid are each built from — the list stacks
+// blocks down the pane, the grid puts one inside each tile — so the two can
+// never drift apart on what a stream looks like.
+func streamBlock(m Model, th Theme, t time.Duration, s Stream, cw, rows int, showIndex, active bool) []string {
+	out := make([]string, 0, rows+1)
+	out = append(out, streamHeader(m, th, s, cw, showIndex, active))
+	if rows > 0 {
+		out = append(out, streamBody(m, th, t, s, cw, rows, active)...)
 	}
 	return out
 }
+
+// maxBadgeW is the width of the widest thinkingBadge, separator included. The
+// header reserves it whatever the stream is doing, so its shape does not
+// change when a model starts or stops thinking.
+var maxBadgeW = width(" · thinking · cut")
 
 // streamHeader is "stream 3/8" on the left and this stream's own rate on the
 // right. The per-stream rate is the point of the concurrent view: an aggregate
@@ -128,20 +113,23 @@ func streamHeader(m Model, th Theme, s Stream, cw int, showIndex, active bool) s
 	if active {
 		label = th.accentBold
 	}
+	name, total := "stream", ""
 	if showIndex {
-		l.add(label, fmt.Sprintf("stream %d", s.Index+1))
-		l.add(th.dim, fmt.Sprintf("/%d", len(m.Streams)))
-	} else {
-		l.add(label, "stream")
+		name = fmt.Sprintf("stream %d", s.Index+1)
+		total = fmt.Sprintf("/%d", len(m.Streams))
 	}
 	// The badge sits with the stream's name rather than with its rate: it says
 	// what the stream is doing, not how fast. Dim, because it is a state
 	// label, and absent the moment an answer token arrives.
-	if badge := thinkingBadge(s); badge != "" {
-		l.add(th.dim, " · "+badge)
+	badge := thinkingBadge(s)
+	if badge != "" {
+		badge = " · " + badge
 	}
 
-	var plain, kind string
+	// plain is the figure on the right of the header; short is the same figure
+	// with everything but the rate dropped, for a header too narrow to hold
+	// both (a tile is half the width of the list pane).
+	var plain, short, kind string
 	switch {
 	case s.Err != "":
 		plain, kind = "failed", "bad"
@@ -163,7 +151,32 @@ func streamHeader(m Model, th Theme, s Stream, cw int, showIndex, active bool) s
 		if s.Timings.TTFTMs <= 0 && len(s.Tokens) > 0 {
 			ttft = fmtMs(msOf(s.Tokens[0].T - s.StartedAt))
 		}
-		plain, kind = rate+" tok/s · ttft "+ttft, "rate"
+		plain, short, kind = rate+" tok/s · ttft "+ttft, rate+" tok/s", "rate"
+	}
+	// What the header gives up when it runs out of room, in order: the TTFT,
+	// then the stream count, then the figure itself. Nothing is ever cut in
+	// half — a clipped number reads as a wrong number — and the stream's own
+	// name always survives, because it is the only thing naming the block.
+	//
+	// The TTFT decision is taken against the widest badge this stream could
+	// ever wear, not the one it wears now. Otherwise a tile would reflow the
+	// instant its model started to think, and four tiles of one run would
+	// print the same figure in two different shapes.
+	if kind == "rate" && width(name)+width(total)+maxBadgeW+1+width(plain) > cw {
+		plain = short
+	}
+	if total != "" && width(name)+width(total)+width(badge)+1+width(plain) > cw {
+		total = ""
+	}
+	if width(name)+width(badge)+1+width(plain) > cw {
+		plain = ""
+	}
+
+	l.add(label, name)
+	l.add(th.dim, total)
+	l.add(th.dim, badge)
+	if plain == "" {
+		return l.String()
 	}
 	l.gapTo(width(plain) + 1)
 	l.space(1)
@@ -286,7 +299,20 @@ func prefillLine(th Theme, t time.Duration, s Stream, cw, indent int, active boo
 		return l.String()
 	}
 	p := s.Progress[len(s.Progress)-1]
-	tail := fmt.Sprintf(" %d/%d · cache %d", p.Processed, p.Total, p.Cache)
+	// The counts are dropped a part at a time rather than cut: "cache 1" is
+	// not a smaller truth than "cache 128", it is a different and wrong one.
+	// A tile is a fraction of the pane, so this line has to survive widths the
+	// full-pane layout never asked it for.
+	tail := ""
+	for _, cand := range []string{
+		fmt.Sprintf(" %d/%d · cache %d", p.Processed, p.Total, p.Cache),
+		fmt.Sprintf(" %d/%d", p.Processed, p.Total),
+	} {
+		if width(cand) <= l.left() {
+			tail = cand
+			break
+		}
+	}
 	barW := prefillBarW
 	if room := l.left() - width(tail); barW > room {
 		barW = room

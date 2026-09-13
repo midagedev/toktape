@@ -1,0 +1,36 @@
+┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────┐
+│ stream 1/8                     12.1 tok/s │ stream 2/8                     12.0 tok/s │ PLACEMENT ────────────────── │
+│ ▏ The page fault spike you are seeing     │ ▏ 이건 배치 문제인지 대역폭 문제인지      │ GPU0 ███████████████    9.4G │
+│ ▏ is the expert tensors being read back   │ ▏ 먼저 갈라야 한다. 전문가 텐서가         │ GPU1 ███████████████    9.6G │
+│ ▏ from NVMe.▍                             │ ▏ ▸ answer                                │ CPU  ███████████████    6.3G │
+│                                           │ ▏ 레이어 배치를 바꾸면 디코드 속도가▍     │ vram ███████████████   17.4G │
+│                                           │                                           │      █ weights  █ kv  █ buf  │
+│                                           │                                           │ never loaded           84.6G │
+│ ▏ tok/s        █▆▇▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │ ▏ tok/s         ▆▇▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │                              │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ MEMORY ───────────────────── │
+│ stream 3/8                     12.1 tok/s │ stream 4/8                     12.2 tok/s │ rss       9.0G file     8.3G │
+│ ▏ Flash attention changes the compute     │ ▏ Prefix caching only helps when the      │ virt     40.0G anon     1.1G │
+│ ▏ buffer size, not the weights. When      │ ▏ system prompt is byte identical. A      │ maj/tok                  0.0 │
+│ ▏ the buffer grows past▍                  │ ▏ single changed character▍               │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│                                           │                                           │                              │
+│                                           │                                           │ SPEED ────────────────────── │
+│ ▏ tok/s         ▇▇█▆▇▇█▆▇▇█▆▇▇  p50 79 ms │ ▏ tok/s         ▇█▆▇▇█▆▇▇█▆▇▇█  p50 79 ms │ prefill           2253 tok/s │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ decode            12.1 tok/s │
+│ stream 5/8 · thinking          12.2 tok/s │ stream 6/8                     12.0 tok/s │ ttft      330 ms · 25% cache │
+│ ▏ 측정이 흔들린다고 했으니 먼저 기계가    │ ▏ The aggregate rate is what the server   │ 8 streams     97.0 tok/s agg │
+│ ▏ 조용했는지 묻는 게 맞다. 잡음이         │ ▏ does; the per stream rate is what▍      │                              │
+│ ▏ 신호보다 크면 나머지 숫자는▍            │                                           │ HOST ─────────────────────── │
+│                                           │                                           │ load     4.9 · contended yes │
+│                                           │                                           │ GPU0         61°C  292W  90% │
+│ ▏ tok/s          █▆▇▇█▆▇▇█▆▇▇█  p50 79 ms │ ▏ tok/s          ▆▇▇█▆▇▇█▆▇▇█▆  p50 86 ms │ GPU1         61°C  292W  90% │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
+│ stream 7/8 · thinking          12.1 tok/s │ stream 8/8                     12.1 tok/s │                              │
+│ ▏ Speculative decoding, acceptance        │ ▏ RSS is not loaded. Under mmap the       │                              │
+│ ▏ rate. I need the break even point       │ ▏ resident set is what this process▍      │                              │
+│ ▏ before I can▍                           │                                           │                              │
+│                                           │                                           │                              │
+│                                           │                                           │                              │
+│ ▏ tok/s           ▇▇█▆▇▇█▆▇▇█▆  p50 79 ms │ ▏ tok/s           ▇█▆▇▇█▆▇▇█▆▇  p50 79 ms │                              │
+├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
+│ token latency                                                           █▏▏▏████▏▏▏▏██  p50 91 ms  q quit · p prompt │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

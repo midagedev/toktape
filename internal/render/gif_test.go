@@ -275,8 +275,14 @@ func TestGIFOfTheWholeClipStaysPostable(t *testing.T) {
 	if err := GIF(tui.ExampleTape(), Options{}, out); err != nil {
 		t.Fatalf("GIF: %v", err)
 	}
-	if got := fileSize(t, out); got > 1_500_000 {
-		t.Errorf("the clip is %d bytes, want under 1.5 MB", got)
+	// Re-pinned 1.5 → 2.0 MB by the lead on 2026-09-13 (TTP-24): the tile
+	// layout gives each of the eight streams its own scrolling sparkline, so
+	// more pixels change per frame. FAIL-first: the same clip measured
+	// 1,521,741 bytes against the old 1.5 MB bound (list layout: 1.22 MB).
+	// 2 MB is still a comfortable Reddit/GitHub embed; the README hero has
+	// its own 1.5 MB cap in cmd/toktape (four streams, 0.87 MB).
+	if got := fileSize(t, out); got > 2_000_000 {
+		t.Errorf("the clip is %d bytes, want under 2.0 MB", got)
 	}
 }
 

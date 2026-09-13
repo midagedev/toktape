@@ -1,0 +1,36 @@
+┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────┐
+│ stream 1/4                     11.3 tok/s │ stream 2/4                     11.3 tok/s │ PLACEMENT ────────────────── │
+│ ▏ The page fault spike you are seeing     │ ▏ 토큰마다 PCIe를 건너야 하고, 페이지     │ GPU0 ███████████████   10.3G │
+│ ▏ is the expert tensors being read back   │ ▏ 캐시에서 밀려난 텐서는 NVMe까지         │ GPU1 ███████████████   10.5G │
+│ ▏ from NVMe. With twelve MoE layers       │ ▏ 내려간다. 스파크라인이 튀는 구간이      │ CPU  ███████████████    6.3G │
+│ ▏ pinned to the CPU the router picks      │ ▏ 정확히 그 지점이다. 레이어 배치를       │ vram ███████████████   17.4G │
+│ ▏ eight experts per token, and any        │ ▏ 바꾸면 디코드 속도가 달라지는 이유는    │      █ weights  █ kv  █ buf  │
+│ ▏ expert that fell out of the page        │ ▏ 간단하다. 전문가 텐서가 호스트          │ never loaded           84.6G │
+│ ▏ cache has to come back over PCIe        │ ▏ 메모리에 남아 있으면 토큰마다 PCIe를    │                              │
+│ ▏ before the next token can be emitted.   │ ▏ 건너야 하고, 페이지 캐시에서 밀려난     │ MEMORY ───────────────────── │
+│ ▏ That is the gap in the latency strip.   │ ▏ 텐서는 NVMe까지 내려간다.               │ rss      13.9G file    12.9G │
+│ ▏ The page fault spike you are seeing     │ ▏ 스파크라인이 튀는 구간이 정확히 그      │ virt     40.0G anon     1.1G │
+│ ▏ is the expert tensors being read back   │ ▏ 지점이다. 레이어 배치를 바꾸면 디코드   │ maj/tok                  0.1 │
+│ ▏ from NVMe. With twelve                  │ ▏ 속도가 달라지는 이유는 간단하다.        │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│                                           │ ▏ 전문가 텐서가                           │                              │
+│ ▏ tok/s ▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇  p50 86 ms │ ▏ tok/s ▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇  p50 86 ms │ SPEED ────────────────────── │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ prefill           1980 tok/s │
+│ stream 3/4                     11.3 tok/s │ stream 4/4 · thinking · cut    11.3 tok/s │ decode            11.3 tok/s │
+│ ▏ buffers, I am                           │ ▏ not realise the whole prefix went       │ ttft      210 ms · 25% cache │
+│ ▏ ▸ answer                                │ ▏ with it. I should say what              │ 4 streams     45.3 tok/s agg │
+│ ▏ Flash attention changes the compute     │ ▏ invalidates it before I say what it     │                              │
+│ ▏ buffer size, not the weights. When      │ ▏ costs. Prefix caching. The user         │ HOST ─────────────────────── │
+│ ▏ the buffer grows past the free VRAM     │ ▏ probably changed the system prompt      │ load    12.2 · contended yes │
+│ ▏ the fit pass silently moves a block     │ ▏ and does not realise the whole prefix   │ GPU0         71°C  339W  99% │
+│ ▏ of experts to host RAM, and the         │ ▏ went with it. I should say what         │ GPU1         71°C  339W  99% │
+│ ▏ decode rate halves without a single     │ ▏ invalidates it before I say what it     │                              │
+│ ▏ line in the log to say so. Flash        │ ▏ costs. Prefix caching. The user         │                              │
+│ ▏ attention changes the compute buffer    │ ▏ probably changed the system prompt      │                              │
+│ ▏ size, not the weights. When the         │ ▏ and does not realise the whole prefix   │                              │
+│ ▏ buffer grows past the free VRAM the     │ ▏ went with                               │                              │
+│ ▏ tok/s ▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█  p50 86 ms │ ▏ tok/s █▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆  p50 86 ms │                              │
+│                                                                                       │                              │
+│ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card    │                              │
+├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
+│ token latency ▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏  p50 91 ms  c card · p prompt · q quit │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

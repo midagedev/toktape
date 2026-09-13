@@ -27,6 +27,15 @@ const tuiQueue = 8192
 // it with a pipe so the quit key can be delivered without a PTY.
 var tuiInput io.Reader
 
+// recordGrid is the tile grid --grid asked for, left here by runRecord.
+//
+// It is a package var for the same reason recordLabels is one: recordTUI's
+// signature is called from record.go, and threading one more argument through
+// would change a shape this track does not own. One invocation records one
+// run, and runRecord always assigns it, so nothing leaks between two Run calls
+// in the same process.
+var recordGrid = tui.DefaultGrid
+
 // recordTUI runs the recorder under the live screen.
 //
 // The recorder owns a goroutine, the screen owns the terminal, and they meet
@@ -81,7 +90,9 @@ func recordTUI(ctx context.Context, stdout, stderr io.Writer, opts recorder.Opti
 		res <- result{tp: tp, arts: arts, err: saveErr}
 	}()
 
-	screenErr := tui.Run(ctx, tui.Options{Events: events, Out: stdout, In: tuiInput, Colour: true})
+	screenErr := tui.Run(ctx, tui.Options{
+		Events: events, Out: stdout, In: tuiInput, Colour: true, Grid: recordGrid,
+	})
 	cancel()
 	r := <-res
 

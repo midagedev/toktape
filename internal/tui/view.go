@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -46,12 +47,23 @@ func View(m Model, t time.Duration, w, h int) string {
 
 	var body []string
 	split := m.Err == ""
+	var pane paneLayout
 	if split {
-		left := leftPane(m, th, t, leftW-2, bodyH)
+		pane = leftPane(m, th, t, leftW-2, bodyH)
 		right := rightPane(m, th, t, rightW-2, bodyH)
 		bar := th.paint(th.dim, "│")
 		for i := 0; i < bodyH; i++ {
-			body = append(body, bar+" "+left[i]+" "+bar+" "+right[i]+" "+bar)
+			row := pane.rows[i]
+			// A tile rule runs the full width of the answer pane, gutters
+			// included, and lands on the frame at both ends: ├ on the outer
+			// border and ┤ where the pane separator carries on past it.
+			lb, rb, gutter := bar, bar, " "
+			if row.rule {
+				lb = th.paint(th.dim, "├")
+				rb = th.paint(th.dim, "┤")
+				gutter = th.paint(th.dim, "─")
+			}
+			body = append(body, lb+gutter+row.text+gutter+rb+" "+right[i]+" "+bar)
 		}
 		if m.Mode == ModePrompt {
 			overlayPrompt(m, th, body, inner)
@@ -71,13 +83,19 @@ func View(m Model, t time.Duration, w, h int) string {
 	divider := "├" + repeat('─', leftW) + "┴" + repeat('─', rightW) + "┤"
 	if !split {
 		divider = "├" + repeat('─', inner) + "┤"
+	} else if pane.vruleAtBottom {
+		// The tile column rules end on this line. Content column c sits two
+		// columns into the frame: the border, then the pane's gutter.
+		for _, c := range pane.vrules {
+			divider = spliceRune(divider, c+2, '┴')
+		}
 	}
 
 	lines := make([]string, 0, h)
 	lines = append(lines, topBorder(m, th, t, inner))
 	lines = append(lines, body...)
 	lines = append(lines, th.paint(th.dim, divider))
-	lines = append(lines, th.paint(th.dim, "│")+" "+footerLine(m, th, inner-2)+" "+th.paint(th.dim, "│"))
+	lines = append(lines, th.paint(th.dim, "│")+" "+footerLine(m, th, inner-2, pane.page, pane.pages)+" "+th.paint(th.dim, "│"))
 	lines = append(lines, th.paint(th.dim, "└"+repeat('─', inner)+"┘"))
 	return strings.Join(lines, "\n")
 }
@@ -169,7 +187,7 @@ func titleSegments(m Model) []titleSeg {
 // window's p95 (spec §3.2 S3), so a stall reads as a thick block among
 // hairlines. The p50 of the same window is printed beside it: the strip says
 // how even the stream is, and that number says what "even" costs.
-func footerLine(m Model, th Theme, w int) string {
+func footerLine(m Model, th Theme, w, page, pages int) string {
 	l := newLine(th, w)
 	hints := "q quit · p prompt"
 	switch {
@@ -182,10 +200,30 @@ func footerLine(m Model, th Theme, w int) string {
 	}
 	hintW := width(hints)
 
+	// Where the run takes more than one page of tiles, the footer says which
+	// page is up and how to move. Its room is reserved whenever there is more
+	// than one page, not only when the hint happens to be drawn, so the strip
+	// beside it keeps one width for the whole run.
+	paging := ""
+	if pages > 1 {
+		paging = fmt.Sprintf("page %d/%d · ←/→", page+1, pages)
+	}
+
 	l.add(th.dim, "token latency ")
 	series := m.latencySeries(l.left())
 	median := "p50 " + fmtMs(percentile(series, 0.5))
-	stripW := l.left() - width(median) - hintW - 4
+	pagingW := 0
+	if paging != "" {
+		pagingW = width(paging) + 2
+	}
+	stripW := l.left() - width(median) - pagingW - hintW - 4
+	if stripW < minStripW && paging != "" {
+		// Too tight for the keys; the page number is the half that says
+		// something the reader cannot work out for themselves.
+		paging = fmt.Sprintf("page %d/%d", page+1, pages)
+		stripW += pagingW - (width(paging) + 2)
+		pagingW = width(paging) + 2
+	}
 	cells := LatencyStrip(m.latencySeries(stripW), stripW)
 	// The newest token is pinned to the right-hand end, so the strip scrolls
 	// left under a fixed edge instead of growing out of the label.
@@ -193,10 +231,18 @@ func footerLine(m Model, th Theme, w int) string {
 	writeCells(l, th, cells, th.accent)
 	l.space(2)
 	l.add(th.dim, median)
+	if paging != "" {
+		l.space(2)
+		l.add(th.dim, paging)
+	}
 	l.gapTo(hintW)
 	l.add(th.dim, hints)
 	return l.String()
 }
+
+// minStripW is the narrowest token-latency strip worth drawing. Below it the
+// strip stops being a shape and becomes a smudge.
+const minStripW = 20
 
 // writeCells appends sparkline or strip cells, painting each severity in its
 // own colour. Runs of one colour are emitted as a single styled segment so a
