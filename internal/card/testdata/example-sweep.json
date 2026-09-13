@@ -1,0 +1,422 @@
+{
+  "id": "20260913-173512-deepseek-v4-1-flash-q4-k",
+  "toktape_version": "0.1.0",
+  "started_at": "2026-09-13T17:35:12Z",
+  "finished_at": "2026-09-13T17:36:43.232Z",
+  "server": {
+    "kind": "ik_llama.cpp",
+    "url": "http://127.0.0.1:8080",
+    "commit": "7b79b229",
+    "pid": 51402,
+    "host": "workstation",
+    "args": [
+      "/usr/local/bin/llama-server",
+      "-m",
+      "/models/DeepSeek-V4.1-Flash-Q4_K_M.gguf",
+      "-md",
+      "/models/drafts/DSpark-0.6B-Q8_0.gguf",
+      "--draft-max",
+      "3",
+      "--draft-min",
+      "1",
+      "-c",
+      "16384",
+      "--parallel",
+      "4",
+      "-ngl",
+      "99",
+      "-ncmoe",
+      "48",
+      "-fa",
+      "on",
+      "-b",
+      "2048",
+      "-ub",
+      "512",
+      "-ctk",
+      "q8_0",
+      "-ctv",
+      "q8_0",
+      "-t",
+      "16"
+    ],
+    "flags": {
+      "ngl": "99",
+      "fa": "on",
+      "b": "2048",
+      "ub": "512",
+      "ctk": "q8_0",
+      "ctv": "q8_0",
+      "cpu_moe": "48",
+      "t": "16",
+      "model_draft": "DSpark-0.6B-Q8_0.gguf",
+      "draft_max": "3",
+      "draft_min": "1"
+    },
+    "n_slots": 4,
+    "ctx_size": 16384
+  },
+  "model": {
+    "path": "/models/DeepSeek-V4.1-Flash-Q4_K_M.gguf",
+    "file_name": "DeepSeek-V4.1-Flash-Q4_K_M.gguf",
+    "name": "DeepSeek V4.1 Flash",
+    "arch": "deepseek2",
+    "quant": "Q4_K_M",
+    "file_bytes": 49392123904,
+    "params": 81400000000,
+    "n_layers": 48,
+    "n_experts": 128,
+    "n_experts_used": 8,
+    "ctx_train": 131072,
+    "active_bytes_per_token": 6720000000
+  },
+  "host": {
+    "hostname": "workstation",
+    "os": "linux",
+    "kernel": "6.8.0-45-generic",
+    "cpu": "AMD Ryzen 9 7950X",
+    "cpu_cores": 16,
+    "cpu_threads": 32,
+    "ram_bytes": 68719476736,
+    "ram_speed": "DDR5-6000",
+    "ram_channels": 2,
+    "gpus": [
+      {
+        "index": 0,
+        "name": "NVIDIA GeForce RTX 3090",
+        "vram_bytes": 25769803776,
+        "driver": "550.54.14",
+        "pcie": "4.0 x16",
+        "peak_bw_bps": 936200000000
+      },
+      {
+        "index": 1,
+        "name": "NVIDIA GeForce RTX 3090",
+        "vram_bytes": 25769803776,
+        "driver": "550.54.14",
+        "pcie": "4.0 x16",
+        "peak_bw_bps": 936200000000
+      }
+    ]
+  },
+  "placement": {
+    "devices": [
+      {
+        "device": "GPU0",
+        "bytes": 3650722201,
+        "classes": {
+          "attention": 1610612736,
+          "embeddings": 2040109465
+        },
+        "layers": "0-23 attn"
+      },
+      {
+        "device": "GPU1",
+        "bytes": 3543348019,
+        "classes": {
+          "attention": 1610612736,
+          "output": 1932735283
+        },
+        "layers": "24-47 attn"
+      },
+      {
+        "device": "CPU",
+        "bytes": 42198053684,
+        "classes": {
+          "experts": 42198053684
+        },
+        "layers": "0-47 experts"
+      }
+    ],
+    "never_loaded_bytes": 0,
+    "source": "gguf+args",
+    "vram_weights_bytes": 7194070220,
+    "vram_kv_bytes": 2576980378,
+    "vram_compute_bytes": 1503238554
+  },
+  "memory": {
+    "at_end": {
+      "virt_bytes": 53687091200,
+      "rss_bytes": 45204530790,
+      "rss_file_bytes": 44238163149,
+      "rss_anon_bytes": 966367642,
+      "rss_shmem_bytes": 0,
+      "swap_bytes": 0,
+      "maj_faults": 0,
+      "min_faults": 2148302
+    },
+    "peak_rss_bytes": 45204530790,
+    "mapped_file_bytes": 49392123904,
+    "maj_faults_total": 0,
+    "maj_faults_prompt": 0,
+    "maj_faults_decode": 0,
+    "maj_faults_per_token": 0
+  },
+  "concurrency": 4,
+  "timings": {
+    "prompt_n": 384,
+    "cache_n": 128,
+    "prompt_ms": 470,
+    "prompt_per_second": 817,
+    "predicted_n": 86,
+    "predicted_ms": 6825.5,
+    "predicted_per_second": 14.741666666666667,
+    "draft_n": 7560,
+    "draft_n_accepted": 2248,
+    "ttft_ms": 640,
+    "client_prompt_per_second": 809,
+    "client_predicted_per_second": 14.67,
+    "client_agrees_with_server": true,
+    "decode_label": "decode",
+    "itl_p50_ms": 69.3,
+    "itl_p95_ms": 76.5,
+    "itl_p99_ms": 93.5,
+    "effective_bw_bps": 99064000000
+  },
+  "aggregate": {
+    "streams": 4,
+    "wall_ms": 90902,
+    "total_prompt_n": 18432,
+    "total_predicted_n": 4146,
+    "aggregate_predicted_per_second": 49.818411035840334,
+    "aggregate_prompt_per_second": 2130,
+    "per_stream_predicted_per_second": 14.741666666666667,
+    "ttft_p50_ms": 640,
+    "ttft_p95_ms": 720,
+    "slots_busy_max": 4
+  },
+  "rounds": 12,
+  "per_round": [
+    {
+      "index": 0,
+      "spec_n_max": 3,
+      "name": "sql-1",
+      "streams": 4,
+      "per_stream_predicted_per_second": 19.3,
+      "aggregate_predicted_per_second": 77.2,
+      "predicted_n": 271,
+      "ttft_p50_ms": 620,
+      "draft_n": 225,
+      "draft_n_accepted": 196
+    },
+    {
+      "index": 1,
+      "spec_n_max": 3,
+      "name": "sql-2",
+      "streams": 4,
+      "per_stream_predicted_per_second": 18.4,
+      "aggregate_predicted_per_second": 73.6,
+      "predicted_n": 279,
+      "ttft_p50_ms": 630,
+      "draft_n": 240,
+      "draft_n_accepted": 199
+    },
+    {
+      "index": 2,
+      "spec_n_max": 3,
+      "name": "prose-1",
+      "streams": 4,
+      "per_stream_predicted_per_second": 9.1,
+      "aggregate_predicted_per_second": 36.4,
+      "predicted_n": 417,
+      "ttft_p50_ms": 660,
+      "draft_n": 900,
+      "draft_n_accepted": 117
+    },
+    {
+      "index": 3,
+      "spec_n_max": 3,
+      "name": "prose-2",
+      "streams": 4,
+      "per_stream_predicted_per_second": 10.2,
+      "aggregate_predicted_per_second": 40.8,
+      "predicted_n": 456,
+      "ttft_p50_ms": 650,
+      "draft_n": 840,
+      "draft_n_accepted": 176
+    },
+    {
+      "index": 4,
+      "spec_n_max": 3,
+      "name": "code-1",
+      "streams": 4,
+      "per_stream_predicted_per_second": 15.6,
+      "aggregate_predicted_per_second": 62.4,
+      "predicted_n": 321,
+      "ttft_p50_ms": 640,
+      "draft_n": 330,
+      "draft_n_accepted": 211
+    },
+    {
+      "index": 5,
+      "spec_n_max": 3,
+      "name": "chat-1",
+      "streams": 4,
+      "per_stream_predicted_per_second": 14,
+      "aggregate_predicted_per_second": 56,
+      "predicted_n": 329,
+      "ttft_p50_ms": 640,
+      "draft_n": 360,
+      "draft_n_accepted": 209
+    },
+    {
+      "index": 6,
+      "spec_n_max": 5,
+      "name": "sql-1",
+      "streams": 4,
+      "per_stream_predicted_per_second": 20.9,
+      "aggregate_predicted_per_second": 83.6,
+      "predicted_n": 271,
+      "ttft_p50_ms": 620,
+      "draft_n": 290,
+      "draft_n_accepted": 213
+    },
+    {
+      "index": 7,
+      "spec_n_max": 5,
+      "name": "sql-2",
+      "streams": 4,
+      "per_stream_predicted_per_second": 20,
+      "aggregate_predicted_per_second": 80,
+      "predicted_n": 279,
+      "ttft_p50_ms": 630,
+      "draft_n": 310,
+      "draft_n_accepted": 217
+    },
+    {
+      "index": 8,
+      "spec_n_max": 5,
+      "name": "prose-1",
+      "streams": 4,
+      "per_stream_predicted_per_second": 8,
+      "aggregate_predicted_per_second": 32,
+      "predicted_n": 417,
+      "ttft_p50_ms": 660,
+      "draft_n": 1650,
+      "draft_n_accepted": 87
+    },
+    {
+      "index": 9,
+      "spec_n_max": 5,
+      "name": "prose-2",
+      "streams": 4,
+      "per_stream_predicted_per_second": 9.2,
+      "aggregate_predicted_per_second": 36.8,
+      "predicted_n": 456,
+      "ttft_p50_ms": 650,
+      "draft_n": 1500,
+      "draft_n_accepted": 156
+    },
+    {
+      "index": 10,
+      "spec_n_max": 5,
+      "name": "code-1",
+      "streams": 4,
+      "per_stream_predicted_per_second": 16.8,
+      "aggregate_predicted_per_second": 67.2,
+      "predicted_n": 321,
+      "ttft_p50_ms": 640,
+      "draft_n": 440,
+      "draft_n_accepted": 233
+    },
+    {
+      "index": 11,
+      "spec_n_max": 5,
+      "name": "chat-1",
+      "streams": 4,
+      "per_stream_predicted_per_second": 15.4,
+      "aggregate_predicted_per_second": 61.6,
+      "predicted_n": 329,
+      "ttft_p50_ms": 640,
+      "draft_n": 475,
+      "draft_n_accepted": 234
+    }
+  ],
+  "spec_n_max": [
+    3,
+    5
+  ],
+  "by_spec_n_max": [
+    {
+      "n_max": 3,
+      "rounds": 6,
+      "spread": {
+        "per_stream_predicted_per_second": {
+          "median": 14.8,
+          "min": 9.1,
+          "max": 19.3
+        },
+        "draft_accept_rate": {
+          "median": 0.6099747474747474,
+          "min": 0.13,
+          "max": 0.8711111111111111
+        }
+      }
+    },
+    {
+      "n_max": 5,
+      "rounds": 6,
+      "spread": {
+        "per_stream_predicted_per_second": {
+          "median": 16.1,
+          "min": 8,
+          "max": 20.9
+        },
+        "draft_accept_rate": {
+          "median": 0.5110885167464114,
+          "min": 0.05272727272727273,
+          "max": 0.7344827586206897
+        }
+      }
+    }
+  ],
+  "spread": {
+    "per_stream_predicted_per_second": {
+      "median": 15.5,
+      "min": 8,
+      "max": 20.9
+    },
+    "draft_accept_rate": {
+      "median": 0.555050505050505,
+      "min": 0.05272727272727273,
+      "max": 0.8711111111111111
+    }
+  },
+  "cache": {
+    "hit_tokens": 128,
+    "prompt_total": 512,
+    "hit_ratio": 0.25,
+    "label": "warm"
+  },
+  "contention": {
+    "contended": false,
+    "loadavg1": 5.4,
+    "other_gpu_procs": 0
+  },
+  "template": {
+    "chat_template": "deepseek3",
+    "rendered_has_think_close": false,
+    "rendered_prompt_sha256": "3d81f04ac6b25e79f0a1c8d3b6e5074a2c9f1b8d4e6a03157c2d9b4f6e8a0135",
+    "rendered_prompt_tokens": 512
+  },
+  "gpus_at_end": [
+    {
+      "index": 0,
+      "used_bytes": 6657199309,
+      "proc_bytes": 6442450944,
+      "util_pct": 88,
+      "temp_c": 64,
+      "power_w": 240,
+      "clock_mhz": 1830
+    },
+    {
+      "index": 1,
+      "used_bytes": 5690831667,
+      "proc_bytes": 5476083302,
+      "util_pct": 84,
+      "temp_c": 61,
+      "power_w": 225,
+      "clock_mhz": 1815
+    }
+  ]
+}

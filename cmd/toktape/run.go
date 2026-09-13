@@ -40,6 +40,7 @@ Record flags:
   --prompt TEXT         prompt to send; repeatable, cycled to fill -n
   --prompts FILE        a JSONL file: each line is one round of -n streams,
                         run in order into one tape
+  --spec-n-max LIST     run the prompt set once per speculative.n_max (e.g. 3,5)
   --n-predict N         max tokens per stream (default 256)
   --out DIR             where run files are written (default ~/.toktape/runs)
   --tag TEXT            label this run for the experiment log (e.g. ngl=40)

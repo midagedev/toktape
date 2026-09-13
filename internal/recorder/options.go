@@ -85,6 +85,11 @@ type Options struct {
 	// prompts, the rounds run strictly one after another, and all of them
 	// land in one tape. Empty means exactly one round of Prompts.
 	Rounds []Round
+	// SpecNMax, when non-empty, runs the prompt set once per value with
+	// "speculative.n_max" set on every request (TTP-35): Rounds, or the one
+	// round of Prompts, are repeated per value in order, and a server whose
+	// argv was read and names no draft model runs only the first value.
+	SpecNMax []int
 	// Concurrency is the number of streams sent at once. 0 or less means 1,
 	// or len(Prompts) when prompts were supplied, or the longest round's
 	// prompt count when Rounds were.

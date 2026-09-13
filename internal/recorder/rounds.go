@@ -297,6 +297,8 @@ func reduceRounds(recs []tape.RequestRecord, names []string, streams int) (tape.
 			AggregatePredictedPerSecond: a.AggregatePredictedPerSecond,
 			PredictedN:                  a.TotalPredictedN,
 			TTFTp50Ms:                   a.TTFTp50Ms,
+			// The n_max a sweep sent this round with (TTP-35); 0 otherwise.
+			SpecNMax: roundSpecNMax(rr),
 		}
 		// representativeTimings returns a lone record's own Timings, whose
 		// draft pointers are that record's; the round gets new ints so writing

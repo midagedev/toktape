@@ -297,6 +297,9 @@ func metaChanges(a, b *tape.RunSummary) []Change {
 		// that moved says nothing if the draft moved with it.
 		{"draft model", a.Server.Flags.DraftModel, b.Server.Flags.DraftModel},
 		{"draft n_max", a.Server.Flags.DraftMax, b.Server.Flags.DraftMax},
+		// Which block sizes a --spec-n-max sweep ran (TTP-35): the per-value
+		// lines of two sweeps compare only over the same values.
+		{"spec n_max", specNMaxList(a), specNMaxList(b)},
 		{"ctx", itoa(a.Server.CtxSize), itoa(b.Server.CtxSize)},
 		{"streams", itoa(a.Concurrency), itoa(b.Concurrency)},
 		// How many prompts the figures are over (TTP-31): a rate that moved
@@ -310,6 +313,20 @@ func metaChanges(a, b *tape.RunSummary) []Change {
 		}
 	}
 	return out
+}
+
+// specNMaxList is a sweep's values as the flag took them, "3,5", or "none" for
+// a run that swept nothing. That is an observation, not an unknown: a run
+// recorded without --spec-n-max sent no override, so "?" would be wrong.
+func specNMaxList(s *tape.RunSummary) string {
+	if len(s.SpecNMax) == 0 {
+		return "none"
+	}
+	parts := make([]string, len(s.SpecNMax))
+	for i, v := range s.SpecNMax {
+		parts[i] = strconv.Itoa(v)
+	}
+	return strings.Join(parts, ",")
 }
 
 // modelDir is s's model directory, but only when the other run recorded one

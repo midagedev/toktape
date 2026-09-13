@@ -353,6 +353,7 @@ func speedSection(s *tape.RunSummary) []string {
 		out = append(out, streamLines(s)...)
 	}
 	out = append(out, roundsLines(s)...)
+	out = append(out, sweepLines(s)...)
 	return out
 }
 
@@ -397,12 +398,16 @@ func roundsLines(s *tape.RunSummary) []string {
 	lines := wrapJoin(head, " · ", avail)
 
 	var parts []string
+	// pos is each round's 1-based place among the rounds sent with the same
+	// speculative n_max, which names an unnamed round in a sweep.
+	pos := map[int]int{}
 	for i, p := range s.PerRound {
 		if i == maxRoundsListed {
 			parts = append(parts, fmt.Sprintf("… +%d more", len(s.PerRound)-maxRoundsListed))
 			break
 		}
-		parts = append(parts, roundPart(p))
+		pos[p.SpecNMax]++
+		parts = append(parts, roundPart(p, pos[p.SpecNMax]))
 	}
 	if len(parts) > 0 {
 		lines = append(lines, wrapJoin(parts, "  ·  ", avail)...)
@@ -414,10 +419,24 @@ func roundsLines(s *tape.RunSummary) []string {
 // name is left out when the prompts line had none; the acceptance rate when the
 // round reported no draft, and a round that drafted nothing says so rather than
 // "0%", as the Draft row does.
-func roundPart(p tape.RoundSummary) string {
-	fields := []string{strconv.Itoa(p.Index + 1)}
-	if p.Name != "" {
-		fields = append(fields, p.Name)
+//
+// A round of a speculative n_max sweep (TTP-35) is labelled by the n_max it ran
+// at instead of its run-order number: "3·sql-1 19.3 tok/s 87%", or "3·2" for
+// the second unnamed prompt at that value, which is pos. In a sweep the
+// run-order number counts every value's copy of the prompt set, and "9" says
+// less than "5·sql-2".
+func roundPart(p tape.RoundSummary, pos int) string {
+	var fields []string
+	switch {
+	case p.SpecNMax > 0 && p.Name != "":
+		fields = []string{strconv.Itoa(p.SpecNMax) + "·" + p.Name}
+	case p.SpecNMax > 0:
+		fields = []string{strconv.Itoa(p.SpecNMax) + "·" + strconv.Itoa(pos)}
+	default:
+		fields = []string{strconv.Itoa(p.Index + 1)}
+		if p.Name != "" {
+			fields = append(fields, p.Name)
+		}
 	}
 	fields = append(fields, formatRateUnit(p.PerStreamPredictedPerSecond))
 	if p.DraftN != nil {
@@ -432,6 +451,81 @@ func roundPart(p tape.RoundSummary) string {
 		}
 	}
 	return strings.Join(fields, " ")
+}
+
+// sweepLines is the Draft sweep row of a speculative n_max sweep, or nil when
+// the run swept fewer than two values (TTP-35, 2026-09-13).
+//
+//	Draft sweep   n_max 3  14.8 tok/s median  61% accepted
+//	              n_max 5  16.1 tok/s median  51% accepted · fastest
+//
+// The row answers the question the sweep was run to ask — which block size is
+// fastest on this prompt mix — so each value gets the median over its own
+// prompts, the figure the Prompts row uses for the run, and its acceptance.
+// The columns are padded to the widest value so the rates can be read down
+// the row. A value none of whose rounds reported a draft prints "?" accepted;
+// "fastest" is only claimed when two values were measured and one was faster.
+func sweepLines(s *tape.RunSummary) []string {
+	groups := s.BySpecNMax
+	if len(groups) < 2 {
+		return nil
+	}
+	nmax := make([]string, len(groups))
+	rate := make([]string, len(groups))
+	pct := make([]string, len(groups))
+	var nmaxW, rateW, pctW int
+	for i, g := range groups {
+		nmax[i] = strconv.Itoa(g.NMax)
+		rate[i] = formatRate(g.Spread.PerStreamPredictedPerSecond.Median)
+		pct[i] = unknown
+		if a := g.Spread.DraftAcceptRate; a.Median != 0 || a.Min != 0 || a.Max != 0 {
+			pct[i] = formatPct(a.Median)
+		}
+		nmaxW, rateW, pctW = max(nmaxW, Width(nmax[i])), max(rateW, Width(rate[i])), max(pctW, Width(pct[i]))
+	}
+	fastest := FastestSpecNMax(groups)
+	lines := make([]string, len(groups))
+	for i := range groups {
+		lines[i] = "n_max " + padLeft(nmax[i], nmaxW) + "  " + padLeft(rate[i], rateW) +
+			" tok/s median  " + padLeft(pct[i], pctW) + " accepted"
+		if i == fastest {
+			lines[i] += " · fastest"
+		}
+	}
+	return labelled("Draft sweep", speedLabelW, lines)
+}
+
+// FastestSpecNMax is the index of the sweep group with the highest median
+// per-stream rate, or -1 when there is no such single group: fewer than two
+// groups measured a rate, or the highest rate is shared. The PNG's best-n_max
+// clause uses it too, so the two renderings name the same value.
+func FastestSpecNMax(groups []tape.SpecNMaxGroup) int {
+	best, observed, tied := -1, 0, false
+	for i, g := range groups {
+		m := g.Spread.PerStreamPredictedPerSecond.Median
+		if m <= 0 {
+			continue
+		}
+		observed++
+		switch {
+		case best < 0 || m > groups[best].Spread.PerStreamPredictedPerSecond.Median:
+			best, tied = i, false
+		case m == groups[best].Spread.PerStreamPredictedPerSecond.Median:
+			tied = true
+		}
+	}
+	if observed < 2 || tied {
+		return -1
+	}
+	return best
+}
+
+// padLeft right-aligns s in w display columns.
+func padLeft(s string, w int) string {
+	if d := w - Width(s); d > 0 {
+		return strings.Repeat(" ", d) + s
+	}
+	return s
 }
 
 // pctNumber is formatPct without the sign, for the low end of a range whose

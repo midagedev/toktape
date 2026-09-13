@@ -82,6 +82,9 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 		// promptsFile is the multi-prompt run (TTP-31): each JSONL line is
 		// its own round of streams, all in one tape.
 		promptsFile = fs.String("prompts", "", "JSONL file, one prompt per line, each sent as its own round")
+		// specNMax is the speculative block-size sweep (TTP-35): the prompt
+		// set runs once per speculative.n_max value, all in one tape.
+		specNMax = fs.String("spec-n-max", "", "run the prompt set once per speculative.n_max (e.g. 3,5)")
 	)
 	fs.IntVar(concurrency, "n", 0, "concurrent streams (shorthand)")
 	fs.Var(&prompts, "prompt", "prompt to send; repeatable")
@@ -111,10 +114,20 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 		}
 	}
 
+	var sweep []int
+	if flagSet(fs, "spec-n-max") {
+		sweep, err = recorder.ParseSpecNMax(*specNMax)
+		if err != nil {
+			fmt.Fprintf(stderr, "toktape record: --spec-n-max %s: %v\n", *specNMax, err)
+			return exitUsage
+		}
+	}
+
 	opts := recorder.Options{
 		BaseURL:      *url,
 		Prompts:      promptRequests(prompts),
 		Rounds:       rounds,
+		SpecNMax:     sweep,
 		Concurrency:  *concurrency,
 		MaxTokens:    *nPredict,
 		Version:      version,

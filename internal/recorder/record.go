@@ -68,9 +68,17 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 		}
 	}()
 	r.collectPlacement()
+	// A --spec-n-max sweep becomes rounds here, once the argv says whether a
+	// draft model is loaded (TTP-35).
+	r.planSweep()
 
-	if len(opts.Rounds) > 0 {
-		return r.recordRounds(ctx)
+	if len(r.opts.Rounds) > 0 {
+		t, err := r.recordRounds(ctx)
+		if err != nil {
+			return nil, err
+		}
+		applySweep(&t.Summary, t.Requests)
+		return t, nil
 	}
 
 	reqs := buildRequests(opts, r.model.ActiveBytesPerToken)

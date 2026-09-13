@@ -196,6 +196,13 @@ func (c *content) buildHero(s *tape.RunSummary) {
 	if r := roundsString(s); r != "" {
 		c.left.sub1 = r
 	}
+	// A speculative n_max sweep (TTP-35, 2026-09-13) takes the same row for the
+	// answer it was run to find: the fastest block size and its median over
+	// that value's prompts. The run-wide median mixes block sizes and settles
+	// nothing; the text card keeps it on its Prompts row.
+	if b := sweepString(s); b != "" {
+		c.left.sub1 = b
+	}
 
 	// A speculative run replaces the decode column's second sub-line with the
 	// draft clause (TTP-30, 2026-09-13). The frame is a fixed 1200×675 and
@@ -264,6 +271,20 @@ func roundsString(s *tape.RunSummary) string {
 	}
 	return fmt.Sprintf("%s median of %d prompts · %s–%s tok/s",
 		formatRate(r.Median), s.Rounds, formatRate(r.Min), formatRate(r.Max))
+}
+
+// sweepString is the PNG's form of the text card's Draft sweep row, reduced to
+// its verdict: "best n_max 5 · 16.1 tok/s median of 6 prompts". Empty unless a
+// sweep of two or more values has a single fastest one (card.FastestSpecNMax,
+// so both renderings name the same value).
+func sweepString(s *tape.RunSummary) string {
+	i := card.FastestSpecNMax(s.BySpecNMax)
+	if len(s.BySpecNMax) < 2 || i < 0 {
+		return ""
+	}
+	g := s.BySpecNMax[i]
+	return fmt.Sprintf("best n_max %d · %s median of %d prompts",
+		g.NMax, formatRateUnit(g.Spread.PerStreamPredictedPerSecond.Median), g.Rounds)
 }
 
 func failedStreams(a tape.AggregateTimings) string {

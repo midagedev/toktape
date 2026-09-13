@@ -1,0 +1,42 @@
+┌──────────────────────────────────────────────────────────────────────┐
+│ toktape v0.1.0              20260913-173512-deepseek-v4-1-flash-q4-k │
+├──────────────────────────────────────────────────────────────────────┤
+│ MODEL    DeepSeek-V4.1-Flash-Q4_K_M.gguf · Q4_K_M · 46.0 GiB         │
+│ ENGINE   ik_llama.cpp 7b79b229 · linux 6.8.0-45-generic              │
+│          workstation                                                 │
+│ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
+├──────────────────────────────────────────────────────────────────────┤
+│ Decode        14.7 tok/s · ≈ 99 GB/s, 5% of peak                     │
+│ Prefill       817 tok/s · TTFT 640 ms · 512 prompt tokens            │
+│ Draft         DSpark-0.6B-Q8_0.gguf · n_max 3                        │
+│               30% accepted (2248/7560)                               │
+│ Context       16384 (512 in / 86 out)                                │
+│ Prefix cache  25% hit (128/512) · warm                               │
+│ Streams       4 streams per round · 14.7 tok/s each                  │
+│               49.8 tok/s aggregate                                   │
+│               TTFT p50 640 ms p95 720 ms · slots busy max 4          │
+│ Prompts       12 rounds · 15.5 tok/s median (8.0–20.9)               │
+│               accepted 56% median (5–87%)                            │
+│               3·sql-1 19.3 tok/s 87%  ·  3·sql-2 18.4 tok/s 83%      │
+│               3·prose-1 9.1 tok/s 13%  ·  3·prose-2 10.2 tok/s 21%   │
+│               3·code-1 15.6 tok/s 64%  ·  3·chat-1 14.0 tok/s 58%    │
+│               5·sql-1 20.9 tok/s 73%  ·  5·sql-2 20.0 tok/s 70%      │
+│               … +4 more                                              │
+│ Draft sweep   n_max 3  14.8 tok/s median  61% accepted               │
+│               n_max 5  16.1 tok/s median  51% accepted · fastest     │
+├──────────────────────────────────────────────────────────────────────┤
+│ MEMORY   GPU0 [███░░░░░░░] 6.2/24.0 GiB                              │
+│          GPU1 [██░░░░░░░░] 5.3/24.0 GiB                              │
+│          weights 6.7 | kv 2.4 | compute 1.4 GiB                      │
+│          Host RSS 42.1 GiB (file 41.2 / anon 0.9)                    │
+│          Page faults 0.0 maj/token (0 during decode)                 │
+├──────────────────────────────────────────────────────────────────────┤
+│ HOST     GPU0 64°C 240 W · GPU1 61°C 225 W · throttled: no           │
+│          contended: no                                               │
+├──────────────────────────────────────────────────────────────────────┤
+│ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0          │
+│          -ncmoe 48 -t 16 -md DSpark-0.6B-Q8_0.gguf --draft-max 3     │
+│          --draft-min 1                                               │
+├──────────────────────────────────────────────────────────────────────┤
+│                toktape · github.com/midagedev/toktape                │
+└──────────────────────────────────────────────────────────────────────┘
