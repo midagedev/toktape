@@ -196,6 +196,12 @@ func (c *canvas) drawLegend(ct *content) {
 
 	entries := make([]legendEntry, 0, len(ct.segments)+len(ct.breakdown))
 	for _, seg := range ct.segments {
+		// A segment that carries its own entries names its halves itself: the
+		// host's "ram" and "disk" say what one "CPU 388.1 GiB" could not.
+		if len(seg.legend) > 0 {
+			entries = append(entries, seg.legend...)
+			continue
+		}
 		entries = append(entries, legendEntry{label: seg.label + " " + seg.size, col: seg.col})
 	}
 	entries = append(entries, ct.breakdown...)
@@ -283,6 +289,14 @@ func (c *canvas) drawStrip(ct *content) {
 	c.hairline("rule.strip", contentL, contentR, stripRuleY, colBorder)
 	c.text(textOpts{
 		id: "strip.flags", s: ct.flags, x: contentL, baseline: stripFlagBase,
+		style: stMicro, src: solid(colDim), maxW: contentW,
+	})
+	// The environment, which the footer grid gave up when it went to three
+	// columns (TTP-54). It is set in the flags line's voice, not a step below
+	// it: these rows were secondary text in the column they came from, and the
+	// whole point of the round is that the small text has to survive a feed.
+	c.text(textOpts{
+		id: "strip.env", s: ct.env, x: contentL, baseline: stripEnvBase,
 		style: stMicro, src: solid(colDim), maxW: contentW,
 	})
 	// The mark is set in the column labels' voice, not in an accent colour: it

@@ -58,6 +58,18 @@ const (
 	shadeCompute = 0.60
 )
 
+// Lightness steps used to subdivide the host segment into what is in RAM and
+// what is not (TTP-63, 2026-09-14, user: "cpu 388g 찍혀있는데 이게 ram이랑
+// nvme랑 구분이 안되나?"). The rule is the GPU segments': one hue, two
+// lightnesses, so the pair reads as one device rather than two. The paged step
+// is mixed further toward the panel than any GPU step, which is the point —
+// those bytes are the part of the placement that is not there, and they should
+// look like the bar fading into its own background.
+const (
+	shadeResident = 0.0
+	shadePaged    = 0.48
+)
+
 // devicePrefixGPU is how tape names GPU devices: "GPU0", "GPU1", ...
 const devicePrefixGPU = "GPU"
 
@@ -104,16 +116,20 @@ const (
 	panelBottom = Height - panelInset // 655
 )
 
-// Band boundaries, top to bottom. The contract fixes the four band heights at
-// 80 / 180 / 120 / 160; they are kept exactly, and the whitespace lives inside
-// each band rather than between them. The bottom strip takes the remainder.
+// Band boundaries, top to bottom. The contract fixed the four band heights at
+// 80 / 180 / 120 / 160 and the whitespace lives inside each band rather than
+// between them. The first three are still exact; the footer is 146 rather than
+// 160 (TTP-54, 2026-09-14). Growing the body type moved the environment rows
+// out of the footer grid and onto a third strip line, and the strip needed the
+// 14 px to keep its last line the same distance off the panel edge that the
+// wordmark sits from the top. Nothing above the footer moved.
 const (
 	bandHeaderTop = 38
 	bandHeroTop   = bandHeaderTop + 80  // 118
 	bandMemTop    = bandHeroTop + 180   // 298
 	bandFooterTop = bandMemTop + 120    // 418
-	bandStripTop  = bandFooterTop + 160 // 578
-	bandStripEnd  = bandStripTop + 44   // 622
+	bandStripTop  = bandFooterTop + 146 // 564
+	bandStripEnd  = bandStripTop + 76   // 640
 )
 
 // Hero row.
@@ -151,35 +167,64 @@ const (
 )
 
 // Footer grid.
+//
+// Three columns, not four (TTP-54, 2026-09-14). A 255 px column cannot hold
+// 14 px body text: the rig's CPU name measures 336 px at the new size and the
+// engine's flag row 216. The environment column was the one to give up, because
+// its four rows are the only ones on the card that settle no argument — the os,
+// the throttle and contention verdicts, the GPU temperatures and the start
+// time — and they read as well on a strip line as in a column. Model, rig and
+// engine keep a column each at 346 px, which clears the longest real row on the
+// two ws tapes by 10 px.
 const (
-	footerCols     = 4
-	footerColW     = 255
-	footerColStep  = 275                // colW + 20 gutter; 4 columns + 3 gutters == contentW
-	footerLabelBas = bandFooterTop + 36 // 454
-	footerRuleY    = bandFooterTop + 46 // 464
-	footerRow0Base = bandFooterTop + 72 // 490
-	footerRowStep  = 22
+	footerCols     = 3
+	footerColW     = 346
+	footerColStep  = 367                // colW + 21 gutter; 3 columns + 2 gutters == contentW
+	footerLabelBas = bandFooterTop + 32 // 450
+	footerRuleY    = bandFooterTop + 42 // 460
+	footerRow0Base = bandFooterTop + 66 // 484
+	footerRowStep  = 23
 	footerRows     = 4
 )
 
-// Bottom strip.
+// Bottom strip. Three lines now: the flags, the environment the footer grid
+// gave up, and the credit line.
 const (
-	stripRuleY    = bandStripTop + 2  // 580
-	stripFlagBase = bandStripTop + 26 // 604
-	stripFootBase = bandStripTop + 46 // 624
+	stripRuleY    = bandStripTop + 2  // 566
+	stripFlagBase = bandStripTop + 24 // 588
+	stripEnvBase  = bandStripTop + 46 // 610
+	stripFootBase = bandStripTop + 68 // 632
 )
 
 // Type sizes. Everything is a multiple of the same small scale so the card
 // reads as one system.
+//
+// The body sizes were raised about a quarter on 2026-09-14 (TTP-54, user:
+// "png카드가 너무 트위터에서 보기에 글씨가 작아"). A timeline crops this card
+// to roughly half its pixel width, so the old 13 px body arrived as 6.5 px and
+// the 10.5 px column labels as 5.2 px — legible only if you opened the image.
+// The hero number and its unit did not move: they were already the one thing
+// that read at feed size.
+//
+// sizeBody is 15 rather than the 16 the round asked for. It is used by the two
+// hero sub-lines and nothing else, and the hero columns are 504 px wide. At
+// 16 px the speculative draft clause — "draft DSpark-0.6B-Q8_0.gguf · n_max 3
+// · 60% accepted", the string TestDraftClauseReplacesTheSecondDecodeLine pins
+// whole — measures 520 px and is cut. Buying those pixels means moving the
+// hero's centre rule right, and the rule is also the right edge of the header's
+// model name, which measures 517 px against 540 on the ws tapes: the move
+// would cut the model name to widen the clause under it. 15 px leaves the
+// widest real sub-line (the sweep's, 486 px) 18 px of slack and moves no
+// geometry at all.
 const (
 	sizeWordmark = 30
 	sizeVersion  = 13
-	sizeTitle    = 16
-	sizeBody     = 13
-	sizeSmall    = 12
-	sizeMicro    = 11.5
-	sizeEyebrow  = 11
-	sizeColLabel = 10.5
+	sizeTitle    = 19
+	sizeBody     = 15
+	sizeSmall    = 14
+	sizeMicro    = 13
+	sizeEyebrow  = 12.5
+	sizeColLabel = 12
 )
 
 // Letter-spacing used to emulate small caps. Real small caps would need a face

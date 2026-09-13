@@ -160,10 +160,13 @@ func TestBandwidthStringOfPeak(t *testing.T) {
 		t.Errorf("Example(): bandwidthString = %q, want %q", got, want)
 	}
 
-	// The placement and ActiveBytesPerToken disagree, so there is no honest
-	// ceiling and the clause is dropped rather than guessed.
+	// A placement split between host RAM and VRAM names the bus (TTP-56,
+	// 2026-09-14): one figure summed over three buses is not a bandwidth
+	// against any ceiling that exists. Until the same day this fixture's
+	// placement and ActiveBytesPerToken disagreed by 59 % and the clause was
+	// "≈ 150 GB/s effective" with no ratio at all (TTP-46).
 	got = bandwidthString(card.ExampleSharded())
-	if want := "≈ 150 GB/s effective"; got != want {
+	if want := "≈ 331 GB/s from RAM · 72% of peak"; got != want {
 		t.Errorf("ExampleSharded(): bandwidthString = %q, want %q", got, want)
 	}
 }

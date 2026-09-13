@@ -34,10 +34,11 @@ type content struct {
 	hasPlaced  bool
 	hasProcMem bool
 
-	// Footer grid: four columns of footerRows lines, first line emphasised.
+	// Footer grid: three columns of footerRows lines, first line emphasised.
 	cols [footerCols]footerCol
 
 	// Bottom strip.
+	env   string // the environment rows the footer grid gave up (TTP-54)
 	flags string
 }
 
@@ -54,11 +55,16 @@ type segment struct {
 	size  string // "6.8 GiB"
 	bytes int64
 	col   color.RGBA
-	// parts subdivides a GPU segment into weights | kv cache | compute
-	// buffers, the three-way VRAM split docs/research/01 ranks third among
-	// the things people cannot see today. Empty when the placement did not
-	// report the split, or for host RAM, where the split is not VRAM.
+	// parts subdivides a segment into lightness steps of its own hue: a GPU
+	// into weights | kv cache | compute buffers, the three-way VRAM split
+	// docs/research/01 ranks third among the things people cannot see today,
+	// and the host into what is in RAM | what is read back from the file
+	// (TTP-63). Empty when neither split was derivable.
 	parts []subseg
+	// legend replaces the segment's own "label size" entry under the bar when
+	// one entry cannot say what the segment holds. The host segment uses it to
+	// name its two halves separately; everything else leaves it nil.
+	legend []legendEntry
 }
 
 // subseg is one lightness step inside a device segment.
@@ -90,6 +96,7 @@ func build(s *tape.RunSummary) *content {
 	c.buildHero(s)
 	c.buildMemory(s)
 	c.buildFooter(s)
+	c.env = envLine(s)
 	c.flags = flagsLine(s.Server)
 	return c
 }
@@ -373,6 +380,18 @@ func promptTokens(s *tape.RunSummary) int {
 // internal/bandwidth, which owns the arithmetic for both renderers (TTP-34,
 // 2026-09-13).
 func bandwidthString(s *tape.RunSummary) string {
+	// TTP-56, 2026-09-14; the reasoning is in internal/card/card.go's twin.
+	if r, ok := bandwidth.RAM(s); ok {
+		out := "≈ " + formatGBs(r.BytesPerSec) + " from RAM"
+		// The percentage only when the CPU's share is provably the whole of
+		// what it reads. A model whose router or shared expert might sit in
+		// host RAM gives a figure that can only be low, and a ratio computed
+		// from it would be a claim the tape cannot support (RAMSide.Exact).
+		if r.Exact && r.OfPeak > 0 {
+			out += " · " + formatPct(r.OfPeak) + " of peak"
+		}
+		return out
+	}
 	if s.Timings.EffectiveBandwidthBytesPerSec <= 0 {
 		return ""
 	}
@@ -400,17 +419,21 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 	}
 	splitVRAM := gpuWeights > 0 && (p.VRAMKVBytes > 0 || p.VRAMComputeBytes > 0)
 
+	// How much of the CPU placement is in RAM. Derived by internal/tape so the
+	// pane, the modal, the text card and this one print the same split from the
+	// same sample; it is never re-derived here.
+	res := tape.Residency(p, s.Memory.AtEnd)
+
 	gpuN := 0
 	for _, d := range p.Devices {
 		if d.Bytes <= 0 {
 			continue
 		}
 		if !strings.HasPrefix(d.Device, devicePrefixGPU) {
-			// Host RAM is the sand segment and is not subdivided: the
-			// three-way split is a VRAM breakdown.
-			c.segments = append(c.segments, segment{
-				label: orUnknown(d.Device), size: formatGiB(d.Bytes), bytes: d.Bytes, col: colHost,
-			})
+			// The host is the sand segment. It gets no VRAM breakdown — that
+			// split is a GPU one — but it does get its own: how much of what
+			// was placed here is actually in RAM (TTP-63).
+			c.segments = append(c.segments, hostSegment(d, res))
 			continue
 		}
 		col := gpuColors[gpuN%len(gpuColors)]
@@ -478,6 +501,47 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 		// "! answer cut" warning line (TTP-20, 2026-09-13).
 		c.pills = append(c.pills, p)
 	}
+}
+
+// hostSegment is the sand block of the placement bar, split into what is in
+// RAM and what is not (TTP-63, 2026-09-14, user: "cpu 388g 찍혀있는데 이게
+// ram이랑 nvme랑 구분이 안되나?").
+//
+// A CPU placement is llama.cpp's backend assignment, not a residency: the ws
+// rig places 388.1 GiB on a 252 GB box, and the difference is read from the
+// model file on every touch — which is what the maj/tok pill beside the bar
+// counts. Drawn as one block, "CPU 388.1 GiB" says the opposite of what
+// happened, and it was the first thing the user asked about the bar.
+//
+// The word for the second half is "disk", not "NVMe": what was observed is
+// that the pages are not resident and come back from the file. The medium
+// behind that file is not in the tape, and naming it would be printing
+// something nobody measured.
+//
+// Three cases, because the split is not always readable. r.Ok false — no /proc
+// sample, a remote server — keeps the block and the legend the card always had;
+// zero paged is a whole block that says "ram", which is a different claim from
+// "CPU" and worth making; and only a real shortfall draws two.
+func hostSegment(d tape.DevicePlacement, r tape.HostResidency) segment {
+	seg := segment{label: orUnknown(d.Device), size: formatGiB(d.Bytes), bytes: d.Bytes, col: colHost}
+	// The residency is derived over every CPU device at once, so it describes
+	// this segment only when this segment is the whole of it. A placement with
+	// a second host device, or a non-CPU host backend, keeps the single block
+	// rather than being given a split that was measured against other bytes.
+	if d.Device != tape.DeviceCPU || !r.Ok || r.Placed != d.Bytes {
+		return seg
+	}
+	if r.Paged <= 0 {
+		seg.legend = []legendEntry{{label: "ram " + formatGiB(r.Resident), col: colHost}}
+		return seg
+	}
+	resident, paged := shade(colHost, shadeResident), shade(colHost, shadePaged)
+	seg.parts = []subseg{{bytes: r.Resident, col: resident}, {bytes: r.Paged, col: paged}}
+	seg.legend = []legendEntry{
+		{label: "ram " + formatGiB(r.Resident), col: resident},
+		{label: "disk " + formatGiB(r.Paged), col: paged},
+	}
+	return seg
 }
 
 // answerCutPill flags a run that spent every predicted token thinking and
@@ -572,13 +636,34 @@ func (c *content) buildFooter(s *tape.RunSummary) {
 			[]string{flagValue(f.Batch, read), flagValue(f.UBatch, read), orUnknown(f.NGL)}),
 		joinParts(" · ", "ctx "+formatInt(s.Server.CtxSize), "slots "+formatInt(s.Server.NSlots)),
 	}}
+}
 
-	c.cols[3] = footerCol{label: "environment", rows: [footerRows]string{
-		osString(s.Host),
-		"throttled " + throttledString(s) + " · contended " + contendedString(s.Contention),
-		gpuStateString(s.GPUsAtEnd),
-		startedString(s),
-	}}
+// envLine is what used to be the footer's fourth column: the os, the throttle
+// and contention verdicts, the GPUs' state at the end and when the run started
+// (TTP-54, 2026-09-14). Growing the body type left room for three columns, and
+// these are the four rows that settle no argument, so they became one line on
+// the bottom strip instead — where they are set larger than the column ever
+// gave them.
+//
+// Two rules shape the order. The throttle and contention verdicts are always
+// printed, labelled, and keep their "?" — lesson 6, they are claims about a
+// machine and an unread one must say so. The rest are dropped when unobserved
+// rather than printed as a bare "?" in a list with nothing to say which field
+// it is. And the GPU state goes last because it is the only part that grows
+// with the rig: on a board with eight cards it is what the cut eats first.
+func envLine(s *tape.RunSummary) string {
+	return joinParts(" · ",
+		omitUnknown(osString(s.Host)),
+		"throttled "+throttledString(s),
+		"contended "+contendedString(s.Contention),
+		// TTP-57, 2026-09-14: the machine's operating point moved under the
+		// run. It sits with the other two claims about the machine — capped,
+		// busy, changed — and is dropped like every other unobserved element
+		// when it did not, rather than printed as a "?".
+		card.ConditionsShort(s),
+		omitUnknown(startedString(s)),
+		omitUnknown(gpuStateString(s.GPUsAtEnd)),
+	)
 }
 
 // engineFlagRow renders one row of the ENGINE column: "fa on · ctk q8_0 · ctv

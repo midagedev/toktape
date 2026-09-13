@@ -417,7 +417,6 @@ func TestUnknownSummaryNeverInventsANumber(t *testing.T) {
 		"footer.col0.row0":  unknown,
 		"footer.col1.row0":  unknown,
 		"footer.col2.row0":  unknown,
-		"footer.col3.row0":  unknown,
 	}
 	for id, w := range want {
 		m, ok := c.markByID(id)
@@ -443,6 +442,14 @@ func TestUnknownSummaryNeverInventsANumber(t *testing.T) {
 	}
 	if m, ok := c.markByID("footer.col1.row3"); !ok || m.Text != unknown {
 		t.Errorf("RAM cell = %q (drawn=%v), want %q — an unread size is not %q", m.Text, ok, unknown, "? GB")
+	}
+	// 2026-09-14 (TTP-54): the environment column became the strip's second
+	// line, so the assertion that used to read footer.col3.row0 reads the line
+	// that carries those fields now. The rule is the one it always was: the
+	// verdicts are labelled and keep their "?", and the fields nobody read are
+	// dropped rather than strung together as bare question marks.
+	if m, ok := c.markByID("strip.env"); !ok || m.Text != "throttled ? · contended ?" {
+		t.Errorf("environment line = %q (drawn=%v), want %q", m.Text, ok, "throttled ? · contended ?")
 	}
 }
 
@@ -677,9 +684,16 @@ func TestGPUSegmentsAreSubdivided(t *testing.T) {
 			}
 		}
 	}
-	// Host RAM is not a VRAM breakdown, so it stays one block.
-	if _, ok := c.markByID(segmentID(2) + ".part0"); ok {
-		t.Error("the CPU segment was subdivided; the three-way split is VRAM only")
+	// The host gets no VRAM breakdown: the three-way split is a GPU one. It
+	// has a split of its own since 2026-09-14 (TTP-63) — in RAM, and not — so
+	// the assertion is that the CPU segment has two parts and never a third,
+	// rather than that it has none. The example's 4 GiB CPU placement against
+	// a 0.8 GiB file-backed RSS is exactly the shortfall case.
+	if _, ok := c.markByID(segmentID(2) + ".part1"); !ok {
+		t.Error("the CPU segment was not split into what is in RAM and what is not")
+	}
+	if _, ok := c.markByID(segmentID(2) + ".part2"); ok {
+		t.Error("the CPU segment got a third part; the three-way split is VRAM only")
 	}
 	for _, want := range []string{"weights 42.5 GiB", "kv 2.6 GiB", "compute 1.5 GiB"} {
 		if !hasLegendEntry(c, want) {
