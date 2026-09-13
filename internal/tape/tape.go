@@ -465,6 +465,16 @@ type ContentionWitness struct {
 	// then complete, and an empty list is a reading, not an unknown.
 	ProcsRead  bool        `json:"procs_read"`
 	LlamaProcs []LlamaProc `json:"llama_procs,omitempty"`
+	// The machine's operating point (TTP-57, 2026-09-14): a thermal watchdog
+	// that lowers the clock cap mid-run leaves a tape whose rate was never
+	// one configuration, and these two readings at each edge make that
+	// visible. CPUMaxKHz is the largest scaling_max_freq over the online
+	// CPUs (Linux cpufreq); 0 = unread. TempC is one hwmon temperature,
+	// TempSensor its chip and label ("k10temp Tctl", "nct6798 CPUTIN");
+	// TempSensor "" means no sensor was read and TempC is not a reading.
+	CPUMaxKHz  int64   `json:"cpu_max_khz,omitempty"`
+	TempC      float64 `json:"temp_c,omitempty"`
+	TempSensor string  `json:"temp_sensor,omitempty"`
 }
 
 // LlamaProc is one live llama-* process (llama-server, llama-bench, ...).
@@ -498,7 +508,24 @@ type PromptRecord struct {
 	ReasoningN     int            `json:"reasoning_n,omitempty"`     // reasoning tokens among the predicted ones
 	MaxTokens      int            `json:"max_tokens,omitempty"`      // the generation cap the request was sent with (n_predict / max_tokens); 0 = not recorded
 	FinishReason   string         `json:"finish_reason,omitempty"`
+	// Endpoint is the server path the request went to (TTP-55, 2026-09-14):
+	// EndpointChat, the default, or EndpointCompletion for a raw
+	// /completion request whose prompt was sent verbatim with no template.
+	// The two paths cost a measurable tenth against each other on a
+	// reasoning model, so the card names which one recorded the rate. ""
+	// on a tape older than the field is chat, the only path that existed.
+	Endpoint string `json:"endpoint,omitempty"`
+	// Thinking says what the request asked of a reasoning model's thinking:
+	// "off" when the recorder sent the engine's own switch to disable it
+	// (--no-think), "" when it sent nothing and the server decided.
+	Thinking string `json:"thinking,omitempty"`
 }
+
+// Values of PromptRecord.Endpoint.
+const (
+	EndpointChat       = "chat"       // /v1/chat/completions, the template applied by the server
+	EndpointCompletion = "completion" // /completion, the prompt sent verbatim
+)
 
 // Message is one chat message.
 type Message struct {
