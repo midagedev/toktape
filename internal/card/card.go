@@ -352,7 +352,92 @@ func speedSection(s *tape.RunSummary) []string {
 	if s.Concurrency > 1 {
 		out = append(out, streamLines(s)...)
 	}
+	out = append(out, roundsLines(s)...)
 	return out
+}
+
+// maxRoundsListed is how many rounds the Prompts row names before it says how
+// many more there were. Eight is four lines at two a line: a prompts file of a
+// hundred lines must not turn the card into a table.
+const maxRoundsListed = 8
+
+// roundsLines is the Prompts row of a multi-prompt run, or nil for a run of one
+// round (TTP-31, 2026-09-13).
+//
+//	Prompts       6 rounds · 14.8 tok/s median (9.1–19.3)
+//	              accepted 61% median (13–87%)
+//	              1 sql-1 19.3 tok/s 87%  ·  2 sql-2 18.4 tok/s 83%
+//
+// The row exists because the same draft model is accepted 13 % on prose and
+// 87 % on SQL: a single prompt's rate is not the rig's rate, and neither is the
+// mean the Decode row prints, which a few long prose rounds pull around. The
+// median with its range is what a reader compares against their own run, and
+// the per-round list shows which prompt was which. The accepted clause is only
+// printed when some round reported a draft, and the list's own percentages
+// only for the rounds that did.
+//
+// It is the last row of the speed section so the Streams block above it keeps
+// its meaning: N × the per-stream mean over every round.
+func roundsLines(s *tape.RunSummary) []string {
+	if s.Rounds <= 1 {
+		return nil
+	}
+	avail := innerWidth - speedLabelW
+	head := []string{fmt.Sprintf("%d rounds", s.Rounds)}
+	if sp := s.Spread; sp != nil {
+		if r := sp.PerStreamPredictedPerSecond; r.Median > 0 {
+			head = append(head, fmt.Sprintf("%s median (%s–%s)",
+				formatRateUnit(r.Median), formatRate(r.Min), formatRate(r.Max)))
+		}
+		if a := sp.DraftAcceptRate; a.Median != 0 || a.Min != 0 || a.Max != 0 {
+			head = append(head, fmt.Sprintf("accepted %s median (%s–%s)",
+				formatPct(a.Median), pctNumber(a.Min), formatPct(a.Max)))
+		}
+	}
+	lines := wrapJoin(head, " · ", avail)
+
+	var parts []string
+	for i, p := range s.PerRound {
+		if i == maxRoundsListed {
+			parts = append(parts, fmt.Sprintf("… +%d more", len(s.PerRound)-maxRoundsListed))
+			break
+		}
+		parts = append(parts, roundPart(p))
+	}
+	if len(parts) > 0 {
+		lines = append(lines, wrapJoin(parts, "  ·  ", avail)...)
+	}
+	return labelled("Prompts", speedLabelW, lines)
+}
+
+// roundPart is one round of the Prompts list: "1 sql-1 19.3 tok/s 87%". The
+// name is left out when the prompts line had none; the acceptance rate when the
+// round reported no draft, and a round that drafted nothing says so rather than
+// "0%", as the Draft row does.
+func roundPart(p tape.RoundSummary) string {
+	fields := []string{strconv.Itoa(p.Index + 1)}
+	if p.Name != "" {
+		fields = append(fields, p.Name)
+	}
+	fields = append(fields, formatRateUnit(p.PerStreamPredictedPerSecond))
+	if p.DraftN != nil {
+		if *p.DraftN == 0 {
+			fields = append(fields, "0 drafted")
+		} else {
+			accepted := 0
+			if p.DraftNAccepted != nil {
+				accepted = *p.DraftNAccepted
+			}
+			fields = append(fields, formatPct(float64(accepted)/float64(*p.DraftN)))
+		}
+	}
+	return strings.Join(fields, " ")
+}
+
+// pctNumber is formatPct without the sign, for the low end of a range whose
+// high end carries it: "(13–87%)".
+func pctNumber(ratio float64) string {
+	return strings.TrimSuffix(formatPct(ratio), "%")
 }
 
 // draftParts is the Draft row, or nil when the run used no speculative
@@ -471,10 +556,25 @@ func streamLines(s *tape.RunSummary) []string {
 	if n == 0 {
 		n = s.Concurrency
 	}
-	first := fmt.Sprintf("%d × %s = %s aggregate",
-		n, formatRateUnit(a.PerStreamPredictedPerSecond), formatRateUnit(a.AggregatePredictedPerSecond))
+	first := []string{fmt.Sprintf("%d × %s = %s aggregate",
+		n, formatRateUnit(a.PerStreamPredictedPerSecond), formatRateUnit(a.AggregatePredictedPerSecond))}
 	if a.StreamsFailed > 0 {
-		first += fmt.Sprintf(" · %d failed", a.StreamsFailed)
+		first[0] += fmt.Sprintf(" · %d failed", a.StreamsFailed)
+	}
+	// A multi-round run is not an equation (lead, 2026-09-13): its aggregate
+	// is weighted by how long each round decoded, so "4 × 14.4 = 50.6" would
+	// print false arithmetic. The three figures are listed instead, and
+	// failures count against every stream the run sent.
+	if s.Rounds > 1 {
+		parts := []string{
+			fmt.Sprintf("%d streams per round", n),
+			formatRateUnit(a.PerStreamPredictedPerSecond) + " each",
+			formatRateUnit(a.AggregatePredictedPerSecond) + " aggregate",
+		}
+		if a.StreamsFailed > 0 {
+			parts = append(parts, fmt.Sprintf("%d of %d failed", a.StreamsFailed, n*s.Rounds))
+		}
+		first = wrapJoin(parts, " · ", innerWidth-speedLabelW)
 	}
 	// The slots line wraps rather than truncating: on a server with fewer
 	// slots than streams the queue note is the part that explains the
@@ -484,7 +584,7 @@ func streamLines(s *tape.RunSummary) []string {
 		"slots busy max " + formatInt(a.SlotsBusyMax),
 		queuedString(s),
 	}, " · ", innerWidth-speedLabelW)
-	return labelled("Streams", speedLabelW, append([]string{first}, second...))
+	return labelled("Streams", speedLabelW, append(first, second...))
 }
 
 func memorySection(s *tape.RunSummary) []string {

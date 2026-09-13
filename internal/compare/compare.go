@@ -15,6 +15,7 @@
 package compare
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/midagedev/toktape/internal/card"
@@ -89,6 +90,12 @@ func metrics(a, b *tape.RunSummary) []Row {
 	if a.Timings.DraftN != nil || b.Timings.DraftN != nil {
 		rows = append(rows, draftAcceptedRow(a, b))
 	}
+	// A multi-prompt run's decode figure above is the mean over every round;
+	// the median is the figure its card leads with, so it is set beside the
+	// other run's here whenever one side has one (TTP-31, 2026-09-13).
+	if a.Rounds > 1 || b.Rounds > 1 {
+		rows = append(rows, medianRateRow(a, b))
+	}
 	// The aggregate is the server-wide view and only says something new when
 	// at least one of the runs sent more than one stream.
 	if a.Concurrency > 1 || b.Concurrency > 1 {
@@ -150,6 +157,42 @@ func draftAcceptedRow(a, b *tape.RunSummary) Row {
 		row.HasDelta = true
 	}
 	return row
+}
+
+// medianRateRow is the median per-stream rate over the prompt rounds of each
+// side. A single-round run has no spread to take a median of, so it prints
+// "?": its one rate is already the decode row above, and repeating it here
+// would present one prompt as the median of several.
+func medianRateRow(a, b *tape.RunSummary) Row {
+	median := func(s *tape.RunSummary) (float64, bool) {
+		if s.Rounds < 2 || s.Spread == nil || s.Spread.PerStreamPredictedPerSecond.Median <= 0 {
+			return 0, false
+		}
+		return s.Spread.PerStreamPredictedPerSecond.Median, true
+	}
+	av, aok := median(a)
+	bv, bok := median(b)
+	row := Row{Label: "tok/s median", A: "?", B: "?"}
+	if aok {
+		row.A = formatRate(av)
+	}
+	if bok {
+		row.B = formatRate(bv)
+	}
+	if aok && bok {
+		row.DeltaPct = (bv - av) / av * 100
+		row.HasDelta = true
+	}
+	return row
+}
+
+// promptsCount is the number of prompt rounds a run sent. A run recorded
+// without a prompts file sent one (Rounds 0 and 1 are both a single round).
+func promptsCount(s *tape.RunSummary) string {
+	if s.Rounds <= 1 {
+		return "1"
+	}
+	return strconv.Itoa(s.Rounds)
 }
 
 // numRow renders one numeric metric and computes the relative change.
@@ -254,6 +297,9 @@ func metaChanges(a, b *tape.RunSummary) []Change {
 		{"draft n_max", a.Server.Flags.DraftMax, b.Server.Flags.DraftMax},
 		{"ctx", itoa(a.Server.CtxSize), itoa(b.Server.CtxSize)},
 		{"streams", itoa(a.Concurrency), itoa(b.Concurrency)},
+		// How many prompts the figures are over (TTP-31): a rate that moved
+		// between one prompt and eight is a different measurement.
+		{"prompts", promptsCount(a), promptsCount(b)},
 	}
 	var out []Change
 	for _, f := range fields {

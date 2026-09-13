@@ -39,6 +39,9 @@ func fixtures() map[string]*tape.RunSummary {
 		// TTP-30: three placement devices with a CPU one, a longer flags strip,
 		// a bare-commit engine line and the draft clause in the hero.
 		"speculative": card.ExampleSpeculative(),
+		// TTP-31: six prompt rounds; the hero's first decode line is the
+		// median over them.
+		"rounds": card.ExampleRounds(),
 	}
 }
 

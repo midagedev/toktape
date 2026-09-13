@@ -36,6 +36,9 @@ type run struct {
 	ownGPU   bool
 	place    tape.PlacementSummary
 	template tape.TemplateInfo
+	// roundNames are the names of the rounds that were actually sent, in
+	// order; nil in a single-round run (TTP-31).
+	roundNames []string
 }
 
 // Record performs one run end to end: attach, collect the static picture,
@@ -60,6 +63,10 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 		}
 	}()
 	r.collectPlacement()
+
+	if len(opts.Rounds) > 0 {
+		return r.recordRounds(ctx)
+	}
 
 	reqs := buildRequests(opts, r.model.ActiveBytesPerToken)
 	r.collectTemplate(ctx, reqs)
@@ -360,20 +367,8 @@ func (r *run) collectTemplate(ctx context.Context, reqs []server.StreamRequest) 
 // stream opens the sampler, starts the periodic host reader, sends every
 // request at once and stops the reader again.
 func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.RequestRecord, *state, error) {
-	var sampler *procmon.Sampler
-	if r.pid > 0 {
-		s, err := procmon.NewSamplerAt(r.opts.FSRoot, r.pid)
-		if err != nil {
-			r.warn("process sampler unavailable, no memory or fault series")
-		} else {
-			sampler = s
-			defer sampler.Close()
-			// The first delta has nothing to subtract from. Latching here,
-			// before anything is sent, is what makes the first token's delta
-			// the prompt phase (procmon.Sampler.FaultDelta doc).
-			_, _, _ = sampler.FaultDelta()
-		}
-	}
+	sampler, closeSampler := r.openSampler()
+	defer closeSampler()
 
 	st := newState(len(reqs), sampler, r.opts.Progress)
 	for i := range reqs {
@@ -388,6 +383,39 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 		})
 	}
 
+	stopSampling := r.startSampling(ctx, st)
+	recs, err := server.RunConcurrent(ctx, r.client, reqs, st.hooks)
+	stopSampling()
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %v", ErrAllStreamsFailed, err)
+	}
+	st.applyDeltas(recs)
+	return recs, st, nil
+}
+
+// openSampler opens the process sampler when the server process is local, and
+// returns the function that closes it again. The sampler is nil, and the
+// closer a no-op, when there is no /proc view.
+func (r *run) openSampler() (*procmon.Sampler, func()) {
+	if r.pid <= 0 {
+		return nil, func() {}
+	}
+	s, err := procmon.NewSamplerAt(r.opts.FSRoot, r.pid)
+	if err != nil {
+		r.warn("process sampler unavailable, no memory or fault series")
+		return nil, func() {}
+	}
+	// The first delta has nothing to subtract from. Latching here, before
+	// anything is sent, is what makes the first token's delta the prompt
+	// phase (procmon.Sampler.FaultDelta doc).
+	_, _, _ = s.FaultDelta()
+	return s, func() { s.Close() }
+}
+
+// startSampling starts the periodic host reader and returns the function that
+// stops it and waits for its last reading.
+func (r *run) startSampling(ctx context.Context, st *state) func() {
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	dep := sampleDeps{
@@ -403,16 +431,10 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 		defer close(done)
 		st.sampleLoop(ctx, stop, dep)
 	}()
-
-	recs, err := server.RunConcurrent(ctx, r.client, reqs, st.hooks)
-	close(stop)
-	<-done
-
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", ErrAllStreamsFailed, err)
+	return func() {
+		close(stop)
+		<-done
 	}
-	st.applyDeltas(recs)
-	return recs, st, nil
 }
 
 // serverThreads is the server's own thread count from its -t flag, or 0 when

@@ -187,6 +187,16 @@ func (c *content) buildHero(s *tape.RunSummary) {
 		}
 	}
 
+	// A multi-prompt run replaces the per-stream line with the median over its
+	// rounds and their range (TTP-31, 2026-09-13). The frame is fixed, so the
+	// clause takes the row rather than adding one. The median leads the line:
+	// the hero number above it is the mean over every stream of every round,
+	// and "median of 6 prompts" standing alone under it would read as that
+	// number's label.
+	if r := roundsString(s); r != "" {
+		c.left.sub1 = r
+	}
+
 	// A speculative run replaces the decode column's second sub-line with the
 	// draft clause (TTP-30, 2026-09-13). The frame is a fixed 1200×675 and
 	// nothing else may move, so the clause takes a row rather than adding one.
@@ -239,6 +249,21 @@ func (c *content) buildHero(s *tape.RunSummary) {
 			),
 		}
 	}
+}
+
+// roundsString is the PNG's form of the text card's Prompts row:
+// "14.8 median of 6 prompts · 9.1–19.3 tok/s". Empty for a single-round run,
+// or when no round produced a rate to take a median of.
+func roundsString(s *tape.RunSummary) string {
+	if s.Rounds < 2 || s.Spread == nil {
+		return ""
+	}
+	r := s.Spread.PerStreamPredictedPerSecond
+	if r.Median <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s median of %d prompts · %s–%s tok/s",
+		formatRate(r.Median), s.Rounds, formatRate(r.Min), formatRate(r.Max))
 }
 
 func failedStreams(a tape.AggregateTimings) string {

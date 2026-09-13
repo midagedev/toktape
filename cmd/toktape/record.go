@@ -79,6 +79,9 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 		tag     = fs.String("tag", "", "label this run for the experiment log (e.g. ngl=40)")
 		note    = fs.String("note", "", "a free-text note recorded with the run")
 		prompts repeatedFlag
+		// promptsFile is the multi-prompt run (TTP-31): each JSONL line is
+		// its own round of streams, all in one tape.
+		promptsFile = fs.String("prompts", "", "JSONL file, one prompt per line, each sent as its own round")
 	)
 	fs.IntVar(concurrency, "n", 0, "concurrent streams (shorthand)")
 	fs.Var(&prompts, "prompt", "prompt to send; repeatable")
@@ -91,9 +94,27 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 		return exitUsage
 	}
 
+	var rounds []recorder.Round
+	if flagSet(fs, "prompts") {
+		if len(prompts) > 0 {
+			fmt.Fprintln(stderr, "toktape record: --prompts and --prompt are alternatives, not a pair")
+			return exitUsage
+		}
+		if *promptsFile == "" {
+			fmt.Fprintln(stderr, "toktape record: --prompts needs a file")
+			return exitUsage
+		}
+		rounds, err = readPromptsFile(*promptsFile)
+		if err != nil {
+			fmt.Fprintf(stderr, "toktape record: --prompts %s: %v\n", *promptsFile, err)
+			return exitUsage
+		}
+	}
+
 	opts := recorder.Options{
 		BaseURL:      *url,
 		Prompts:      promptRequests(prompts),
+		Rounds:       rounds,
 		Concurrency:  *concurrency,
 		MaxTokens:    *nPredict,
 		Version:      version,

@@ -40,6 +40,17 @@ type state struct {
 	progress func(Event)
 	streams  int
 
+	// Multi-round runs (TTP-31). perRound is N, the streams of one round, and
+	// 0 in a single-round run. The per-stream slices above are then indexed
+	// by the run-wide stream index g = round*N + i, so one state and one
+	// sampler serve the whole run and the fault timeline stays one series.
+	perRound int
+	// round is the round being sent, stamped on the sample events.
+	round int
+	// roundStart[k] is len(timeline) when round k began: rounds are
+	// sequential, so round k's tokens are timeline[roundStart[k]:roundStart[k+1]].
+	roundStart []int
+
 	// slotsDead latches a /slots route that answered with an error (a server
 	// started with --no-slots returns 501), so the poll is not retried every
 	// interval for the length of the run.
@@ -97,7 +108,11 @@ func (st *state) hooks(i int) server.StreamHooks {
 			st.perStream[i] = append(st.perStream[i], maj)
 			st.tokens++
 			ev.MajFaultsDelta = maj
-			st.emit(Event{Kind: EventToken, Stream: i, Streams: st.streams, Token: ev})
+			stream, round := i, 0
+			if st.perRound > 0 {
+				stream, round = i%st.perRound, i/st.perRound
+			}
+			st.emit(Event{Kind: EventToken, Stream: stream, Round: round, Streams: st.streams, Token: ev})
 			st.mu.Unlock()
 		},
 	}
@@ -264,6 +279,6 @@ func (st *state) takeSample(ctx context.Context, dep sampleDeps) {
 	}
 	st.mu.Lock()
 	st.samples = append(st.samples, s)
-	st.emit(Event{Kind: EventSample, Stream: -1, Streams: st.streams, Sample: s})
+	st.emit(Event{Kind: EventSample, Stream: -1, Streams: st.streams, Round: st.round, Sample: s})
 	st.mu.Unlock()
 }

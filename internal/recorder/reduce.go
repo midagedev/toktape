@@ -21,10 +21,29 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		recs[i].Cache = server.CacheVerdict(recs[i].Timings, st.decodeFaults(i), recs[i].Timings.PredictedN)
 	}
 
-	agg := server.Aggregate(recs)
+	var (
+		agg         tape.AggregateTimings
+		perRound    []tape.RoundSummary
+		spread      *tape.RoundSpread
+		rounds      int
+		concurrency = len(recs)
+	)
+	if st.perRound > 0 {
+		// A multi-round run (TTP-31): the aggregate is over every round but
+		// its windows are the rounds' own, and Concurrency is the streams sent
+		// at once, never streams × rounds.
+		agg, perRound, spread = reduceRounds(recs, r.roundNames, st.perRound)
+		rounds = len(r.roundNames)
+		concurrency = st.perRound
+	} else {
+		agg = server.Aggregate(recs)
+	}
 	agg.SlotsBusyMax = slotsBusyMax(samples)
 
 	mem := procmon.Summarize(samples, timeline, st.firstTokenIndex())
+	if st.perRound > 0 {
+		st.roundFaults(&mem, timeline)
+	}
 	if r.pid > 0 && r.model.Path != "" {
 		if b, err := procmon.MappedFileBytes(r.opts.FSRoot, r.pid, r.model.Path); err == nil {
 			mem.MappedFileBytes = b
@@ -56,9 +75,12 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		Host:        r.host,
 		Placement:   r.place,
 		Memory:      mem,
-		Concurrency: len(recs),
+		Concurrency: concurrency,
 		Timings:     timings,
 		Aggregate:   agg,
+		Rounds:      rounds,
+		PerRound:    perRound,
+		Spread:      spread,
 		Cache:       cache,
 		Contention:  contention,
 		Template:    r.template,

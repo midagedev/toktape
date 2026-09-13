@@ -59,6 +59,9 @@ func TestTextGolden(t *testing.T) {
 		// only golden carrying the Draft row, the bare-commit ENGINE line and
 		// a CPU device in the placement.
 		{"example-speculative", ExampleSpeculative()},
+		// TTP-31: the speculative rig over six prompt rounds. The only golden
+		// carrying the Prompts row.
+		{"example-rounds", ExampleRounds()},
 		{"unknowns", unknownsSummary()},
 		// The two width stress fixtures are goldens as well, so a reviewer can
 		// read what a Hangul rig and an oversized -ot actually render as.
@@ -84,6 +87,7 @@ func TestJSONGolden(t *testing.T) {
 		{"example", Example()},
 		{"example-concurrent", ExampleConcurrent()},
 		{"example-speculative", ExampleSpeculative()},
+		{"example-rounds", ExampleRounds()},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

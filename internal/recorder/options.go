@@ -76,8 +76,14 @@ type Options struct {
 	// Concurrency are given they are cycled; when more are given and
 	// Concurrency is 0, Concurrency becomes len(Prompts).
 	Prompts []server.StreamRequest
+	// Rounds, when non-empty, replaces Prompts with a sequence of prompt
+	// rounds (TTP-31): each round sends Concurrency streams of its own
+	// prompts, the rounds run strictly one after another, and all of them
+	// land in one tape. Empty means exactly one round of Prompts.
+	Rounds []Round
 	// Concurrency is the number of streams sent at once. 0 or less means 1,
-	// or len(Prompts) when prompts were supplied.
+	// or len(Prompts) when prompts were supplied, or the longest round's
+	// prompt count when Rounds were.
 	Concurrency int
 	// MaxTokens caps every stream's answer (the server's max_tokens /
 	// n_predict). 0 leaves whatever the prompt itself carries.
@@ -159,10 +165,15 @@ const (
 // filled; the rest are zero.
 type Event struct {
 	Kind EventKind
-	// Stream is the stream index for the stream-scoped kinds, else -1.
+	// Stream is the stream index for the stream-scoped kinds, else -1. In a
+	// multi-round run it is the index within the round.
 	Stream int
-	// Streams is the total stream count, for the stream-scoped kinds.
+	// Streams is the total stream count, for the stream-scoped kinds. In a
+	// multi-round run it is the streams of one round, never streams × rounds.
 	Streams int
+	// Round is the 0-based prompt round the event belongs to (TTP-31). It is
+	// always 0 in a single-round run.
+	Round int
 	// Message is human-readable detail: the URL, the warning sentence, the
 	// build and model line.
 	Message string
@@ -204,7 +215,9 @@ func (o Options) normalize() Options {
 		o.LoadingPoll = DefaultLoadingPoll
 	}
 	if o.Concurrency <= 0 {
-		if len(o.Prompts) > 0 {
+		if len(o.Rounds) > 0 {
+			o.Concurrency = roundsConcurrency(o.Rounds)
+		} else if len(o.Prompts) > 0 {
 			o.Concurrency = len(o.Prompts)
 		} else {
 			o.Concurrency = 1
