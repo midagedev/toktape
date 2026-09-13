@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/midagedev/toktape/internal/tape"
 )
 
 // The emphasis contract (TTP-28, user 2026-09-13: "화면에 너무 많은 요소들이
@@ -688,79 +686,78 @@ func accentRunsOf(row []pcell, hex string) []run {
 	return out
 }
 
-// The card screen's own emphasis contract (TTP-42, lead 2026-09-13).
+// The result modal's own emphasis contract (TTP-42, lead 2026-09-13; rewritten
+// 2026-09-14 when the full-screen text card became a modal over the live
+// screen).
 //
-// cardScreen painted every line of the text card in th.text, so the MEMORY
-// row's [██████████] gauges — twenty solid cells of the brightest tone on the
-// screen — were the first thing the eye found, and the box-drawing frame
-// around the card was as bright as the figures inside it. That frame is the
-// clip's final image, the one a reader looks at longest, and it was the one
-// region that never got the treatment the rest of the screen has had since
-// TTP-28: shapes are demoted, chrome is dim, and the figures are what is left
-// lit.
-//
-// The gate reads the frame by rune class, which is what paintCardLine keys
-// off: a gauge's fill wears the muted accent the placement bars wear, its
-// track wears the dark fill, the frame wears dim, and nothing in those three
-// classes wears th.text. The counters are the non-vacuity half — the example's
-// gauges are nearly full, so the ░ class is only on the frame at all because
-// the model below makes one gauge partial.
-func TestCardScreenPaintsByRole(t *testing.T) {
+// The modal's two headline rates are the only thing in it that wears the
+// accent, its frame is dim like every other frame on the screen, and its
+// placement bar wears the demoted shades the right pane's bars wear — never
+// th.text, which is what the old card screen painted its gauges in. The gate
+// reads the modal's rows by rune class: the half blocks the big figures are
+// drawn in, the frame, and the bar glyph.
+func TestResultModalPaintsByRole(t *testing.T) {
 	const w, h = 120, 36
 	th := ColourTheme()
 	m := ModelAt(ExampleTapeN(4), doneAt)
 	m.Mode = ModeCard
 	m.Theme = th
-	m.TapePath = "~/.toktape/runs/" + m.Summary.ID + ".tape"
-	// The example ends with both cards' VRAM nearly full, so every gauge cell
-	// is a fill and the track class would go unchecked. Half of one device's
-	// bytes puts both glyphs on the frame.
-	if len(m.Summary.GPUsAtEnd) == 0 {
-		t.Fatal("the example has no GPU at the end; this test would measure no gauge")
-	}
-	// Copied before it is edited: Summary is a value but its slice is not, and
-	// a halved device leaking into another test's fixture would be a failure
-	// nobody could read.
-	m.Summary.GPUsAtEnd = append([]tape.GPUSample(nil), m.Summary.GPUsAtEnd...)
-	m.Summary.GPUsAtEnd[0].UsedBytes /= 2
-
 	rows := parseFrame(View(m, doneAt, w, h), w, h)
-	text := styleHex(th.text)
-	want := map[rune]struct {
-		hex  string
-		what string
-	}{
-		'█': {styleHex(th.accentMuted), "a gauge fill"},
-		'░': {styleHex(th.darkFill), "a gauge track"},
+	// The modal is the box drawn inside the screen's frame: its top rule is
+	// the first row after the screen's own with a ┌ past the left border, and
+	// the gate reads only the columns between that ┌ and its ┐, so the right
+	// pane's sparklines beside the box are not mistaken for figures.
+	top, x0, x1 := -1, -1, -1
+	for y := 1; y < len(rows) && top < 0; y++ {
+		for x := 1; x < len(rows[y]); x++ {
+			if rows[y][x].r == '┌' {
+				top, x0 = y, x
+				break
+			}
+		}
 	}
-	for _, r := range []rune("┌┐└┘├┤┬┴┼─│") {
-		want[r] = struct {
-			hex  string
-			what string
-		}{styleHex(th.dim), "the card's frame"}
+	if top >= 0 {
+		for x := x0; x < len(rows[top]); x++ {
+			if rows[top][x].r == '┐' {
+				x1 = x
+			}
+		}
 	}
-	seen := map[rune]int{}
-	for y, row := range rows {
+	if top < 0 {
+		t.Fatal("no modal on the card-mode frame")
+	}
+	accent, text := styleHex(th.accentBold), styleHex(th.text)
+	big, bars := 0, 0
+	for y := top; y < len(rows); y++ {
+		row := rows[y]
+		plain := plainRow(row)
 		for x, c := range row {
-			w, ok := want[c.r]
-			if !ok {
+			if x < x0 || x > x1 {
 				continue
 			}
-			seen[c.r]++
-			if c.fg == text {
-				t.Errorf("%s (%q at row %d col %d) wears the card's text tone; shapes and chrome are demoted\n%s",
-					w.what, c.r, y, x, rowContext(rows, y))
-				continue
+			switch {
+			case c.r == '▀' || c.r == '▄' || (c.r == '█' && strings.Contains(plain, "tok/s")):
+				big++
+				if c.fg != accent {
+					t.Errorf("a big figure cell (%q at row %d col %d) is %s, want the accent %s", c.r, y, x, c.fg, accent)
+				}
+			case c.r == barGlyph:
+				bars++
+				if c.fg == text || c.fg == accent {
+					t.Errorf("the placement bar (%q at row %d col %d) is %s; shapes are demoted", c.r, y, x, c.fg)
+				}
+			case c.r == '─' || c.r == '│' || c.r == '┌' || c.r == '┐' || c.r == '└' || c.r == '┘':
+				if c.fg != styleHex(th.dim) {
+					t.Errorf("the modal's frame (%q at row %d col %d) is %s, want dim", c.r, y, x, c.fg)
+				}
 			}
-			if c.fg != w.hex {
-				t.Errorf("%s (%q at row %d col %d) is %s, want %s", w.what, c.r, y, x, c.fg, w.hex)
-			}
+		}
+		if row[x0].r == '└' {
+			break
 		}
 	}
-	for _, r := range []rune{'█', '░', '─', '│'} {
-		if seen[r] == 0 {
-			t.Errorf("no %q on the card frame; the gate checked nothing for that class", r)
-		}
+	if big == 0 || bars == 0 {
+		t.Errorf("the gate checked %d figure cells and %d bar cells; both classes must be on the frame", big, bars)
 	}
 }
 

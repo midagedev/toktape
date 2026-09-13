@@ -455,7 +455,9 @@ func doneFooter(m Model, th Theme, cw int) []string {
 	} else {
 		l.add(th.text, "run complete")
 	}
-	l.add(th.dim, " — c for the card")
+	if !m.Replay {
+		l.add(th.dim, " — c for the card")
+	}
 	return []string{strings.Repeat(" ", cw), l.String()}
 }
 

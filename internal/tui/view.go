@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -48,9 +47,6 @@ func View(m Model, t time.Duration, w, h int) string {
 	if w < MinWidth || h < MinHeight {
 		return tooSmall(w, h)
 	}
-	if m.Mode == ModeCard && m.Err == "" {
-		return cardScreen(m, w, h)
-	}
 	th := m.Theme
 	inner := w - 2
 	bodyH := h - chromeH
@@ -77,8 +73,14 @@ func View(m Model, t time.Duration, w, h int) string {
 			}
 			body = append(body, lb+gutter+row.text+gutter+rb+" "+right[i]+" "+bar)
 		}
-		if m.Mode == ModePrompt {
-			overlayPrompt(m, th, body, inner)
+		switch m.Mode {
+		case ModePrompt:
+			overlayModal(th, body, promptModal(m, th, modalWidth(inner)), inner)
+		case ModeCard:
+			// The result over the live screen, not in place of it
+			// (2026-09-14): the clip's last frame keeps the dashboard the
+			// reader was watching, and the box says what it came to.
+			overlayModal(th, body, resultModal(m, th, modalWidth(inner)), inner)
 		}
 	} else {
 		content := errorBody(m, th, inner-2)
@@ -242,6 +244,8 @@ func footerLine(m Model, th Theme, w, page, pages int) string {
 	l := newLine(th, w)
 	hints := "q quit · p prompt"
 	switch {
+	case m.Replay:
+		hints = ""
 	case m.Mode == ModePrompt:
 		hints = "p close · q quit"
 	case m.Mode == ModeCard:
@@ -361,51 +365,6 @@ func tooSmall(w, h int) string {
 	return strings.Join(lines, "\n")
 }
 
-// cardScreen replaces the entire screen with the result card.
-//
-// "c" drops the chrome rather than framing the card inside it. The card is
-// card.CardWidth (72) columns and about thirty rows; nested inside the live
-// screen's border it would not fit an 80×24-descended terminal, and a card
-// reflowed or clipped to fit is no longer the fixed layout that makes it worth
-// posting (docs/toktape-spec.ko.md §4). This is the moment the screen stops
-// being a monitor and becomes the artifact.
-func cardScreen(m Model, w, h int) string {
-	th := m.Theme
-	summary := m.Summary
-	body := strings.Split(strings.TrimRight(card.Text(&summary), "\n"), "\n")
-
-	foot := newLine(th, w)
-	hint := "c live · q quit"
-	if m.TapePath != "" {
-		foot.add(th.accent, "✓ ")
-		foot.add(th.dim, "saved ")
-		foot.addTrunc(th.text, m.TapePath)
-	}
-	foot.gapTo(width(hint) + 2)
-	foot.space(2)
-	foot.add(th.dim, hint)
-
-	lines := make([]string, 0, h)
-	top := (h - 1 - len(body)) / 2
-	if top < 0 {
-		top = 0
-	}
-	for i := 0; i < top; i++ {
-		lines = append(lines, strings.Repeat(" ", w))
-	}
-	for _, line := range body {
-		if len(lines) >= h-1 {
-			break
-		}
-		lines = append(lines, pad(paintCardLine(th, clip(center(line, w), w)), w))
-	}
-	for len(lines) < h-1 {
-		lines = append(lines, strings.Repeat(" ", w))
-	}
-	lines = append(lines, foot.String())
-	return strings.Join(lines, "\n")
-}
-
 // errorBody renders a fatal error in place of the two panes.
 func errorBody(m Model, th Theme, cw int) []string {
 	return []string{
@@ -414,26 +373,34 @@ func errorBody(m Model, th Theme, cw int) []string {
 	}
 }
 
-// overlayPrompt replaces the middle rows of the body with the rendered-prompt
-// modal. It overwrites whole rows rather than punching a hole in them: an
-// inset that had to preserve the pane separator underneath would have to cut
-// styled text mid-escape, and a clean full-width card is the better read
-// anyway.
-func overlayPrompt(m Model, th Theme, body []string, inner int) {
+// modalWidth is the box width both modals use: most of the screen, capped
+// where a line of text stops being comfortable to read.
+func modalWidth(inner int) int {
 	boxW := min(inner-8, 86)
 	if boxW < 40 {
 		boxW = inner - 4
 	}
-	rows := promptModal(m, th, boxW)
+	return boxW
+}
+
+// overlayModal replaces the middle rows of the body with a modal's rows. It
+// overwrites whole rows rather than punching a hole in them: an inset that
+// had to preserve the pane separator underneath would have to cut styled text
+// mid-escape, and a clean full-width box is the better read anyway.
+func overlayModal(th Theme, body, rows []string, inner int) {
+	if len(rows) == 0 {
+		return
+	}
+	boxW := width(rows[0])
 	if len(rows) > len(body) {
 		rows = rows[:len(body)]
 	}
 	top := (len(body) - len(rows)) / 2
 	gutter := (inner - boxW) / 2
+	bar := th.paint(th.dim, "│")
 	for i, row := range rows {
-		body[top+i] = th.paint(th.dim, "│") +
-			strings.Repeat(" ", gutter) + row +
-			strings.Repeat(" ", inner-gutter-boxW) + th.paint(th.dim, "│")
+		body[top+i] = bar + strings.Repeat(" ", gutter) + row +
+			strings.Repeat(" ", inner-gutter-boxW) + bar
 	}
 }
 

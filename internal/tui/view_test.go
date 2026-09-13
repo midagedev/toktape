@@ -291,18 +291,27 @@ func TestUnknownsPrintQuestionMark(t *testing.T) {
 	}
 }
 
-// TestCardModeNeedsDone: "c" is only meaningful once there is a card to show,
+// TestCardModeRenders: "c" is only meaningful once there is a result to show,
 // but View must still render a frame if a caller sets the mode early.
+//
+// 2026-09-14: the card mode is a modal over the live screen, not a screen of
+// its own, so the frame keeps the dashboard (the right pane's PLACEMENT title)
+// and carries the run's ID and the project, never the tape's local path. The
+// old assertions (the text card's VERIFIED footer and the path) failed on the
+// new frame first.
 func TestCardModeRenders(t *testing.T) {
 	m := goldenModel(t, doneAt)
 	m.Mode = ModeCard
 	frame := View(m, doneAt, 120, 36)
 	checkFrame(t, frame, 120, 36)
-	if !strings.Contains(frame, "VERIFIED") && !strings.Contains(frame, "toktape · github.com") {
-		t.Error("card mode did not render the card footer")
+	plain := card.StripANSI(frame)
+	for _, want := range []string{"PLACEMENT", "toktape · github.com/midagedev/toktape", m.Summary.ID, "tok/s"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("card mode did not draw %q", want)
+		}
 	}
-	if !strings.Contains(frame, m.TapePath) {
-		t.Error("card mode did not name the saved tape")
+	if strings.Contains(plain, "VERIFIED") {
+		t.Error("card mode drew the full text card; it is a modal over the live screen now")
 	}
 }
 

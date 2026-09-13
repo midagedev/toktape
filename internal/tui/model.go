@@ -120,6 +120,11 @@ type Model struct {
 	Done bool
 	// TapePath is printed in the footer once the tape has been written.
 	TapePath string
+	// Replay marks a frame rendered for a clip rather than drawn for a
+	// person at a keyboard (2026-09-14). A clip is not interactive, so the
+	// key hints — "q quit", "c for the card" — are not drawn on it: on a
+	// clip's final frame they read as instructions the viewer cannot follow.
+	Replay bool
 	// PID of the server process, 0 when it was not found locally.
 	PID int
 	// Err is the last fatal error; non-empty replaces the body with it.
