@@ -1,28 +1,28 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────┐
 │ stream 1/8                 done │ stream 2/8                 done │ PLACEMENT ────────────────── │
 │ 9.1 tok/s  ttft 630 ms          │ 9.1 tok/s  ttft 690 ms          │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
-│ ▏ the same token, but it        │ ▏ 그때는 속도를 재기 전에       │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
-│ ▏ wants a fast link between     │ ▏ 배치부터 고쳐야 한다.         │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ ▏ them and it is not what       │ ▏ 실제로 자리가 모자랄 때       │      ▆ weights  ▆ kv  ▆ buf  │
-│ ▏ this server does              │ ▏ 손대는                        │                              │
+│ devices work together on the    │ 있다는 뜻이고, 그때는 속도를    │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
+│ same token, but it wants a      │ 재기 전에 배치부터 고쳐야       │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ fast link between them and it   │ 한다. 실제로 자리가 모자랄 때   │      ▆ weights  ▆ kv  ▆ buf  │
+│ is not what this server does    │ 손대는                          │                              │
 ├─────────────────────────────────┼─────────────────────────────────┤ MEMORY ───────────────────── │
 │ stream 3/8                 done │ stream 4/8                 done │ rss       1.2G file     0.8G │
 │ 9.1 tok/s  ttft 750 ms          │ 9.1 tok/s  ttft 810 ms          │ virt     48.0G anon     0.4G │
-│ ▏ fill, and why a burst of      │ ▏ change, make it late rather   │ maj/tok                  0.0 │
-│ ▏ arrivals makes ongoing        │ ▏ than early, because the       │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ streams                       │ ▏ cost is not the size          │                              │
+│ fill, and why a burst of        │ avoid a change, make it late    │ maj/tok                  0.0 │
+│ arrivals makes ongoing          │ rather than early, because      │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ streams                         │ the cost is not the size        │                              │
 ├─────────────────────────────────┼─────────────────────────────────┤ SPEED ────────────────────── │
 │ stream 5/8                 done │ stream 6/8                 done │ prefill            610 tok/s │
 │ 9.1 tok/s  ttft 870 ms          │ 9.1 tok/s  ttft 930 ms          │ decode             9.1 tok/s │
-│ ▏ 아니라 원인을 찾아야 할       │ ▏ moving fewer bytes rather     │ ttft      810 ms · 25% cache │
-│ ▏ 증상이다. 이 도구가           │ ▏ than from doing cheaper       │ 8 streams     72.9 tok/s agg │
-│ ▏ 실행마다                      │ ▏ multiplications. The          │                              │
+│ 측정은 평균을 낼 대상이         │ comes from moving fewer bytes   │ ttft      810 ms · 25% cache │
+│ 아니라 원인을 찾아야 할         │ rather than from doing          │ 8 streams     72.9 tok/s agg │
+│ 증상이다. 이 도구가 실행마다    │ cheaper multiplications. The    │                              │
 ├─────────────────────────────────┼─────────────────────────────────┤ RESOURCES ───── contended no │
 │ stream 7/8 · thinking · cut     │ stream 8/8                 done │ CPU  0%  0.1 cores  load 3.1 │
 │ 9.1 tok/s  ttft 990 ms          │ 9.1 tok/s  ttft 1.05 s          │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ means concurrency, which      │ ▏ fully offloaded. The          │ GPU0          3%  71°C  348W │
-│ ▏ means my whole break even     │ ▏ counter that does matter      │ ▇▇▇▇▇█▇▇▇▇▇▇█▇▇▇▆▆▆▆▆▅▅▅▅▅▁▁ │
-│ ▏ calculation is answering      │ ▏ during                        │ GPU1          3%  67°C  318W │
+│ means concurrency, which        │ a model is fully offloaded.     │ GPU0          3%  71°C  348W │
+│ means my whole break even       │ The counter that does matter    │ ▇▇▇▇▇█▇▇▇▇▇▇█▇▇▇▆▆▆▆▆▅▅▅▅▅▁▁ │
+│ calculation is answering        │ during                          │ GPU1          3%  67°C  318W │
 │                                                                   │ ▇▇▇▆▇▇▇▇▇▇▆▇▇▇▆▆▆▆▆▆▆▅▅▄▅▅▁▁ │
 │ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape │                              │
 ├───────────────────────────────────────────────────────────────────┴──────────────────────────────┤

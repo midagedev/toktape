@@ -1,7 +1,7 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 1/8   prefill ████████████ 128/512 │ stream 2/8   prefill ████████████ 128/512 │ PLACEMENT ────────────────── │
 │ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.5G │
-│ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.5G │
+│ ◐ waiting for the first token             │ ◐ waiting for the first token             │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.5G │
 │                                           │                                           │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
 │                                           │                                           │      ▆ weights  ▆ kv  ▆ buf  │
 │                                           │                                           │                              │
@@ -10,7 +10,7 @@
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ virt     48.0G anon     0.4G │
 │ stream 3/8   prefill ████████████ 128/512 │ stream 4/8   prefill ████████████ 128/512 │ maj/tok                  0.0 │
 │ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │                              │
-│ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │                              │
+│ ◐ waiting for the first token             │ ◐ waiting for the first token             │                              │
 │                                           │                                           │ SPEED ────────────────────── │
 │                                           │                                           │ prefill ◐            ? tok/s │
 │                                           │                                           │ decode               ? tok/s │
@@ -18,7 +18,7 @@
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams        ? tok/s agg │
 │ stream 5/8   prefill ████████████ 128/512 │ stream 6/8   prefill ████████████ 128/512 │                              │
 │ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ RESOURCES ───── contended no │
-│ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │ CPU     ?  ? cores  load 3.1 │
+│ ◐ waiting for the first token             │ ◐ waiting for the first token             │ CPU     ?  ? cores  load 3.1 │
 │                                           │                                           │                              │
 │                                           │                                           │                              │
 │                                           │                                           │                              │
@@ -26,7 +26,7 @@
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤                            █ │
 │ stream 7/8   prefill ████████████ 128/512 │ stream 8/8   prefill ████████████ 128/512 │                            █ │
 │ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │                            █ │
-│ ▏ ◐ waiting for the first token           │ ▏ ◐ waiting for the first token           │ GPU1        100%  64°C  310W │
+│ ◐ waiting for the first token             │ ◐ waiting for the first token             │ GPU1        100%  64°C  310W │
 │                                           │                                           │                            █ │
 │                                           │                                           │                            █ │
 │                                           │                                           │                            █ │

@@ -115,9 +115,10 @@ func streamHeader(m Model, th Theme, s Stream, cw int, showIndex, active bool) s
 	// which put a lit word directly above the one figure the tile exists to
 	// report, and moved it from tile to tile every few frames (TTP-28, user
 	// 2026-09-13: "화면에 너무 많은 요소들이 강조되어 있다"). Which stream is
-	// talking is still said twice — by the accent gutter down the left of its
-	// answer and by the cursor breathing at the end of it — and both of those
-	// sit beside the text they describe rather than on top of a number.
+	// talking is still said by the cursor breathing at the end of its answer,
+	// which sits beside the text it describes rather than on top of a number.
+	// (An accent gutter down the left of the answer said it too, until the
+	// gutter went, TTP-50.)
 	label := th.text
 	name, total := "stream", ""
 	if showIndex {
@@ -238,16 +239,22 @@ func streamRate(s Stream) float64 {
 func streamBody(m Model, th Theme, t time.Duration, s Stream, cw, rows int, active bool) []string {
 	out := make([]string, 0, rows)
 	blank := strings.Repeat(" ", cw)
-	const indent = 2
 
 	if len(s.Tokens) == 0 {
-		out = append(out, prefillLine(th, t, cw, active))
+		out = append(out, prefillLine(th, t, cw))
 		return fitRows(out, blank, rows)
 	}
 
+	// The answer starts at the tile's first column. It used to open every
+	// line with a one-cell rule and a space (TTP-50, user 2026-09-14: "팬에
+	// 왼쪽에 라인 그려진거 불필요하게 자리 차지하는 것 같아"): the rule
+	// separated stacked stream blocks in the list layout, which is gone, and in
+	// the grid the tiles are separated by rules of their own. The stream that
+	// is talking is still marked by its breathing cursor.
+	//
 	// Two columns are held back so the cursor never forces a re-wrap when it
 	// appears at the end of the last line.
-	lines := streamTextLines(s, cw-indent-2)
+	lines := streamTextLines(s, cw-2)
 	// The bands are computed over the whole text and then cut to the visible
 	// tail with it, so scrolling a tile cannot move the glow relative to the
 	// words it belongs to.
@@ -256,7 +263,6 @@ func streamBody(m Model, th Theme, t time.Duration, s Stream, cw, rows int, acti
 	lastIsText := true
 	for i, bl := range tail(lines, rows) {
 		l := newLine(th, cw)
-		gutter(l, th, active)
 		for _, sg := range bands[first+i] {
 			l.add(bodyStyle(th, bl, sg.band), sg.text)
 		}
@@ -270,19 +276,6 @@ func streamBody(m Model, th Theme, t time.Duration, s Stream, cw, rows int, acti
 		out[len(out)-1] = appendCursor(th, t, out[len(out)-1], cw, active)
 	}
 	return fitRows(out, blank, rows)
-}
-
-// gutter draws the one-cell rule that runs down the left of a stream's answer.
-// It separates stacked blocks in the dense layout without spending a row on a
-// blank line, and on the active stream it is the accent, which is the cheapest
-// way to say "this one is talking".
-func gutter(l *lineBuf, th Theme, active bool) {
-	st := th.dim
-	if active {
-		st = th.accent
-	}
-	l.add(st, "▏")
-	l.space(1)
 }
 
 // appendCursor puts the block cursor after the last character of a stream that
@@ -418,9 +411,8 @@ func writePrefillSeg(l *lineBuf, th Theme, seg prefillSeg) {
 // would be the same measurement competing with itself. What is left is the one
 // thing the header cannot carry: something moving, so a stream stuck in
 // prefill still reads as alive.
-func prefillLine(th Theme, t time.Duration, cw int, active bool) string {
+func prefillLine(th Theme, t time.Duration, cw int) string {
 	l := newLine(th, cw)
-	gutter(l, th, active)
 	l.add(th.accent, spinnerAt(t))
 	l.add(th.dim, " waiting for the first token")
 	return l.String()

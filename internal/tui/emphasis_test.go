@@ -133,7 +133,7 @@ func TestAccentIsReserved(t *testing.T) {
 					if within(spans, rn) || reservedChrome(rows, y, rn) || sparkWriteHead(rows, y, rn) {
 						continue
 					}
-					t.Errorf("%q at row %d col %d wears the full accent, which is reserved for the rate figures, the brand, the active gutter, the cursor, the spinner, the prefill bar and one sparkline cell per stat line\n%s",
+					t.Errorf("%q at row %d col %d wears the full accent, which is reserved for the rate figures, the brand, the cursor, the spinner, the prefill bar and one sparkline cell per stat line\n%s",
 						rn.text, y, rn.from, rowContext(rows, y))
 				}
 			}
@@ -222,7 +222,7 @@ func within(spans []span, rn run) bool {
 }
 
 // reservedChrome is the accent that is not a figure: the brand on the title
-// bar, the gutter of the stream that is talking, its breathing cursor, the
+// bar, the breathing cursor of the stream that is talking, the
 // prefill spinner and the evaluated part of a prompt-progress bar, and the tick
 // on the footer of a finished run. Each is a single glyph or a word, and each
 // says something no demoted shade could.
@@ -230,8 +230,9 @@ func reservedChrome(rows [][]pcell, y int, rn run) bool {
 	switch {
 	case rn.text == "toktape":
 		return y == 0
-	case strings.Trim(rn.text, "▏") == "": // the active stream's gutter
-		return true
+	// The active stream's gutter ▏ was reserved here until the gutter went
+	// (TTP-50, 2026-09-14). Removing the case tightens the gate: an accent ▏
+	// anywhere now fails.
 	case strings.Trim(rn.text, "▍") == "": // the cursor on the newest token
 		return true
 	case rn.text == "✓": // "tape saved", on the pane footer
@@ -252,9 +253,8 @@ func reservedChrome(rows [][]pcell, y int, rn run) bool {
 //
 // 2026-09-13 (TTP-29) — this is an addition to the accent contract, not a
 // relaxation of it, and it is written as tightly as the thing it admits. One
-// cell, exactly one rune, and only a sparkline rune (U+2581–U+2588: the tile
-// gutter ▏ and the cursor ▍ are outside that range and are covered by
-// reservedChrome above). It must sit on a row whose tile header is directly
+// cell, exactly one rune, and only a sparkline rune (U+2581–U+2588: the cursor
+// ▍ is outside that range and is covered by reservedChrome above). It must sit on a row whose tile header is directly
 // above it, and nothing of the graph may follow it — the cell to its right is
 // blank or the segment ends there. A second lit cell, a lit cell in the middle
 // of the line, or a lit graph anywhere but a stat line all still fail.

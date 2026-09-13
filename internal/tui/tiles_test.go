@@ -394,11 +394,17 @@ func TestTileSpendsEveryRowPastItsChromeOnTheAnswer(t *testing.T) {
 		if rows >= 2 && !strings.Contains(got[1], "tok/s") {
 			t.Errorf("a %d-row tile dropped its stat line: %q", rows, got[1])
 		}
-		// Every row past the two of chrome is answer, and the gutter is what
-		// says so.
-		for i := tileChromeRows; i < rows; i++ {
-			if !strings.HasPrefix(got[i], "▏") {
-				t.Errorf("a %d-row tile's row %d is not answer: %q", rows, i, got[i])
+		// Every row past the two of chrome is answer: the tail of the
+		// stream's own wrapped text, line for line. (The gutter used to be
+		// the mark of an answer row; it went in TTP-50, and the rows are now
+		// checked against the text itself, which is the stronger claim.)
+		if rows > tileChromeRows {
+			want := tail(streamTextLines(s, 41-2), rows-tileChromeRows)
+			for i := tileChromeRows; i < rows; i++ {
+				k := i - tileChromeRows - (rows - tileChromeRows - len(want))
+				if k < 0 || !strings.HasPrefix(got[i], want[k].text) {
+					t.Errorf("a %d-row tile's row %d is not answer: %q", rows, i, got[i])
+				}
 			}
 		}
 	}

@@ -1,36 +1,36 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 1/8                         answer │ stream 2/8                         answer │ PLACEMENT ────────────────── │
 │ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 104/320 │ 9.1 tok/s  ██▇▇▇██▇ ttft 690 ms · 103/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│ ▏ Take the bytes the model has to touch   │ ▏ 차지하는 채널 수와 컨텍스트 토큰 수를   │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-│ ▏ per token, multiply by the tokens per   │ ▏ 곱한 다음, 원소 하나가 몇               │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ ▏ second you are getting, and compare     │ ▏ 바이트인지를 곱하면 된다. 팔십          │      ▆ weights  ▆ kv  ▆ buf  │
-│ ▏ the result against what your cards      │ ▏ 레이어짜리 칠십억 단위 모델이 만 육천   │                              │
-│ ▏ can actually move. If the two figures   │ ▏ 토큰을 잡으면 반정밀도로는 오           │ MEMORY ───────────────────── │
-│ ▏ are▍                                    │ ▏ 기가바이트가 넘고,▍                     │ rss       1.2G file     0.8G │
+│ your head. Take the bytes the model has   │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+│ to touch per token, multiply by the       │ 수를 곱한 다음, 원소 하나가 몇            │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ tokens per second you are getting, and    │ 바이트인지를 곱하면 된다. 팔십            │      ▆ weights  ▆ kv  ▆ buf  │
+│ compare the result against what your      │ 레이어짜리 칠십억 단위 모델이 만 육천     │                              │
+│ cards can actually move. If the two       │ 토큰을 잡으면 반정밀도로는 오             │ MEMORY ───────────────────── │
+│ figures are▍                              │ 기가바이트가 넘고,▍                       │ rss       1.2G file     0.8G │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ virt     48.0G anon     0.4G │
 │ stream 3/8                         answer │ stream 4/8                         answer │ maj/tok                  0.0 │
 │ 9.1 tok/s  ██▇███▇▇ ttft 750 ms · 103/320 │ 9.1 tok/s  ██▇███▇▇ ttft 810 ms · 102/320 │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ sequence, because the matrix multiply   │ ▏ was. One extra space in your system     │                              │
-│ ▏ is batched across them. The expensive   │ ▏ message, a timestamp you helpfully      │ SPEED ────────────────────── │
-│ ▏ part is amortised eight ways. What is   │ ▏ injected, a tool list whose order       │ prefill            610 tok/s │
-│ ▏ not amortised is the attention step,    │ ▏ comes out of a map and therefore        │ decode             9.1 tok/s │
-│ ▏ where every sequence▍                   │ ▏ changes between▍                        │ ttft      810 ms · 25% cache │
+│ it, one for each sequence, because the    │ difference was. One extra space in your   │                              │
+│ matrix multiply is batched across them.   │ system message, a timestamp you           │ SPEED ────────────────────── │
+│ The expensive part is amortised eight     │ helpfully injected, a tool list whose     │ prefill            610 tok/s │
+│ ways. What is not amortised is the        │ order comes out of a map and therefore    │ decode             9.1 tok/s │
+│ attention step, where every sequence▍     │ changes between▍                          │ ttft      810 ms · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
 │ stream 5/8                         answer │ stream 6/8                         answer │                              │
 │ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │ RESOURCES ───── contended no │
-│ ▏ 여기까지가                              │ ▏ are usually kept at a higher width,     │ CPU  6%  1.9 cores  load 3.1 │
-│ ▏ ▸ answer                                │ ▏ because an error there lands on every   │                              │
-│ ▏ 숫자를 재기 전에 기계가 조용한지부터    │ ▏ token rather than being averaged away   │                              │
-│ ▏ 확인하는 습관이 결국 시간을 아껴        │ ▏ inside a layer. That is why two files   │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
-│ ▏ 준다. 다른 프로세스가 같은 카드를▍      │ ▏ with the same label can▍                │ GPU0         90%  69°C  343W │
+│ 여기까지가                                │ usually kept at a higher width, because   │ CPU  6%  1.9 cores  load 3.1 │
+│ ▸ answer                                  │ an error there lands on every token       │                              │
+│ 숫자를 재기 전에 기계가 조용한지부터      │ rather than being averaged away inside    │                              │
+│ 확인하는 습관이 결국 시간을 아껴 준다.    │ a layer. That is why two files with the   │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│ 다른 프로세스가 같은 카드를▍              │ same label can▍                           │ GPU0         90%  69°C  343W │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ ▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆ │
 │ stream 7/8 · thinking                     │ stream 8/8                         answer │ ████████████████████████████ │
 │ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1.05 s · 100/320 │ ████████████████████████████ │
-│ ▏ its own forward passes cost, one per    │ ▏ file backed page can be dropped and     │ GPU1         83%  65°C  313W │
-│ ▏ proposed token. So for a draft that     │ ▏ read back later. So the resident        │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
-│ ▏ is a tenth the size, proposing four     │ ▏ figure tells you what this process      │ ████████████████████████████ │
-│ ▏ tokens costs about four tenths of a     │ ▏ has touched recently and what the       │ ████████████████████████████ │
-│ ▏ step plus the one step▍                 │ ▏ kernel has chosen to▍                   │                              │
+│ whatever its own forward passes cost,     │ because a clean file backed page can be   │ GPU1         83%  65°C  313W │
+│ one per proposed token. So for a draft    │ dropped and read back later. So the       │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
+│ that is a tenth the size, proposing       │ resident figure tells you what this       │ ████████████████████████████ │
+│ four tokens costs about four tenths of    │ process has touched recently and what     │ ████████████████████████████ │
+│ a step plus the one step▍                 │ the kernel has chosen to▍                 │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

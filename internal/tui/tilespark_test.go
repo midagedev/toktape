@@ -28,8 +28,8 @@ import (
 var statLineOrder = regexp.MustCompile(`^(\?|[0-9]+(\.[0-9]+)?) tok/s +[\x{2581}-\x{2588}]+( ttft .*)?$`)
 
 // sparkRuneAt reports whether r is one of the eight sparkline levels
-// (U+2581–U+2588). The tile gutter (▏ U+258F) and the stream cursor (▍ U+258D)
-// are block elements too and are deliberately outside this range.
+// (U+2581–U+2588). The stream cursor (▍ U+258D) is a block element too and is
+// deliberately outside this range.
 func sparkRuneAt(r rune) bool { return r >= '▁' && r <= '█' }
 
 // paneRows renders the answer pane alone, in colour, and parses it into cells.

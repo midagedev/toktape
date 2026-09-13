@@ -82,8 +82,8 @@ const minP50Intervals = 8
 //
 // The rate is bold accent on every tile, active or not. Painting the inactive
 // ones plain would make the hero figure dimmest on the seven tiles a reader
-// scans and brightest only on the one that happens to be talking; the gutter
-// and the breathing cursor already say which that is.
+// scans and brightest only on the one that happens to be talking; the
+// breathing cursor already says which that is.
 func tileStatLine(th Theme, s Stream, cw int) string {
 	if cw <= 0 {
 		return ""

@@ -1,36 +1,36 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 1/8                         answer │ stream 2/8                         answer │ PLACEMENT ────────────────── │
 │ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 104/320 │ 9.1 tok/s  ██▇▇▇██▇ ttft 690 ms · 103/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│ ▏ single one of those bytes is read       │ ▏ 크기가 정해지고 그 뒤로는 변하지        │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-│ ▏ again for every token you generate.     │ ▏ 않지만, KV 캐시는 슬롯마다 따로         │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ ▏ That one sentence explains most of      │ ▏ 잡히고 컨텍스트 길이에 정비례해서       │      ▆ weights  ▆ kv  ▆ buf  │
-│ ▏ what you are seeing. Decoding is not    │ ▏ 자란다. 그래서 같은 모델을 같은         │                              │
-│ ▏ compute bound on this rig. It is a      │ ▏ 카드에 올려도 컨텍스트를 네 배로        │ MEMORY ───────────────────── │
-│ ▏ memory bandwidth problem wearing a      │ ▏ 늘리면 갑자기 자리가 모자란다. 계산은   │ rss       1.2G file     0.8G │
-│ ▏ compute costume, and the arithmetic     │ ▏ 어렵지 않다. 레이어 수에 키와 값 두     │ virt     48.0G anon     0.4G │
-│ ▏ is simple enough to do in your head.    │ ▏ 벌을 곱하고, 거기에 KV 헤드가           │ maj/tok                  0.0 │
-│ ▏ Take the bytes the model has to touch   │ ▏ 차지하는 채널 수와 컨텍스트 토큰 수를   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ per token, multiply by the tokens per   │ ▏ 곱한 다음, 원소 하나가 몇               │                              │
-│ ▏ second you are getting, and compare     │ ▏ 바이트인지를 곱하면 된다. 팔십          │ SPEED ────────────────────── │
-│ ▏ the result against what your cards      │ ▏ 레이어짜리 칠십억 단위 모델이 만 육천   │ prefill            610 tok/s │
-│ ▏ can actually move. If the two figures   │ ▏ 토큰을 잡으면 반정밀도로는 오           │ decode             9.1 tok/s │
-│ ▏ are▍                                    │ ▏ 기가바이트가 넘고,▍                     │ ttft      810 ms · 25% cache │
+│ of weights, and every single one of       │ 메모리다. 가중치는 모델을 올리는 순간     │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+│ those bytes is read again for every       │ 크기가 정해지고 그 뒤로는 변하지          │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ token you generate. That one sentence     │ 않지만, KV 캐시는 슬롯마다 따로 잡히고    │      ▆ weights  ▆ kv  ▆ buf  │
+│ explains most of what you are seeing.     │ 컨텍스트 길이에 정비례해서 자란다.        │                              │
+│ Decoding is not compute bound on this     │ 그래서 같은 모델을 같은 카드에 올려도     │ MEMORY ───────────────────── │
+│ rig. It is a memory bandwidth problem     │ 컨텍스트를 네 배로 늘리면 갑자기 자리가   │ rss       1.2G file     0.8G │
+│ wearing a compute costume, and the        │ 모자란다. 계산은 어렵지 않다. 레이어      │ virt     48.0G anon     0.4G │
+│ arithmetic is simple enough to do in      │ 수에 키와 값 두 벌을 곱하고, 거기에 KV    │ maj/tok                  0.0 │
+│ your head. Take the bytes the model has   │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ to touch per token, multiply by the       │ 수를 곱한 다음, 원소 하나가 몇            │                              │
+│ tokens per second you are getting, and    │ 바이트인지를 곱하면 된다. 팔십            │ SPEED ────────────────────── │
+│ compare the result against what your      │ 레이어짜리 칠십억 단위 모델이 만 육천     │ prefill            610 tok/s │
+│ cards can actually move. If the two       │ 토큰을 잡으면 반정밀도로는 오             │ decode             9.1 tok/s │
+│ figures are▍                              │ 기가바이트가 넘고,▍                       │ ttft      810 ms · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
 │ stream 3/8                         answer │ stream 4/8                         answer │                              │
 │ 9.1 tok/s  ██▇███▇▇ ttft 750 ms · 103/320 │ 9.1 tok/s  ██▇███▇▇ ttft 810 ms · 102/320 │ RESOURCES ───── contended no │
-│ ▏ gets slower and the server as a whole   │ ▏ for a slot, and when the next request   │ CPU  6%  1.9 cores  load 3.1 │
-│ ▏ gets faster, and both of those are      │ ▏ arrives it compares the new token       │                              │
-│ ▏ the same fact seen from two ends.       │ ▏ sequence with the old one from the      │                              │
-│ ▏ During decoding the engine reads the    │ ▏ beginning. Every position that          │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
-│ ▏ entire set of weights to produce one    │ ▏ matches is reused. The first position   │ GPU0         90%  69°C  343W │
-│ ▏ token. If eight slots are busy it       │ ▏ that differs ends the reuse, and        │ ▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆ │
-│ ▏ reads that same set once and produces   │ ▏ everything after it is evaluated        │ ████████████████████████████ │
-│ ▏ eight tokens from it, one for each      │ ▏ again, however small the difference     │ ████████████████████████████ │
-│ ▏ sequence, because the matrix multiply   │ ▏ was. One extra space in your system     │ GPU1         83%  65°C  313W │
-│ ▏ is batched across them. The expensive   │ ▏ message, a timestamp you helpfully      │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
-│ ▏ part is amortised eight ways. What is   │ ▏ injected, a tool list whose order       │ ████████████████████████████ │
-│ ▏ not amortised is the attention step,    │ ▏ comes out of a map and therefore        │ ████████████████████████████ │
-│ ▏ where every sequence▍                   │ ▏ changes between▍                        │                              │
+│ most benchmarks print. Each session       │ value tensors it already computed for a   │ CPU  6%  1.9 cores  load 3.1 │
+│ gets slower and the server as a whole     │ slot, and when the next request arrives   │                              │
+│ gets faster, and both of those are the    │ it compares the new token sequence with   │                              │
+│ same fact seen from two ends. During      │ the old one from the beginning. Every     │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│ decoding the engine reads the entire      │ position that matches is reused. The      │ GPU0         90%  69°C  343W │
+│ set of weights to produce one token. If   │ first position that differs ends the      │ ▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆ │
+│ eight slots are busy it reads that same   │ reuse, and everything after it is         │ ████████████████████████████ │
+│ set once and produces eight tokens from   │ evaluated again, however small the        │ ████████████████████████████ │
+│ it, one for each sequence, because the    │ difference was. One extra space in your   │ GPU1         83%  65°C  313W │
+│ matrix multiply is batched across them.   │ system message, a timestamp you           │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
+│ The expensive part is amortised eight     │ helpfully injected, a tool list whose     │ ████████████████████████████ │
+│ ways. What is not amortised is the        │ order comes out of a map and therefore    │ ████████████████████████████ │
+│ attention step, where every sequence▍     │ changes between▍                          │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  page 1/2 · ←/→  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

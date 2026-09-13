@@ -465,7 +465,7 @@ func TestColourHierarchy(t *testing.T) {
 	}
 
 	// No stream header is lit at all. The one that is talking is marked beside
-	// its text — an accent gutter and a breathing cursor — rather than by
+	// its text — its breathing cursor — rather than by
 	// lighting the word above its rate (TTP-28).
 	bold := 0
 	for i := 1; i <= len(m.Streams); i++ {
@@ -479,15 +479,30 @@ func TestColourHierarchy(t *testing.T) {
 }
 
 // firstAnswerWord is a word of answer text taken off the frame itself: the
-// first one on a tile body row, which the gutter glyph marks. Reading it off
-// the frame rather than hard-coding a sentence means the example's material can
-// be rewritten without this test going quietly vacuous.
+// first two on the row under the first tile stat line, the tile's first body
+// row. Reading it off the frame rather than hard-coding a sentence means the
+// example's material can be rewritten without this test going quietly vacuous.
+//
+// The body row used to be found by the gutter glyph that opened it; the gutter
+// went in TTP-50 (2026-09-14), so the row is found by the stat line above it,
+// and the tile's left edge by where that line's rate figure starts.
 func firstAnswerWord(frame string) string {
-	for _, line := range strings.Split(card.StripANSI(frame), "\n") {
-		_, rest, ok := strings.Cut(line, "▏ ")
-		if !ok {
+	lines := strings.Split(card.StripANSI(frame), "\n")
+	for y := 0; y+1 < len(lines); y++ {
+		at := strings.Index(lines[y], " tok/s")
+		if at < 0 || !strings.Contains(lines[y], "ttft") {
 			continue
 		}
+		rs := []rune(lines[y])
+		col := len([]rune(lines[y][:at]))
+		for col > 0 && rs[col-1] != ' ' {
+			col--
+		}
+		body := []rune(lines[y+1])
+		if col >= len(body) {
+			continue
+		}
+		rest, _, _ := strings.Cut(string(body[col:]), "│")
 		fields := strings.Fields(rest)
 		if len(fields) < 2 {
 			continue
@@ -627,12 +642,19 @@ func TestDoneStateFillsThePane(t *testing.T) {
 		//
 		// 2026-09-13 (TTP-29): that row used to be the tile's sparkline
 		// footer, found by its " avg" label. The footer is gone — the graph
-		// moved into the stat line — so the row is a line of the reply, marked
-		// by the gutter every answer row carries, and it draws none of the
-		// sparkline runes the footer used to. The second half doubles as the
-		// "the footer really is gone" check on the done frame.
+		// moved into the stat line — so the row is a line of the reply, and it
+		// draws none of the sparkline runes the footer used to. The second
+		// half doubles as the "the footer really is gone" check on the done
+		// frame. (A line of the reply was marked by the gutter every answer
+		// row carried until TTP-50; it is now a row that spells words.)
 		last := lines[len(lines)-3]
-		if !strings.Contains(last, "▏") {
+		letters := 0
+		for _, r := range last {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= 0xAC00 && r <= 0xD7A3) {
+				letters++
+			}
+		}
+		if letters < 8 {
 			t.Errorf("%dx%d: the bottom tile row is not a line of answer: %q", sz.w, sz.h, last)
 		}
 		for _, r := range last {

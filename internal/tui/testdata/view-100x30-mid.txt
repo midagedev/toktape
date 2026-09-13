@@ -1,30 +1,30 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────┐
 │ stream 1/8               answer │ stream 2/8               answer │ PLACEMENT ────────────────── │
 │ 9.1 tok/s  ttft 630 ms          │ 9.1 tok/s  ttft 690 ms          │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│ ▏ getting, and compare the      │ ▏ 레이어짜리 칠십억 단위        │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-│ ▏ result against what your      │ ▏ 모델이 만 육천 토큰을         │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ ▏ cards can actually move. If   │ ▏ 잡으면 반정밀도로는 오        │      ▆ weights  ▆ kv  ▆ buf  │
-│ ▏ the two figures are▍          │ ▏ 기가바이트가 넘고,▍           │                              │
+│ getting, and compare the        │ 된다. 팔십 레이어짜리 칠십억    │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+│ result against what your        │ 단위 모델이 만 육천 토큰을      │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ cards can actually move. If     │ 잡으면 반정밀도로는 오          │      ▆ weights  ▆ kv  ▆ buf  │
+│ the two figures are▍            │ 기가바이트가 넘고,▍             │                              │
 ├─────────────────────────────────┼─────────────────────────────────┤ MEMORY ───────────────────── │
 │ stream 3/8               answer │ stream 4/8               answer │ rss       1.2G file     0.8G │
 │ 9.1 tok/s  ttft 750 ms          │ 9.1 tok/s  ttft 810 ms          │ virt     48.0G anon     0.4G │
-│ ▏ part is amortised eight       │ ▏ you helpfully injected, a     │ maj/tok                  0.0 │
-│ ▏ ways. What is not amortised   │ ▏ tool list whose order comes   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ is the attention step,        │ ▏ out of a map and therefore    │                              │
-│ ▏ where every sequence▍         │ ▏ changes between▍              │ SPEED ────────────────────── │
+│ amortised eight ways. What is   │ helpfully injected, a tool      │ maj/tok                  0.0 │
+│ not amortised is the            │ list whose order comes out of   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ attention step, where every     │ a map and therefore changes     │                              │
+│ sequence▍                       │ between▍                        │ SPEED ────────────────────── │
 ├─────────────────────────────────┼─────────────────────────────────┤ prefill            610 tok/s │
 │ stream 5/8               answer │ stream 6/8               answer │ decode             9.1 tok/s │
 │ 9.1 tok/s  ttft 870 ms          │ 9.1 tok/s  ttft 930 ms          │ ttft      810 ms · 25% cache │
-│ ▏ 조용한지부터 확인하는         │ ▏ averaged away inside a        │ 8 streams     72.8 tok/s agg │
-│ ▏ 습관이 결국 시간을 아껴       │ ▏ layer. That is why two        │                              │
-│ ▏ 준다. 다른 프로세스가 같은    │ ▏ files with the same label     │ RESOURCES ───── contended no │
-│ ▏ 카드를▍                       │ ▏ can▍                          │ CPU  6%  1.9 cores  load 3.1 │
+│ 숫자를 재기 전에 기계가         │ than being averaged away        │ 8 streams     72.8 tok/s agg │
+│ 조용한지부터 확인하는 습관이    │ inside a layer. That is why     │                              │
+│ 결국 시간을 아껴 준다. 다른     │ two files with the same label   │ RESOURCES ───── contended no │
+│ 프로세스가 같은 카드를▍         │ can▍                            │ CPU  6%  1.9 cores  load 3.1 │
 ├─────────────────────────────────┼─────────────────────────────────┤ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ stream 7/8 · thinking           │ stream 8/8               answer │ GPU0         90%  69°C  343W │
 │ 9.1 tok/s  ttft 990 ms          │ 9.1 tok/s  ttft 1.05 s          │ ▇▇▇▇▇▇█▇▇▇▇▇█▇▇▇▇▇▇█▇▇▇▇▇█▇▇ │
-│ ▏ size, proposing four tokens   │ ▏ process has touched           │ GPU1         83%  65°C  313W │
-│ ▏ costs about four tenths of    │ ▏ recently and what the         │ ▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇ │
-│ ▏ a step plus the one step▍     │ ▏ kernel has chosen to▍         │                              │
+│ four tokens costs about four    │ what this process has touched   │ GPU1         83%  65°C  313W │
+│ tenths of a step plus the one   │ recently and what the kernel    │ ▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇ │
+│ step▍                           │ has chosen to▍                  │                              │
 ├─────────────────────────────────┴─────────────────────────────────┴──────────────────────────────┤
 │ token latency ████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘

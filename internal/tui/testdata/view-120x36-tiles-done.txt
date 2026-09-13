@@ -1,34 +1,34 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 1/4                           done │ stream 2/4                           done │ PLACEMENT ────────────────── │
 │ 12.5 tok/s ██▇▇▇██▇ ttft 630 ms · 296/320 │ 12.5 tok/s █▇▇███▇▇ ttft 690 ms · 301/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
-│ ▏ rather than the maximum, which is why   │ ▏ 슬롯마다 전체 컨텍스트를 따로 잡는다.   │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
-│ ▏ adding a card raises the memory you     │ ▏ 어느 쪽인지 모르면 메모리 계산이 여덟   │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ ▏ can fill but not the speed at which     │ ▏ 배 틀린다. 실행 로그에 슬롯 하나가 몇   │      ▆ weights  ▆ kv  ▆ buf  │
-│ ▏ one session is answered. What it does   │ ▏ 토큰을 갖는지가 찍히니 그 줄을 먼저     │                              │
-│ ▏ raise is how many sessions you can      │ ▏ 확인하고, 거기서 나온 숫자로 캐시       │ MEMORY ───────────────────── │
-│ ▏ serve at once, and that is usually      │ ▏ 크기를 다시 계산해 보라. 화면           │ rss       1.2G file     0.8G │
-│ ▏ the thing people actually want.         │ ▏ 오른쪽의 메모리 칸이 그 계산과 실제     │ virt     48.0G anon     0.4G │
-│ ▏ Tensor parallelism would split each     │ ▏ 장치 사용량을 나란히 보여 주는 이유도   │ maj/tok                  0.0 │
-│ ▏ matrix instead of each layer and let    │ ▏ 그것이다. 두 값이 어긋나면 설정이       │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ both devices work together on the       │ ▏ 생각과 다르게 잡혀 있다는 뜻이고,       │                              │
-│ ▏ same token, but it wants a fast link    │ ▏ 그때는 속도를 재기 전에 배치부터        │ SPEED ────────────────────── │
-│ ▏ between them and it is not what this    │ ▏ 고쳐야 한다. 실제로 자리가 모자랄 때    │ prefill            610 tok/s │
-│ ▏ server does                             │ ▏ 손대는                                  │ decode            12.5 tok/s │
+│ the two halves rather than the maximum,   │ 여덟 몫으로 나뉘거나, 설정에 따라서는     │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
+│ which is why adding a card raises the     │ 슬롯마다 전체 컨텍스트를 따로 잡는다.     │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ memory you can fill but not the speed     │ 어느 쪽인지 모르면 메모리 계산이 여덟     │      ▆ weights  ▆ kv  ▆ buf  │
+│ at which one session is answered. What    │ 배 틀린다. 실행 로그에 슬롯 하나가 몇     │                              │
+│ it does raise is how many sessions you    │ 토큰을 갖는지가 찍히니 그 줄을 먼저       │ MEMORY ───────────────────── │
+│ can serve at once, and that is usually    │ 확인하고, 거기서 나온 숫자로 캐시         │ rss       1.2G file     0.8G │
+│ the thing people actually want. Tensor    │ 크기를 다시 계산해 보라. 화면 오른쪽의    │ virt     48.0G anon     0.4G │
+│ parallelism would split each matrix       │ 메모리 칸이 그 계산과 실제 장치           │ maj/tok                  0.0 │
+│ instead of each layer and let both        │ 사용량을 나란히 보여 주는 이유도          │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ devices work together on the same         │ 그것이다. 두 값이 어긋나면 설정이         │                              │
+│ token, but it wants a fast link between   │ 생각과 다르게 잡혀 있다는 뜻이고,         │ SPEED ────────────────────── │
+│ them and it is not what this server       │ 그때는 속도를 재기 전에 배치부터 고쳐야   │ prefill            610 tok/s │
+│ does                                      │ 한다. 실제로 자리가 모자랄 때 손대는      │ decode            12.5 tok/s │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ ttft      690 ms · 25% cache │
 │ stream 3/4                           done │ stream 4/4 · thinking · cut               │ 4 streams     50.1 tok/s agg │
 │ 12.5 tok/s ▇▇█▇██▇▇ ttft 750 ms · 306/320 │ 12.5 tok/s █▇▇█▇██▇ ttft 810 ms · 320/320 │                              │
-│ ▏ steeply at first and then flattens,     │ ▏ and mitigates the third. I should be    │ RESOURCES ───── contended no │
-│ ▏ while each individual session decays    │ ▏ careful not to promise that reuse       │ CPU  0%  0.1 cores  load 3.1 │
-│ ▏ gently. Around eight concurrent         │ ▏ survives everything. There are builds   │                              │
-│ ▏ streams a seventy billion parameter     │ ▏ where a change to the sampling          │                              │
-│ ▏ model on two consumer cards typically   │ ▏ parameters does not invalidate          │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁ │
-│ ▏ gives you roughly half the single       │ ▏ anything and builds where slot          │ GPU0          3%  71°C  348W │
-│ ▏ session speed per session and about     │ ▏ management differs, and quoting a       │ ▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▂▅▂▂        │
-│ ▏ four times the total throughput.        │ ▏ rule that does not hold on their        │ █████████████████████▇▇▆▆█   │
-│ ▏ Which of those two numbers matters      │ ▏ version would be worse than saying      │ ██████████████████████████▂▂ │
-│ ▏ depends entirely on what you are        │ ▏ nothing. Better to describe what is     │ GPU1          3%  67°C  318W │
-│ ▏ building. A person waiting for a        │ ▏ certainly true everywhere: matching     │ ▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▃▃          │
-│ ▏ reply                                   │ ▏ happens from the beginning,             │ █████████████████████▅▅▅▇▇   │
+│ demands. So the aggregate climbs          │ first two cases and mitigates the         │ RESOURCES ───── contended no │
+│ steeply at first and then flattens,       │ third. I should be careful not to         │ CPU  0%  0.1 cores  load 3.1 │
+│ while each individual session decays      │ promise that reuse survives everything.   │                              │
+│ gently. Around eight concurrent streams   │ There are builds where a change to the    │                              │
+│ a seventy billion parameter model on      │ sampling parameters does not invalidate   │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁ │
+│ two consumer cards typically gives you    │ anything and builds where slot            │ GPU0          3%  71°C  348W │
+│ roughly half the single session speed     │ management differs, and quoting a rule    │ ▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▂▅▂▂        │
+│ per session and about four times the      │ that does not hold on their version       │ █████████████████████▇▇▆▆█   │
+│ total throughput. Which of those two      │ would be worse than saying nothing.       │ ██████████████████████████▂▂ │
+│ numbers matters depends entirely on       │ Better to describe what is certainly      │ GPU1          3%  67°C  318W │
+│ what you are building. A person waiting   │ true everywhere: matching happens from    │ ▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▃▃          │
+│ for a reply                               │ the beginning,                            │ █████████████████████▅▅▅▇▇   │
 │                                                                                       │ ██████████████████████████▂▂ │
 │ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card    │                              │
 ├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤

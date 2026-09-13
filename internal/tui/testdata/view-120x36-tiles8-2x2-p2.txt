@@ -1,36 +1,36 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 5/8                         answer │ stream 6/8                         answer │ PLACEMENT ────────────────── │
 │ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│ ▏ 실행이 크게 빨라지면 첫 실행이          │ ▏ source of half the confusion about      │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-│ ▏ 차가웠던 것이고, 그러면 페이지 캐시     │ ▏ quality. In the common mixed schemes    │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ ▏ 이야기만 하면 끝난다. 여기서 토큰당     │ ▏ the file is built tensor by tensor,     │      ▆ weights  ▆ kv  ▆ buf  │
-│ ▏ 메이저 폴트 값을 같이 보게 하면         │ ▏ and different tensors get different     │                              │
-│ ▏ 추측이 측정으로 바뀐다. 그 다음이       │ ▏ treatment. The attention projections    │ MEMORY ───────────────────── │
-│ ▏ 다른 프로세스다. 로드 평균과 다른       │ ▏ and the feed forward matrices that      │ rss       1.2G file     0.8G │
-│ ▏ 연산 프로세스 수를 같이 보라고 하면     │ ▏ dominate the file size take the low     │ virt     48.0G anon     0.4G │
-│ ▏ 되는데, 화면에 이미 둘 다 있으니        │ ▏ bit width the name advertises. The      │ maj/tok                  0.0 │
-│ ▏ 어디를 보라고만 말하면 된다.            │ ▏ embedding table and the output head     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ 여기까지가                              │ ▏ are usually kept at a higher width,     │                              │
-│ ▏ ▸ answer                                │ ▏ because an error there lands on every   │ SPEED ────────────────────── │
-│ ▏ 숫자를 재기 전에 기계가 조용한지부터    │ ▏ token rather than being averaged away   │ prefill            610 tok/s │
-│ ▏ 확인하는 습관이 결국 시간을 아껴        │ ▏ inside a layer. That is why two files   │ decode             9.1 tok/s │
-│ ▏ 준다. 다른 프로세스가 같은 카드를▍      │ ▏ with the same label can▍                │ ttft      810 ms · 25% cache │
+│ 번 더 돌려 보는 것이다. 두 번째 실행이    │ source of half the confusion about        │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+│ 크게 빨라지면 첫 실행이 차가웠던          │ quality. In the common mixed schemes      │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ 것이고, 그러면 페이지 캐시 이야기만       │ the file is built tensor by tensor, and   │      ▆ weights  ▆ kv  ▆ buf  │
+│ 하면 끝난다. 여기서 토큰당 메이저 폴트    │ different tensors get different           │                              │
+│ 값을 같이 보게 하면 추측이 측정으로       │ treatment. The attention projections      │ MEMORY ───────────────────── │
+│ 바뀐다. 그 다음이 다른 프로세스다. 로드   │ and the feed forward matrices that        │ rss       1.2G file     0.8G │
+│ 평균과 다른 연산 프로세스 수를 같이       │ dominate the file size take the low bit   │ virt     48.0G anon     0.4G │
+│ 보라고 하면 되는데, 화면에 이미 둘 다     │ width the name advertises. The            │ maj/tok                  0.0 │
+│ 있으니 어디를 보라고만 말하면 된다.       │ embedding table and the output head are   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ 여기까지가                                │ usually kept at a higher width, because   │                              │
+│ ▸ answer                                  │ an error there lands on every token       │ SPEED ────────────────────── │
+│ 숫자를 재기 전에 기계가 조용한지부터      │ rather than being averaged away inside    │ prefill            610 tok/s │
+│ 확인하는 습관이 결국 시간을 아껴 준다.    │ a layer. That is why two files with the   │ decode             9.1 tok/s │
+│ 다른 프로세스가 같은 카드를▍              │ same label can▍                           │ ttft      810 ms · 25% cache │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
 │ stream 7/8 · thinking                     │ stream 8/8                         answer │                              │
 │ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1.05 s · 100/320 │ RESOURCES ───── contended no │
-│ ▏ before I can answer that properly, so   │ ▏ of confused bug reports comes from.     │ CPU  6%  1.9 cores  load 3.1 │
-│ ▏ let me work it rather than quoting      │ ▏ The server maps the model file rather   │                              │
-│ ▏ the number I half remember. Each        │ ▏ than reading it into its own memory.    │                              │
-│ ▏ verification pass costs roughly one     │ ▏ A mapping costs address space, not      │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
-│ ▏ ordinary decoding step, because the     │ ▏ pages. Pages appear in the resident     │ GPU0         90%  69°C  343W │
-│ ▏ cost is reading the weights and a       │ ▏ set when they are touched, and they     │ ▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆ │
-│ ▏ batch of four candidate tokens reads    │ ▏ can leave again whenever the kernel     │ ████████████████████████████ │
-│ ▏ them once. The draft costs whatever     │ ▏ needs the memory, because a clean       │ ████████████████████████████ │
-│ ▏ its own forward passes cost, one per    │ ▏ file backed page can be dropped and     │ GPU1         83%  65°C  313W │
-│ ▏ proposed token. So for a draft that     │ ▏ read back later. So the resident        │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
-│ ▏ is a tenth the size, proposing four     │ ▏ figure tells you what this process      │ ████████████████████████████ │
-│ ▏ tokens costs about four tenths of a     │ ▏ has touched recently and what the       │ ████████████████████████████ │
-│ ▏ step plus the one step▍                 │ ▏ kernel has chosen to▍                   │                              │
+│ need the break even point before I can    │ them is where a whole genre of confused   │ CPU  6%  1.9 cores  load 3.1 │
+│ answer that properly, so let me work it   │ bug reports comes from. The server maps   │                              │
+│ rather than quoting the number I half     │ the model file rather than reading it     │                              │
+│ remember. Each verification pass costs    │ into its own memory. A mapping costs      │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│ roughly one ordinary decoding step,       │ address space, not pages. Pages appear    │ GPU0         90%  69°C  343W │
+│ because the cost is reading the weights   │ in the resident set when they are         │ ▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆ │
+│ and a batch of four candidate tokens      │ touched, and they can leave again         │ ████████████████████████████ │
+│ reads them once. The draft costs          │ whenever the kernel needs the memory,     │ ████████████████████████████ │
+│ whatever its own forward passes cost,     │ because a clean file backed page can be   │ GPU1         83%  65°C  313W │
+│ one per proposed token. So for a draft    │ dropped and read back later. So the       │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
+│ that is a tenth the size, proposing       │ resident figure tells you what this       │ ████████████████████████████ │
+│ four tokens costs about four tenths of    │ process has touched recently and what     │ ████████████████████████████ │
+│ a step plus the one step▍                 │ the kernel has chosen to▍                 │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  page 2/2 · ←/→  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
