@@ -45,17 +45,22 @@ func inkFraction(img image.Image) float64 {
 
 func TestFramesWritesReadablePNGs(t *testing.T) {
 	dir := t.TempDir()
-	// Two frames per second for one second: the first frame, one mid-clip and
-	// the last, which is three files without rendering three hundred.
-	paths, err := Frames(tui.ExampleTape(), Options{FPS: 2, Duration: time.Second}, dir)
+	// Two frames per second for one second: the poster, the first frame, one
+	// mid-clip and the last, which is four files without rendering four
+	// hundred.
+	opts := Options{FPS: 2, Duration: time.Second}
+	paths, err := Frames(tui.ExampleTape(), opts, dir)
 	if err != nil {
 		t.Fatalf("Frames: %v", err)
 	}
-	if len(paths) != 3 {
-		t.Fatalf("wrote %d frames, want 3", len(paths))
+	if len(paths) != 4 {
+		t.Fatalf("wrote %d frames, want 4", len(paths))
 	}
 
-	sched := NewSchedule(RunEnd(tui.ExampleTape()), 2, time.Second, false)
+	_, sched, err := prepare(tui.ExampleTape(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var bounds image.Rectangle
 	for i, p := range paths {
 		if want := filepath.Join(dir, "frame_0000"+string(rune('0'+i))+".png"); p != want {

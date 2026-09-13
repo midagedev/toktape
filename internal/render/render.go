@@ -96,6 +96,14 @@ type Options struct {
 	// at the run's start: a clip of a run is shared for its numbers, and the
 	// hero is the one clip that has to teach the command.
 	ColdOpen bool
+	// NoPoster drops the result frame from the front of the clip.
+	//
+	// The poster is on by default (Schedule.WithPoster): the first frame is
+	// the still every platform shows before anyone presses play, and an empty
+	// terminal is a poor advertisement for a clip whose whole point is the
+	// figures at its end. The cost is a one-frame flash of the ending each
+	// time a GIF loops, and this is the way out for a caller who minds it.
+	NoPoster bool
 	// Timestamp is the asciicast header's recording time. Zero uses the run's
 	// own start time, which keeps the header reproducible.
 	Timestamp time.Time
@@ -151,7 +159,11 @@ func prepare(tp *tape.Tape, o Options) (Options, Schedule, error) {
 	if err := o.validate(); err != nil {
 		return o, Schedule{}, err
 	}
-	return o, NewSchedule(RunEnd(tp), o.FPS, o.Duration, o.ColdOpen), nil
+	sched := NewSchedule(RunEnd(tp), o.FPS, o.Duration, o.ColdOpen)
+	if !o.NoPoster {
+		sched = sched.WithPoster()
+	}
+	return o, sched, nil
 }
 
 // RunEnd is when the last token of the run arrived.

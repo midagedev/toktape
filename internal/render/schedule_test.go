@@ -315,3 +315,100 @@ func TestScheduleFramesAreMonotonic(t *testing.T) {
 		}
 	}
 }
+
+// TestPosterIsTheResultInFrontOfTheClip (2026-09-14, user: "랜더링 할때
+// 첫프레임을 결과 화면으로 넣을 수 있게 해줘 … 이걸 기본 모드로 하고").
+//
+// The first frame is the still every platform shows before anyone presses
+// play. It is the result, and nothing else about the clip moves: every other
+// frame keeps the phase and the run instant it had, one frame later.
+func TestPosterIsTheResultInFrontOfTheClip(t *testing.T) {
+	const fps = 30
+	plain := NewSchedule(7*time.Second, fps, 0, true)
+	with := plain.WithPoster()
+
+	if with.Count != plain.Count+1 {
+		t.Errorf("the poster added %d frames, want 1", with.Count-plain.Count)
+	}
+	if want := plain.Duration + time.Second/fps; with.Duration != want {
+		t.Errorf("the clip is %v, want %v", with.Duration, want)
+	}
+	for _, phase := range []struct {
+		name string
+		a, b time.Duration
+	}{
+		{"open", plain.Open, with.Open},
+		{"intro", plain.Intro, with.Intro},
+		{"stream", plain.Stream, with.Stream},
+		{"card", plain.Card, with.Card},
+	} {
+		if phase.a != phase.b {
+			t.Errorf("the poster moved the %s phase: %v became %v", phase.name, phase.a, phase.b)
+		}
+	}
+
+	first := with.Frame(0)
+	if first.Mode != tui.ModeCard {
+		t.Errorf("the first frame is mode %v, want the result", first.Mode)
+	}
+	if first.At != with.RunEnd || first.Anim != with.RunEnd {
+		t.Errorf("the first frame is cut at %v/%v, want the run's end %v", first.At, first.Anim, with.RunEnd)
+	}
+	if first.InOpen {
+		t.Error("the first frame is a cold-open frame")
+	}
+	if first.Clip != 0 {
+		t.Errorf("the first frame is at %v of the clip, want 0", first.Clip)
+	}
+
+	// Every other frame is the schedule's own, one frame later in the clip.
+	for i := 0; i < plain.Count; i++ {
+		want, got := plain.Frame(i), with.Frame(i+1)
+		if got.At != want.At || got.Anim != want.Anim || got.Mode != want.Mode ||
+			got.InOpen != want.InOpen || got.Open != want.Open {
+			t.Fatalf("frame %d shifted: %+v, want %+v", i+1, got, want)
+		}
+		// It sits one index later in the finished clip, at that index's own
+		// frame time: the times are i×Second/FPS, and Second/FPS on its own
+		// truncates, so the shift is compared by index and not by adding a
+		// frame's worth of nanoseconds.
+		if at := clipTimeAt(with, i+1); got.Clip != at {
+			t.Fatalf("frame %d is at %v of the clip, want %v", i+1, got.Clip, at)
+		}
+	}
+
+	// Asking twice is asking once: a second poster would show the ending
+	// twice and lengthen the clip for nothing.
+	if again := with.WithPoster(); again.Count != with.Count || again.Duration != with.Duration {
+		t.Errorf("WithPoster is not idempotent: %d frames, %v", again.Count, again.Duration)
+	}
+}
+
+// clipTimeAt is frame i's time in s, the schedule's own arithmetic.
+func clipTimeAt(s Schedule, i int) time.Duration {
+	return time.Duration(i) * time.Second / time.Duration(s.FPS)
+}
+
+// TestNoPosterOptOut: Options.NoPoster gives back the clip that used to be the
+// only one, so a caller who minds the one-frame flash at the top of a GIF loop
+// has a way out.
+func TestNoPosterOptOut(t *testing.T) {
+	tp := tui.ExampleTape()
+	_, on, err := prepare(tp, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, off, err := prepare(tp, Options{NoPoster: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if on.Count != off.Count+1 {
+		t.Errorf("the default clip has %d frames and --no-poster %d, want one more", on.Count, off.Count)
+	}
+	if off.Frame(0).Mode == tui.ModeCard {
+		t.Error("--no-poster still opens on the result")
+	}
+	if on.Frame(0).Mode != tui.ModeCard {
+		t.Error("the default clip does not open on the result")
+	}
+}

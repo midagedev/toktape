@@ -118,6 +118,9 @@ type Schedule struct {
 
 	// introLead is added to clip time during the intro; see the type comment.
 	introLead time.Duration
+	// poster marks a clip whose first frame is the result screen; see
+	// WithPoster.
+	poster bool
 	// oneToOne marks the ordinary case: the streaming phase is the run, at
 	// its own speed, and Frame maps it by subtraction rather than by a ratio.
 	// It is not the same as Stream == RunEnd — snapping the clip to a whole
@@ -212,6 +215,39 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration, open bool) Sc
 	return s
 }
 
+// WithPoster puts the run's result on the front of the clip, as one frame
+// before everything else (user, 2026-09-14: "랜더링 할때 첫프레임을 결과 화면으로
+// 넣을 수 있게 해줘", then "이걸 기본 모드로 하고").
+//
+// The first frame is what a still of a clip is: the thumbnail X, Reddit and
+// Slack show before anyone presses play, the poster of an <video>, and the
+// image a GIF holds while the rest of it loads. Without this that still is an
+// empty terminal at a shell prompt, which says nothing about the run — the
+// figures a reader is being shown the clip for arrive thirty seconds later.
+// With it the still is the result: two rates, the rig, where the model sits.
+//
+// The cost is one frame, and on a looping GIF it is paid once per loop as a
+// flash of the ending before the clip restarts. That is the trade: a still
+// that means something, against a sixty-seventh of a second of the end shown
+// out of order. Options.NoPoster turns it off for a caller who would rather
+// have the loop clean.
+//
+// It is a frame in front of the schedule rather than a change to it: every
+// other frame keeps the phase it had, and the run still plays at 1:1.
+func (s Schedule) WithPoster() Schedule {
+	if s.poster || s.FPS <= 0 {
+		return s
+	}
+	s.poster = true
+	s.Count++
+	// From the count, not by adding a frame's duration: Second/FPS truncates
+	// (at 30 fps a frame is 33333333ns and three of them are a nanosecond
+	// short of 100ms), and a clip whose length disagreed with its frame times
+	// by a nanosecond would put the last frame in the wrong phase.
+	s.Duration = time.Duration(s.Count-1) * time.Second / time.Duration(s.FPS)
+	return s
+}
+
 // Frame returns frame i. Indices outside [0, Count) are clamped, so a caller
 // that miscounts gets the first or last frame rather than a panic.
 func (s Schedule) Frame(i int) Frame {
@@ -227,27 +263,42 @@ func (s Schedule) Frame(i int) Frame {
 	}
 	f := Frame{Index: i, Clip: clip, Mode: tui.ModeLive}
 
+	// The poster is the result, drawn before the clip proper starts. Every
+	// frame after it is the schedule's own, one frame later in the finished
+	// clip but on the same phase it always had — which is why the switch
+	// below reads `at` and not `clip`.
+	at := clip
+	if s.poster {
+		if i == 0 {
+			f.At, f.Anim, f.Mode = s.RunEnd, s.RunEnd, tui.ModeCard
+			return f
+		}
+		// The clip time this frame would have had without the poster, from
+		// the index rather than by subtracting a frame — see WithPoster.
+		at = time.Duration(i-1) * time.Second / time.Duration(s.FPS)
+	}
+
 	switch {
-	case clip < s.Open && s.Open > 0:
+	case at < s.Open && s.Open > 0:
 		f.InOpen = true
-		f.Open = time.Duration(float64(clip) * float64(OpenHold) / float64(s.Open))
+		f.Open = time.Duration(float64(at) * float64(OpenHold) / float64(s.Open))
 		f.At = 0
 		f.Anim = f.Open
-	case clip < s.Open+s.Intro:
+	case at < s.Open+s.Intro:
 		f.At = 0
-		f.Anim = clip - s.Open + s.introLead
-	case clip < s.Open+s.Intro+s.Stream && s.Stream > 0:
+		f.Anim = at - s.Open + s.introLead
+	case at < s.Open+s.Intro+s.Stream && s.Stream > 0:
 		if s.oneToOne {
 			// Exactly clip − start: integer subtraction, not a ratio, so the
 			// run clock and the clip clock stay locked to the nanosecond and
 			// the sparklines scroll at the speed the operator saw. The clamp
 			// covers the part-frame the snapping added past the run's end.
-			f.At = clip - s.Open - s.Intro
+			f.At = at - s.Open - s.Intro
 			if f.At > s.RunEnd {
 				f.At = s.RunEnd
 			}
 		} else {
-			p := float64(clip-s.Open-s.Intro) / float64(s.Stream)
+			p := float64(at-s.Open-s.Intro) / float64(s.Stream)
 			f.At = time.Duration(float64(s.RunEnd) * p)
 		}
 		f.Anim = f.At

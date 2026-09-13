@@ -111,11 +111,12 @@ func TestRenderVerbWritesEveryAskedForArtifact(t *testing.T) {
 	if err != nil || len(frames) == 0 {
 		t.Fatalf("no frames in %s (%v)", framesDir, err)
 	}
-	// 1 s at 5 fps is six frames, both endpoints included.
-	if len(frames) != 6 {
-		t.Errorf("%d frames, want 6", len(frames))
+	// 1 s at 5 fps is six frames, both endpoints included, and the poster
+	// makes seven (2026-09-14).
+	if len(frames) != 7 {
+		t.Errorf("%d frames, want 7", len(frames))
 	}
-	if !strings.Contains(out, "(6 frames)") {
+	if !strings.Contains(out, "(7 frames)") {
 		t.Errorf("stdout = %q, does not report the frame count", out)
 	}
 }
@@ -327,7 +328,7 @@ func TestHeroGIFIsPostable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the hero's recording is missing: %v", err)
 	}
-	sched := render.NewSchedule(render.RunEnd(tp), heroFPS, 0, true)
+	sched := render.NewSchedule(render.RunEnd(tp), heroFPS, 0, true).WithPoster()
 	if len(g.Image) > sched.Count {
 		t.Errorf("the hero has %d frames, more than the schedule's %d", len(g.Image), sched.Count)
 	}

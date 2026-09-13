@@ -41,6 +41,7 @@ Flags:
   --cast FILE      write an asciicast v2 recording
   --frames DIR     write the PNG frame sequence into DIR
   --open           open on a shell prompt with the command being typed, before the screen
+  --no-poster      do not put the result on the clip's first frame
   --duration D     length of the clip (default: derived from the run)
   --fps N          frame rate (default 30)
   --size WxH       terminal size in cells (default 156x38 for --mp4 and --frames, 120x36 for --gif and --cast)
@@ -65,6 +66,7 @@ func runRender(stdout, stderr io.Writer, args []string) int {
 		framesTo = fs.String("frames", "", "write the PNG frame sequence into this directory")
 		duration = fs.Duration("duration", 0, "length of the clip (default: derived from the run)")
 		coldOpen = fs.Bool("open", false, "open on a shell prompt with the command being typed")
+		noPoster = fs.Bool("no-poster", false, "do not put the result on the clip's first frame")
 		fps      = fs.Int("fps", render.DefaultFPS, "frame rate")
 		size     = fs.String("size", "", "terminal size in cells, e.g. 120x36")
 		outDir   = fs.String("out", defaultRunsDir(), "directory to take the newest run from")
@@ -86,7 +88,7 @@ func runRender(stdout, stderr io.Writer, args []string) int {
 		return exitUsage
 	}
 
-	opts := render.Options{FPS: *fps, Duration: *duration, ColdOpen: *coldOpen}
+	opts := render.Options{FPS: *fps, Duration: *duration, ColdOpen: *coldOpen, NoPoster: *noPoster}
 	if *size != "" {
 		w, h, err := parseSize(*size)
 		if err != nil {

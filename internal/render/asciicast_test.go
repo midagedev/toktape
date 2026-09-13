@@ -65,7 +65,11 @@ func TestAsciicastOfAConcurrentRun(t *testing.T) {
 	}
 
 	events := lines[1:]
-	sched := NewSchedule(RunEnd(tp), DefaultFPS, 0, false)
+	// The renderer's own schedule, poster frame included (2026-09-14).
+	_, sched, err := prepare(tp, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(events) != sched.Count {
 		t.Errorf("recording has %d events, want the schedule's %d frames", len(events), sched.Count)
 	}
@@ -95,9 +99,9 @@ func TestAsciicastOfAConcurrentRun(t *testing.T) {
 		}
 	}
 	// The clip is the holds plus the whole run, snapped up to a whole frame
-	// (no cap on the run since 2026-09-14), so the last event lands within one
-	// frame past that sum.
-	if lo, hi := MinDuration.Seconds(), (MinDuration + RunEnd(tp) + time.Second/DefaultFPS).Seconds(); last < lo || last > hi {
+	// (no cap on the run since 2026-09-14) and with the poster frame in front
+	// of it, so the last event lands within two frames past that sum.
+	if lo, hi := MinDuration.Seconds(), (MinDuration + RunEnd(tp) + 2*time.Second/DefaultFPS).Seconds(); last < lo || last > hi {
 		t.Errorf("recording ends at %.3fs, want it inside [%.0fs, %.0fs]", last, lo, hi)
 	}
 }
@@ -109,8 +113,9 @@ func TestAsciicastFramesAreFullRedraws(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	events := lines[1:]
-	if len(events) != 3 {
-		t.Fatalf("%d events, want 3", len(events))
+	// Two frames of a one-second two-fps clip, and the poster in front.
+	if len(events) != 4 {
+		t.Fatalf("%d events, want 4", len(events))
 	}
 
 	_, first := castEventOf(t, events[0])
@@ -160,7 +165,8 @@ func TestAsciicastOfAnEmptyTape(t *testing.T) {
 		t.Fatalf("Asciicast(nil): %v", err)
 	}
 	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if want := DefaultFPS*int(MinDuration/time.Second) + 1; len(lines)-1 != want {
+	// The two holds, their end frame, and the poster.
+	if want := DefaultFPS*int(MinDuration/time.Second) + 2; len(lines)-1 != want {
 		t.Errorf("%d events, want %d", len(lines)-1, want)
 	}
 }

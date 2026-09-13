@@ -221,7 +221,11 @@ func TestGIFOfARunReplaysTheRenderedFrames(t *testing.T) {
 	want := opts
 	want.FontSize = GIFFontSize
 	want = want.withDefaults()
-	sched := NewSchedule(RunEnd(tp), want.FPS, want.Duration, false)
+	// The renderer's own schedule, poster frame included (2026-09-14).
+	_, sched, err := prepare(tp, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	g := decodeGIF(t, out)
 	canvas := image.NewRGBA(image.Rect(0, 0, g.Config.Width, g.Config.Height))
