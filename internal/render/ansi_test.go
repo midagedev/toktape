@@ -166,10 +166,12 @@ func TestParseScreenReadsTheRealTheme(t *testing.T) {
 		name string
 		col  color.RGBA
 	}{
-		{"accent", color.RGBA{R: 0x7d, G: 0xd3, B: 0xfc, A: 0xff}},
-		{"dim", color.RGBA{R: 0x6b, G: 0x72, B: 0x80, A: 0xff}},
-		{"text", color.RGBA{R: 0xe5, G: 0xe7, B: 0xeb, A: 0xff}},
-		{"warn", color.RGBA{R: 0xfb, G: 0xbf, B: 0x24, A: 0xff}},
+		// The palette's own entries (TTP-40): the check is that every role
+		// survives the parse, whatever the palette currently is.
+		{"accent", hexColour(tui.ThemePalette().Accent)},
+		{"dim", hexColour(tui.ThemePalette().Dim)},
+		{"text", hexColour(tui.ThemePalette().Text)},
+		{"warn", hexColour(tui.ThemePalette().Warn)},
 	} {
 		found := 0
 		for _, c := range sc.cells {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/midagedev/toktape/internal/tape"
+	"github.com/midagedev/toktape/internal/tui"
 )
 
 // The cold open is the part of the clip before the TUI exists: an empty shell
@@ -86,14 +87,15 @@ const (
 // screen and the quarter circle reads at every cell size the clip uses.
 var openSpinnerFrames = []rune{'◐', '◓', '◑', '◒'}
 
-// The open's palette mirrors internal/tui/theme.go, whose colour constants are
-// unexported. Same three roles the TUI uses and no fourth: the accent carries
+// The open's palette is internal/tui's, read through tui.ThemePalette so a
+// palette change reaches the open too (TTP-40). Same three roles the TUI uses
+// and no fourth: the accent carries
 // the prompt glyph, the spinner and the cursor; text carries what the operator
 // typed and the model that was found; everything else is chrome and is dim.
 var (
-	openAccent = color.RGBA{R: 0x7d, G: 0xd3, B: 0xfc, A: 0xff}
-	openText   = color.RGBA{R: 0xe5, G: 0xe7, B: 0xeb, A: 0xff}
-	openDim    = color.RGBA{R: 0x6b, G: 0x72, B: 0x80, A: 0xff}
+	openAccent = hexColour(tui.ThemePalette().Accent)
+	openText   = hexColour(tui.ThemePalette().Text)
+	openDim    = hexColour(tui.ThemePalette().Dim)
 )
 
 // OpenScreen renders one frame of the cold open as a block of ANSI-coloured

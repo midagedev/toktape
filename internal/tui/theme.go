@@ -25,6 +25,25 @@ const (
 	colDarkFill = "#1e293b"
 )
 
+// colGround is the terminal background the palette is designed on. The TUI
+// never paints it — a terminal brings its own — but internal/render rasterises
+// frames on it, and every luminance step in this file is measured against it.
+const colGround = "#11111b"
+
+// Palette is the part of the theme the renderers outside this package draw
+// with directly: the ground a frame is rasterised on, the default foreground,
+// and the roles the cold open uses. It is the single owner of those colours
+// (TTP-40, 2026-09-13): internal/render used to carry its own copies, and a
+// palette change would have left them behind.
+type Palette struct {
+	Ground, Text, Dim, Accent, Warn string
+}
+
+// ThemePalette returns the palette as hex strings, "#rrggbb".
+func ThemePalette() Palette {
+	return Palette{Ground: colGround, Text: colText, Dim: colDim, Accent: colAccent, Warn: colWarn}
+}
+
 // Three shades of the accent, used only where something breathes: the stream
 // cursor and the header shimmer. They are the same hue at three lightnesses,
 // never three different hues.

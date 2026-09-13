@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mattn/go-runewidth"
+	"github.com/midagedev/toktape/internal/tui"
 )
 
 // The terminal the frames are rasterised for: a dark, unthemed one. These two
@@ -15,11 +16,22 @@ var (
 	// bgColour is the terminal background. It is the ANSI-art convention's
 	// near-black with a blue cast rather than #000, which would make the
 	// dim chrome (#6b7280) read as the brightest thing on screen.
-	bgColour = color.RGBA{R: 0x11, G: 0x11, B: 0x1b, A: 0xff}
+	bgColour = hexColour(tui.ThemePalette().Ground)
 	// fgColour is the default foreground, used for any cell the frame did not
-	// paint. It matches tui's colText.
-	fgColour = color.RGBA{R: 0xe5, G: 0xe7, B: 0xeb, A: 0xff}
+	// paint. It is tui's text colour, read from its palette (TTP-40).
+	fgColour = hexColour(tui.ThemePalette().Text)
 )
+
+// hexColour parses a "#rrggbb" palette entry. The palette is tui's, fixed at
+// compile time and pinned by its tests, so a malformed entry is a programming
+// error and panics at start-up rather than rasterising a wrong colour.
+func hexColour(hex string) color.RGBA {
+	v, err := strconv.ParseUint(strings.TrimPrefix(hex, "#"), 16, 32)
+	if err != nil || len(hex) != 7 {
+		panic("render: palette colour " + strconv.Quote(hex) + " is not #rrggbb")
+	}
+	return color.RGBA{R: uint8(v >> 16), G: uint8(v >> 8), B: uint8(v), A: 0xff}
+}
 
 // cellWidth measures runes exactly as the TUI laid them out.
 //
