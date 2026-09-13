@@ -203,7 +203,8 @@ side by side. Each field is there because it settles an argument.
 **Record:** `--url` (default: discover), `-n`/`--concurrency`, `--prompt`
 (repeatable, cycled to fill `-n`), `--prompts`
 (a JSONL file; each line is one round of `-n` streams, run in order into one
-tape), `--n-predict` (default 256), `--out`
+tape), `--spec-n-max LIST` (e.g. `3,5`: the prompt set once per
+speculative `n_max`, all in one tape, with a card line per value), `--n-predict` (default 256), `--out`
 (default `~/.toktape/runs`), `--tag`, `--note`, `--wait`, `--tui`,
 `--grid COLSxROWS` (default `2x4`, `0` fits the terminal), `--no-card`,
 `--json`, `--quiet`.
