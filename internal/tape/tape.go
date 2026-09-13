@@ -50,6 +50,11 @@ const (
 	// ColdMajFaultsPerToken: at or above this average the run is labelled
 	// cold (weights were being paged in from disk during decode).
 	ColdMajFaultsPerToken = 1.0
+	// ContendedIOSomeAvg10 is the /proc/pressure/io "some avg10" above which a
+	// witness marks the run contended (TTP-36, 2026-09-13). A model load pins
+	// IO pressure high from its first second, long before the load average
+	// moves; the threshold is the one rig-log's quiet-machine protocol uses.
+	ContendedIOSomeAvg10 = 5.0
 )
 
 // Tape is the run file. Serialised as gzip'd JSON by Write; read by Read.
@@ -102,13 +107,19 @@ type RunSummary struct {
 	// and PerRound / Spread are then empty. Timings and Aggregate are over
 	// every stream of every round; Aggregate.WallMs is the sum of the rounds'
 	// own windows, never the gaps between them.
-	Rounds     int            `json:"rounds,omitempty"`
-	PerRound   []RoundSummary `json:"per_round,omitempty"`
-	Spread     *RoundSpread   `json:"spread,omitempty"` // nil for a single round
-	Cache      CacheSummary   `json:"cache"`
-	Contention ContentionInfo `json:"contention"`
-	Template   TemplateInfo   `json:"template"`
-	GPUsAtEnd  []GPUSample    `json:"gpus_at_end,omitempty"`
+	Rounds   int            `json:"rounds,omitempty"`
+	PerRound []RoundSummary `json:"per_round,omitempty"`
+	// SpecNMax are the speculative.n_max values of a `record --spec-n-max`
+	// sweep, in the order they ran (TTP-35, 2026-09-13). Each value runs the
+	// whole prompt set, so Rounds = len(SpecNMax) x prompts, and BySpecNMax
+	// is the spread per value. Empty = no sweep.
+	SpecNMax   []int           `json:"spec_n_max,omitempty"`
+	BySpecNMax []SpecNMaxGroup `json:"by_spec_n_max,omitempty"`
+	Spread     *RoundSpread    `json:"spread,omitempty"` // nil for a single round
+	Cache      CacheSummary    `json:"cache"`
+	Contention ContentionInfo  `json:"contention"`
+	Template   TemplateInfo    `json:"template"`
+	GPUsAtEnd  []GPUSample     `json:"gpus_at_end,omitempty"`
 
 	// Tag and Note label the experiment this run belongs to (`--tag ngl=40
 	// --note "fa on"`). They are the user's words, recorded so the run ledger
@@ -358,6 +369,9 @@ type AggregateTimings struct {
 // use, restricted to the round's streams, so a round is a run in miniature.
 type RoundSummary struct {
 	Index int `json:"index"`
+	// SpecNMax is the speculative.n_max this round was sent with in a sweep
+	// (TTP-35); 0 = not overridden.
+	SpecNMax int `json:"spec_n_max,omitempty"`
 	// Name is the JSONL line's "name" when it had one, else "" and the card
 	// labels the round by its 1-based number.
 	Name    string `json:"name,omitempty"`
@@ -371,6 +385,15 @@ type RoundSummary struct {
 	// Speculative decoding totals over the round's streams; nil = not reported.
 	DraftN         *int `json:"draft_n,omitempty"`
 	DraftNAccepted *int `json:"draft_n_accepted,omitempty"`
+}
+
+// SpecNMaxGroup is one value of a speculative.n_max sweep (TTP-35): the rounds
+// sent with it and the spread of their figures, reduced exactly as the
+// run-level Spread is.
+type SpecNMaxGroup struct {
+	NMax   int         `json:"n_max"`
+	Rounds int         `json:"rounds"`
+	Spread RoundSpread `json:"spread"`
 }
 
 // Spread is a median with its range over the rounds of a run. Min == Max ==
@@ -414,6 +437,39 @@ type ContentionInfo struct {
 	Reasons       []string `json:"reasons,omitempty"` // "loadavg 12.3 > cores 8", "2 other GPU procs"
 	LoadAvg1      float64  `json:"loadavg1"`
 	OtherGPUProcs int      `json:"other_gpu_procs"`
+	// Witnesses are readings of the box taken at the start and the end of
+	// every measurement round (TTP-36, 2026-09-13), so a suspect row carries
+	// its own evidence instead of a timeline rebuilt from logs. Recorded only
+	// when the server runs on this host (Server.PID found): the recording
+	// machine's pressure says nothing about a remote server's.
+	Witnesses []ContentionWitness `json:"witnesses,omitempty"`
+}
+
+// ContentionWitness is one reading of how busy the box was (TTP-36).
+type ContentionWitness struct {
+	T        time.Duration `json:"t"`     // since run start
+	Round    int           `json:"round"` // 0 for a single-round run
+	Edge     string        `json:"edge"`  // "start" | "end"
+	LoadAvg1 float64       `json:"loadavg1"`
+	// IOSomeAvg10 is /proc/pressure/io "some avg10". nil = unreadable (no PSI
+	// in the kernel, or not Linux); 0 is a real, quiet reading.
+	IOSomeAvg10 *float64 `json:"io_some_avg10,omitempty"`
+	// PageCacheBytes is /proc/meminfo Cached. 0 = unread.
+	PageCacheBytes int64 `json:"page_cache_bytes,omitempty"`
+	// ProcsRead is true when the process table was scanned; LlamaProcs is
+	// then complete, and an empty list is a reading, not an unknown.
+	ProcsRead  bool        `json:"procs_read"`
+	LlamaProcs []LlamaProc `json:"llama_procs,omitempty"`
+}
+
+// LlamaProc is one live llama-* process (llama-server, llama-bench, ...).
+type LlamaProc struct {
+	PID    int     `json:"pid"`
+	Comm   string  `json:"comm"`
+	AgeSec float64 `json:"age_s"`
+	// Attached is true for the server this run measured; every other
+	// llama-* process is contention.
+	Attached bool `json:"attached,omitempty"`
 }
 
 // TemplateInfo records what was actually sent. Lesson 4.
