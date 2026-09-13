@@ -191,6 +191,10 @@ type recorder struct {
 	timings    ServerTimings
 	sawTimings bool
 	completion strings.Builder
+	// reasoning is the thinking text, kept apart from the answer even though
+	// its tokens are in rec.Tokens alongside the answer's.
+	reasoning  strings.Builder
+	reasoningN int
 	cached     int
 	sawCached  bool
 	errMsg     string
@@ -262,29 +266,53 @@ func (r *recorder) apply(c *streamChunk, t time.Duration) {
 		if ch.FinishReason != nil && *ch.FinishReason != "" {
 			r.rec.Prompt.FinishReason = *ch.FinishReason
 		}
-		// Reasoning text is generated but is not part of the answer, so it
-		// stays out of Completion and out of Tokens (counting it would move
-		// the decode window). It reaches the caller through OnReasoning.
+		// A reasoning ("thinking") delta is a decode token: the server counts
+		// it in predicted_n exactly like an answer token, so TTFT and every
+		// rate must count it too (TTP-20, 2026-09-13). Only the transcript
+		// keeps the two apart — the text goes to Prompt.Reasoning, never to
+		// Prompt.Completion, and the event carries Reasoning: true so a
+		// renderer can style it differently.
 		if rc := ch.Delta.ReasoningContent; rc != nil && *rc != "" {
+			ev := r.addToken(t, *rc, true)
+			r.reasoning.WriteString(*rc)
+			// OnReasoning is the transcript hook and still fires, so a caller
+			// that wants only the thinking text does not have to filter
+			// OnToken. addToken has already fired OnToken for this event.
 			if r.hooks.OnReasoning != nil {
-				r.hooks.OnReasoning(tape.TokenEvent{T: t, Index: -1, Text: *rc})
+				r.hooks.OnReasoning(ev)
 			}
 		}
 		// Lesson 1: only a delta that carried text is a token. The role-only
 		// chunk, the empty content deltas and the finish chunk are not.
 		if ct := ch.Delta.Content; ct != nil && *ct != "" {
-			ev := tape.TokenEvent{T: t, Index: len(r.rec.Tokens), Text: *ct}
-			if r.sawTimings {
-				ev.PredictedN = r.timings.PredictedN
-				ev.PredictedMs = r.timings.PredictedMs
-			}
-			r.rec.Tokens = append(r.rec.Tokens, ev)
+			r.addToken(t, *ct, false)
 			r.completion.WriteString(*ct)
-			if r.hooks.OnToken != nil {
-				r.hooks.OnToken(ev)
-			}
 		}
 	}
+}
+
+// addToken appends one generated token to the record and hands it to OnToken.
+//
+// Reasoning and answer tokens share one Index sequence, because they share the
+// server's predicted_n sequence: they are the same decode steps. Every token
+// the record keeps fires OnToken, which is what lets the process recorder
+// stitch its per-token major-fault readings back onto rec.Tokens by arrival
+// order (internal/recorder state.applyDeltas). A token that skipped the hook
+// would shift every later reading onto the wrong token.
+func (r *recorder) addToken(t time.Duration, text string, reasoning bool) tape.TokenEvent {
+	ev := tape.TokenEvent{T: t, Index: len(r.rec.Tokens), Text: text, Reasoning: reasoning}
+	if r.sawTimings {
+		ev.PredictedN = r.timings.PredictedN
+		ev.PredictedMs = r.timings.PredictedMs
+	}
+	r.rec.Tokens = append(r.rec.Tokens, ev)
+	if reasoning {
+		r.reasoningN++
+	}
+	if r.hooks.OnToken != nil {
+		r.hooks.OnToken(ev)
+	}
+	return ev
 }
 
 // finish closes the record. sentAt and activeBytesPerToken are handed to
@@ -293,6 +321,8 @@ func (r *recorder) apply(c *streamChunk, t time.Duration) {
 func (r *recorder) finish(sentAt time.Time, activeBytesPerToken int64) (*tape.RequestRecord, ServerTimings, error) {
 	rec := &r.rec
 	rec.Prompt.Completion = r.completion.String()
+	rec.Prompt.Reasoning = r.reasoning.String()
+	rec.Prompt.ReasoningN = r.reasoningN
 	rec.Timings = r.timings.Summary()
 	if r.sawCached && rec.Timings.CacheN == 0 {
 		// stream_options.include_usage reports the same figure as timings.cache_n

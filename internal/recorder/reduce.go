@@ -108,6 +108,10 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 		out.PromptN += t.PromptN
 		out.CacheN += t.CacheN
 		out.PredictedN += t.PredictedN
+		// A thinking model's reasoning tokens are part of PredictedN, so they
+		// are averaged with it; without this the card's Context row drops the
+		// thinking clause for every concurrent run (TTP-20, 2026-09-13).
+		out.ReasoningN += t.ReasoningN
 		out.PromptMs += t.PromptMs
 		out.PredictedMs += t.PredictedMs
 		out.PromptPerSecond += t.PromptPerSecond
@@ -132,6 +136,7 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 	out.PromptN = int(float64(out.PromptN)/n + 0.5)
 	out.CacheN = int(float64(out.CacheN)/n + 0.5)
 	out.PredictedN = int(float64(out.PredictedN)/n + 0.5)
+	out.ReasoningN = int(float64(out.ReasoningN)/n + 0.5)
 	out.PromptMs /= n
 	out.PredictedMs /= n
 	out.PromptPerSecond /= n

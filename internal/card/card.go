@@ -317,8 +317,7 @@ func speedSection(s *tape.RunSummary) []string {
 	)...)
 
 	out = append(out, labelled("Context", speedLabelW, []string{
-		fmt.Sprintf("%s (%s in / %s out)",
-			formatInt(s.Server.CtxSize), formatInt(promptTotal), formatInt(t.PredictedN)),
+		contextString(s.Server.CtxSize, promptTotal, t.PredictedN, reasoningTokens(s)),
 	})...)
 
 	out = append(out, labelled("Prefix cache", speedLabelW, []string{cacheString(s.Cache)})...)
@@ -328,6 +327,32 @@ func speedSection(s *tape.RunSummary) []string {
 	}
 	return out
 }
+
+// contextString is the value of the Context row: the window the server was
+// started with and how much of it this run used.
+//
+//	16384 (43 in / 96 out)
+//	16384 (43 in / 96 out · 96 thinking)
+//
+// A thinking model's reasoning tokens are already inside the "out" figure —
+// the server counts them in predicted_n, so every rate on the card includes
+// them (TTP-20, 2026-09-13). The trailing clause says how many of them there
+// were, because "96 out" for a run that spent the whole budget thinking is a
+// different fact from 96 tokens of answer, and the reader cannot tell the two
+// apart from the number alone. It is omitted when thinking is 0, which is both
+// "not a thinking model" and "did not think" — neither is worth a clause.
+func contextString(ctxSize, in, out, thinking int) string {
+	used := fmt.Sprintf("%s in / %s out", formatInt(in), formatInt(out))
+	if thinking > 0 {
+		used += " · " + formatInt(thinking) + " thinking"
+	}
+	return fmt.Sprintf("%s (%s)", formatInt(ctxSize), used)
+}
+
+// reasoningTokens is how many of the run's generated tokens were a thinking
+// model's reasoning_content. 0 for every model that does not think, and for a
+// thinking model that answered without thinking.
+func reasoningTokens(s *tape.RunSummary) int { return s.Timings.ReasoningN }
 
 // promptTokens is the whole prompt the run sent, cached prefix included.
 func promptTokens(s *tape.RunSummary) int {
@@ -614,9 +639,33 @@ func flagTokens(srv tape.ServerInfo) (base []string, ot string) {
 	return base, strings.Join(parts, " ")
 }
 
+// answerCutWarning is the caveat for a run that thought until it ran out of
+// budget and never answered.
+//
+// It is derived rather than recorded, because it is a reading of two figures
+// the tape already carries and not an observation of its own. Without it the
+// card shows a healthy decode rate beside an empty completion, and the reader
+// blames the tool instead of --n-predict (TTP-20, 2026-09-13). A run that
+// thought and then answered is not cut and gets no warning: the thinking
+// clause on the Context row already says how much of the budget went where.
+func answerCutWarning(s *tape.RunSummary) string {
+	t := s.Timings
+	if t.PredictedN <= 0 || t.ReasoningN < t.PredictedN {
+		return ""
+	}
+	return fmt.Sprintf("answer cut: all %s predicted tokens were reasoning — raise --n-predict",
+		formatInt(t.PredictedN))
+}
+
 func warningSection(s *tape.RunSummary) []string {
 	var out []string
-	for _, w := range s.Warnings {
+	warnings := s.Warnings
+	if w := answerCutWarning(s); w != "" {
+		// First: it explains an empty answer, which is the thing a reader is
+		// looking at the card to understand.
+		warnings = append([]string{w}, warnings...)
+	}
+	for _, w := range warnings {
 		if strings.TrimSpace(w) == "" {
 			continue
 		}

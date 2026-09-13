@@ -124,3 +124,23 @@ func TestShadeSteps(t *testing.T) {
 		t.Errorf("the weights step should keep the device hue exactly: %v != %v", got, base)
 	}
 }
+
+// TestThinkingString pins the decode column's thinking clause. It is empty
+// until a run actually reports reasoning tokens, so joinParts drops it and no
+// existing PNG golden moves (TTP-20, 2026-09-13).
+func TestThinkingString(t *testing.T) {
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, ""},
+		{-1, ""},
+		{96, "96 thinking"},
+		{12800, "12800 thinking"},
+	}
+	for _, tc := range cases {
+		if got := thinkingString(tc.n); got != tc.want {
+			t.Errorf("thinkingString(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}

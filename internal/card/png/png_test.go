@@ -859,3 +859,46 @@ func TestQueuedStreamsAreNamed(t *testing.T) {
 		})
 	}
 }
+
+// TestAnswerCutPillFitsTheCard: a run that thought until it ran out of budget
+// gets a fourth pill, and the memory band still fits inside the content box
+// with it (TTP-20, 2026-09-13).
+func TestAnswerCutPillFitsTheCard(t *testing.T) {
+	s := *card.Example()
+	s.Timings.PredictedN = 128
+	s.Timings.ReasoningN = 128
+
+	c := build(&s)
+	var texts []string
+	for _, p := range c.pills {
+		texts = append(texts, p.text)
+	}
+	if got, want := len(c.pills), 4; got != want {
+		t.Fatalf("pills = %d %v, want %d", got, texts, want)
+	}
+	if got := c.pills[3].text; got != "answer cut" {
+		t.Errorf("last pill = %q, want %q", got, "answer cut")
+	}
+
+	// And it is absent when the run answered.
+	s.Timings.ReasoningN = 96
+	if got, want := len(build(&s).pills), 3; got != want {
+		t.Errorf("pills = %d, want %d for a run that answered", got, want)
+	}
+
+	// The layout guard: nothing may leave the content box with the extra pill.
+	s.Timings.ReasoningN = 128
+	cv, err := renderCanvas(&s)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	for _, m := range cv.marks {
+		if m.Kind != "text" || m.Text == "" {
+			continue
+		}
+		if m.Rect.Min.X < contentL || m.Rect.Max.X > contentR {
+			t.Errorf("%s (%q) spans x=%d..%d, outside the content box (%d..%d)",
+				m.ID, m.Text, m.Rect.Min.X, m.Rect.Max.X, contentL, contentR)
+		}
+	}
+}

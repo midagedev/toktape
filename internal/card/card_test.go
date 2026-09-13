@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -458,5 +459,121 @@ func TestQueuedStreamsAreNamed(t *testing.T) {
 	single.Server.NSlots = 0
 	if got := Text(single); strings.Contains(got, "queued") {
 		t.Errorf("a single-stream run reported a queue:\n%s", got)
+	}
+}
+
+// TestContextString pins the Context row's value, the thinking clause
+// included. The clause is not reachable from a *tape.RunSummary yet — the
+// count lives on tape.PromptRecord — so this tests the formatter directly and
+// the row itself will start printing it the moment reasoningTokens can read a
+// real figure (TTP-20, 2026-09-13).
+func TestContextString(t *testing.T) {
+	cases := []struct {
+		name                   string
+		ctx, in, out, thinking int
+		want                   string
+	}{
+		{"no thinking", 16384, 43, 96, 0, "16384 (43 in / 96 out)"},
+		{"all thinking", 16384, 43, 96, 96, "16384 (43 in / 96 out · 96 thinking)"},
+		{"some thinking", 16384, 43, 240, 96, "16384 (43 in / 240 out · 96 thinking)"},
+		{"unknown ctx", 0, 43, 96, 0, "? (43 in / 96 out)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := contextString(tc.ctx, tc.in, tc.out, tc.thinking); got != tc.want {
+				t.Errorf("contextString = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAnswerCutWarning: a run whose every predicted token was reasoning
+// produced no answer at all, and the card has to say why — otherwise the
+// reader sees a healthy decode rate beside an empty completion and blames the
+// tool (TTP-20, 2026-09-13).
+func TestAnswerCutWarning(t *testing.T) {
+	cut := func(predicted, reasoning int) *tape.RunSummary {
+		return &tape.RunSummary{Timings: tape.TimingsSummary{
+			PredictedN: predicted, ReasoningN: reasoning,
+		}}
+	}
+	if got := answerCutWarning(cut(128, 128)); got == "" {
+		t.Error("no warning for a run that was all reasoning")
+	} else {
+		want := "answer cut: all 128 predicted tokens were reasoning — raise --n-predict"
+		if got != want {
+			t.Errorf("warning = %q, want %q", got, want)
+		}
+	}
+	for _, tc := range []struct {
+		name                 string
+		predicted, reasoning int
+	}{
+		{"answered after thinking", 128, 96},
+		{"no thinking at all", 128, 0},
+		{"nothing generated", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := answerCutWarning(cut(tc.predicted, tc.reasoning)); got != "" {
+				t.Errorf("warning = %q, want none", got)
+			}
+		})
+	}
+
+	// The whole card prints it, wrapped by the warning section, inside the box.
+	text := Text(cut(128, 128))
+	if !strings.Contains(text, "! answer cut: all 128 predicted tokens were reasoning") {
+		t.Errorf("Text() does not print the warning:\n%s", text)
+	}
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		if got := Width(line); got != CardWidth {
+			t.Fatalf("line %q is %d columns, want %d", line, got, CardWidth)
+		}
+	}
+}
+
+// TestAnswerCutOnExampleConcurrent renders the warning on the real example
+// summary, so the check covers a card that has every other section filled in
+// and not just the two counts the rule reads.
+func TestAnswerCutOnExampleConcurrent(t *testing.T) {
+	s := *ExampleConcurrent()
+	before := Text(&s)
+	if strings.Contains(before, "answer cut") {
+		t.Fatal("the example summary already warns; this test cannot show the change")
+	}
+
+	s.Timings.ReasoningN = s.Timings.PredictedN
+	after := Text(&s)
+	want := fmt.Sprintf("! answer cut: all %s predicted tokens were reasoning", formatInt(s.Timings.PredictedN))
+	if !strings.Contains(after, want) {
+		t.Errorf("card does not carry %q:\n%s", want, after)
+	}
+	// The fix is in the warning. The sentence is 71 columns and the warning
+	// column is 66, so it wraps and "--n-predict" starts the continuation
+	// line, indented under the "!" the way every wrapped card field is.
+	if !strings.Contains(after, "raise") || !strings.Contains(after, "--n-predict") {
+		t.Errorf("the warning does not say what to do:\n%s", after)
+	}
+	if !strings.Contains(after, "\n│   --n-predict") {
+		t.Errorf("the continuation line is not indented under the warning:\n%s", after)
+	}
+	// The Context row says the same thing in its own voice.
+	if !strings.Contains(after, formatInt(s.Timings.PredictedN)+" thinking") {
+		t.Errorf("Context row has no thinking clause:\n%s", after)
+	}
+	for _, line := range strings.Split(strings.TrimRight(after, "\n"), "\n") {
+		if got := Width(line); got != CardWidth {
+			t.Fatalf("line %q is %d columns, want %d", line, got, CardWidth)
+		}
+	}
+	// The warning wraps onto at most two lines inside the box.
+	var warn int
+	for _, line := range strings.Split(after, "\n") {
+		if strings.Contains(line, "answer cut") || strings.Contains(line, "raise --n-predict") {
+			warn++
+		}
+	}
+	if warn > 2 {
+		t.Errorf("the warning spans %d lines, want at most 2", warn)
 	}
 }

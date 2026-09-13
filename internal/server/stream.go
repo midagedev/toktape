@@ -52,14 +52,20 @@ type StreamRequest struct {
 // goroutines at the same time, so anything they share must be synchronised.
 // Nil fields are skipped.
 type StreamHooks struct {
-	// OnToken fires for each token that carried text, in order.
+	// OnToken fires for each token that carried text, in order — every token
+	// the record keeps, a thinking model's reasoning tokens included. The
+	// process recorder pairs its per-token readings with
+	// tape.RequestRecord.Tokens by arrival order, so a token that skipped this
+	// hook would shift every later reading onto the wrong token.
+	// tape.TokenEvent.Reasoning says which kind arrived.
 	OnToken func(tape.TokenEvent)
 	// OnProgress fires for each return_progress event during prefill.
 	OnProgress func(tape.PromptProgress)
-	// OnReasoning fires for each reasoning ("thinking") delta. Its Index is
-	// -1: reasoning text is not part of the answer and is not recorded in
-	// tape.RequestRecord.Tokens, because counting it would move the decode
-	// window that lesson 1 defines over the content tokens.
+	// OnReasoning fires for each reasoning ("thinking") delta, after OnToken
+	// has already fired for the same event. It is the transcript hook: a
+	// caller that wants only the thinking text does not have to filter
+	// OnToken for it. The event it receives is the one in Tokens, so its
+	// Index is that token's place in the shared sequence, not -1.
 	OnReasoning func(tape.TokenEvent)
 }
 

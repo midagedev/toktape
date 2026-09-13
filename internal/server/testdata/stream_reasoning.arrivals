@@ -1,6 +1,8 @@
 # Arrival offsets (ms since send) for stream_reasoning.sse, one per data: event.
 # A thinking model: three reasoning_content deltas precede the first content
-# token, so the first CONTENT token (TTFT) is at 165, not 90.
+# token. All seven are decode tokens the server counted in predicted_n, so
+# TTFT is the first reasoning delta at 90 and the client window is 90..240
+# (TTP-20, 2026-09-13). The role-only chunk at 62 is still not a token.
 62
 90
 115

@@ -254,45 +254,85 @@ func traceRateN(events []fixtureEvent) float64 {
 	return float64(len(ats)) / (ats[len(ats)-1] - ats[0]).Seconds()
 }
 
-// TestReduceReasoningFixture: a thinking model's reasoning deltas are
-// generated tokens on the server's count but are not part of the answer. They
-// must stay out of Completion and out of Tokens, and the disagreement that
-// causes with the server's predicted_n must be reported, not smoothed over.
+// TestReduceReasoningFixture: a reasoning delta IS a decode token.
+//
+// Rewritten 2026-09-13 (TTP-20, lead decision). Until then this test pinned
+// the opposite contract — reasoning deltas stayed out of rec.Tokens, so TTFT
+// was the first *content* token at 165 ms and the client window spanned four
+// tokens. The first real end-to-end run killed that reading: a thinking model
+// whose whole budget went to reasoning_content produced tokens=null,
+// ttft_ms=0 and client_agrees_with_server=false against the server's
+// predicted_n=96. The server counts a reasoning token in predicted_n exactly
+// like an answer token, so every rate and TTFT must count it too; only the
+// transcript keeps the two apart (Prompt.Reasoning vs Prompt.Completion).
+// This is not a loosened assertion: the counts and the window got LARGER and
+// stricter, and TestReduceReasoningOnlyFixture pins the case that had no
+// assertion at all before.
 func TestReduceReasoningFixture(t *testing.T) {
-	var reasoning []tape.TokenEvent
+	var reasoning, tokens []tape.TokenEvent
 	rec, _ := loadFixture(t, "stream_reasoning", StreamHooks{
 		OnReasoning: func(ev tape.TokenEvent) { reasoning = append(reasoning, ev) },
+		OnToken:     func(ev tape.TokenEvent) { tokens = append(tokens, ev) },
 	})
 
-	if got, want := len(rec.Tokens), 4; got != want {
-		t.Errorf("tokens = %d, want %d (only the content deltas)", got, want)
+	if got, want := len(rec.Tokens), 7; got != want {
+		t.Errorf("tokens = %d, want %d (3 reasoning + 4 content)", got, want)
 	}
+	// OnToken fires for every token the record keeps, reasoning included: the
+	// process recorder stitches its per-token major-fault deltas back onto
+	// rec.Tokens by arrival order, so a token that skipped the hook would
+	// shift every later delta onto the wrong token.
+	if got, want := len(tokens), 7; got != want {
+		t.Errorf("OnToken fired %d times, want %d (every recorded token)", got, want)
+	}
+	// OnReasoning still fires as well: it is the transcript hook, and a caller
+	// that wants only the thinking text should not have to filter OnToken.
 	if got, want := len(reasoning), 3; got != want {
 		t.Errorf("OnReasoning fired %d times, want %d", got, want)
 	}
+	wantFlags := []bool{true, true, true, false, false, false, false}
+	for i, want := range wantFlags {
+		if i >= len(rec.Tokens) {
+			break
+		}
+		if got := rec.Tokens[i].Reasoning; got != want {
+			t.Errorf("Tokens[%d].Reasoning = %v, want %v (%q)", i, got, want, rec.Tokens[i].Text)
+		}
+		if got := rec.Tokens[i].Index; got != i {
+			t.Errorf("Tokens[%d].Index = %d, want %d (one shared sequence)", i, got, i)
+		}
+	}
 	if got, want := rec.Prompt.Completion, "Four bytes per word."; got != want {
-		t.Errorf("Completion = %q, want %q (no reasoning text)", got, want)
+		t.Errorf("Completion = %q, want %q (answer only)", got, want)
 	}
 	if strings.Contains(rec.Prompt.Completion, "The user") {
 		t.Errorf("Completion leaked reasoning text: %q", rec.Prompt.Completion)
 	}
-	if got, want := rec.Timings.TTFTMs, 165.0; got != want {
-		t.Errorf("TTFTMs = %v, want %v (first content token, not the first reasoning delta at 90)", got, want)
+	if got, want := rec.Prompt.Reasoning, "The user wants a short answer."; got != want {
+		t.Errorf("Reasoning = %q, want %q", got, want)
+	}
+	if got, want := rec.Prompt.ReasoningN, 3; got != want {
+		t.Errorf("ReasoningN = %d, want %d", got, want)
+	}
+	if got, want := rec.Timings.TTFTMs, 90.0; got != want {
+		t.Errorf("TTFTMs = %v, want %v (the first reasoning delta; the server was already decoding)", got, want)
 	}
 	if got, want := rec.Timings.DecodeLabel, "sample"; got != want {
 		t.Errorf("DecodeLabel = %q, want %q (7 predicted tokens is below tape.MinDecodeTokens)", got, want)
 	}
-	// The server counted 7 generated tokens; the client recorded 4 content
-	// ones. The COUNTS differ and both are visible, which is the point: a
-	// renderer that prints len(Tokens) as "tokens generated" would understate
-	// a thinking run by the whole thinking budget.
+	// The counts now match: the server's predicted_n and the number of tokens
+	// the client recorded are the same 7. Before TTP-20 they were 7 and 4, and
+	// a renderer printing len(Tokens) as "tokens generated" understated a
+	// thinking run by the whole thinking budget.
 	if got, want := rec.Timings.PredictedN, 7; got != want {
 		t.Errorf("PredictedN = %d, want %d (the server counts reasoning tokens)", got, want)
 	}
-	// The RATES still agree: reasoning tokens are produced at the same speed
-	// as content tokens, so excluding them from the client window changes the
-	// count but not the tok/s. The cross-check therefore survives a thinking
-	// model and must not be weakened for one.
+	if got, want := len(rec.Tokens), rec.Timings.PredictedN; got != want {
+		t.Errorf("len(Tokens) = %d, PredictedN = %d; the two counts must agree for a thinking model", got, want)
+	}
+	// The rates agree over the wider window too: 6 gaps of 25 ms is the same
+	// 40 tok/s the server reports. The cross-check survives a thinking model
+	// and must not be weakened for one.
 	if !rec.Timings.ClientAgreesWithServer {
 		t.Errorf("ClientAgreesWithServer = false; client %v vs server %v, %.4f%% apart",
 			rec.Timings.ClientPredictedPerSecond, rec.Timings.PredictedPerSecond,
@@ -303,6 +343,87 @@ func TestReduceReasoningFixture(t *testing.T) {
 	}
 	if got, want := rec.Cache.HitTokens, 30; got != want {
 		t.Errorf("Cache.HitTokens = %d, want %d", got, want)
+	}
+}
+
+// TestReduceReasoningOnlyFixture is the run that found the defect (2026-09-13,
+// llama-server b40, DeepSeek-V4.1-Flash, --jinja): all 96 predicted tokens
+// arrived as reasoning_content and not one as content. Every figure the card
+// prints has to survive that, because for a thinking model asked a short
+// question it is the ordinary case, not an edge one.
+func TestReduceReasoningOnlyFixture(t *testing.T) {
+	var reasoning, tokens []tape.TokenEvent
+	rec, srv := loadFixture(t, "stream_reasoning_only", StreamHooks{
+		OnReasoning: func(ev tape.TokenEvent) { reasoning = append(reasoning, ev) },
+		OnToken:     func(ev tape.TokenEvent) { tokens = append(tokens, ev) },
+	})
+
+	if got, want := len(rec.Tokens), 96; got != want {
+		t.Fatalf("tokens = %d, want %d (the defect recorded 0)", got, want)
+	}
+	if got, want := len(tokens), 96; got != want {
+		t.Errorf("OnToken fired %d times, want %d", got, want)
+	}
+	if got, want := len(reasoning), 96; got != want {
+		t.Errorf("OnReasoning fired %d times, want %d", got, want)
+	}
+	for i, tk := range rec.Tokens {
+		if !tk.Reasoning {
+			t.Fatalf("Tokens[%d].Reasoning = false; every token of this stream is a reasoning token", i)
+		}
+	}
+	if got, want := rec.Prompt.ReasoningN, 96; got != want {
+		t.Errorf("ReasoningN = %d, want %d", got, want)
+	}
+	// The answer is genuinely empty: the model was cut off by n_predict while
+	// still thinking. Empty is the measurement here, not an unknown.
+	if got := rec.Prompt.Completion; got != "" {
+		t.Errorf("Completion = %q, want empty (no content delta in this stream)", got)
+	}
+	if !strings.HasPrefix(rec.Prompt.Reasoning, "Okay, the user is asking") {
+		t.Errorf("Reasoning = %q..., want the concatenated thinking text", clip(rec.Prompt.Reasoning, 40))
+	}
+	if got, want := len(rec.Prompt.Reasoning), 496; got != want {
+		t.Errorf("len(Reasoning) = %d, want %d bytes (the whole monologue, joined without gaps)", got, want)
+	}
+	if got, want := rec.Prompt.FinishReason, "length"; got != want {
+		t.Errorf("FinishReason = %q, want %q", got, want)
+	}
+	// TTFT was 0 before TTP-20: no token had been recorded, so there was
+	// nothing to take the first arrival from and the card printed "TTFT ?".
+	if got, want := rec.Timings.TTFTMs, 222.0; got != want {
+		t.Errorf("TTFTMs = %v, want %v (arrival of the first reasoning token)", got, want)
+	}
+	// 96 tokens is above tape.MinDecodeTokens, so this is a decode rate and
+	// not a sample — the label the defect got wrong in the other direction by
+	// falling back to len(Tokens) == 0.
+	if got, want := rec.Timings.DecodeLabel, "decode"; got != want {
+		t.Errorf("DecodeLabel = %q, want %q", got, want)
+	}
+	if got, want := rec.Timings.PredictedN, 96; got != want {
+		t.Errorf("PredictedN = %d, want %d", got, want)
+	}
+	if got, want := len(rec.Tokens), srv.PredictedN; got != want {
+		t.Errorf("len(Tokens) = %d, server predicted_n = %d; the two counts must agree", got, want)
+	}
+	// The whole point of the cross-check: with the reasoning tokens counted,
+	// the client's independent clock reproduces the server's rate. It read 0
+	// before, which silently turned the check off.
+	if rec.Timings.ClientPredictedPerSecond <= 0 {
+		t.Fatalf("ClientPredictedPerSecond = %v, want > 0", rec.Timings.ClientPredictedPerSecond)
+	}
+	if !rec.Timings.ClientAgreesWithServer {
+		t.Errorf("ClientAgreesWithServer = false; client %v vs server %v, %.4f%% apart (tolerance %v)",
+			rec.Timings.ClientPredictedPerSecond, rec.Timings.PredictedPerSecond,
+			relDiff(rec.Timings.ClientPredictedPerSecond, rec.Timings.PredictedPerSecond)*100,
+			tape.RateTolerance)
+	}
+	// The 61 ms stall at index 40 is the only gap above 28 ms, so p99 sees it
+	// and p50 does not: the latency strip stays informative for a stream that
+	// never produced an answer token.
+	if rec.Timings.ITLp50Ms > 30 || rec.Timings.ITLp99Ms < 55 {
+		t.Errorf("ITL p50 %v / p99 %v, want p50 <= 30 and p99 >= 55 (the stall)",
+			rec.Timings.ITLp50Ms, rec.Timings.ITLp99Ms)
 	}
 }
 
@@ -466,5 +587,67 @@ func TestPercentileNearestRank(t *testing.T) {
 	}
 	if got := percentile([]float64{42}, 0.99); got != 42 {
 		t.Errorf("percentile single = %v, want 42", got)
+	}
+}
+
+// TestReduceRealThinkingCapture replays bytes captured from a real run
+// (llama-server b40, DeepSeek-V4.1-Flash, --jinja, 2026-09-13) — the run that
+// found the defect. It is the only fixture here nobody wrote: the chunk shape,
+// the null content in the role delta, the timings keys and the cut-off
+// monologue are the server's own.
+//
+// There is no arrival sidecar, because the capture kept the bytes and not the
+// client clock. ReplayStream then synthesises each arrival from that chunk's
+// own prompt_ms + predicted_ms, which makes the client rate an identity of the
+// server figures — so this test asserts the counts, the text and the labels,
+// and leaves the independent rate cross-check to the fixtures that carry a
+// separate client clock.
+func TestReduceRealThinkingCapture(t *testing.T) {
+	rec, srv, err := ReplayStream(readFixture(t, "stream_reasoning_real.sse"), nil, StreamHooks{})
+	if err != nil {
+		t.Fatalf("ReplayStream(stream_reasoning_real): %v", err)
+	}
+
+	// The defect recorded 0 of these 48 and wrote tokens=null to the tape.
+	if got, want := len(rec.Tokens), 48; got != want {
+		t.Fatalf("tokens = %d, want %d", got, want)
+	}
+	if got, want := srv.PredictedN, 48; got != want {
+		t.Errorf("server predicted_n = %d, want %d", got, want)
+	}
+	if got, want := rec.Timings.ReasoningN, 48; got != want {
+		t.Errorf("Timings.ReasoningN = %d, want %d (the figure the card's Context row prints)", got, want)
+	}
+	if got, want := rec.Prompt.ReasoningN, 48; got != want {
+		t.Errorf("Prompt.ReasoningN = %d, want %d", got, want)
+	}
+	for i, tk := range rec.Tokens {
+		if !tk.Reasoning {
+			t.Fatalf("Tokens[%d].Reasoning = false; this capture has no content delta at all", i)
+		}
+	}
+	if got := rec.Prompt.Completion; got != "" {
+		t.Errorf("Completion = %q, want empty: the model hit n_predict while still thinking", got)
+	}
+	if !strings.HasPrefix(rec.Prompt.Reasoning, "We need answer one sentence.") {
+		t.Errorf("Reasoning = %q..., want the captured monologue", clip(rec.Prompt.Reasoning, 40))
+	}
+	if got, want := rec.Prompt.FinishReason, "length"; got != want {
+		t.Errorf("FinishReason = %q, want %q", got, want)
+	}
+	// TTFT was 0 and the card printed "TTFT ?". 505.849 ms is the server's own
+	// prompt_ms plus the first decode step, which is what the synthesised
+	// clock can know; a live run measures it against the send instant.
+	if got, want := rec.Timings.TTFTMs, 505.849; got != want {
+		t.Errorf("TTFTMs = %v, want %v", got, want)
+	}
+	// 48 tokens is above tape.MinDecodeTokens, so this is a decode rate. The
+	// defect fell back to len(Tokens) == 0 and could not say even that.
+	if got, want := rec.Timings.DecodeLabel, "decode"; got != want {
+		t.Errorf("DecodeLabel = %q, want %q", got, want)
+	}
+	if rec.Timings.ITLp99Ms <= rec.Timings.ITLp50Ms {
+		t.Errorf("ITL p99 %v <= p50 %v; the per-token timeline is degenerate",
+			rec.Timings.ITLp99Ms, rec.Timings.ITLp50Ms)
 	}
 }

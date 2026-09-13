@@ -170,7 +170,10 @@ func TestStreamIgnoresControlTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream died on the control timeout: %v", err)
 	}
-	if got, want := len(rec.Tokens), 4; got != want {
+	// 7 = the fixture's 3 reasoning tokens plus its 4 content ones; both kinds
+	// are decode tokens (TTP-20, 2026-09-13). What this test is actually
+	// about is that none of them were cut off by the 30 ms control timeout.
+	if got, want := len(rec.Tokens), 7; got != want {
 		t.Errorf("tokens = %d, want %d", got, want)
 	}
 }

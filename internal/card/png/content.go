@@ -166,6 +166,7 @@ func (c *content) buildHero(s *tape.RunSummary) {
 			sub1:    bandwidthString(s),
 			sub2: joinParts(" · ",
 				formatInt(t.PredictedN)+" tokens",
+				thinkingString(reasoningTokens(s)),
 				omitUnknown(formatMs(t.PredictedMs)),
 				itlString(t),
 			),
@@ -229,6 +230,26 @@ func contextString(s *tape.RunSummary) string {
 	}
 	return "ctx " + strconv.Itoa(s.Server.CtxSize)
 }
+
+// thinkingString is the decode column's "96 thinking" clause: how many of the
+// tokens beside it were a thinking model's reasoning_content.
+//
+// This is the PNG's equivalent of the text card's Context row clause. The
+// reasoning tokens are already counted in the "N tokens" figure to its left,
+// because the server counts them in predicted_n and so does every rate on the
+// card (TTP-20, 2026-09-13); without this clause a run that spent its whole
+// budget thinking is indistinguishable from one that answered. Empty when
+// there were none, so joinParts drops it.
+func thinkingString(reasoningN int) string {
+	if reasoningN <= 0 {
+		return ""
+	}
+	return formatInt(reasoningN) + " thinking"
+}
+
+// reasoningTokens is how many of the run's generated tokens were
+// reasoning_content, the same figure the text card's Context row prints.
+func reasoningTokens(s *tape.RunSummary) int { return s.Timings.ReasoningN }
 
 func itlString(t tape.TimingsSummary) string {
 	if t.ITLp50Ms <= 0 {
@@ -352,6 +373,24 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 	c.placedSum = placedStr + " placed · host RSS " + rss
 
 	c.pills = []pill{majFaultPill(s, c.hasProcMem), cachePill(s.Cache), contendedPill(s.Contention)}
+	if p, ok := answerCutPill(s); ok {
+		// Only when it happened, so the ordinary card keeps three pills and
+		// its layout. This is the PNG's form of the text card's
+		// "! answer cut" warning line (TTP-20, 2026-09-13).
+		c.pills = append(c.pills, p)
+	}
+}
+
+// answerCutPill flags a run that spent every predicted token thinking and
+// never reached an answer. Red, like the other pills that mean "this run does
+// not say what you think it says": the decode rate beside it is real, the
+// empty completion is not the tool's doing, and the fix is --n-predict.
+func answerCutPill(s *tape.RunSummary) (pill, bool) {
+	t := s.Timings
+	if t.PredictedN <= 0 || t.ReasoningN < t.PredictedN {
+		return pill{}, false
+	}
+	return pill{text: "answer cut", col: colRed}, true
 }
 
 func majFaultPill(s *tape.RunSummary, hasProc bool) pill {

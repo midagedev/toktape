@@ -5,10 +5,10 @@
 │ ▏ the latency strip. The page fault spike you are seeing is the expert tensors being read back from       │ CPU  ███████████████    6.3G │
 │ ▏ NVMe. With twelve                                                                                       │ vram ███████████████   17.4G │
 │ stream 2/8                                                                       11.3 tok/s · ttft 250 ms │      █ weights  █ kv  █ buf  │
-│ ▏ 텐서가 호스트 메모리에 남아 있으면 토큰마다 PCIe를 건너야 하고, 페이지 캐시에서 밀려난 텐서는           │ never loaded           84.6G │
-│ ▏ NVMe까지 내려간다. 스파크라인이 튀는 구간이 정확히 그 지점이다. 레이어 배치를 바꾸면 디코드 속도가      │                              │
-│ ▏ 달라지는 이유는 간단하다. 전문가 텐서가 호스트 메모리에 남아 있으면 토큰마다 PCIe를 건너야 하고,        │ MEMORY ───────────────────── │
-│ ▏ 페이지 캐시에서                                                                                         │ rss      13.8G file    12.8G │
+│ ▏ 튀는 구간이 정확히 그 지점이다. 레이어 배치를 바꾸면 디코드 속도가 달라지는 이유는 간단하다. 전문가     │ never loaded           84.6G │
+│ ▏ 텐서가 호스트 메모리에 남아 있으면 토큰마다 PCIe를 건너야 하고, 페이지 캐시에서 밀려난 텐서는           │                              │
+│ ▏ NVMe까지 내려간다. 스파크라인이 튀는 구간이 정확히 그 지점이다. 레이어 배치를 바꾸면 디코드 속도가      │ MEMORY ───────────────────── │
+│ ▏ 달라지는 이유는 간단하다. 전문가 텐서가                                                                 │ rss      13.8G file    12.8G │
 │ stream 3/8                                                                       11.3 tok/s · ttft 290 ms │ virt     40.0G anon     1.1G │
 │ ▏ single line in the log to say so. Flash attention changes the compute buffer size, not the weights.     │ maj/tok                  0.1 │
 │ ▏ When the buffer grows past the free VRAM the fit pass silently moves a block of experts to host RAM,    │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
@@ -18,17 +18,17 @@
 │ ▏ identical. A single changed character invalidates the whole prefix, the cache hit drops to zero, and    │ decode            11.3 tok/s │
 │ ▏ the prefill you thought was free costs the full five hundred tokens again. Prefix caching               │ ttft      210 ms · 25% cache │
 │ stream 5/8                                                                       11.3 tok/s · ttft 370 ms │ 8 streams     90.6 tok/s agg │
-│ ▏ 때는 먼저 머신이 한가한지 본다. 다른 프로세스가 같은 GPU를 쓰고 있으면 재는 대상보다 잡음이 크다.       │                              │
-│ ▏ 그래서 이 화면은 load 와 다른 GPU 프로세스 수를 항상 같이 보여 준다. 측정값이 흔들릴 때는 먼저 머신이   │ HOST ─────────────────────── │
-│ ▏ 한가한지 본다. 다른 프로세스가 같은 GPU를 쓰고 있으면 재는 대상보다 잡음이 크다. 그래서 이 화면은       │ load    12.0 · contended yes │
+│ ▏ 잡음이 크다. 그래서 이 화면은 load 와 다른 GPU 프로세스 수를 항상 같이 보여 준다. 측정값이 흔들릴       │                              │
+│ ▏ 때는 먼저 머신이 한가한지 본다. 다른 프로세스가 같은 GPU를 쓰고 있으면 재는 대상보다 잡음이 크다.       │ HOST ─────────────────────── │
+│ ▏ 그래서 이 화면은 load 와 다른 GPU 프로세스 수를 항상 같이 보여 준다. 측정값이 흔들릴 때는 먼저          │ load    12.0 · contended yes │
 │ stream 6/8                                                                       11.3 tok/s · ttft 410 ms │ GPU0         71°C  338W  99% │
 │ ▏ only one of those two numbers tells you which one you have. The aggregate rate is what the server       │ GPU1         71°C  338W  99% │
 │ ▏ does; the per stream rate is what one agent feels. Eight sessions at twelve tokens a second is a very   │                              │
 │ ▏ different product from one session                                                                      │                              │
-│ stream 7/8                                                                       11.3 tok/s · ttft 450 ms │                              │
-│ ▏ the usual dashboards says why. Speculative decoding is a bet on the draft model. Below roughly half     │                              │
-│ ▏ acceptance you are paying for two forward passes and taking one token, so the headline speedup turns    │                              │
-│ ▏ into a slowdown and nothing on the usual dashboards says why.                                           │                              │
+│ stream 7/8 · thinking · cut                                                      11.3 tok/s · ttft 450 ms │                              │
+│ ▏ assumes the draft is cheap, and if the draft model is a quarter the size the threshold moves. Let me    │                              │
+│ ▏ work the arithmetic properly rather than quote the number I half remember, because the whole point of   │                              │
+│ ▏ the question is the case where the headline speedup                                                     │                              │
 │ stream 8/8                                                                       11.3 tok/s · ttft 490 ms │                              │
 │ ▏ tensor headers, not from subtracting. RSS is not loaded. Under mmap the resident set is what this       │                              │
 │ ▏ process has touched, the page cache holds the rest, and whatever was copied to VRAM may have been       │                              │

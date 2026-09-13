@@ -134,6 +134,12 @@ func streamHeader(m Model, th Theme, s Stream, cw int, showIndex, active bool) s
 	} else {
 		l.add(label, "stream")
 	}
+	// The badge sits with the stream's name rather than with its rate: it says
+	// what the stream is doing, not how fast. Dim, because it is a state
+	// label, and absent the moment an answer token arrives.
+	if badge := thinkingBadge(s); badge != "" {
+		l.add(th.dim, " · "+badge)
+	}
 
 	var plain, kind string
 	switch {
@@ -207,14 +213,19 @@ func streamBody(m Model, th Theme, t time.Duration, s Stream, cw, rows int, acti
 
 	// Two columns are held back so the cursor never forces a re-wrap when it
 	// appears at the end of the last line.
-	lines := wrap(s.Text, cw-indent-2)
-	for _, line := range tail(lines, rows) {
+	lines := streamTextLines(s, cw-indent-2)
+	lastIsText := true
+	for _, bl := range tail(lines, rows) {
 		l := newLine(th, cw)
 		gutter(l, th, active)
-		l.add(th.text, line)
+		l.add(bodyStyle(th, bl), bl.text)
 		out = append(out, l.String())
+		lastIsText = !bl.marker
 	}
-	if !s.Done && len(out) > 0 {
+	// The cursor follows the newest token, so it has no business sitting after
+	// the answer marker — that line is chrome, and the token that triggered it
+	// starts the line below.
+	if !s.Done && lastIsText && len(out) > 0 {
 		out[len(out)-1] = appendCursor(th, t, out[len(out)-1], cw, active)
 	}
 	return fitRows(out, blank, rows)

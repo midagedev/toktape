@@ -109,6 +109,7 @@ func (m Model) Apply(e Event) Model {
 			Text:           e.Token.Text,
 			ITL:            itl,
 			MajFaultsDelta: e.Token.MajFaultsDelta,
+			Reasoning:      e.Token.Reasoning,
 		})
 		s.Text += e.Token.Text
 		s.EndedAt = e.T

@@ -58,6 +58,12 @@ type Token struct {
 	// MajFaultsDelta is the major faults the server took since the previous
 	// token. Zero is a measurement here, not an unknown.
 	MajFaultsDelta uint64
+	// Reasoning marks a token a thinking model emitted as reasoning_content.
+	// It is a decode token like any other — it counts toward every rate and
+	// toward TTFT — and it differs only in how the answer pane draws it: dim,
+	// so the reader can see the model thinking without mistaking it for the
+	// answer (tape.TokenEvent.Reasoning).
+	Reasoning bool
 }
 
 // Stream is one concurrent request as the screen knows it.
@@ -65,7 +71,10 @@ type Stream struct {
 	Index     int
 	Slot      int
 	StartedAt time.Duration
-	// Text is the answer received so far.
+	// Text is everything the stream has generated so far, in arrival order:
+	// for a thinking model that is the reasoning monologue and then the
+	// answer. It is the concatenation of the tokens' text, and Tokens says
+	// which runes came from thinking (see reasoning.go).
 	Text string
 	// RenderedPrompt is what /apply-template returned for this request, empty
 	// when the endpoint was unavailable.
@@ -158,6 +167,7 @@ func ModelAt(tp *tape.Tape, at time.Duration) Model {
 				Text:           tk.Text,
 				ITL:            itl,
 				MajFaultsDelta: tk.MajFaultsDelta,
+				Reasoning:      tk.Reasoning,
 			})
 			text = append(text, tk.Text...)
 		}

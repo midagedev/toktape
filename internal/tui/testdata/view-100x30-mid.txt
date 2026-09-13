@@ -3,23 +3,23 @@
 │ ▏ The page fault spike you are seeing is the expert tensors       │ GPU0 ███████████████    9.4G │
 │ ▏ being read back from NVMe.▍                                     │ GPU1 ███████████████    9.6G │
 │ stream 2/8                               12.0 tok/s · ttft 250 ms │ CPU  ███████████████    6.3G │
-│ ▏ 레이어 배치를 바꾸면 디코드 속도가 달라지는 이유는 간단하다.    │ vram ███████████████   17.4G │
-│ ▏ 전문가 텐서가 호스트 메모리에 남아 있으면 토큰마다▍             │      █ weights  █ kv  █ buf  │
+│ ▏ ▸ answer                                                        │ vram ███████████████   17.4G │
+│ ▏ 레이어 배치를 바꾸면 디코드 속도가▍                             │      █ weights  █ kv  █ buf  │
 │ stream 3/8                               12.1 tok/s · ttft 290 ms │ never loaded           84.6G │
 │ ▏ Flash attention changes the compute buffer size, not the        │                              │
 │ ▏ weights. When the buffer grows past▍                            │ MEMORY ───────────────────── │
 │ stream 4/8                               12.2 tok/s · ttft 330 ms │ rss       9.0G file     8.3G │
 │ ▏ Prefix caching only helps when the system prompt is byte        │ virt     40.0G anon     1.1G │
 │ ▏ identical. A single changed character▍                          │ maj/tok                  0.0 │
-│ stream 5/8                               12.2 tok/s · ttft 370 ms │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ 측정값이 흔들릴 때는 먼저 머신이 한가한지 본다. 다른            │                              │
-│ ▏ 프로세스가 같은 GPU를 쓰고 있으면 재는▍                         │ SPEED ────────────────────── │
+│ stream 5/8 · thinking                    12.2 tok/s · ttft 370 ms │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ 측정이 흔들린다고 했으니 먼저 기계가 조용했는지 묻는 게 맞다.   │                              │
+│ ▏ 잡음이 신호보다 크면 나머지 숫자는▍                             │ SPEED ────────────────────── │
 │ stream 6/8                               12.0 tok/s · ttft 410 ms │ prefill           2253 tok/s │
 │ ▏ The aggregate rate is what the server does; the per stream      │ decode            12.1 tok/s │
 │ ▏ rate is what▍                                                   │ ttft      330 ms · 25% cache │
-│ stream 7/8                               12.1 tok/s · ttft 450 ms │ 8 streams     97.0 tok/s agg │
-│ ▏ Speculative decoding is a bet on the draft model. Below         │                              │
-│ ▏ roughly half acceptance▍                                        │ HOST ─────────────────────── │
+│ stream 7/8 · thinking                    12.1 tok/s · ttft 450 ms │ 8 streams     97.0 tok/s agg │
+│ ▏ Speculative decoding, acceptance rate. I need the break even    │                              │
+│ ▏ point before I can▍                                             │ HOST ─────────────────────── │
 │ stream 8/8                               12.1 tok/s · ttft 490 ms │ load     4.9 · contended yes │
 │ ▏ RSS is not loaded. Under mmap the resident set is what this     │ GPU0         61°C  292W  90% │
 │ ▏ process▍                                                        │ GPU1         61°C  292W  90% │

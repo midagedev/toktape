@@ -3,8 +3,8 @@
 │ ▏ the latency strip. The page fault spike you are seeing is the   │ GPU0 ███████████████   10.3G │
 │ ▏ expert tensors being read back from NVMe. With twelve           │ GPU1 ███████████████   10.5G │
 │ stream 2/8                               11.3 tok/s · ttft 250 ms │ CPU  ███████████████    6.3G │
-│ ▏ 메모리에 남아 있으면 토큰마다 PCIe를 건너야 하고, 페이지        │ vram ███████████████   17.4G │
-│ ▏ 캐시에서                                                        │      █ weights  █ kv  █ buf  │
+│ ▏ 튀는 구간이 정확히 그 지점이다. 레이어 배치를 바꾸면 디코드     │ vram ███████████████   17.4G │
+│ ▏ 속도가 달라지는 이유는 간단하다. 전문가 텐서가                  │      █ weights  █ kv  █ buf  │
 │ stream 3/8                               11.3 tok/s · ttft 290 ms │ never loaded           84.6G │
 │ ▏ pass silently moves a block of experts to host RAM, and the     │                              │
 │ ▏ decode rate halves                                              │ MEMORY ───────────────────── │
@@ -12,14 +12,14 @@
 │ ▏ thought was free costs the full five hundred tokens again.      │ virt     40.0G anon     1.1G │
 │ ▏ Prefix caching                                                  │ maj/tok                  0.1 │
 │ stream 5/8                               11.3 tok/s · ttft 370 ms │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ 본다. 다른 프로세스가 같은 GPU를 쓰고 있으면 재는 대상보다      │                              │
-│ ▏ 잡음이 크다. 그래서 이 화면은                                   │ SPEED ────────────────────── │
+│ ▏ 크다. 그래서 이 화면은 load 와 다른 GPU 프로세스 수를 항상      │                              │
+│ ▏ 같이 보여 준다. 측정값이 흔들릴 때는 먼저                       │ SPEED ────────────────────── │
 │ stream 6/8                               11.3 tok/s · ttft 410 ms │ prefill           1980 tok/s │
 │ ▏ twelve tokens a second is a very different product from one     │ decode            11.3 tok/s │
 │ ▏ session                                                         │ ttft      210 ms · 25% cache │
-│ stream 7/8                               11.3 tok/s · ttft 450 ms │ 8 streams     90.6 tok/s agg │
-│ ▏ and taking one token, so the headline speedup turns into a      │                              │
-│ ▏ slowdown and nothing on the usual dashboards says why.          │ HOST ─────────────────────── │
+│ stream 7/8 · thinking · cut              11.3 tok/s · ttft 450 ms │ 8 streams     90.6 tok/s agg │
+│ ▏ number I half remember, because the whole point of the          │                              │
+│ ▏ question is the case where the headline speedup                 │ HOST ─────────────────────── │
 │ stream 8/8                               11.3 tok/s · ttft 490 ms │ load    12.0 · contended yes │
 │ ▏ rest, and whatever was copied to VRAM may have been dropped     │ GPU0         71°C  338W  99% │
 │ ▏ again. Never loaded comes from the tensor                       │ GPU1         71°C  338W  99% │

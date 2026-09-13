@@ -171,7 +171,11 @@ func splitWords(s string) []string {
 
 // tail returns the last n elements of lines, or all of them when there are
 // fewer. Streaming panes are anchored to the bottom, like a terminal.
-func tail(lines []string, n int) []string {
+//
+// It is generic over the element type because the answer pane draws styled
+// lines (bodyLine) while every other caller draws plain strings, and both want
+// the same anchoring rule.
+func tail[T any](lines []T, n int) []T {
 	if n <= 0 {
 		return nil
 	}

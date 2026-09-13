@@ -1,0 +1,117 @@
+# Arrival offset of every SSE `data:` event, in milliseconds since the
+# request was sent, one per event, in order (the final [DONE] included).
+# Blank lines and # comments are ignored.
+#
+# These are the CLIENT clock. The `timings` objects inside the fixture are
+# the SERVER clock; the two differ by a constant offset plus jitter, so a
+# client-vs-server agreement test is not circular.
+#
+# A thinking model that never reached an answer: all 96 predicted tokens
+# are reasoning_content. TTFT is the first of them, 222, because the server
+# counts it in predicted_n exactly like an answer token (TTP-20).
+# Landmarks: role chunk 200, first token 222, last token 2637,
+# finish chunk 2685 (48 ms later, on purpose).
+52
+108
+162
+194
+200
+222
+249
+273
+300
+326
+349
+373
+399
+425
+448
+476
+497
+525
+549
+575
+599
+623
+650
+676
+699
+723
+749
+775
+798
+826
+847
+875
+899
+925
+949
+973
+1000
+1026
+1049
+1073
+1099
+1125
+1148
+1176
+1197
+1225
+1285
+1311
+1335
+1359
+1386
+1412
+1435
+1459
+1485
+1511
+1534
+1562
+1583
+1611
+1635
+1661
+1685
+1709
+1736
+1762
+1785
+1809
+1835
+1861
+1884
+1912
+1933
+1961
+1985
+2011
+2035
+2059
+2086
+2112
+2135
+2159
+2185
+2211
+2234
+2262
+2283
+2311
+2335
+2361
+2385
+2409
+2436
+2462
+2485
+2509
+2535
+2561
+2584
+2612
+2637
+2685
+2686
+2687

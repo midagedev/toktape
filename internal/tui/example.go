@@ -116,7 +116,15 @@ func ExampleTape() *tape.Tape {
 			})
 		}
 
-		words := exampleWords(i, tokens)
+		// Three of the eight streams are a thinking model, so the hero clip
+		// and every golden show all three states the pane has to draw: still
+		// thinking (7, which never reaches an answer), thinking then
+		// answering (2 and 5, which cross the "▸ answer" marker mid-clip),
+		// and plain answering (the rest). Real agent workloads run thinking
+		// models, so a screen that only ever shows the last state is showing
+		// the uncommon case.
+		reasoningN := exampleReasoningN(i, tokens)
+		words := exampleWords(i, tokens, reasoningN)
 		at := ttft
 		for k := 0; k < tokens; k++ {
 			// A page-in burst between 2.4 s and 3.1 s of the run: the stall
@@ -136,6 +144,7 @@ func ExampleTape() *tape.Tape {
 				T:              at,
 				Index:          k,
 				Text:           words[k],
+				Reasoning:      k < reasoningN,
 				PredictedN:     k + 1,
 				PredictedMs:    msOf(at - ttft),
 				MajFaultsDelta: faults,
@@ -145,11 +154,21 @@ func ExampleTape() *tape.Tape {
 			}
 			at += step
 		}
-		var b strings.Builder
+		// Completion is the answer alone and Reasoning the monologue: the
+		// server counts both in predicted_n, and only the transcript keeps
+		// them apart (internal/tape PromptRecord).
+		var answer, thinking strings.Builder
 		for _, tk := range req.Tokens {
-			b.WriteString(tk.Text)
+			if tk.Reasoning {
+				thinking.WriteString(tk.Text)
+				continue
+			}
+			answer.WriteString(tk.Text)
 		}
-		req.Prompt.Completion = b.String()
+		req.Prompt.Completion = answer.String()
+		req.Prompt.Reasoning = thinking.String()
+		req.Prompt.ReasoningN = reasoningN
+		req.Timings.ReasoningN = reasoningN
 		req.Prompt.FinishReason = "length"
 
 		// The rate the summary reports is measured off the timeline that was
@@ -291,6 +310,42 @@ var exampleAnswers = []string{
 		"headers, not from subtracting.",
 }
 
+// exampleThinking is what the thinking streams say before they answer, in the
+// register a reasoning model actually uses: first person, clipped, planning
+// rather than explaining. It is drawn dim, so the reader sees the model
+// working without mistaking the monologue for the reply. Index 6 is the stream
+// that never finishes thinking, so its text has to still read as mid-thought
+// wherever the clip cuts it off.
+var exampleThinking = []string{
+	"The user is asking about page faults during decode. I should check " +
+		"whether the experts are resident before blaming PCIe. Let me lay out " +
+		"the path a token takes and point at the step that costs the stall.",
+	"이건 배치 문제인지 대역폭 문제인지 먼저 갈라야 한다. 전문가 텐서가 어디 " +
+		"있는지부터 확인하자. 호스트에 남아 있으면 답은 정해져 있다.",
+	"Flash attention: does it touch the weights or only the buffers? Only the " +
+		"buffers, I am fairly sure. Then the question is what the fit pass " +
+		"does when the buffer grows, and whether it says anything in the log.",
+	"Prefix caching. The user probably changed the system prompt and does not " +
+		"realise the whole prefix went with it. I should say what invalidates " +
+		"it before I say what it costs.",
+	"측정이 흔들린다고 했으니 먼저 기계가 조용했는지 묻는 게 맞다. 잡음이 " +
+		"신호보다 크면 나머지 숫자는 볼 필요가 없다.",
+	"Aggregate versus per stream. These are two different products and the " +
+		"user is conflating them. Let me give the numbers side by side, that " +
+		"usually lands faster than an explanation.",
+	"Speculative decoding, acceptance rate. I need the break even point " +
+		"before I can answer this. Two forward passes per accepted token is " +
+		"the cost, so acceptance has to clear roughly one half. But that " +
+		"assumes the draft is cheap, and if the draft model is a quarter the " +
+		"size the threshold moves. Let me work the arithmetic properly rather " +
+		"than quote the number I half remember, because the whole point of " +
+		"the question is the case where the headline speedup reverses and a " +
+		"wrong threshold would send them tuning the wrong knob entirely",
+	"RSS under mmap. The user is subtracting to get loaded bytes, which is " +
+		"the mistake. Never loaded comes from the tensor headers. Say that " +
+		"first, then explain why the subtraction is wrong.",
+}
+
 // itlJitter scales successive inter-token intervals. The eight factors average
 // to exactly 1, so a stream's decode rate still matches the figure the summary
 // reports.
@@ -299,21 +354,67 @@ var itlJitter = []float64{0.86, 1.14, 0.94, 1.06, 0.90, 1.10, 0.96, 1.04}
 // exampleWords splits one answer into n token-sized pieces, keeping the space
 // that precedes a word attached to it the way a real tokenizer does. The answer
 // repeats when it runs out, with the space kept so two sentences never collide.
-func exampleWords(i, n int) []string {
-	fields := strings.Fields(exampleAnswers[i%len(exampleAnswers)])
-	if len(fields) == 0 {
-		fields = []string{"…"}
+// exampleReasoningN is how many of stream i's n tokens are thinking.
+//
+// The three counts are chosen so that one mid-run frame shows all three states
+// the pane can be in, because that frame is the hero clip and the goldens:
+//
+//   - stream 2 (0-based 1) thinks briefly and has already crossed the
+//     "▸ answer" marker by midRun, with the marker still inside its visible
+//     tail;
+//   - stream 5 (0-based 4) is still thinking at midRun and crosses later;
+//   - stream 7 (0-based 6) never stops, which is what a run that hits
+//     n_predict mid-monologue looks like — the state the card warns about and
+//     the header calls "thinking · cut".
+//
+// At roughly 12 tok/s the first two counts put the crossings either side of
+// midRun; a change to perStream, tokens or midRun moves them, which
+// TestExampleTapeShowsEveryThinkingState is there to catch.
+func exampleReasoningN(i, n int) int {
+	switch i {
+	case 1:
+		return 10
+	case 4:
+		return n / 5
+	case 6:
+		return n
+	default:
+		return 0
 	}
+}
+
+// exampleWords is stream i's n token texts, the first reasoningN of them from
+// the thinking monologue and the rest from the answer.
+func exampleWords(i, n, reasoningN int) []string {
+	answer := exampleFields(exampleAnswers[i%len(exampleAnswers)])
+	thinking := exampleFields(exampleThinking[i%len(exampleThinking)])
 	out := make([]string, 0, n)
 	for j := 0; j < n; j++ {
-		w := fields[j%len(fields)]
-		if j == 0 {
+		fields, at := answer, j-reasoningN
+		if j < reasoningN {
+			fields, at = thinking, j
+		}
+		w := fields[at%len(fields)]
+		// No leading space at the start of the text or at the start of the
+		// answer: the wrap treats a leading space as an empty first word, and
+		// the answer begins its own line under the marker anyway.
+		if j == 0 || j == reasoningN {
 			out = append(out, w)
 			continue
 		}
 		out = append(out, " "+w)
 	}
 	return out
+}
+
+// exampleFields splits one example paragraph into words, never returning an
+// empty slice: the token loop indexes it modulo its length.
+func exampleFields(s string) []string {
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return []string{"…"}
+	}
+	return fields
 }
 
 func examplePrompt(i int) string {

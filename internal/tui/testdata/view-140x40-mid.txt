@@ -4,9 +4,9 @@
 │                                                                                                           │ GPU1 ███████████████    9.6G │
 │                                                                                                           │ CPU  ███████████████    6.3G │
 │ stream 2/8                                                                       12.0 tok/s · ttft 250 ms │ vram ███████████████   17.4G │
-│ ▏ 레이어 배치를 바꾸면 디코드 속도가 달라지는 이유는 간단하다. 전문가 텐서가 호스트 메모리에 남아         │      █ weights  █ kv  █ buf  │
-│ ▏ 있으면 토큰마다▍                                                                                        │ never loaded           84.6G │
-│                                                                                                           │                              │
+│ ▏ 이건 배치 문제인지 대역폭 문제인지 먼저 갈라야 한다. 전문가 텐서가                                      │      █ weights  █ kv  █ buf  │
+│ ▏ ▸ answer                                                                                                │ never loaded           84.6G │
+│ ▏ 레이어 배치를 바꾸면 디코드 속도가▍                                                                     │                              │
 │ stream 3/8                                                                       12.1 tok/s · ttft 290 ms │ MEMORY ───────────────────── │
 │ ▏ Flash attention changes the compute buffer size, not the weights. When the buffer grows past▍           │ rss       9.0G file     8.3G │
 │                                                                                                           │ virt     40.0G anon     1.1G │
@@ -15,16 +15,16 @@
 │ ▏ Prefix caching only helps when the system prompt is byte identical. A single changed character▍         │                              │
 │                                                                                                           │ SPEED ────────────────────── │
 │                                                                                                           │ prefill           2253 tok/s │
-│ stream 5/8                                                                       12.2 tok/s · ttft 370 ms │ decode            12.1 tok/s │
-│ ▏ 측정값이 흔들릴 때는 먼저 머신이 한가한지 본다. 다른 프로세스가 같은 GPU를 쓰고 있으면 재는▍            │ ttft      330 ms · 25% cache │
+│ stream 5/8 · thinking                                                            12.2 tok/s · ttft 370 ms │ decode            12.1 tok/s │
+│ ▏ 측정이 흔들린다고 했으니 먼저 기계가 조용했는지 묻는 게 맞다. 잡음이 신호보다 크면 나머지 숫자는▍       │ ttft      330 ms · 25% cache │
 │                                                                                                           │ 8 streams     97.0 tok/s agg │
 │                                                                                                           │                              │
 │ stream 6/8                                                                       12.0 tok/s · ttft 410 ms │ HOST ─────────────────────── │
 │ ▏ The aggregate rate is what the server does; the per stream rate is what▍                                │ load     4.9 · contended yes │
 │                                                                                                           │ GPU0         61°C  292W  90% │
 │                                                                                                           │ GPU1         61°C  292W  90% │
-│ stream 7/8                                                                       12.1 tok/s · ttft 450 ms │                              │
-│ ▏ Speculative decoding is a bet on the draft model. Below roughly half acceptance▍                        │                              │
+│ stream 7/8 · thinking                                                            12.1 tok/s · ttft 450 ms │                              │
+│ ▏ Speculative decoding, acceptance rate. I need the break even point before I can▍                        │                              │
 │                                                                                                           │                              │
 │                                                                                                           │                              │
 │ stream 8/8                                                                       12.1 tok/s · ttft 490 ms │                              │

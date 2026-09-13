@@ -31,12 +31,19 @@ const CachedHitRatio = 0.5
 //
 //   - TTFT is the arrival of the first token that carried text. The role-only
 //     chunk arrives earlier and is not it.
-//   - The client decode rate is measured over the content window only: the
-//     n-1 gaps between the first and the last token that carried text. Neither
-//     the finish chunk nor wall time that keeps running after generation
-//     stopped may enter the window.
+//   - The client decode rate is measured over the decode window: the n-1 gaps
+//     between the first and the last token that carried text. Neither the
+//     finish chunk nor wall time that keeps running after generation stopped
+//     may enter the window.
 //   - Counting n tokens over that window instead of n-1 inflates the rate by
 //     n/(n-1), which is outside RateTolerance for any realistic stream.
+//
+// "Token" here means every token the server counted in predicted_n, a thinking
+// model's reasoning_content tokens included: they are decode steps taken at
+// the same speed, and excluding them is what made a run whose whole budget
+// went to thinking report TTFT 0 and no client rate at all (TTP-20,
+// 2026-09-13). rec.Tokens already holds both kinds, so this function needs no
+// case for them; tape.TokenEvent.Reasoning says which is which.
 //
 // sentAt is the instant the request was sent. tape.TokenEvent.T is by schema
 // already relative to it, so Reduce does no arithmetic with sentAt; it is part
@@ -48,6 +55,7 @@ const CachedHitRatio = 0.5
 func Reduce(rec *tape.RequestRecord, sentAt time.Time, activeBytesPerToken int64) tape.TimingsSummary {
 	_ = sentAt
 	out := rec.Timings
+	out.ReasoningN = 0
 	out.TTFTMs = 0
 	out.ClientPromptPerSecond = 0
 	out.ClientPredictedPerSecond = 0
@@ -56,6 +64,15 @@ func Reduce(rec *tape.RequestRecord, sentAt time.Time, activeBytesPerToken int64
 	out.EffectiveBandwidthBytesPerSec = 0
 
 	toks := rec.Tokens
+	// How many of the generated tokens were thinking. Counted from the tokens
+	// rather than copied from rec.Prompt.ReasoningN so that Reduce stays a
+	// function of the timeline it measures: a caller that assembles a record
+	// by hand gets a figure that matches the tokens it supplied.
+	for _, tk := range toks {
+		if tk.Reasoning {
+			out.ReasoningN++
+		}
+	}
 	if len(toks) > 0 {
 		out.TTFTMs = msOf(toks[0].T)
 	}
