@@ -1,6 +1,7 @@
 package recorder
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/midagedev/toktape/internal/gpu"
@@ -84,6 +85,7 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		Cache:       cache,
 		Contention:  contention,
 		Template:    r.template,
+		Sampling:    samplingOf(recs),
 		GPUsAtEnd:   gpusAtEnd,
 		Warnings:    r.warnings,
 	}
@@ -267,4 +269,47 @@ func (r *run) contention(samples []tape.RunSample) tape.ContentionInfo {
 	}
 	info := gpu.Contention(load, r.host.CPUThreads, other, serverThreads(r.flags))
 	return gpu.Witnessed(info, r.witnesses)
+}
+
+// samplingOf lifts the request shape onto the summary (TTP-55, 2026-09-14).
+//
+// One run sends one shape — the flags apply to every request it builds — so
+// the first record speaks for all of them, and the renderers, which read a
+// RunSummary and nothing else, get the three figures that decide what the
+// rates mean. Only what was actually sent: a request that carried no
+// temperature leaves it nil, which is "the server's own default", never a
+// number nobody chose.
+func samplingOf(recs []tape.RequestRecord) tape.SamplingSummary {
+	if len(recs) == 0 {
+		return tape.SamplingSummary{}
+	}
+	p := recs[0].Prompt
+	out := tape.SamplingSummary{Thinking: p.Thinking, Endpoint: p.Endpoint}
+	if v, ok := p.Params["temperature"]; ok {
+		if f, ok := floatOf(v); ok {
+			out.Temperature = &f
+		}
+	}
+	return out
+}
+
+// floatOf reads a number out of a params value. The params are JSON-shaped —
+// --param parses its value as JSON when it can — so a temperature arrives as a
+// float64 from a decoded tape and as whatever the flag produced in the process
+// that recorded it.
+func floatOf(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	}
+	return 0, false
 }

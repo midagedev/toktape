@@ -1,0 +1,60 @@
+# Arrival offset of every SSE `data:` event of completion_basic.sse, in
+# milliseconds since the request was sent, one per event, in order.
+# Blank lines and # comments are ignored.
+#
+# Taken verbatim from stream_basic.arrivals, minus the two events that
+# path does not have (the usage chunk and [DONE]). The two fixtures are
+# the same generation seen through two endpoints, so the client clock
+# must be identical or the reduction could not be compared.
+42
+88
+134
+166
+185
+187
+189
+194
+213
+234
+257
+277
+298
+318
+339
+362
+381
+405
+419
+446
+466
+487
+508
+528
+551
+571
+592
+612
+660
+682
+703
+728
+744
+766
+787
+809
+830
+852
+876
+899
+918
+940
+963
+984
+1006
+1031
+1049
+1073
+1095
+1118
+1137
+1191

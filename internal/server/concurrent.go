@@ -56,6 +56,15 @@ func RunConcurrent(ctx context.Context, c *Client, reqs []StreamRequest, hooks f
 				rec.Prompt.Messages = reqs[i].Messages
 				rec.Prompt.Params = reqs[i].Params
 				rec.Prompt.MaxTokens = reqs[i].SentMaxTokens()
+				// A stream that never got an answer still records what it
+				// asked for, the path included (TTP-55): "which endpoint was
+				// this" must not become unknowable because the request failed.
+				rec.Prompt.Endpoint = reqs[i].EndpointName()
+				rec.Prompt.Thinking = reqs[i].ThinkingSetting()
+				if reqs[i].IsCompletion() {
+					rec.Prompt.Messages = nil
+					rec.Prompt.RenderedPrompt = reqs[i].Prompt
+				}
 			}
 			rec.Index = i
 			rec.StartedAt = startedAt

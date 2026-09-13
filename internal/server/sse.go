@@ -47,38 +47,69 @@ func (s ServerTimings) Summary() tape.TimingsSummary {
 // Every field is optional: a chunk can be prefill progress with no choices at
 // all, a role-only delta, a content delta, a reasoning delta, the finish
 // chunk, a usage-only chunk, or an error frame.
+//
+// Its parts are named types rather than anonymous structs (TTP-55,
+// 2026-09-14) so the raw /completion path can translate its own chunk shape
+// into this one and hand it to the same recorder: the reduction must not
+// depend on which endpoint fed it, and the cheapest way to guarantee that is
+// to leave exactly one apply().
 type streamChunk struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
-	IDSlot  *int   `json:"id_slot"`
-	Choices []struct {
-		Index int `json:"index"`
-		Delta struct {
-			Role             string  `json:"role"`
-			Content          *string `json:"content"`
-			ReasoningContent *string `json:"reasoning_content"`
-		} `json:"delta"`
-		FinishReason *string `json:"finish_reason"`
-	} `json:"choices"`
+	ID             string         `json:"id"`
+	Model          string         `json:"model"`
+	IDSlot         *int           `json:"id_slot"`
+	Choices        []chunkChoice  `json:"choices"`
 	Timings        *ServerTimings `json:"timings"`
-	PromptProgress *struct {
-		Total     int     `json:"total"`
-		Cache     int     `json:"cache"`
-		Processed int     `json:"processed"`
-		TimeMs    float64 `json:"time_ms"`
-	} `json:"prompt_progress"`
-	Usage *struct {
-		PromptTokens        int `json:"prompt_tokens"`
-		CompletionTokens    int `json:"completion_tokens"`
-		PromptTokensDetails *struct {
-			CachedTokens int `json:"cached_tokens"`
-		} `json:"prompt_tokens_details"`
-	} `json:"usage"`
-	Error *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-		Type    string `json:"type"`
-	} `json:"error"`
+	PromptProgress *chunkProgress `json:"prompt_progress"`
+	Usage          *chunkUsage    `json:"usage"`
+	Error          *chunkError    `json:"error"`
+
+	// stop is not a wire field of the chat stream: it is how the /completion
+	// translator reports that chunk's `"stop": true`, which is where that
+	// endpoint ends its stream instead of sending the chat path's [DONE].
+	stop bool `json:"-"`
+}
+
+// chunkChoice is one entry of a chat chunk's choices array.
+type chunkChoice struct {
+	Index        int        `json:"index"`
+	Delta        chunkDelta `json:"delta"`
+	FinishReason *string    `json:"finish_reason"`
+}
+
+// chunkDelta is the incremental text of one choice. A nil pointer and an
+// empty string are both "no text": lesson 1 counts only a delta that carried
+// text as a token.
+type chunkDelta struct {
+	Role             string  `json:"role"`
+	Content          *string `json:"content"`
+	ReasoningContent *string `json:"reasoning_content"`
+}
+
+// chunkProgress is the return_progress object of a prefill chunk.
+type chunkProgress struct {
+	Total     int     `json:"total"`
+	Cache     int     `json:"cache"`
+	Processed int     `json:"processed"`
+	TimeMs    float64 `json:"time_ms"`
+}
+
+// chunkUsage is the stream_options.include_usage object of the final chunk.
+type chunkUsage struct {
+	PromptTokens        int               `json:"prompt_tokens"`
+	CompletionTokens    int               `json:"completion_tokens"`
+	PromptTokensDetails *chunkUsageCached `json:"prompt_tokens_details"`
+}
+
+// chunkUsageCached is the cached-prompt half of the usage object.
+type chunkUsageCached struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+// chunkError is a server error frame delivered inside the stream.
+type chunkError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Type    string `json:"type"`
 }
 
 // sseScanner is an incremental Server-Sent Events decoder. It is a pure
@@ -186,6 +217,11 @@ const doneMarker = "[DONE]"
 // ReplayStream drives it from recorded bytes, so both produce the same record.
 type recorder struct {
 	hooks StreamHooks
+	// rawPath selects the chunk decoder: false for the OpenAI-shaped chat
+	// stream, true for llama-server's own /completion stream (TTP-55). It
+	// changes nothing after the chunk is decoded — apply, addToken and finish
+	// see one shape — which is what makes the two endpoints reduce alike.
+	rawPath bool
 
 	rec        tape.RequestRecord
 	timings    ServerTimings
@@ -223,12 +259,24 @@ func (r *recorder) feed(data []byte, t time.Duration) error {
 		r.done = true
 		return nil
 	}
+	c, err := r.parse(trimmed)
+	if err != nil {
+		return err
+	}
+	r.apply(c, t)
+	return nil
+}
+
+// parse decodes one payload into the common chunk shape.
+func (r *recorder) parse(trimmed string) (*streamChunk, error) {
+	if r.rawPath {
+		return parseCompletionChunk(trimmed)
+	}
 	var c streamChunk
 	if err := json.Unmarshal([]byte(trimmed), &c); err != nil {
-		return fmt.Errorf("server: decode stream chunk %q: %w", clip(trimmed, 160), err)
+		return nil, fmt.Errorf("server: decode stream chunk %q: %w", clip(trimmed, 160), err)
 	}
-	r.apply(&c, t)
-	return nil
+	return &c, nil
 }
 
 func (r *recorder) apply(c *streamChunk, t time.Duration) {
@@ -242,6 +290,12 @@ func (r *recorder) apply(c *streamChunk, t time.Duration) {
 		}
 		r.errMsg = msg
 		return
+	}
+	if c.stop {
+		// The /completion stream's own end marker. The chunk that carries it
+		// also carries the final timings, so it is applied like any other and
+		// only the loop is told to stop.
+		r.done = true
 	}
 	if c.IDSlot != nil && *c.IDSlot >= 0 {
 		r.rec.Slot = *c.IDSlot
@@ -359,7 +413,27 @@ func (r *recorder) finish(sentAt time.Time, activeBytesPerToken int64) (*tape.Re
 // the reduced client-side ones, and Cache carries the verdict with zero major
 // faults (the recorder re-runs CacheVerdict once it has the fault counters).
 func ReplayStream(sse []byte, arrivals []time.Duration, hooks StreamHooks) (*tape.RequestRecord, ServerTimings, error) {
+	return replay(sse, arrivals, hooks, false)
+}
+
+// ReplayCompletionStream is ReplayStream for the raw /completion stream
+// (TTP-55, 2026-09-14): the same pure core over llama-server's own chunk
+// shape, so the rule that the two endpoints reduce alike is testable against
+// two fixtures and no server.
+//
+// Like ReplayStream it leaves Prompt.Endpoint and Prompt.Thinking empty.
+// Those describe the request, and a replay has only the answer's bytes; Stream
+// fills them from the StreamRequest that was actually sent. Leaving them here
+// is also what lets a test assert that two fixtures of the same generation
+// reduce to byte-identical records.
+func ReplayCompletionStream(sse []byte, arrivals []time.Duration, hooks StreamHooks) (*tape.RequestRecord, ServerTimings, error) {
+	return replay(sse, arrivals, hooks, true)
+}
+
+// replay is the body both of them share; completion selects the decoder.
+func replay(sse []byte, arrivals []time.Duration, hooks StreamHooks, rawPath bool) (*tape.RequestRecord, ServerTimings, error) {
 	r := newRecorder(hooks)
+	r.rawPath = rawPath
 	var sc sseScanner
 	events := sc.feed(sse)
 	events = append(events, sc.close()...)
@@ -373,8 +447,9 @@ func ReplayStream(sse []byte, arrivals []time.Duration, hooks StreamHooks) (*tap
 			at = arrivals[i]
 		default:
 			at = r.last
-			var c streamChunk
-			if json.Unmarshal(ev, &c) == nil && c.Timings != nil {
+			// The same decoder the record will use, so a /completion chunk's
+			// timings are found where that endpoint puts them.
+			if c, err := r.parse(strings.TrimSpace(string(ev))); err == nil && c.Timings != nil {
 				at = time.Duration((c.Timings.PromptMs + c.Timings.PredictedMs) * float64(time.Millisecond))
 			}
 		}

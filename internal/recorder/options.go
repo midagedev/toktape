@@ -97,6 +97,22 @@ type Options struct {
 	// MaxTokens caps every stream's answer (the server's max_tokens /
 	// n_predict). 0 leaves whatever the prompt itself carries.
 	MaxTokens int
+	// Params are merged verbatim into every request body (TTP-55,
+	// 2026-09-14): temperature, seed, chat_template_kwargs, and anything else
+	// the build honours. They are what `--temp` and `--param` fill, and they
+	// win over a prompt's own Params for the same key — the flag is the more
+	// recently expressed intent. The card shows what was actually sent
+	// (lesson 4), so this map ends up in tape.PromptRecord.Params.
+	Params map[string]any
+	// Endpoint chooses the server path for every stream: "" or
+	// tape.EndpointChat for /v1/chat/completions, tape.EndpointCompletion to
+	// post each prompt verbatim to /completion with no template around it.
+	//
+	// Measured 2026-09-14 on DeepSeek-V4.1-Flash Q3_K_M: the chat path with
+	// thinking on cost 11.6 % against greedy /completion on the same twenty
+	// prompts, so which path recorded a rate is part of the result and not an
+	// implementation detail.
+	Endpoint string
 	// SampleInterval is how often a tape.RunSample is taken. 0 means
 	// tape.DefaultSampleInterval.
 	SampleInterval time.Duration
@@ -262,8 +278,86 @@ func buildRequests(o Options, activeBytesPerToken int64) []server.StreamRequest 
 			reqs[i].MaxTokens = o.MaxTokens
 		}
 		reqs[i].ActiveBytesPerToken = activeBytesPerToken
+		mergeParams(&reqs[i], o.Params)
+		applyEndpoint(&reqs[i], o.Endpoint)
 	}
 	return reqs
+}
+
+// mergeParams merges the run's parameters into one request's own.
+//
+// chat_template_kwargs is merged key by key rather than replaced, because two
+// switches that both live in it must be able to coexist: `--no-think` puts
+// enable_thinking there and a `--param chat_template_kwargs={...}` may put
+// something else. Replacing the map would silently drop one of the two, and a
+// request that quietly lost a switch is the worst kind of wrong number.
+// Every other key is replaced: the run's flag is the more recently expressed
+// intent than a prompt file's line.
+func mergeParams(r *server.StreamRequest, params map[string]any) {
+	if len(params) == 0 {
+		return
+	}
+	if r.Params == nil {
+		r.Params = make(map[string]any, len(params))
+	}
+	for k, v := range params {
+		if k == templateKwargsKey {
+			if merged, ok := mergedKwargs(r.Params[k], v); ok {
+				r.Params[k] = merged
+				continue
+			}
+		}
+		r.Params[k] = v
+	}
+}
+
+// templateKwargsKey is the engine's bag of template switches; enable_thinking
+// is the one this recorder sets.
+const templateKwargsKey = "chat_template_kwargs"
+
+// mergedKwargs returns old overlaid with new when both are objects, and
+// reports whether it could merge at all. A value that is not an object is left
+// to the caller to replace: the user typed it and the tape must show it.
+func mergedKwargs(old, add any) (map[string]any, bool) {
+	addMap, ok := add.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	oldMap, ok := old.(map[string]any)
+	if !ok {
+		return addMap, true
+	}
+	out := make(map[string]any, len(oldMap)+len(addMap))
+	for k, v := range oldMap {
+		out[k] = v
+	}
+	for k, v := range addMap {
+		out[k] = v
+	}
+	return out, true
+}
+
+// applyEndpoint moves a request onto the raw path when the run asked for it.
+//
+// The prompt sent to /completion is the last user message's text, which is
+// what every prompt source in this recorder produces: the default set, a
+// repeated --prompt and a prompts file all build a one-message conversation.
+// The messages are then cleared, because on this path they were never sent —
+// a record that kept them would claim a conversation the server never saw.
+func applyEndpoint(r *server.StreamRequest, endpoint string) {
+	if endpoint != tape.EndpointCompletion {
+		return
+	}
+	r.Endpoint = tape.EndpointCompletion
+	if r.Prompt == "" {
+		for i := len(r.Messages) - 1; i >= 0; i-- {
+			if r.Messages[i].Content != "" {
+				r.Prompt = r.Messages[i].Content
+				break
+			}
+		}
+	}
+	r.Messages = nil
 }
 
 // cloneRequest deep-copies the parts of a request the recorder mutates.

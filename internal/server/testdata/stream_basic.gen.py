@@ -22,7 +22,7 @@ assertion rather than an identity.
 """
 import json, os
 
-OUT = "/Users/hckim/repo/toktape-wt/server/internal/server/testdata"
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)))
 os.makedirs(OUT, exist_ok=True)
 
 CREATED = 1757740800

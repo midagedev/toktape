@@ -38,6 +38,15 @@ type StreamRequest struct {
 	// RenderedPrompt, when the caller already fetched it from ApplyTemplate,
 	// is copied into the record.
 	RenderedPrompt string
+	// Endpoint chooses the server path (TTP-55, 2026-09-14): "" or
+	// tape.EndpointChat sends Messages through ChatPath and lets the server
+	// apply its chat template; tape.EndpointCompletion sends Prompt verbatim
+	// to CompletionPath, with no template and no messages at all.
+	Endpoint string
+	// Prompt is the raw prompt of a completion request, sent as the model
+	// will see it. It is ignored on the chat path, where Messages are the
+	// request and the template decides what the model sees.
+	Prompt string
 }
 
 // SentMaxTokens is the generation cap this request will actually carry.
@@ -110,6 +119,9 @@ type StreamHooks struct {
 // per-token timeline, the prefill progress and the prompt-cache hit
 // recordable, and a server that does not know a field ignores it.
 func (r StreamRequest) Body() map[string]any {
+	if r.IsCompletion() {
+		return r.completionBody()
+	}
 	body := map[string]any{
 		"timings_per_token": true,
 		"return_progress":   true,
@@ -141,11 +153,12 @@ func (r StreamRequest) Body() map[string]any {
 // The only deadline is ctx. Generation takes as long as it takes, so the
 // control-call timeout deliberately does not apply here.
 func (c *Client) Stream(ctx context.Context, req StreamRequest, hooks StreamHooks) (*tape.RequestRecord, ServerTimings, error) {
+	path := req.Path()
 	body, err := json.Marshal(req.Body())
 	if err != nil {
 		return nil, ServerTimings{}, fmt.Errorf("server: stream: encode body: %w", err)
 	}
-	httpReq, err := c.newRequest(ctx, http.MethodPost, ChatPath, bytes.NewReader(body))
+	httpReq, err := c.newRequest(ctx, http.MethodPost, path, bytes.NewReader(body))
 	if err != nil {
 		return nil, ServerTimings{}, err
 	}
@@ -155,24 +168,34 @@ func (c *Client) Stream(ctx context.Context, req StreamRequest, hooks StreamHook
 	sentAt := time.Now()
 	resp, err := c.hc.Do(httpReq)
 	if err != nil {
-		return nil, ServerTimings{}, fmt.Errorf("server: POST %s: %w", ChatPath, err)
+		return nil, ServerTimings{}, fmt.Errorf("server: POST %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
-		return nil, ServerTimings{}, fmt.Errorf("server: POST %s: %s: %s", ChatPath, resp.Status, clip(strings.TrimSpace(string(msg)), 200))
+		return nil, ServerTimings{}, fmt.Errorf("server: POST %s: %s: %s", path, resp.Status, clip(strings.TrimSpace(string(msg)), 200))
 	}
 
 	rec := newRecorder(hooks)
-	rec.rec.Prompt.Messages = req.Messages
-	rec.rec.Prompt.RenderedPrompt = req.RenderedPrompt
+	rec.rawPath = req.IsCompletion()
+	// Which path recorded the rate, and what was asked of the model's
+	// thinking (TTP-55). Chat says so explicitly from now on; "" is only ever
+	// a tape older than the field.
+	rec.rec.Prompt.Endpoint = req.EndpointName()
+	rec.rec.Prompt.Thinking = req.ThinkingSetting()
+	if req.IsCompletion() {
+		// There is no template on this path and there are no messages: the
+		// prompt as sent is the prompt as the model saw it, which is exactly
+		// what RenderedPrompt means.
+		rec.rec.Prompt.RenderedPrompt = req.Prompt
+	} else {
+		rec.rec.Prompt.Messages = req.Messages
+		rec.rec.Prompt.RenderedPrompt = req.RenderedPrompt
+	}
 	// Record the parameters as they went over the wire, not as the caller
 	// typed them: max_tokens and the streaming switches are part of what was
-	// measured (lesson 4). Messages and stream live in their own fields.
-	params := req.Body()
-	delete(params, "messages")
-	delete(params, "stream")
-	rec.rec.Prompt.Params = params
+	// measured (lesson 4). The prompt and stream live in their own fields.
+	rec.rec.Prompt.Params = req.RecordedParams()
 	// The cap gets a field of its own as well as its place in Params: every
 	// renderer asks "how far through its budget is this stream", and reading
 	// that out of a free-form parameter map means each one re-implements

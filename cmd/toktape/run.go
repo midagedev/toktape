@@ -42,6 +42,10 @@ Record flags:
                         run in order into one tape
   --spec-n-max LIST     run the prompt set once per speculative.n_max (e.g. 3,5)
   --n-predict N         max tokens per stream (default 256)
+  --temp N              sampling temperature (0 = greedy; unset = server default)
+  --no-think            ask a reasoning model not to think (chat only)
+  --endpoint NAME       chat (templated) or completion (prompt sent verbatim)
+  --param key=value     extra request parameter, repeatable (JSON value if valid)
   --out DIR             where run files are written (default ~/.toktape/runs)
   --tag TEXT            label this run for the experiment log (e.g. ngl=40)
   --note TEXT           a free-text note recorded with the run

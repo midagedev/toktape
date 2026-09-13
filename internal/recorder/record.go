@@ -373,8 +373,16 @@ func (r *run) collectTemplate(ctx context.Context, reqs []server.StreamRequest) 
 	if len(reqs) == 0 {
 		return
 	}
-	failed := 0
+	failed, templated := 0, 0
 	for i := range reqs {
+		// A raw /completion request has no template to apply (TTP-55): its
+		// prompt is already what the model sees, and asking the server to
+		// render it would record a prompt that was never sent.
+		if reqs[i].IsCompletion() {
+			reqs[i].RenderedPrompt = reqs[i].Prompt
+			continue
+		}
+		templated++
 		rendered, err := r.client.ApplyTemplate(ctx, reqs[i].Messages)
 		if err != nil {
 			failed++
@@ -383,7 +391,7 @@ func (r *run) collectTemplate(ctx context.Context, reqs []server.StreamRequest) 
 		reqs[i].RenderedPrompt = rendered
 	}
 	if failed > 0 {
-		r.warn("/apply-template failed for %d/%d streams, prompt unknown", failed, len(reqs))
+		r.warn("/apply-template failed for %d/%d streams, prompt unknown", failed, templated)
 	}
 	first := reqs[0].RenderedPrompt
 	if first != "" {

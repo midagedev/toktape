@@ -156,6 +156,46 @@ func TestParseFlags(t *testing.T) {
 			argv: []string{"llama-server", "--draft", "8"},
 			want: tape.ServerFlags{DraftMax: "8"},
 		},
+		// TTP-58, 2026-09-14: the argv of the ws DSpark run, verbatim from
+		// scratch/wsreal/20260913-205310-deepseek-v4-1-flash-q3-k.tape. Its
+		// card printed "n_max ?" beside "44% accepted" because the fork
+		// spells the block size --spec-draft-n-max. --spec-type names the
+		// drafting scheme and has no field, so it stays in Other, where the
+		// FLAGS line already prints it.
+		{
+			name: "the DSpark fork's spelling is the same block size",
+			argv: []string{
+				"/home/user/llama.cpp-v41-merged/build/bin/llama-server",
+				"-m", "/models/DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16/DeepSeek-V4.1-Flash-Q3_K_M-00001-of-00009.gguf",
+				"--alias", "DeepSeek-V4.1-Flash", "-c", "16384",
+				"-ngl", "99", "-t", "32", "-b", "2048", "-ub", "512",
+				"--lazy-mode", "auto",
+				"-md", "/models/DeepSeek-V4.1-Flash-DSpark/DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf",
+				"--spec-type", "draft-dspark", "--spec-draft-n-max", "3",
+				"-otd", "output_norm=CUDA0", "--jinja",
+				"--reasoning-budget", "0", "--host", "127.0.0.1", "--port", "8001",
+			},
+			want: tape.ServerFlags{
+				NGL:        "99",
+				Batch:      "2048",
+				UBatch:     "512",
+				Threads:    "32",
+				DraftModel: "DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf",
+				DraftMax:   "3",
+				Other: []string{
+					"-m /models/DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16/DeepSeek-V4.1-Flash-Q3_K_M-00001-of-00009.gguf",
+					"--alias DeepSeek-V4.1-Flash",
+					"-c 16384",
+					"--lazy-mode auto",
+					"--spec-type draft-dspark",
+					"-otd output_norm=CUDA0",
+					"--jinja",
+					"--reasoning-budget 0",
+					"--host 127.0.0.1",
+					"--port 8001",
+				},
+			},
+		},
 		{
 			name: "the inline = form carries the same values",
 			argv: []string{

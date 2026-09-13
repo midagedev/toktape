@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -291,5 +292,396 @@ func TestRecordVerbCancelled(t *testing.T) {
 		}
 	case <-time.After(15 * time.Second):
 		t.Fatal("a cancelled run did not return")
+	}
+}
+
+// Sampling and the raw path (TTP-55, 2026-09-14). Measured that day: greedy
+// /completion 25.6 tok/s median, server-default sampling on /completion 24.5,
+// and the chat path with thinking on 22.4 — so the flags below decide which
+// of three numbers a card is showing.
+
+// TestSamplingOptions covers what the four flags assemble.
+func TestSamplingOptions(t *testing.T) {
+	kwargsOf := func(t *testing.T, s sampling) map[string]any {
+		t.Helper()
+		kw, ok := s.params["chat_template_kwargs"].(map[string]any)
+		if !ok {
+			t.Fatalf("chat_template_kwargs %+v, want an object", s.params["chat_template_kwargs"])
+		}
+		return kw
+	}
+
+	// An unnamed --temp sends nothing: the server's own default stays in
+	// effect, and the card must not print a figure nobody chose.
+	got, err := samplingOptions(tape.EndpointChat, false, 0, false, nil)
+	if err != nil {
+		t.Fatalf("plain run: %v", err)
+	}
+	if got.params != nil {
+		t.Fatalf("a plain run sends parameters: %+v", got.params)
+	}
+
+	// --temp 0 is greedy and must reach the wire. Zero is the value, not the
+	// absence of one.
+	got, err = samplingOptions(tape.EndpointChat, true, 0, false, nil)
+	if err != nil {
+		t.Fatalf("--temp 0: %v", err)
+	}
+	if got.params["temperature"] != 0.0 {
+		t.Fatalf("--temp 0 params %+v, want temperature 0", got.params)
+	}
+
+	got, err = samplingOptions(tape.EndpointChat, true, 0.7, false, nil)
+	if err != nil {
+		t.Fatalf("--temp 0.7: %v", err)
+	}
+	if got.params["temperature"] != 0.7 {
+		t.Fatalf("--temp 0.7 params %+v", got.params)
+	}
+
+	// --no-think sends the engine's own switch.
+	got, err = samplingOptions(tape.EndpointChat, false, 0, true, nil)
+	if err != nil {
+		t.Fatalf("--no-think: %v", err)
+	}
+	if kwargsOf(t, got)["enable_thinking"] != false {
+		t.Fatalf("--no-think params %+v", got.params)
+	}
+
+	// --no-think and a user's own kwargs share that object rather than one
+	// overwriting the other.
+	got, err = samplingOptions(tape.EndpointChat, false, 0, true,
+		[]string{`chat_template_kwargs={"tools":"none"}`})
+	if err != nil {
+		t.Fatalf("--no-think with kwargs: %v", err)
+	}
+	kw := kwargsOf(t, got)
+	if kw["enable_thinking"] != false || kw["tools"] != "none" {
+		t.Fatalf("kwargs %+v, want both switches", kw)
+	}
+
+	// --endpoint completion carries through untouched.
+	got, err = samplingOptions(tape.EndpointCompletion, true, 0, false, nil)
+	if err != nil {
+		t.Fatalf("--endpoint completion: %v", err)
+	}
+	if got.endpoint != tape.EndpointCompletion {
+		t.Fatalf("endpoint %q", got.endpoint)
+	}
+}
+
+// TestSamplingOptionsRefusals: the three ways of asking for something the
+// server cannot honour, each of which would otherwise record a tape that
+// describes a request nobody made.
+func TestSamplingOptionsRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		endpoint string
+		noThink  bool
+		params   []string
+		want     string
+	}{
+		{"an endpoint that is not one", "completions", false, nil, "use chat or completion"},
+		{"thinking on a raw prompt", tape.EndpointCompletion, true, nil, "thinking is the template's"},
+		{"--param messages", tape.EndpointChat, false, []string{`messages=[]`}, "is the request, not a parameter"},
+		{"--param prompt", tape.EndpointChat, false, []string{`prompt=hi`}, "is the request, not a parameter"},
+		{"--param stream", tape.EndpointChat, false, []string{`stream=false`}, "is the request, not a parameter"},
+		{"--param without a value", tape.EndpointChat, false, []string{"seed"}, "expected key=value"},
+		{"--param without a key", tape.EndpointChat, false, []string{"=4"}, "expected key=value"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := samplingOptions(tc.endpoint, false, 0, tc.noThink, tc.params)
+			if err == nil {
+				t.Fatalf("accepted %v", tc.params)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q, want it to mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseParam: a value that is JSON stays typed, and a value that is not is
+// the string it was typed as. llama-server rejects "0.7" where it wants 0.7,
+// and quoting every bare word would make the flag unusable.
+func TestParseParam(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		key  string
+		want any
+	}{
+		{"seed=7", "seed", float64(7)},
+		{"temperature=0.7", "temperature", 0.7},
+		{"cache_prompt=false", "cache_prompt", false},
+		{"reasoning_effort=high", "reasoning_effort", "high"},
+		{`chat_template_kwargs={"enable_thinking":false}`, "chat_template_kwargs", nil},
+		{"top_k=40", "top_k", float64(40)},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			key, v, err := parseParam(tc.in)
+			if err != nil {
+				t.Fatalf("parseParam(%q): %v", tc.in, err)
+			}
+			if key != tc.key {
+				t.Fatalf("key %q, want %q", key, tc.key)
+			}
+			if tc.want == nil {
+				if _, ok := v.(map[string]any); !ok {
+					t.Fatalf("value %T, want an object", v)
+				}
+				return
+			}
+			if v != tc.want {
+				t.Fatalf("value %#v, want %#v", v, tc.want)
+			}
+		})
+	}
+}
+
+// TestRecordVerbSamplingUsage: the refusals reach the user as exit 1 with a
+// sentence that says what to do instead.
+func TestRecordVerbSamplingUsage(t *testing.T) {
+	hermetic(t)
+	dead := "http://127.0.0.1:1"
+
+	code, _, stderr := exec(t, "--url", dead, "--endpoint", "completion", "--no-think")
+	if code != exitUsage || !strings.Contains(stderr, "thinking is the template's") {
+		t.Errorf("--no-think on the raw path: exit %d, stderr %q", code, stderr)
+	}
+
+	code, _, stderr = exec(t, "--url", dead, "--endpoint", "completions")
+	if code != exitUsage || !strings.Contains(stderr, "use chat or completion") {
+		t.Errorf("a misspelled endpoint: exit %d, stderr %q", code, stderr)
+	}
+
+	code, _, stderr = exec(t, "--url", dead, "--param", "messages=[]")
+	if code != exitUsage || !strings.Contains(stderr, "is the request, not a parameter") {
+		t.Errorf("--param messages: exit %d, stderr %q", code, stderr)
+	}
+}
+
+// rawCLIServer answers /props and /completion only. It serves no
+// /v1/chat/completions and no /apply-template, so a run that reached for
+// either would fail here rather than pass quietly.
+func rawCLIServer(t *testing.T) (*httptest.Server, func() []map[string]any) {
+	t.Helper()
+	sse, err := os.ReadFile("../../internal/server/testdata/completion_basic.sse")
+	if err != nil {
+		t.Fatalf("read completion fixture: %v", err)
+	}
+	var mu sync.Mutex
+	var bodies []map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/props", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", "llama.cpp")
+		_, _ = w.Write([]byte(cliProps))
+	})
+	mux.HandleFunc("/completion", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		bodies = append(bodies, body)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		for _, ev := range bytes.SplitAfter(sse, []byte("\n\n")) {
+			if len(bytes.TrimSpace(ev)) == 0 {
+				continue
+			}
+			if _, err := w.Write(ev); err != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv, func() []map[string]any {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]map[string]any(nil), bodies...)
+	}
+}
+
+// TestRecordVerbRawEndpoint is the flag end to end: --endpoint completion
+// posts the prompt verbatim to /completion, --temp 0 rides along, and the
+// tape says which path recorded the rate.
+func TestRecordVerbRawEndpoint(t *testing.T) {
+	hermetic(t)
+	srv, bodies := rawCLIServer(t)
+	out := t.TempDir()
+
+	code, stdout, stderr := exec(t,
+		"--url", srv.URL, "--out", out, "--quiet",
+		"--endpoint", "completion", "--temp", "0",
+		"--prompt", "Explain mmap.", "--n-predict", "320")
+	if code != exitOK {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	sent := bodies()
+	if len(sent) != 1 {
+		t.Fatalf("got %d requests, want 1", len(sent))
+	}
+	if sent[0]["prompt"] != "Explain mmap." {
+		t.Fatalf("server saw prompt %v, want the text verbatim", sent[0]["prompt"])
+	}
+	if sent[0]["temperature"] != float64(0) {
+		t.Fatalf("temperature %v, want 0 on the wire", sent[0]["temperature"])
+	}
+	if sent[0]["n_predict"] != float64(320) {
+		t.Fatalf("n_predict %v, want 320", sent[0]["n_predict"])
+	}
+	if _, ok := sent[0]["messages"]; ok {
+		t.Fatalf("the raw path sent messages: %+v", sent[0])
+	}
+
+	tapes, err := filepath.Glob(filepath.Join(out, "*"+tape.Ext))
+	if err != nil || len(tapes) != 1 {
+		t.Fatalf("glob tapes: %v, %v", tapes, err)
+	}
+	tp, err := tape.Read(tapes[0])
+	if err != nil {
+		t.Fatalf("read tape: %v", err)
+	}
+	if len(tp.Requests) != 1 {
+		t.Fatalf("tape has %d records, want 1", len(tp.Requests))
+	}
+	rec := tp.Requests[0]
+	if rec.Prompt.Endpoint != tape.EndpointCompletion {
+		t.Fatalf("recorded endpoint %q, want %q", rec.Prompt.Endpoint, tape.EndpointCompletion)
+	}
+	if len(rec.Prompt.Messages) != 0 {
+		t.Fatalf("recorded messages on the raw path: %+v", rec.Prompt.Messages)
+	}
+	if rec.Prompt.Params["temperature"] != float64(0) {
+		t.Fatalf("the tape does not show the temperature that was sent: %+v", rec.Prompt.Params)
+	}
+	if n := len(rec.Tokens); n != 44 {
+		t.Fatalf("recorded %d tokens, want the fixture's 44", n)
+	}
+}
+
+// TestRecordVerbNoThinkReachesTheWire: --no-think sends the engine's own
+// switch on the chat path and the tape records that it was sent.
+func TestRecordVerbNoThinkReachesTheWire(t *testing.T) {
+	hermetic(t)
+	sse, err := os.ReadFile(cliSSE)
+	if err != nil {
+		t.Fatalf("read SSE fixture: %v", err)
+	}
+	var mu sync.Mutex
+	var bodies []map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/props", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", "llama.cpp")
+		_, _ = w.Write([]byte(cliProps))
+	})
+	mux.HandleFunc("/apply-template", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"prompt": "<|user|>hi<|assistant|>"})
+	})
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		bodies = append(bodies, body)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write(sse)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	out := t.TempDir()
+	code, stdout, stderr := exec(t,
+		"--url", srv.URL, "--out", out, "--quiet", "--no-think",
+		"--param", "seed=7", "--prompt", "hi")
+	if code != exitOK {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	mu.Lock()
+	sent := append([]map[string]any(nil), bodies...)
+	mu.Unlock()
+	if len(sent) != 1 {
+		t.Fatalf("got %d requests, want 1", len(sent))
+	}
+	kw, ok := sent[0]["chat_template_kwargs"].(map[string]any)
+	if !ok || kw["enable_thinking"] != false {
+		t.Fatalf("the engine's thinking switch never reached the wire: %+v", sent[0])
+	}
+	if sent[0]["seed"] != float64(7) {
+		t.Fatalf("--param seed did not reach the wire: %+v", sent[0])
+	}
+
+	tapes, _ := filepath.Glob(filepath.Join(out, "*"+tape.Ext))
+	if len(tapes) != 1 {
+		t.Fatalf("got %d tapes, want 1", len(tapes))
+	}
+	tp, err := tape.Read(tapes[0])
+	if err != nil {
+		t.Fatalf("read tape: %v", err)
+	}
+	rec := tp.Requests[0]
+	if rec.Prompt.Thinking != "off" {
+		t.Fatalf("recorded thinking %q, want off", rec.Prompt.Thinking)
+	}
+	if rec.Prompt.Endpoint != tape.EndpointChat {
+		t.Fatalf("recorded endpoint %q, want %q", rec.Prompt.Endpoint, tape.EndpointChat)
+	}
+	if got := tp.Summary.Template.TemplateKwargs["enable_thinking"]; got != "false" {
+		t.Fatalf("summary template kwargs %+v, want enable_thinking false",
+			tp.Summary.Template.TemplateKwargs)
+	}
+}
+
+// TestRecordVerbRawRefusesAConversation: /completion takes one string. A
+// prompts file that carries a whole conversation would otherwise be flattened
+// to its last turn, and the tape would name a prompt the user never wrote.
+func TestRecordVerbRawRefusesAConversation(t *testing.T) {
+	hermetic(t)
+	path := filepath.Join(t.TempDir(), "prompts.jsonl")
+	line := `{"name":"chatty","messages":[{"role":"system","content":"be terse"},{"role":"user","content":"hi"}]}`
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr := exec(t, "--url", "http://127.0.0.1:1", "--prompts", path, "--endpoint", "completion")
+	if code != exitUsage {
+		t.Fatalf("exit %d, want %d\nstderr: %s", code, exitUsage, stderr)
+	}
+	for _, want := range []string{"sends one prompt verbatim", "chatty", "2-message"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr %q, want it to mention %q", stderr, want)
+		}
+	}
+
+	// The same file on the chat path is fine: it is only the raw endpoint
+	// that cannot carry a conversation.
+	code, _, stderr = exec(t, "--url", "http://127.0.0.1:1", "--prompts", path)
+	if code == exitUsage && strings.Contains(stderr, "sends one prompt verbatim") {
+		t.Errorf("the chat path refused a conversation: %s", stderr)
+	}
+
+	// An unnamed line is identified by its ROUND number, not its file line:
+	// the parser skips blank lines, so the two differ, and the round number
+	// is what the card prints for a round without a name. The blank line and
+	// the single-prompt line before it are what make the difference visible —
+	// the offending round is the 2nd round and the 4th line.
+	unnamed := filepath.Join(t.TempDir(), "unnamed.jsonl")
+	body := `{"prompt":"first"}` + "\n\n" +
+		`{"messages":[{"role":"system","content":"be terse"},{"role":"user","content":"hi"}]}` + "\n"
+	if err := os.WriteFile(unnamed, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr = exec(t, "--url", "http://127.0.0.1:1", "--prompts", unnamed, "--endpoint", "completion")
+	if code != exitUsage || !strings.Contains(stderr, "round 2") {
+		t.Errorf("exit %d, stderr %q, want a usage error naming round 2", code, stderr)
 	}
 }

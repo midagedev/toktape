@@ -113,7 +113,16 @@ func ParseFlags(argv []string) tape.ServerFlags {
 			if v, ok := value(); ok {
 				f.DraftModel = filepath.Base(v)
 			}
-		case "--draft-max", "--draft", "--draft-n":
+		// --spec-draft-n-max is the DSpark fork's spelling of the same
+		// block size (TTP-58, 2026-09-14). The ws rig runs
+		// "--spec-type draft-dspark --spec-draft-n-max 3" and the Draft row
+		// printed "n_max ?" beside a 44 % acceptance rate: the figure the
+		// rate has to be read against was on the command line and the parser
+		// did not know the name. --spec-type stays in Other and prints on the
+		// FLAGS line verbatim; it names which drafting scheme ran, which no
+		// field on the schema holds, and the schema is not this parser's to
+		// extend.
+		case "--draft-max", "--draft", "--draft-n", "--spec-draft-n-max":
 			if v, ok := value(); ok {
 				f.DraftMax = v
 			}

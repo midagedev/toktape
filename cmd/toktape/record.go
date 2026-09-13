@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -85,9 +86,18 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 		// specNMax is the speculative block-size sweep (TTP-35): the prompt
 		// set runs once per speculative.n_max value, all in one tape.
 		specNMax = fs.String("spec-n-max", "", "run the prompt set once per speculative.n_max (e.g. 3,5)")
+		// Sampling and the raw path (TTP-55). Without these the card could
+		// not show the engine's real number: measured 2026-09-14, the chat
+		// path with thinking on ran 11.6 % slower than greedy /completion on
+		// the same prompts and the same server.
+		temp     = fs.Float64("temp", 0, "sampling temperature (0 = greedy); unset = the server's default")
+		noThink  = fs.Bool("no-think", false, "ask a reasoning model not to think (chat only)")
+		endpoint = fs.String("endpoint", tape.EndpointChat, "chat (templated) or completion (the prompt sent verbatim)")
+		params   repeatedFlag
 	)
 	fs.IntVar(concurrency, "n", 0, "concurrent streams (shorthand)")
 	fs.Var(&prompts, "prompt", "prompt to send; repeatable")
+	fs.Var(&params, "param", "extra request parameter as key=value; repeatable")
 	extra, err := parseArgs(fs, args)
 	if err != nil {
 		return exitUsage
@@ -123,6 +133,16 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 		}
 	}
 
+	sampling, err := samplingOptions(*endpoint, flagSet(fs, "temp"), *temp, *noThink, params)
+	if err != nil {
+		fmt.Fprintf(stderr, "toktape record: %v\n", err)
+		return exitUsage
+	}
+	if err := checkRawPrompts(sampling.endpoint, rounds); err != nil {
+		fmt.Fprintf(stderr, "toktape record: %v\n", err)
+		return exitUsage
+	}
+
 	opts := recorder.Options{
 		BaseURL:      *url,
 		Prompts:      promptRequests(prompts),
@@ -130,6 +150,8 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 		SpecNMax:     sweep,
 		Concurrency:  *concurrency,
 		MaxTokens:    *nPredict,
+		Params:       sampling.params,
+		Endpoint:     sampling.endpoint,
 		Version:      version,
 		WaitForModel: waitBudget(fs, *wait),
 		// Waiting for a server that is not listening yet is only done when
@@ -366,6 +388,123 @@ func promptRequests(prompts []string) []server.StreamRequest {
 		})
 	}
 	return out
+}
+
+// sampling is what the sampling flags decided: the parameters every request
+// carries and the path it is sent to.
+type sampling struct {
+	params   map[string]any
+	endpoint string
+}
+
+// reservedParams are the keys --param may not set, because each one is the
+// request itself rather than a parameter of it: overriding one would send
+// something other than the prompt the tape says it sent.
+var reservedParams = []string{"messages", "prompt", "stream"}
+
+// samplingOptions turns --endpoint, --temp, --no-think and --param into the
+// request parameters and the path.
+//
+// tempSet, not the value, decides whether a temperature is sent: `--temp 0` is
+// greedy and must reach the server, while an unnamed flag must leave the
+// server's own default alone. A number we did not send must never appear on
+// the card (the repo's unknown rule), and the only way to keep that true is to
+// send nothing when nothing was asked for.
+func samplingOptions(endpoint string, tempSet bool, temp float64, noThink bool, params []string) (sampling, error) {
+	out := sampling{endpoint: endpoint}
+	switch endpoint {
+	case tape.EndpointChat, tape.EndpointCompletion:
+	default:
+		return out, fmt.Errorf("--endpoint %s: use %s or %s", endpoint, tape.EndpointChat, tape.EndpointCompletion)
+	}
+	if noThink && endpoint == tape.EndpointCompletion {
+		return out, fmt.Errorf("--no-think has nothing to turn off on --endpoint %s: thinking is the template's, and a raw prompt has none", tape.EndpointCompletion)
+	}
+
+	merged := map[string]any{}
+	for _, kv := range params {
+		k, v, err := parseParam(kv)
+		if err != nil {
+			return out, err
+		}
+		merged[k] = v
+	}
+	if tempSet {
+		merged["temperature"] = temp
+	}
+	if noThink {
+		// The engine's own switch (llama.cpp tools/server/README.md:
+		// chat_template_kwargs "allows sending additional parameters to the
+		// json templating system. For example: {"enable_thinking": false}").
+		// A kwargs object the user supplied is kept and this key added to it,
+		// so the two flags cannot silently cancel each other.
+		kw, _ := merged["chat_template_kwargs"].(map[string]any)
+		if kw == nil {
+			kw = map[string]any{}
+		}
+		kw["enable_thinking"] = false
+		merged["chat_template_kwargs"] = kw
+	}
+	if len(merged) > 0 {
+		out.params = merged
+	}
+	return out, nil
+}
+
+// checkRawPrompts refuses a multi-turn prompt on the raw path.
+//
+// A prompts file may carry a whole conversation ("messages": [...]), and
+// /completion takes one string. Flattening it to the last turn would record a
+// tape whose prompt is not the prompt the user wrote, which is the one thing
+// the prompt record exists to prevent — so the run stops here instead, while
+// the user can still choose between the two endpoints. Every other prompt
+// source builds a single turn and passes.
+func checkRawPrompts(endpoint string, rounds []recorder.Round) error {
+	if endpoint != tape.EndpointCompletion {
+		return nil
+	}
+	for k, rd := range rounds {
+		for _, p := range rd.Prompts {
+			if len(p.Messages) > 1 {
+				// Rounds are numbered, not line-numbered: the parser skips
+				// blank lines, so the k-th round is rarely the k-th line of
+				// the file. The number here is the one the card prints for an
+				// unnamed round, which is what the user will look for.
+				name := rd.Name
+				if name == "" {
+					name = fmt.Sprintf("round %d", k+1)
+				}
+				return fmt.Errorf("--endpoint %s sends one prompt verbatim, but %s of the prompts file is a %d-message conversation; use --endpoint %s for it",
+					tape.EndpointCompletion, name, len(p.Messages), tape.EndpointChat)
+			}
+		}
+	}
+	return nil
+}
+
+// parseParam splits one --param into its key and its value.
+//
+// The value is decoded as JSON when it is valid JSON, so a number stays a
+// number, a bool a bool and an object an object — llama-server rejects
+// "0.7" where it wants 0.7. Anything that is not valid JSON is the string it
+// was typed as, which is what makes --param reasoning_effort=high work
+// without quoting.
+func parseParam(kv string) (string, any, error) {
+	key, raw, found := strings.Cut(kv, "=")
+	key = strings.TrimSpace(key)
+	if !found || key == "" {
+		return "", nil, fmt.Errorf("--param %q: expected key=value", kv)
+	}
+	for _, reserved := range reservedParams {
+		if key == reserved {
+			return "", nil, fmt.Errorf("--param %s: %s is the request, not a parameter of it; use --prompt or --endpoint", key, key)
+		}
+	}
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return key, raw, nil
+	}
+	return key, v, nil
 }
 
 // headerLine is the one line printed the moment the run is attached:
