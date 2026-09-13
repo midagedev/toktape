@@ -39,6 +39,10 @@ type bodyLine struct {
 	// marker marks the answerMarker rule, which is chrome rather than text
 	// the model produced.
 	marker bool
+	// src is, rune for rune, where each drawn rune sits in the text the
+	// stream's tokens spell out, or -1 for a rune the wrapper wrote itself.
+	// Nil on the marker, which the model did not write.
+	src []int
 }
 
 // tokenBand is how long ago the text under it arrived. It is a pure function
@@ -86,6 +90,9 @@ func streamTextLines(s Stream, w int) []bodyLine {
 		out         []bodyLine
 		sawAnswer   bool
 		sawThinking bool
+		// base is where the run being wrapped starts in the stream's text,
+		// so a line's source offsets are the stream's and not the run's.
+		base int
 	)
 	for _, r := range runs {
 		// The marker earns its line only at the first answer run that follows
@@ -99,9 +106,15 @@ func streamTextLines(s Stream, w int) []bodyLine {
 		} else {
 			sawAnswer = true
 		}
-		for _, line := range wrap(r.text, w) {
-			out = append(out, bodyLine{text: line, reasoning: r.reasoning})
+		for _, wl := range wrapSource(r.text, w) {
+			for k, o := range wl.src {
+				if o >= 0 {
+					wl.src[k] = o + base
+				}
+			}
+			out = append(out, bodyLine{text: wl.text, reasoning: r.reasoning, src: wl.src})
 		}
+		base += utf8.RuneCountInString(r.text)
 	}
 	return out
 }
@@ -232,21 +245,17 @@ func bandStarts(s Stream, t time.Duration) (midStart, freshStart int) {
 
 // bodyBands splits each drawn line into age-banded segments.
 //
-// The lines come out of the wrapper, which collapses the whitespace between
-// words, so a drawn rune cannot be indexed straight back into the token text.
-// They are aligned instead: the wrapper never reorders and never invents a
-// rune, so walking the source forward to the next occurrence of each drawn
-// rune lands on the token that produced it. A rune the walk cannot find — it
-// should not happen, and a frame is not the place to find out — falls back to
-// the settled band, which is the quiet answer rather than the bright one.
+// Every drawn rune carries its offset in the stream's text (bodyLine.src), and
+// the bands are suffixes of that text, so a rune's band is a comparison. It
+// used to be a search: the wrapper collapsed whitespace, and each drawn rune
+// was matched to the next occurrence of itself in the source, which broke the
+// moment the wrapper drew a rune the source did not have in that place — a
+// tab as spaces, the indent a wrapped code line hangs from (TTP-48). A rune
+// the wrapper wrote itself belongs to no token and is settled: it is layout,
+// and the write head's fill has no business lighting it.
 func bodyBands(s Stream, lines []bodyLine, t time.Duration) [][]bodySeg {
 	midStart, freshStart := bandStarts(s, t)
-	var src []rune
-	for _, tk := range s.Tokens {
-		src = append(src, []rune(tk.Text)...)
-	}
 	out := make([][]bodySeg, len(lines))
-	si := 0
 	for i, bl := range lines {
 		if bl.marker {
 			out[i] = []bodySeg{{text: bl.text, band: bandSettled}}
@@ -263,20 +272,19 @@ func bodyBands(s Stream, lines []bodyLine, t time.Duration) [][]bodySeg {
 				b.Reset()
 			}
 		}
+		j := 0
 		for _, r := range bl.text {
-			for si < len(src) && src[si] != r {
-				si++
-			}
 			band := bandSettled
-			if si < len(src) {
-				switch {
-				case si >= freshStart:
+			if j < len(bl.src) {
+				switch o := bl.src[j]; {
+				case o < 0:
+				case o >= freshStart:
 					band = bandFresh
-				case si >= midStart:
+				case o >= midStart:
 					band = bandMid
 				}
-				si++
 			}
+			j++
 			if band != cur {
 				flush()
 				cur = band

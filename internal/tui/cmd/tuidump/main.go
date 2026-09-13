@@ -11,6 +11,11 @@
 // -png adds a third file per frame, the same instant rasterised by the clip
 // renderer (render.FrameImage), so a look question is one command away from a
 // still instead of a whole clip render (TTP-39).
+//
+// -tape dumps a recorded run instead of the example (TTP-48, 2026-09-14). The
+// code-formatting defect was invisible on the example, whose answers are all
+// prose, and was found on a real rig's tape by a throwaway program; a real
+// recording is now one flag away from the same frames.
 package main
 
 import (
@@ -46,6 +51,7 @@ func main() {
 	// 0 or 1 is the ordinary single-round example.
 	rounds := flag.Int("rounds", 0, "sequential prompt rounds (2..3) instead of one; 0 = the single-round example")
 	pngOut := flag.Bool("png", false, "also write each frame as a PNG, rasterised the way the clip renderer draws it")
+	tapeIn := flag.String("tape", "", "dump a recorded run file instead of the example tape; without -at, frames at a quarter, half and three quarters of its run and at its end")
 	flag.Parse()
 
 	grid, err := tui.ParseGrid(*gridSpec)
@@ -64,6 +70,14 @@ func main() {
 		tp = tui.ExampleRoundsTape(*n, *rounds)
 		tag = fmt.Sprintf("-r%d", tp.Summary.Rounds)
 	}
+	if *tapeIn != "" {
+		rec, err := tape.Read(*tapeIn)
+		if err != nil {
+			fail(err)
+		}
+		tp = rec
+		tag = "-" + strings.TrimSuffix(filepath.Base(*tapeIn), ".tape")
+	}
 	extras, err := parseOffsets(*at)
 	if err != nil {
 		fail(err)
@@ -79,8 +93,9 @@ func main() {
 	// and a "done" frame stamped a few milliseconds early is a live model with
 	// one token still pending — which looks finished and is not.
 	doneAt := time.Duration(tp.Summary.Aggregate.WallMs*float64(time.Millisecond)) + time.Second
-	if *rounds > 1 {
-		// A rounds run's WallMs is the sum of its rounds' own windows and
+	if *rounds > 1 || *tapeIn != "" {
+		// A recorded tape is dated by its last token for the same reason. A
+		// rounds run's WallMs is the sum of its rounds' own windows and
 		// leaves out the gaps between them, so it ends early on the clip's
 		// timeline; the last token is the end that frame has to be past.
 		doneAt = tui.ModelAt(tp, time.Duration(1<<62)).RunEnd + time.Second
@@ -95,6 +110,22 @@ func main() {
 		{"t10.0s", 10 * time.Second},
 		{fmt.Sprintf("t%.1fs-mid", tui.ExampleMidRun.Seconds()), tui.ExampleMidRun},
 		{fmt.Sprintf("t%.1fs-done", doneAt.Seconds()), doneAt},
+	}
+	if *tapeIn != "" {
+		// The example's instants mean nothing on another run.
+		end := doneAt - time.Second
+		offsets = offsets[:0]
+		for _, f := range []float64{0.25, 0.5, 0.75} {
+			at := time.Duration(float64(end) * f)
+			offsets = append(offsets, struct {
+				name string
+				at   time.Duration
+			}{fmt.Sprintf("t%.1fs", at.Seconds()), at})
+		}
+		offsets = append(offsets, struct {
+			name string
+			at   time.Duration
+		}{fmt.Sprintf("t%.1fs-done", doneAt.Seconds()), doneAt})
 	}
 	if len(extras) > 0 {
 		offsets = extras
