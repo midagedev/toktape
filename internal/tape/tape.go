@@ -363,7 +363,9 @@ type PromptRecord struct {
 	Messages       []Message      `json:"messages"`
 	RenderedPrompt string         `json:"rendered_prompt,omitempty"` // from /apply-template
 	Params         map[string]any `json:"params,omitempty"`          // temperature, n_predict, ...
-	Completion     string         `json:"completion"`                // concatenated token text
+	Completion     string         `json:"completion"`                // concatenated answer token text (reasoning excluded)
+	Reasoning      string         `json:"reasoning,omitempty"`       // concatenated reasoning_content text
+	ReasoningN     int            `json:"reasoning_n,omitempty"`     // reasoning tokens among the predicted ones
 	FinishReason   string         `json:"finish_reason,omitempty"`
 }
 
@@ -378,6 +380,11 @@ type TokenEvent struct {
 	T     time.Duration `json:"t"`
 	Index int           `json:"i"`
 	Text  string        `json:"text"`
+	// Reasoning marks a token the server emitted as reasoning_content
+	// (thinking models: DeepSeek, Qwen3 …). The server counts it in
+	// predicted_n exactly like an answer token, so it is a decode token for
+	// every rate and for TTFT; only the transcript keeps it apart.
+	Reasoning bool `json:"r,omitempty"`
 	// Server-side cumulative figures from timings_per_token, when present.
 	PredictedN  int     `json:"pn,omitempty"`
 	PredictedMs float64 `json:"pms,omitempty"`
