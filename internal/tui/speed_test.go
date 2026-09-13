@@ -41,14 +41,15 @@ func TestSpeedPanePrintsNothingItHasNotObserved(t *testing.T) {
 	// The same, from the outside: none of the summary's headline figures may
 	// appear anywhere on the screen before the run has measured them.
 	frame := View(m, 0, MinWidth+20, MinHeight+6)
+	sum := ExampleTape().Summary
 	for _, leak := range []struct {
 		figure string
 		what   string
 	}{
-		{"1980", "the summary's prefill rate"},
-		{"11.3", "the summary's per-stream decode rate"},
-		{"90.6", "the summary's aggregate decode rate"},
-		{"210 ms", "the summary's TTFT"},
+		{fmtRate(sum.Timings.PromptPerSecond), "the summary's prefill rate"},
+		{fmtRate(sum.Aggregate.PerStreamPredictedPerSecond), "the summary's per-stream decode rate"},
+		{fmtRate(sum.Aggregate.AggregatePredictedPerSecond), "the summary's aggregate decode rate"},
+		{fmtMs(sum.Aggregate.TTFTp50Ms), "the summary's TTFT"},
 	} {
 		if strings.Contains(frame, leak.figure) {
 			t.Errorf("the t=0 frame prints %s (%q) before a single token has arrived", leak.what, leak.figure)
@@ -59,16 +60,18 @@ func TestSpeedPanePrintsNothingItHasNotObserved(t *testing.T) {
 func TestSpeedPaneFillsInAsFiguresBecomeObservable(t *testing.T) {
 	tp := ExampleTape()
 
-	// 250 ms: the first stream has reported prompt progress and has its first
-	// token, so prefill and TTFT are measurements. A decode rate still is not
-	// — one arrival is not a rate, it takes two.
-	early := ModelAt(tp, 250*time.Millisecond)
-	pane := speedPane(t, early, 250*time.Millisecond)
+	// Just past the first stream's TTFT: it has reported prompt progress and
+	// has its first token, so prefill and TTFT are measurements. A decode rate
+	// still is not — one arrival is not a rate, it takes two.
+	const early = 640 * time.Millisecond
+	earlyM := ModelAt(tp, early)
+	pane := speedPane(t, earlyM, early)
 	if line := rowStarting(pane, "prefill"); strings.Contains(line, unknown) {
-		t.Errorf("prefill is still %q at 250 ms, with four progress rows in: %q", unknown, strings.TrimSpace(line))
+		t.Errorf("prefill is still %q at %v, with the progress rows in: %q", unknown, early, strings.TrimSpace(line))
 	}
-	if line := rowStarting(pane, "ttft"); !strings.Contains(line, "210 ms") {
-		t.Errorf("ttft reads %q at 250 ms, want the first token's observed 210 ms", strings.TrimSpace(line))
+	if want := fmtMs(msOf(exampleTTFT(0))); !strings.Contains(rowStarting(pane, "ttft"), want) {
+		t.Errorf("ttft reads %q at %v, want the first token's observed %s",
+			strings.TrimSpace(rowStarting(pane, "ttft")), early, want)
 	}
 	if line := rowStarting(pane, "decode"); !strings.Contains(line, unknown) {
 		t.Errorf("decode reads %q after one token, want %q — one arrival is not a rate",
@@ -77,22 +80,28 @@ func TestSpeedPaneFillsInAsFiguresBecomeObservable(t *testing.T) {
 
 	// Mid-run: every figure is a live measurement, and none of them is the
 	// summary's.
-	mid := ModelAt(tp, 3*time.Second)
-	pane = speedPane(t, mid, 3*time.Second)
+	mid := ModelAt(tp, midRun)
+	pane = speedPane(t, mid, midRun)
 	for _, row := range []string{"prefill", "decode", "ttft", "streams"} {
 		if line := rowStarting(pane, row); strings.Contains(line, unknown) {
-			t.Errorf("at 3 s the %q row is still %q", row, unknown)
+			t.Errorf("at %v the %q row is still %q", midRun, row, unknown)
 		}
 	}
 
 	// Done: the server's own timings are the record (CLAUDE.md), so the
 	// summary comes back.
-	done := ModelAt(tp, 9*time.Second)
+	done := ModelAt(tp, doneAt)
 	if !done.Done {
-		t.Fatal("the example run is not finished at 9 s")
+		t.Fatalf("the example run is not finished at %v", doneAt)
 	}
-	pane = speedPane(t, done, 9*time.Second)
-	for _, want := range []string{"1980", "11.3", "90.6", "210 ms"} {
+	pane = speedPane(t, done, doneAt)
+	sum := tp.Summary
+	for _, want := range []string{
+		fmtRate(sum.Timings.PromptPerSecond),
+		fmtRate(sum.Aggregate.PerStreamPredictedPerSecond),
+		fmtRate(sum.Aggregate.AggregatePredictedPerSecond),
+		fmtMs(sum.Aggregate.TTFTp50Ms),
+	} {
 		if !strings.Contains(pane, want) {
 			t.Errorf("the finished run does not print the summary's %q:\n%s", want, pane)
 		}

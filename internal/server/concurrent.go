@@ -55,6 +55,7 @@ func RunConcurrent(ctx context.Context, c *Client, reqs []StreamRequest, hooks f
 				rec = &tape.RequestRecord{Slot: -1}
 				rec.Prompt.Messages = reqs[i].Messages
 				rec.Prompt.Params = reqs[i].Params
+				rec.Prompt.MaxTokens = reqs[i].SentMaxTokens()
 			}
 			rec.Index = i
 			rec.StartedAt = startedAt

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -8,26 +9,77 @@ import (
 	"github.com/midagedev/toktape/internal/tape"
 )
 
-// ExampleTape returns a realistic eight-stream run: the rig and the headline
-// figures of card.ExampleConcurrent, with a full token timeline under them.
+// The example run: card.Example's rig — a dense 70B at Q4_K_M on two RTX
+// 3090s — with a full token timeline under it.
 //
-// It exists for the same reason card.Example does — the golden tests, the
-// headless frame dump and, later, the GIF track all draw the same run instead
-// of each inventing a fixture. The figures are internally consistent: every
-// stream decodes 80 tokens at the summary's 12.1 tok/s, eight of them make the
-// summary's 96.8 tok/s aggregate, and the run ends at 7.0 s so that a frame
-// taken at 8 s is a finished run.
+// It exists so the golden tests, the headless frame dump, the hero clip and
+// the README all draw the same run instead of each inventing a fixture. Every
+// figure is derived from the card's, so a frame and the card it ends on cannot
+// disagree (see internal/card/example.go for where the rig's numbers come
+// from).
 //
-// The token count is 80 per stream rather than the 30 of a smaller fixture
-// because the two have to agree: at 12.1 tok/s, 30 tokens are over in 2.4 s,
-// and every frame after that would be the same frozen screen.
+// 2026-09-13 (TTP-28, user: "토큰 생성하는 화면을 충분히 살펴보기에 재생시간이 너무
+// 짧아"). The run used to be 80 tokens a stream and over in seven seconds,
+// which is long enough to prove the layout renders and too short to watch. Now
+// every request carries a 320-token budget, the answers stop on an end token
+// somewhere past 296, and four streams take about twenty-six seconds — long
+// enough that a reader of the clip sees tokens arrive, a sparkline scroll, a
+// thinking stream cross into its answer, and the card at the end.
+const (
+	// exampleMaxTokens is the cap every request is sent with. Answer streams
+	// stop short of it on their own; the reasoning-only stream runs into it,
+	// which is the state the "thinking · cut" badge names.
+	exampleMaxTokens = 320
+	// exampleSingleRate is card.Example's single-stream decode rate, and
+	// exampleBatchPenalty is how much each additional concurrent stream costs
+	// the others: a batched decoding step reads the same weights for every
+	// slot, so the server-wide rate rises while each session slows.
+	exampleSingleRate   = 17.4
+	exampleBatchPenalty = 0.13
+	// The prompt: 512 tokens of which the prefix cache already held 128, so
+	// 384 are evaluated at card.Example's 610 tok/s. Several agent sessions
+	// share a system prompt, which makes a partial hit the ordinary case — and
+	// the case worth drawing, because the cached prefix and the part being
+	// evaluated are different shades of the same bar.
+	examplePromptTotal = 512
+	examplePromptCache = 128
+	examplePrefillRate = 610.0
+	// exampleQueueStep is how long each stream waits behind the one before it
+	// for its turn at the prompt. The requests all go out together — an agent
+	// workload dispatches its sessions at once — so the spread in time to
+	// first token comes from the slots queueing, not from the client sending
+	// late.
+	exampleQueueStep = 60 * time.Millisecond
+)
+
+// ExampleMidRun is the instant the goldens, the tuidump frames and the
+// self-check captures are taken at: far enough in that every stream has a rate,
+// a sparkline and a page of text, and close enough to a thinking stream's
+// crossing that the "▸ answer" marker is still on screen.
+//
+// It is here rather than in the tests because the fixture is built around it:
+// exampleReasoningN puts the middle stream's crossing three seconds before it,
+// at whatever rate the stream count implies.
+const ExampleMidRun = 12 * time.Second
+
+// exampleCrossLead is how long before ExampleMidRun the middle thinking stream
+// stops thinking.
+//
+// A second and a half is a dozen or so tokens: two or three wrapped lines, so
+// the "▸ answer" marker has moved up off the newest line but is still inside
+// the tail even the shortest tile shows. Measured against the eight-stream
+// frame at 140×40, which gives a tile five body rows — the smallest tile any
+// test frames this state in.
+const exampleCrossLead = 1500 * time.Millisecond
+
+// ExampleTape returns the eight-stream example run.
 func ExampleTape() *tape.Tape { return ExampleTapeN(8) }
 
 // ExampleTapeN is ExampleTape with a chosen stream count (2..8). The four
-// stream form is the README hero (user, 2026-09-13: eight tiles are too
-// busy for a clip; four read well). Thinking streams keep their three
-// states at any count: the second stream thinks briefly, the third is still
-// thinking mid-run, the last never stops.
+// stream form is the README hero (user, 2026-09-13: eight tiles are too busy
+// for a clip; four read well). Thinking streams keep their three states at any
+// count: the second stream thinks briefly, one in the middle crosses into its
+// answer just before ExampleMidRun, and the last never stops.
 func ExampleTapeN(streams int) *tape.Tape {
 	if streams < 2 {
 		streams = 2
@@ -35,149 +87,79 @@ func ExampleTapeN(streams int) *tape.Tape {
 	if streams > 8 {
 		streams = 8
 	}
-	const (
-		tokens = 80
-		// exampleMaxTokens is the cap the requests asked for. It is above the
-		// 80 they actually produce, because a run that stopped because it ran
-		// out of budget is the uncommon case and a tile showing "80/80" for
-		// every stream would read as one.
-		exampleMaxTokens = 128
-		// promptTotal is the whole prompt; promptCache is the leading part the
-		// server's prefix cache already held. Eight agent sessions share a
-		// system prompt, so a partial hit is the ordinary case, and it is the
-		// case that makes the prefill bar worth drawing: the cached prefix and
-		// the part actually being evaluated are different colours.
-		//
-		// A partial prefix hit does not make the run "warm": tape.CacheCold is
-		// about major faults paging weights in during decode, which this run
-		// still takes. The two are separate measurements and the screen keeps
-		// them apart.
-		promptTotal = 512
-		promptCache = 128
-	)
-	// perStream is a variable, not a constant: the inter-token interval below
-	// is derived from it, and a constant expression there would not be a whole
-	// number of nanoseconds.
-	perStream := 12.1 // tok/s, the summary's per-stream decode rate
+	perStream := examplePerStreamRate(streams)
 	itl := time.Duration(float64(time.Second) / perStream)
 
 	summary := *card.ExampleConcurrent()
-	// The v41-demo's signature figure: tensors the server maps but never
-	// reads. It comes from the GGUF header, never from total-minus-RSS
-	// (handover lesson 3).
-	summary.Placement.NeverLoadedBytes = 90800000000
-	summary.Contention.Contended = true
-	summary.Contention.Reasons = []string{"loadavg 12.3 > cores 16"}
-	summary.Contention.LoadAvg1 = 12.3
-
 	summary.Concurrency = streams
 	summary.Server.NSlots = streams
 	tp := &tape.Tape{Schema: tape.SchemaVersion, Summary: summary}
 
 	runEnd := time.Duration(0)
 	for i := 0; i < streams; i++ {
-		// All eight requests go out together. An agent workload dispatches its
-		// sessions at once; the spread in TTFT below comes from slots queueing
-		// behind each other, not from the client sending late. It also means
-		// every stream is in prefill at t = 0, which is the frame that has to
-		// show what prefill looks like.
-		started := time.Duration(0)
-		ttft := time.Duration(210+i*40) * time.Millisecond
+		ttft := exampleTTFT(i)
+		tokens := exampleTokenCount(i, streams)
 
 		req := tape.RequestRecord{
 			Index:     i,
 			Slot:      i,
-			StartedAt: started,
+			StartedAt: 0,
 			Prompt: tape.PromptRecord{
 				Messages:       []tape.Message{{Role: "user", Content: examplePrompt(i)}},
 				RenderedPrompt: exampleRendered(i),
-				// The parameters as they went over the wire, which is where
-				// the answer cap lives: tape.PromptRecord has no field of its
-				// own for it (internal/server/stream.go records req.Body()).
-				// The tile's stat line reads it to print "80/128".
-				Params: map[string]any{"max_tokens": exampleMaxTokens},
+				// The cap has a field of its own — the recorder fills it with
+				// what the request was sent with — and is in Params as well,
+				// because Params is the body as it went over the wire (lesson
+				// 4, internal/server/stream.go).
+				MaxTokens: exampleMaxTokens,
+				Params:    map[string]any{"max_tokens": exampleMaxTokens},
 			},
 			Timings: tape.TimingsSummary{
-				PromptN:                  promptTotal - promptCache,
-				CacheN:                   promptCache,
-				PromptPerSecond:          1031,
+				PromptN:                  examplePromptTotal - examplePromptCache,
+				CacheN:                   examplePromptCache,
+				PromptMs:                 examplePrefillMs(),
+				PromptPerSecond:          examplePrefillRate,
 				PredictedN:               tokens,
-				PredictedMs:              float64(tokens-1) / perStream * 1000,
 				PredictedPerSecond:       perStream,
 				TTFTMs:                   msOf(ttft),
 				ClientPredictedPerSecond: perStream,
 				ClientAgreesWithServer:   true,
 				DecodeLabel:              "decode",
-				ITLp50Ms:                 78.4,
-				ITLp95Ms:                 164.0,
-				ITLp99Ms:                 402.5,
+				ITLp50Ms:                 1000 / perStream,
+				ITLp95Ms:                 1000 / perStream * 1.08,
+				ITLp99Ms:                 1000 / perStream * 1.19,
 			},
 			Cache: tape.CacheSummary{
-				HitTokens:   promptCache,
-				PromptTotal: promptTotal,
-				HitRatio:    float64(promptCache) / float64(promptTotal),
-				Label:       tape.CacheCold,
+				HitTokens:   examplePromptCache,
+				PromptTotal: examplePromptTotal,
+				HitRatio:    float64(examplePromptCache) / float64(examplePromptTotal),
+				Label:       tape.CacheWarm,
 			},
+			Progress: exampleProgress(i),
 		}
 
-		// Prompt progress: eight return_progress rows ramping to the full
-		// prompt. The first is stamped at zero because the server emits one as
-		// soon as it starts on the prompt, which is what puts a progress bar
-		// rather than a blank wait on the opening frame.
-		//
-		// processed counts the cached prefix too, the way llama-server reports
-		// it, so the bar's first rows already start past the cache mark.
-		const progressRows = 8
-		for s := 1; s <= progressRows; s++ {
-			frac := float64(s) / progressRows
-			at := time.Duration(float64(ttft) * 0.8 * float64(s-1) / progressRows)
-			req.Progress = append(req.Progress, tape.PromptProgress{
-				T:         at,
-				Total:     promptTotal,
-				Cache:     promptCache,
-				Processed: promptCache + int(float64(promptTotal-promptCache)*frac),
-				TimeMs:    msOf(at),
-			})
-		}
-
-		// Three of the eight streams are a thinking model, so the hero clip
-		// and every golden show all three states the pane has to draw: still
-		// thinking (7, which never reaches an answer), thinking then
-		// answering (2 and 5, which cross the "▸ answer" marker mid-clip),
-		// and plain answering (the rest). Real agent workloads run thinking
-		// models, so a screen that only ever shows the last state is showing
-		// the uncommon case.
-		reasoningN := exampleReasoningN(i, streams, tokens)
+		reasoningN := exampleReasoningN(i, streams, tokens, perStream)
 		words := exampleWords(i, tokens, reasoningN)
 		at := ttft
 		for k := 0; k < tokens; k++ {
-			// A page-in burst between 2.4 s and 3.1 s of the run: the stall
-			// the sparkline and the latency strip both have to show.
-			abs := started + at
-			var faults uint64
-			// Real inter-token latency is never flat. The jitter pattern
-			// averages to exactly 1, so the stream still decodes at the rate
-			// the summary reports while the latency strip has something to
-			// draw.
-			step := time.Duration(float64(itl) * itlJitter[(k+i)%len(itlJitter)])
-			if abs > 2400*time.Millisecond && abs < 3100*time.Millisecond {
-				faults = uint64(1 + (k+i)%4)
-				step += time.Duration(faults) * 45 * time.Millisecond
-			}
+			// Real inter-token latency is never flat, so the strip and the
+			// sparklines have something to draw. The jitter pattern averages
+			// to exactly 1 over its length, which keeps the stream decoding at
+			// the rate the summary reports.
 			req.Tokens = append(req.Tokens, tape.TokenEvent{
-				T:              at,
-				Index:          k,
-				Text:           words[k],
-				Reasoning:      k < reasoningN,
-				PredictedN:     k + 1,
-				PredictedMs:    msOf(at - ttft),
-				MajFaultsDelta: faults,
+				T:           at,
+				Index:       k,
+				Text:        words[k],
+				Reasoning:   k < reasoningN,
+				PredictedN:  k + 1,
+				PredictedMs: msOf(at - ttft),
 			})
-			if abs > runEnd {
-				runEnd = abs
+			if at > runEnd {
+				runEnd = at
 			}
-			at += step
+			at += time.Duration(float64(itl) * itlJitter[(k+i)%len(itlJitter)])
 		}
+
 		// Completion is the answer alone and Reasoning the monologue: the
 		// server counts both in predicted_n, and only the transcript keeps
 		// them apart (internal/tape PromptRecord).
@@ -193,10 +175,15 @@ func ExampleTapeN(streams int) *tape.Tape {
 		req.Prompt.Reasoning = thinking.String()
 		req.Prompt.ReasoningN = reasoningN
 		req.Timings.ReasoningN = reasoningN
-		req.Prompt.FinishReason = "length"
+		// Only the stream that spent its whole budget thinking stopped because
+		// it ran out; the rest stopped because they were finished.
+		req.Prompt.FinishReason = "stop"
+		if reasoningN >= tokens {
+			req.Prompt.FinishReason = "length"
+		}
 
 		// The rate the summary reports is measured off the timeline that was
-		// just generated, not copied from the card fixture: the page-in burst
+		// just generated rather than copied from the card fixture: the jitter
 		// costs real milliseconds, and a summary that ignored them would put
 		// the screen's live figure at odds with its own header (CLAUDE.md:
 		// never fix a disagreement by picking the nicer number).
@@ -209,67 +196,161 @@ func ExampleTapeN(streams int) *tape.Tape {
 	}
 
 	var rateSum float64
+	var predicted, ttftSum float64
 	for _, req := range tp.Requests {
 		rateSum += req.Timings.PredictedPerSecond
+		predicted += float64(req.Timings.PredictedN)
+		ttftSum += req.Timings.TTFTMs
 	}
 	perStreamMean := rateSum / float64(len(tp.Requests))
+	tp.Summary.Timings.PredictedN = int(predicted) / len(tp.Requests)
 	tp.Summary.Timings.PredictedPerSecond = perStreamMean
 	tp.Summary.Timings.ClientPredictedPerSecond = perStreamMean
 	tp.Summary.Timings.PredictedMs = tp.Requests[0].Timings.PredictedMs
-	tp.Summary.Timings.PromptN = promptTotal - promptCache
-	tp.Summary.Timings.CacheN = promptCache
+	tp.Summary.Timings.TTFTMs = ttftSum / float64(len(tp.Requests))
 	tp.Summary.Cache = tp.Requests[0].Cache
+	// Effective bandwidth follows the rate it is derived from. It is a
+	// property of this run at this concurrency, not of the card fixture the
+	// summary was copied from, and a card printing 12.5 tok/s beside a figure
+	// computed for 9.1 would be two measurements of different runs on one
+	// line (CLAUDE.md).
+	tp.Summary.Timings.EffectiveBandwidthBytesPerSec =
+		int64(float64(tp.Summary.Model.ActiveBytesPerToken) * perStreamMean)
 	tp.Summary.Aggregate.WallMs = msOf(runEnd)
-	tp.Summary.Aggregate.TotalPredictedN = streams * tokens
-	tp.Summary.Aggregate.TotalPromptN = streams * (promptTotal - promptCache)
+	tp.Summary.Aggregate.TotalPredictedN = int(predicted)
+	tp.Summary.Aggregate.TotalPromptN = streams * (examplePromptTotal - examplePromptCache)
 	tp.Summary.Aggregate.Streams = streams
 	tp.Summary.Aggregate.SlotsBusyMax = streams
 	tp.Summary.Aggregate.PerStreamPredictedPerSecond = perStreamMean
 	tp.Summary.Aggregate.AggregatePredictedPerSecond = rateSum
+	tp.Summary.Aggregate.TTFTp50Ms = percentile(exampleTTFTs(streams), 0.5)
+	tp.Summary.Aggregate.TTFTp95Ms = percentile(exampleTTFTs(streams), 0.95)
+	// The server-wide prompt rate, by the field's own definition: every
+	// stream's evaluated tokens over the window that ends when the last of
+	// them has its first token.
+	tp.Summary.Aggregate.AggregatePromptPerSecond =
+		float64(tp.Summary.Aggregate.TotalPromptN) / exampleTTFT(streams-1).Seconds()
 	tp.Summary.FinishedAt = tp.Summary.StartedAt.Add(runEnd)
 
 	tp.Samples = exampleSamples(tp, runEnd)
-	tp.Summary.Memory.MajFaultsTotal = totalFaults(tp)
-	tp.Summary.Memory.MajFaultsDecode = tp.Summary.Memory.MajFaultsTotal
-	tp.Summary.Memory.MajFaultsPerToken =
-		float64(tp.Summary.Memory.MajFaultsTotal) / float64(streams*tokens)
+	// Weights that live in VRAM are not paged in during decode, so this run
+	// takes no major faults at all. That is the ordinary case on a rig that
+	// fits, and a fixture that showed a fault storm as the ordinary case was
+	// teaching the reader the wrong alarm (TTP-28).
+	tp.Summary.Memory.MajFaultsTotal = 0
+	tp.Summary.Memory.MajFaultsDecode = 0
+	tp.Summary.Memory.MajFaultsPerToken = 0
 	return tp
 }
 
-// exampleSamples takes one host reading every tape.DefaultSampleInterval, with
-// VRAM climbing as the KV cache fills and load rising as the streams pile up.
+// examplePerStreamRate is what one of n concurrent streams decodes at.
+func examplePerStreamRate(streams int) float64 {
+	return exampleSingleRate / (1 + exampleBatchPenalty*float64(streams-1))
+}
+
+// examplePrefillMs is how long the evaluated part of the prompt takes.
+func examplePrefillMs() float64 {
+	return float64(examplePromptTotal-examplePromptCache) / examplePrefillRate * 1000
+}
+
+// exampleTTFT is stream i's time to first token: its own prompt evaluation,
+// plus the wait for the slots ahead of it.
+func exampleTTFT(i int) time.Duration {
+	return time.Duration(examplePrefillMs()*float64(time.Millisecond)) + time.Duration(i)*exampleQueueStep
+}
+
+func exampleTTFTs(streams int) []float64 {
+	out := make([]float64, streams)
+	for i := range out {
+		out[i] = msOf(exampleTTFT(i))
+	}
+	return out
+}
+
+// exampleTokenCount is how many tokens stream i produces.
+//
+// The reasoning-only stream spends the whole budget; the rest stop on an end
+// token somewhere in the high two hundreds, which is what a bounded answer
+// actually does. A fixture where every stream stopped at the cap would show
+// "320/320" on every tile and teach the reader that hitting the budget is
+// normal.
+func exampleTokenCount(i, streams int) int {
+	if i == exampleCutStream(streams) {
+		return exampleMaxTokens
+	}
+	return 296 + (i*5)%21
+}
+
+// exampleProgress is stream i's return_progress rows: one when the server takes
+// the request, then eight as it works through the prompt.
+//
+// time_ms is the slot's own processing time and excludes the wait for the slots
+// ahead, which is what llama-server reports and what makes every row reduce to
+// the same 610 tok/s the summary carries. processed counts the tokens actually
+// evaluated, not the cached prefix (docs/research/03: total 4096, cache 2048,
+// processed 1024) — the bar adds the two to draw how much of the prompt is
+// done.
+func exampleProgress(i int) []tape.PromptProgress {
+	queue := time.Duration(i) * exampleQueueStep
+	// The row the server emits as it accepts the request, stamped at zero on
+	// every stream: the requests all arrive together and the prefix cache's
+	// share is known immediately, even on a stream that will wait for a slot.
+	// processed starts at the cache length, the way the slot's prompt buffer
+	// does upstream, so the row puts a bar rather than a blank wait on the
+	// opening frame and still reduces to no rate at all.
+	out := []tape.PromptProgress{{
+		Total:     examplePromptTotal,
+		Cache:     examplePromptCache,
+		Processed: examplePromptCache,
+	}}
+	const rows = 8
+	evaluated := examplePromptTotal - examplePromptCache
+	for s := 1; s <= rows; s++ {
+		frac := float64(s) / rows
+		spent := time.Duration(examplePrefillMs() * frac * float64(time.Millisecond))
+		out = append(out, tape.PromptProgress{
+			T:         queue + spent,
+			Total:     examplePromptTotal,
+			Cache:     examplePromptCache,
+			Processed: examplePromptCache + int(float64(evaluated)*frac),
+			TimeMs:    msOf(spent),
+		})
+	}
+	return out
+}
+
+// exampleSamples takes one host reading every tape.DefaultSampleInterval. VRAM
+// climbs as the KV cache fills, and nothing else moves much: the run is GPU
+// bound on a quiet machine, which is the picture the card reports.
 func exampleSamples(tp *tape.Tape, runEnd time.Duration) []tape.RunSample {
-	gibF := float64(gib)
 	var out []tape.RunSample
+	end := tp.Summary.GPUsAtEnd
 	for t := time.Duration(0); t <= runEnd; t += tape.DefaultSampleInterval {
 		frac := float64(t) / float64(runEnd)
-		mem := tape.MemSample{
-			VirtBytes:    42949672960,
-			RSSBytes:     int64(14 * gibF * (0.55 + 0.45*frac)),
-			RSSFileBytes: int64(13 * gibF * (0.55 + 0.45*frac)),
-			RSSAnonBytes: int64(1.1 * gibF),
-			MinFaults:    uint64(128402 + 4000*frac),
-		}
+		mem := tp.Summary.Memory.AtEnd
+		mem.MinFaults = uint64(128402 + 900*frac)
 		var gpus []tape.GPUSample
-		for i := 0; i < 2; i++ {
-			base := int64(9.2*gibF) + int64(i)*int64(0.2*gibF)
+		for i, g := range end {
+			// The KV cache is what grows during the run; the weights were
+			// resident before the first request arrived.
+			kv := int64(float64(tp.Summary.Placement.VRAMKVBytes) / float64(len(end)))
 			gpus = append(gpus, tape.GPUSample{
 				Index:     i,
-				UsedBytes: base + int64(1.1*gibF*frac),
-				ProcBytes: base,
-				UtilPct:   88 + 11*frac,
-				TempC:     58 + 13*frac,
-				PowerW:    280 + 60*frac,
-				ClockMHz:  1830 - int(75*frac),
+				UsedBytes: g.UsedBytes - kv + int64(float64(kv)*frac),
+				ProcBytes: g.ProcBytes - kv + int64(float64(kv)*frac),
+				UtilPct:   g.UtilPct,
+				TempC:     g.TempC - 3 + 3*frac,
+				PowerW:    g.PowerW - 8 + 8*frac,
+				ClockMHz:  g.ClockMHz + int(60*(1-frac)),
 			})
 		}
 		out = append(out, tape.RunSample{
 			T:           t,
 			Mem:         mem,
 			GPUs:        gpus,
-			LoadAvg1:    3.1 + 9.2*frac,
+			LoadAvg1:    tp.Summary.Contention.LoadAvg1,
 			TokensSoFar: tokensBefore(tp, t),
-			SlotsBusy:   8,
+			SlotsBusy:   slotsBusyAt(tp, t),
 		})
 	}
 	return out
@@ -288,133 +369,81 @@ func tokensBefore(tp *tape.Tape, t time.Duration) int {
 	return n
 }
 
-func totalFaults(tp *tape.Tape) uint64 {
-	var n uint64
+// slotsBusyAt is how many streams have not finished by t. The streams stop at
+// different moments now, so the count falls towards the end of the run the way
+// /slots would report it.
+func slotsBusyAt(tp *tape.Tape, t time.Duration) int {
+	n := 0
 	for _, req := range tp.Requests {
-		for _, tk := range req.Tokens {
-			n += tk.MajFaultsDelta
+		if len(req.Tokens) == 0 {
+			continue
+		}
+		if req.StartedAt+req.Tokens[len(req.Tokens)-1].T >= t {
+			n++
 		}
 	}
 	return n
 }
 
-// Two of the eight streams answer in Korean. That is not decoration: it is the
-// case the border has to survive, and a frame the lead looks at should show
-// it (handover lesson 5, "CJK is two columns").
-var exampleAnswers = []string{
-	"The page fault spike you are seeing is the expert tensors being read " +
-		"back from NVMe. With twelve MoE layers pinned to the CPU the router " +
-		"picks eight experts per token, and any expert that fell out of the " +
-		"page cache has to come back over PCIe before the next token can be " +
-		"emitted. That is the gap in the latency strip.",
-	"레이어 배치를 바꾸면 디코드 속도가 달라지는 이유는 간단하다. " +
-		"전문가 텐서가 호스트 메모리에 남아 있으면 토큰마다 PCIe를 건너야 하고, " +
-		"페이지 캐시에서 밀려난 텐서는 NVMe까지 내려간다. 스파크라인이 튀는 구간이 " +
-		"정확히 그 지점이다.",
-	"Flash attention changes the compute buffer size, not the weights. When " +
-		"the buffer grows past the free VRAM the fit pass silently moves a " +
-		"block of experts to host RAM, and the decode rate halves without a " +
-		"single line in the log to say so.",
-	"Prefix caching only helps when the system prompt is byte identical. A " +
-		"single changed character invalidates the whole prefix, the cache hit " +
-		"drops to zero, and the prefill you thought was free costs the full " +
-		"five hundred tokens again.",
-	"측정값이 흔들릴 때는 먼저 머신이 한가한지 본다. 다른 프로세스가 같은 GPU를 " +
-		"쓰고 있으면 재는 대상보다 잡음이 크다. 그래서 이 화면은 load 와 다른 GPU " +
-		"프로세스 수를 항상 같이 보여 준다.",
-	"The aggregate rate is what the server does; the per stream rate is what " +
-		"one agent feels. Eight sessions at twelve tokens a second is a very " +
-		"different product from one session at ninety six, and only one of " +
-		"those two numbers tells you which one you have.",
-	"Speculative decoding is a bet on the draft model. Below roughly half " +
-		"acceptance you are paying for two forward passes and taking one " +
-		"token, so the headline speedup turns into a slowdown and nothing on " +
-		"the usual dashboards says why.",
-	"RSS is not loaded. Under mmap the resident set is what this process has " +
-		"touched, the page cache holds the rest, and whatever was copied to " +
-		"VRAM may have been dropped again. Never loaded comes from the tensor " +
-		"headers, not from subtracting.",
+// itlJitter scales successive inter-token intervals. The sixteen factors
+// average to exactly 1, so a stream's decode rate still matches the figure the
+// summary reports.
+//
+// They wander rather than alternate. A short pattern that went fast, slow,
+// fast, slow drew every sparkline as a comb — a texture, not a line — and a
+// reader learns nothing from a shape that is the same in every tile and in
+// every frame. The spread is about seven per cent either way, which is what an
+// otherwise healthy stream looks like.
+var itlJitter = []float64{
+	0.97, 1.02, 1.06, 1.01, 0.95, 0.99, 1.04, 1.07,
+	1.00, 0.94, 0.98, 1.03, 1.05, 0.96, 1.01, 0.92,
 }
 
-// exampleThinking is what the thinking streams say before they answer, in the
-// register a reasoning model actually uses: first person, clipped, planning
-// rather than explaining. It is drawn dim, so the reader sees the model
-// working without mistaking the monologue for the reply. Index 6 is the stream
-// that never finishes thinking, so its text has to still read as mid-thought
-// wherever the clip cuts it off.
-var exampleThinking = []string{
-	"The user is asking about page faults during decode. I should check " +
-		"whether the experts are resident before blaming PCIe. Let me lay out " +
-		"the path a token takes and point at the step that costs the stall.",
-	"이건 배치 문제인지 대역폭 문제인지 먼저 갈라야 한다. 전문가 텐서가 어디 " +
-		"있는지부터 확인하자. 호스트에 남아 있으면 답은 정해져 있다.",
-	"Flash attention: does it touch the weights or only the buffers? Only the " +
-		"buffers, I am fairly sure. Then the question is what the fit pass " +
-		"does when the buffer grows, and whether it says anything in the log.",
-	"Prefix caching. The user probably changed the system prompt and does not " +
-		"realise the whole prefix went with it. I should say what invalidates " +
-		"it before I say what it costs.",
-	"측정이 흔들린다고 했으니 먼저 기계가 조용했는지 묻는 게 맞다. 잡음이 " +
-		"신호보다 크면 나머지 숫자는 볼 필요가 없다.",
-	"Aggregate versus per stream. These are two different products and the " +
-		"user is conflating them. Let me give the numbers side by side, that " +
-		"usually lands faster than an explanation.",
-	"Speculative decoding, acceptance rate. I need the break even point " +
-		"before I can answer this. Two forward passes per accepted token is " +
-		"the cost, so acceptance has to clear roughly one half. But that " +
-		"assumes the draft is cheap, and if the draft model is a quarter the " +
-		"size the threshold moves. Let me work the arithmetic properly rather " +
-		"than quote the number I half remember, because the whole point of " +
-		"the question is the case where the headline speedup reverses and a " +
-		"wrong threshold would send them tuning the wrong knob entirely",
-	"RSS under mmap. The user is subtracting to get loaded bytes, which is " +
-		"the mistake. Never loaded comes from the tensor headers. Say that " +
-		"first, then explain why the subtraction is wrong.",
+// exampleCutStream is the stream that spends its whole budget thinking: the
+// last one, except at eight, where the grid's second page would hide it.
+func exampleCutStream(streams int) int {
+	if streams == 8 {
+		return 6
+	}
+	return streams - 1
 }
 
-// itlJitter scales successive inter-token intervals. The eight factors average
-// to exactly 1, so a stream's decode rate still matches the figure the summary
-// reports.
-var itlJitter = []float64{0.86, 1.14, 0.94, 1.06, 0.90, 1.10, 0.96, 1.04}
-
-// exampleWords splits one answer into n token-sized pieces, keeping the space
-// that precedes a word attached to it the way a real tokenizer does. The answer
-// repeats when it runs out, with the space kept so two sentences never collide.
 // exampleReasoningN is how many of stream i's n tokens are thinking.
 //
-// The three counts are chosen so that one mid-run frame shows all three states
-// the pane can be in, because that frame is the hero clip and the goldens:
+// The counts are chosen so that one frame at ExampleMidRun shows all three
+// states the pane can be in, at any stream count:
 //
-//   - stream 2 (0-based 1) thinks briefly and has already crossed the
-//     "▸ answer" marker by midRun, with the marker still inside its visible
-//     tail;
-//   - stream 5 (0-based 4) is still thinking at midRun and crosses later;
-//   - stream 7 (0-based 6) never stops, which is what a run that hits
-//     n_predict mid-monologue looks like — the state the card warns about and
-//     the header calls "thinking · cut".
-//
-// At roughly 12 tok/s the first two counts put the crossings either side of
-// midRun; a change to perStream, tokens or midRun moves them, which
-// TestExampleTapeShowsEveryThinkingState is there to catch.
-func exampleReasoningN(i, streams, n int) int {
-	brief, mid, cut := 1, 4, 6
-	if streams < 8 {
-		brief, mid, cut = 1, 2, streams-1
+//   - stream 2 (0-based 1) thinks briefly and crossed into its answer early;
+//   - one stream in the middle crosses exampleCrossLead before ExampleMidRun,
+//     so the "▸ answer" marker is still inside its visible tail. Its count is
+//     derived from the rate, because the rate depends on how many streams are
+//     running and a fixed count would put the crossing in a different place
+//     for four streams than for eight;
+//   - exampleCutStream never stops, which is what a run that hits its budget
+//     mid-monologue looks like — the state the header calls "thinking · cut".
+func exampleReasoningN(i, streams, n int, rate float64) int {
+	brief, mid := 1, 2
+	if streams == 8 {
+		mid = 4
 	}
 	switch i {
-	case brief:
-		return 10
-	case mid:
-		return n / 5
-	case cut:
+	case exampleCutStream(streams):
 		return n
-	default:
-		return 0
+	case brief:
+		return 24
+	case mid:
+		cross := ExampleMidRun - exampleCrossLead - exampleTTFT(i)
+		return clampInt(int(cross.Seconds()*rate), 24, n-40)
 	}
+	return 0
 }
 
 // exampleWords is stream i's n token texts, the first reasoningN of them from
 // the thinking monologue and the rest from the answer.
+//
+// Both are longer than the budget a stream can spend, so neither wraps; the
+// shingle gate (TestExampleStreamsNeverRepeatThemselves) is what keeps that
+// true as the counts change.
 func exampleWords(i, n, reasoningN int) []string {
 	answer := exampleFields(exampleAnswers[i%len(exampleAnswers)])
 	thinking := exampleFields(exampleThinking[i%len(exampleThinking)])
@@ -447,12 +476,25 @@ func exampleFields(s string) []string {
 	return fields
 }
 
+// examplePrompt is what stream i was asked. It is the first line of the answer
+// turned back into a question, so a reader of the prompt modal sees a request
+// that matches the reply under it.
 func examplePrompt(i int) string {
-	return exampleAnswers[i%len(exampleAnswers)][:40] + " — explain."
+	return fmt.Sprintf("%s — explain.", firstWords(exampleAnswers[i%len(exampleAnswers)], 8))
+}
+
+// firstWords is the first n words of s.
+func firstWords(s string, n int) string {
+	fields := strings.Fields(s)
+	if len(fields) > n {
+		fields = fields[:n]
+	}
+	return strings.Join(fields, " ")
 }
 
 func exampleRendered(i int) string {
-	return "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n" +
-		"<|im_start|>user\n" + examplePrompt(i) + "<|im_end|>\n" +
-		"<|im_start|>assistant\n<think>\n\n</think>\n\n"
+	return "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n" +
+		"You are a helpful assistant.<|eot_id|>" +
+		"<|start_header_id|>user<|end_header_id|>\n\n" + examplePrompt(i) + "<|eot_id|>" +
+		"<|start_header_id|>assistant<|end_header_id|>\n\n"
 }

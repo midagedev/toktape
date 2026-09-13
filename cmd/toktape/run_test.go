@@ -173,7 +173,7 @@ func TestLsVerb(t *testing.T) {
 	if !strings.Contains(lines[2], older.ID) {
 		t.Errorf("second row = %q", lines[2])
 	}
-	if !strings.Contains(out, "UD-Q4_K_M") {
+	if !strings.Contains(out, "Q4_K_M") {
 		t.Error("the exact quant sub-type is missing from the list")
 	}
 	if strings.Contains(out, "notes") {
@@ -241,7 +241,7 @@ func TestHeaderLine(t *testing.T) {
 	got := headerLine(card.Example())
 	for _, want := range []string{
 		"→ llama-server at http://127.0.0.1:8080 (b3650)",
-		"Qwen3.5 35B A3B UD-Q4_K_M",
+		"Llama 3.3 70B Q4_K_M",
 		"pid 48213",
 	} {
 		if !strings.Contains(got, want) {

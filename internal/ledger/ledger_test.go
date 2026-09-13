@@ -48,37 +48,40 @@ func TestColumnsAreUnique(t *testing.T) {
 func TestFromTapeSingleStream(t *testing.T) {
 	tp := tapeOf(card.Example())
 	want := map[string]string{
-		"id":               "20260913-142530-qwen3.5-35b-a3b",
-		"tape":             "20260913-142530-qwen3.5-35b-a3b.tape",
-		"model":            "Qwen3.5 35B A3B",
-		"quant":            "UD-Q4_K_M",
-		"params":           "35000000000",
-		"size_gb":          "19.8",
-		"server":           "llama-server",
-		"build":            "b3650",
-		"ngl":              "99",
-		"flash_attn":       "on",
-		"batch":            "2048",
-		"ubatch":           "512",
-		"cache_type_k":     "q8_0",
-		"cache_type_v":     "q8_0",
-		"threads":          "16",
-		"override_tensor":  `blk\.(3[6-9]|4[0-7])\.ffn_.*_exps=CPU`,
+		"id":           "20260913-142530-llama3.3-70b",
+		"tape":         "20260913-142530-llama3.3-70b.tape",
+		"model":        "Llama 3.3 70B",
+		"quant":        "Q4_K_M",
+		"params":       "70553706496",
+		"size_gb":      "42.5",
+		"server":       "llama-server",
+		"build":        "b3650",
+		"ngl":          "99",
+		"flash_attn":   "on",
+		"batch":        "2048",
+		"ubatch":       "512",
+		"cache_type_k": "q8_0",
+		"cache_type_v": "q8_0",
+		"threads":      "16",
+		// The example rig is a dense model split by layer, with no -ot rules
+		// to record (2026-09-13, TTP-28): an unobserved flag is an empty
+		// cell, never a placeholder.
+		"override_tensor":  "",
 		"concurrency":      "1",
-		"prompt_n":         "112",
-		"predicted_n":      "128",
-		"prefill_tok_s":    "2450.0",
-		"decode_tok_s":     "68.4",
+		"prompt_n":         "384",
+		"predicted_n":      "320",
+		"prefill_tok_s":    "610.0",
+		"decode_tok_s":     "17.4",
 		"per_stream_tok_s": "",
-		"aggregate_tok_s":  "68.4",
-		"ttft_ms":          "143",
-		"itl_p50_ms":       "14",
-		"itl_p95_ms":       "20",
+		"aggregate_tok_s":  "17.4",
+		"ttft_ms":          "630",
+		"itl_p50_ms":       "58",
+		"itl_p95_ms":       "62",
 		"cache_label":      "warm",
-		"cache_n":          "400",
-		"rss_gb":           "3.4",
+		"cache_n":          "128",
+		"rss_gb":           "1.2",
 		"gpus":             "RTX 3090+RTX 3090",
-		"load1":            "1.2",
+		"load1":            "3.1",
 		"warnings":         "0",
 		"toktape_version":  "0.1.0",
 	}
@@ -92,9 +95,9 @@ func TestFromTapeSingleStream(t *testing.T) {
 	if got, w := get(t, tp, "started_at"), card.Example().StartedAt.Local().Format(time.RFC3339); got != w {
 		t.Errorf("started_at = %q, want %q", got, w)
 	}
-	// The two devices held 9.2 and 8.8 GiB at the end of the run.
-	if got := get(t, tp, "vram_gb"); got != "18.0" {
-		t.Errorf("vram_gb = %q, want 18.0", got)
+	// The two devices held 23.8 and 22.8 GiB at the end of the run.
+	if got := get(t, tp, "vram_gb"); got != "46.6" {
+		t.Errorf("vram_gb = %q, want 46.6", got)
 	}
 	// Never observed, so empty — not "?" and not a 0 nobody measured.
 	for _, col := range []string{"tag", "note"} {
@@ -118,27 +121,39 @@ func TestFromTapeConcurrent(t *testing.T) {
 	tp := tapeOf(card.ExampleConcurrent())
 	want := map[string]string{
 		"concurrency":      "8",
-		"decode_tok_s":     "12.1",
-		"per_stream_tok_s": "12.1",
-		"aggregate_tok_s":  "96.8",
-		"prefill_tok_s":    "1980.0",
-		"ttft_ms":          "210",
-		"ttft_p50_ms":      "210",
-		"ttft_p95_ms":      "480",
-		"cache_label":      "cold",
-		// 1 since 2026-09-13 (TTP-21): the example lost its NVML warning,
-		// which toktape never emits any more; the cold-run caveat remains.
-		"warnings": "1",
+		"decode_tok_s":     "9.1",
+		"per_stream_tok_s": "9.1",
+		"aggregate_tok_s":  "72.9",
+		"prefill_tok_s":    "610.0",
+		"ttft_ms":          "810",
+		"ttft_p50_ms":      "810",
+		"ttft_p95_ms":      "1050",
+		"cache_label":      "warm",
+		// The run fits in VRAM and is not contended, so it carries no caveats
+		// (2026-09-13, TTP-28). The cold-run warning is exercised below on a
+		// run that actually went cold.
+		"warnings": "0",
 	}
 	for col, w := range want {
 		if got := get(t, tp, col); got != w {
 			t.Errorf("%s = %q, want %q", col, got, w)
 		}
 	}
-	// The cold run's prompt cache hit nothing. A 0 here would be imported as
-	// a measurement, so the unobserved figure stays an empty cell.
-	if got := get(t, tp, "cache_n"); got != "" {
+	// A run whose prompt cache hit nothing writes an empty cell: a 0 here
+	// would be imported as a measurement.
+	cold := card.ExampleConcurrent()
+	cold.Cache = tape.CacheSummary{PromptTotal: 512, Label: tape.CacheCold}
+	cold.Timings.CacheN = 0
+	cold.Timings.PromptN = 512
+	cold.Warnings = []string{"cold run: 1.4 major faults per token during decode"}
+	coldTape := tapeOf(cold)
+	if got := get(t, coldTape, "cache_n"); got != "" {
 		t.Errorf("cache_n = %q, want an empty cell", got)
+	}
+	for col, w := range map[string]string{"cache_label": "cold", "warnings": "1"} {
+		if got := get(t, coldTape, col); got != w {
+			t.Errorf("on a cold run %s = %q, want %q", col, got, w)
+		}
 	}
 }
 

@@ -40,6 +40,42 @@ type StreamRequest struct {
 	RenderedPrompt string
 }
 
+// SentMaxTokens is the generation cap this request will actually carry.
+//
+// It reads the assembled body rather than the MaxTokens field because Params
+// is merged over the defaults: a caller that put llama.cpp's own "n_predict"
+// there, or that overrode "max_tokens", changed the cap, and what the tape
+// records has to be what went over the wire (lesson 4). A negative value is
+// llama-server's "no limit", which is not a cap and comes back as 0.
+func (r StreamRequest) SentMaxTokens() int {
+	body := r.Body()
+	for _, key := range []string{"max_tokens", "n_predict"} {
+		if n, ok := bodyInt(body[key]); ok && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// bodyInt reads a request-body value that should be a whole number. Params
+// comes from a caller, so the same figure can arrive as any of Go's numeric
+// types.
+func bodyInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int32:
+		return int(n), true
+	case int64:
+		return int(n), true
+	case float32:
+		return int(n), true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
+}
+
 // StreamHooks receive events as they arrive, not after the stream ends.
 //
 // Every hook runs synchronously on the goroutine reading the stream, at the
@@ -137,6 +173,11 @@ func (c *Client) Stream(ctx context.Context, req StreamRequest, hooks StreamHook
 	delete(params, "messages")
 	delete(params, "stream")
 	rec.rec.Prompt.Params = params
+	// The cap gets a field of its own as well as its place in Params: every
+	// renderer asks "how far through its budget is this stream", and reading
+	// that out of a free-form parameter map means each one re-implements
+	// which key llama-server honoured.
+	rec.rec.Prompt.MaxTokens = req.SentMaxTokens()
 
 	var sc sseScanner
 	buf := make([]byte, 16<<10)

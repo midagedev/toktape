@@ -47,6 +47,13 @@ func truncatedTape(k int) *tape.Tape {
 // the window it draws. No assertion here was weakened: the frames under them
 // are different frames (user: "각 pane마다 핵심적으로 tok/s가 표시가 안 되는데,
 // 표시해야 될 지표에 대해서 좀 잘 생각해 보자").
+//
+// 2026-09-13 TTP-28: re-baselined once more. The example is now a dense
+// Llama 3.3 70B on two 3090s running 320-token answers, so every figure in
+// these frames moved, and the emphasis contract demoted the sparklines, the
+// section titles, the bars and the tile headers out of the accent (see
+// TestOnlyTheRateIsAccent). A third different set of frames, not a loosened
+// assertion: the gates above them were added, not relaxed.
 func TestTileGolden(t *testing.T) {
 	cases := []struct {
 		name string

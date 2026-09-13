@@ -19,7 +19,7 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 // and the slower numbers that came out of it.
 func modified() *tape.RunSummary {
 	s := *card.Example()
-	s.ID = "20260913-151212-qwen3.5-35b-a3b"
+	s.ID = "20260913-151212-llama3.3-70b"
 	s.Server.Build = "b3701"
 	s.Server.Commit = "f9e8d7c"
 	s.Server.Flags.FlashAttn = "off"
@@ -43,6 +43,11 @@ func modified() *tape.RunSummary {
 	return &s
 }
 
+// 2026-09-13 TTP-28: re-baselined. The left-hand run is card.Example(), which
+// became the Llama 3.3 70B fixture, so every figure the diff quotes moved. What
+// the test asserts — that a difference is shown and an equality is not — is
+// unchanged, and the -ot pair the diff needs is now built inside this file
+// rather than borrowed from the example, which no longer carries one.
 func TestTextGolden(t *testing.T) {
 	got := compare.Text(compare.Diff(card.Example(), modified()))
 	golden := filepath.Join("testdata", "example-vs-modified.txt")
@@ -127,7 +132,15 @@ func TestDiffConcurrentAddsAggregate(t *testing.T) {
 }
 
 func TestFlagAndMetaChanges(t *testing.T) {
-	r := compare.Diff(card.Example(), modified())
+	// The -ot half of this test needs a rule on both sides: the example rig is
+	// a dense model fully offloaded by layer and carries none (2026-09-13,
+	// TTP-28), so the pair is built here rather than taken from the fixture.
+	// One rule replaced by another must diff as one removal and one addition,
+	// which is the thing a naive per-index comparison gets wrong.
+	a := *card.Example()
+	a.Server.Flags.OverrideTens = []string{`blk\.(3[6-9]|4[0-7])\.ffn_.*_exps=CPU`}
+	b := *modified()
+	r := compare.Diff(&a, &b)
 
 	var fa, added, removed bool
 	for _, c := range r.Flags {

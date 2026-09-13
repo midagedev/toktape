@@ -14,7 +14,7 @@ import (
 func TestModelAtIsMonotonic(t *testing.T) {
 	tp := ExampleTape()
 	var prev Model
-	for at := time.Duration(0); at <= 9*time.Second; at += 137 * time.Millisecond {
+	for at := time.Duration(0); at <= doneAt; at += 311 * time.Millisecond {
 		m := ModelAt(tp, at)
 		if at > 0 {
 			if len(m.Streams) != len(prev.Streams) {
@@ -230,9 +230,40 @@ func TestDecodeRateExcludesPrefill(t *testing.T) {
 
 // TestMajFaultSeriesSpansTheStreams: with eight concurrent streams a column
 // per merged token would cover a third of a second, and the burst the
-// sparkline exists to show would never be on screen.
+// sparkline exists to show would never be on screen. The window therefore
+// merges tokens into columns, and a burst inside one column has to survive
+// that merge.
+//
+// 2026-09-13 (TTP-28): the fixture this used to read is a run that takes no
+// major faults at all — a 70B that fits in VRAM does not page weights in
+// during decode, and a fixture where it did was teaching the reader that a
+// fault storm is the ordinary case. So the burst is built here instead, which
+// is where it belongs: this test is about the reduction, not about the example.
 func TestMajFaultSeriesSpansTheStreams(t *testing.T) {
-	m := ModelAt(ExampleTape(), 3*time.Second)
+	const (
+		streams = 8
+		tokens  = 120
+		itl     = 80 * time.Millisecond
+	)
+	tp := &tape.Tape{Schema: tape.SchemaVersion}
+	for i := 0; i < streams; i++ {
+		req := tape.RequestRecord{Index: i, Slot: i}
+		for k := 0; k < tokens; k++ {
+			at := time.Duration(k+1) * itl
+			var faults uint64
+			// A page-in burst near the end of the window, on every stream at
+			// once, the way a server that ran out of page cache faults.
+			if k >= tokens-10 && k < tokens-2 {
+				faults = uint64(2 + (k+i)%3)
+			}
+			req.Tokens = append(req.Tokens, tape.TokenEvent{
+				T: at, Index: k, Text: " x", MajFaultsDelta: faults,
+			})
+		}
+		tp.Requests = append(tp.Requests, req)
+	}
+
+	m := ModelAt(tp, time.Duration(tokens)*itl)
 	series := m.majFaultSeries(28)
 	if len(series) != 28 {
 		t.Fatalf("got %d columns, want 28", len(series))
@@ -244,7 +275,7 @@ func TestMajFaultSeriesSpansTheStreams(t *testing.T) {
 		}
 	}
 	if hot == 0 {
-		t.Error("the page-in burst is not visible anywhere in the window")
+		t.Errorf("the page-in burst is not visible anywhere in the window: %v", series)
 	}
 }
 

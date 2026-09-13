@@ -110,7 +110,7 @@ func TestOpenAttachLineMatchesTheCLI(t *testing.T) {
 	// imported, so the wording is replicated — and pinned here against the
 	// line that function produces for this fixture. If the CLI's wording
 	// changes, this is the test that says the clip is now lying about it.
-	const want = "→ llama-server at http://127.0.0.1:8080 (b3650) · Qwen3.5 35B A3B UD-Q4_K_M · pid 48213"
+	const want = "→ llama-server at http://127.0.0.1:8080 (b3650) · Llama 3.3 70B Q4_K_M · pid 48213"
 	got := strings.TrimRight(card.StripANSI(
 		openAttachLine(newOpenLine(DefaultWidth), tui.ExampleTapeN(4)).String()), " ")
 	if got != want {

@@ -227,8 +227,15 @@ func footerLine(m Model, th Theme, w, page, pages int) string {
 	cells := LatencyStrip(m.latencySeries(stripW), stripW)
 	// The newest token is pinned to the right-hand end, so the strip scrolls
 	// left under a fixed edge instead of growing out of the label.
+	//
+	// The strip runs along the bottom of the screen for its whole width, which
+	// makes it the largest series on it, so it is drawn in the chrome's own
+	// dim and the tokens past the window's p95 are lifted to plain text rather
+	// than to amber (TTP-28: the strip's one amber block was competing with
+	// the figures, and an even run has no outliers worth an alarm). A stall at
+	// three times the median is a real event and keeps the warm hue.
 	l.space(stripW - len(cells))
-	writeCells(l, th, cells, th.accent)
+	writeCells(l, th, cells, cellPalette{base: th.dim, warn: th.text, bad: th.warn})
 	l.space(2)
 	l.add(th.dim, median)
 	if paging != "" {
@@ -244,18 +251,32 @@ func footerLine(m Model, th Theme, w, page, pages int) string {
 // strip stops being a shape and becomes a smudge.
 const minStripW = 20
 
+// cellPalette is the three colours a series of cells is painted in: the
+// ordinary value, the one past its first threshold, and the one past its
+// second.
+//
+// It is a parameter rather than the theme's warn and bad because the emphasis
+// contract gives each series its own answer to "how loud is an outlier here"
+// (TTP-28). A latency strip marks its slowest tokens by making them plain text
+// among dim ones — the shape is the message and a coloured block in the middle
+// of it reads as an alarm the run did not raise. A fault sparkline does raise
+// one, and goes warm.
+type cellPalette struct {
+	base, warn, bad lipgloss.Style
+}
+
 // writeCells appends sparkline or strip cells, painting each severity in its
 // own colour. Runs of one colour are emitted as a single styled segment so a
 // frame does not carry an escape sequence per column.
-func writeCells(l *lineBuf, th Theme, cells []Cell, base lipgloss.Style) {
+func writeCells(l *lineBuf, th Theme, cells []Cell, pal cellPalette) {
 	style := func(sev Severity) lipgloss.Style {
 		switch sev {
 		case SevWarn:
-			return th.warn
+			return pal.warn
 		case SevBad:
-			return th.bad
+			return pal.bad
 		default:
-			return base
+			return pal.base
 		}
 	}
 	for i := 0; i < len(cells); {

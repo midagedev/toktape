@@ -1,36 +1,36 @@
-┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────┐
+┌─ toktape · Llama 3.3 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────────────────────┐
 │ stream 1/4                           done │ stream 2/4                           done │ PLACEMENT ────────────────── │
-│ 11.3 tok/s ttft 210 ms · 80/128           │ 11.3 tok/s ttft 250 ms · 80/128           │ GPU0 ███████████████   10.3G │
-│ ▏ The page fault spike you are seeing     │ ▏ 캐시에서 밀려난 텐서는 NVMe까지         │ GPU1 ███████████████   10.5G │
-│ ▏ is the expert tensors being read back   │ ▏ 내려간다. 스파크라인이 튀는 구간이      │ CPU  ███████████████    6.3G │
-│ ▏ from NVMe. With twelve MoE layers       │ ▏ 정확히 그 지점이다. 레이어 배치를       │ vram ███████████████   17.4G │
-│ ▏ pinned to the CPU the router picks      │ ▏ 바꾸면 디코드 속도가 달라지는 이유는    │      █ weights  █ kv  █ buf  │
-│ ▏ eight experts per token, and any        │ ▏ 간단하다. 전문가 텐서가 호스트          │ never loaded           84.6G │
-│ ▏ expert that fell out of the page        │ ▏ 메모리에 남아 있으면 토큰마다 PCIe를    │                              │
-│ ▏ cache has to come back over PCIe        │ ▏ 건너야 하고, 페이지 캐시에서 밀려난     │ MEMORY ───────────────────── │
-│ ▏ before the next token can be emitted.   │ ▏ 텐서는 NVMe까지 내려간다.               │ rss      13.9G file    12.9G │
-│ ▏ That is the gap in the latency strip.   │ ▏ 스파크라인이 튀는 구간이 정확히 그      │ virt     40.0G anon     1.1G │
-│ ▏ The page fault spike you are seeing     │ ▏ 지점이다. 레이어 배치를 바꾸면 디코드   │ maj/tok                  0.1 │
-│ ▏ is the expert tensors being read back   │ ▏ 속도가 달라지는 이유는 간단하다.        │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ from NVMe. With twelve                  │ ▏ 전문가 텐서가                           │                              │
-│ ▏ ▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇  12.2 avg │ ▏ ▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇  12.2 avg │ SPEED ────────────────────── │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ prefill           1980 tok/s │
-│ stream 3/4                           done │ stream 4/4 · thinking · cut               │ decode            11.3 tok/s │
-│ 11.3 tok/s ttft 290 ms · 80/128           │ 11.3 tok/s ttft 330 ms · 80/128           │ ttft      210 ms · 25% cache │
-│ ▏ ▸ answer                                │ ▏ with it. I should say what              │ 4 streams     45.3 tok/s agg │
-│ ▏ Flash attention changes the compute     │ ▏ invalidates it before I say what it     │                              │
-│ ▏ buffer size, not the weights. When      │ ▏ costs. Prefix caching. The user         │ HOST ─────────────────────── │
-│ ▏ the buffer grows past the free VRAM     │ ▏ probably changed the system prompt      │ load    12.2 · contended yes │
-│ ▏ the fit pass silently moves a block     │ ▏ and does not realise the whole prefix   │ GPU0         71°C  339W  99% │
-│ ▏ of experts to host RAM, and the         │ ▏ went with it. I should say what         │ GPU1         71°C  339W  99% │
-│ ▏ decode rate halves without a single     │ ▏ invalidates it before I say what it     │                              │
-│ ▏ line in the log to say so. Flash        │ ▏ costs. Prefix caching. The user         │                              │
-│ ▏ attention changes the compute buffer    │ ▏ probably changed the system prompt      │                              │
-│ ▏ size, not the weights. When the         │ ▏ and does not realise the whole prefix   │                              │
-│ ▏ buffer grows past the free VRAM the     │ ▏ went with                               │                              │
-│ ▏ █▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█  12.3 avg │ ▏ ▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆▇▇█▆  12.2 avg │                              │
+│ 12.5 tok/s ttft 630 ms · 296/320          │ 12.5 tok/s ttft 690 ms · 301/320          │ GPU0 ███████████████   23.8G │
+│ ▏ adding a card raises the memory you     │ ▏ 어느 쪽인지 모르면 메모리 계산이 여덟   │ GPU1 ███████████████   22.8G │
+│ ▏ can fill but not the speed at which     │ ▏ 배 틀린다. 실행 로그에 슬롯 하나가 몇   │ vram ███████████████   46.6G │
+│ ▏ one session is answered. What it does   │ ▏ 토큰을 갖는지가 찍히니 그 줄을 먼저     │      █ weights  █ kv  █ buf  │
+│ ▏ raise is how many sessions you can      │ ▏ 확인하고, 거기서 나온 숫자로 캐시       │                              │
+│ ▏ serve at once, and that is usually      │ ▏ 크기를 다시 계산해 보라. 화면           │ MEMORY ───────────────────── │
+│ ▏ the thing people actually want.         │ ▏ 오른쪽의 메모리 칸이 그 계산과 실제     │ rss       1.2G file     0.8G │
+│ ▏ Tensor parallelism would split each     │ ▏ 장치 사용량을 나란히 보여 주는 이유도   │ virt     48.0G anon     0.4G │
+│ ▏ matrix instead of each layer and let    │ ▏ 그것이다. 두 값이 어긋나면 설정이       │ maj/tok                  0.0 │
+│ ▏ both devices work together on the       │ ▏ 생각과 다르게 잡혀 있다는 뜻이고,       │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ same token, but it wants a fast link    │ ▏ 그때는 속도를 재기 전에 배치부터        │                              │
+│ ▏ between them and it is not what this    │ ▏ 고쳐야 한다. 실제로 자리가 모자랄 때    │ SPEED ────────────────────── │
+│ ▏ server does                             │ ▏ 손대는                                  │ prefill            610 tok/s │
+│ ▏ █▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇  12.5 avg │ ▏ █▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇  12.5 avg │ decode            12.5 tok/s │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ ttft      690 ms · 25% cache │
+│ stream 3/4                           done │ stream 4/4 · thinking · cut               │ 4 streams     50.1 tok/s agg │
+│ 12.5 tok/s ttft 750 ms · 306/320          │ 12.5 tok/s ttft 810 ms · 320/320          │                              │
+│ ▏ while each individual session decays    │ ▏ careful not to promise that reuse       │ HOST ─────────────────────── │
+│ ▏ gently. Around eight concurrent         │ ▏ survives everything. There are builds   │ load      3.1 · contended no │
+│ ▏ streams a seventy billion parameter     │ ▏ where a change to the sampling          │ GPU0         71°C  348W  98% │
+│ ▏ model on two consumer cards typically   │ ▏ parameters does not invalidate          │ GPU1         67°C  318W  94% │
+│ ▏ gives you roughly half the single       │ ▏ anything and builds where slot          │                              │
+│ ▏ session speed per session and about     │ ▏ management differs, and quoting a       │                              │
+│ ▏ four times the total throughput.        │ ▏ rule that does not hold on their        │                              │
+│ ▏ Which of those two numbers matters      │ ▏ version would be worse than saying      │                              │
+│ ▏ depends entirely on what you are        │ ▏ nothing. Better to describe what is     │                              │
+│ ▏ building. A person waiting for a        │ ▏ certainly true everywhere: matching     │                              │
+│ ▏ reply                                   │ ▏ happens from the beginning,             │                              │
+│ ▏ ▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇  12.5 avg │ ▏ █▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇  12.5 avg │                              │
 │                                                                                       │                              │
 │ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card    │                              │
 ├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
-│ token latency ▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏▏  p50 91 ms  c card · p prompt · q quit │
+│ token latency ▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▋▋▏▊▊█▋▏  p50 82 ms  c card · p prompt · q quit │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

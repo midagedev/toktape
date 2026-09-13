@@ -170,6 +170,11 @@ type Event struct {
 	Token tape.TokenEvent
 	// Sample is filled for EventSample.
 	Sample tape.RunSample
+	// MaxTokens is filled for EventStreamStarted: the generation cap that
+	// stream's request carries. A live tile prints "12/320" from its first
+	// token rather than a bare count that only becomes a fraction once the
+	// tape is written. Zero means the request named no cap.
+	MaxTokens int
 	// Summary is filled for EventDone.
 	Summary *tape.RunSummary
 	// Elapsed is filled for EventLoading: how long attaching has been

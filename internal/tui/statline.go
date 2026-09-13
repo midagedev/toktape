@@ -208,12 +208,17 @@ func streamP50Figure(s Stream) string {
 // promptMaxTokens is the answer cap the request asked for, or 0 when it did
 // not ask for one.
 //
-// tape.PromptRecord has no field for it: the parameters go into Params as they
-// went over the wire (internal/server/stream.go), which is "max_tokens" for
-// the OpenAI-shaped endpoint and "n_predict" for a caller that typed
-// llama.cpp's own name for it. A negative value is llama-server's "no limit",
-// which is not a cap and is read here as unknown.
+// tape.PromptRecord.MaxTokens is the record: the recorder fills it with the
+// cap the request was actually sent with. Params is the fallback, and it is
+// what a tape written before that field existed carries — the parameters go
+// in as they went over the wire (internal/server/stream.go), which is
+// "max_tokens" for the OpenAI-shaped endpoint and "n_predict" for a caller
+// that typed llama.cpp's own name for it. A negative value is llama-server's
+// "no limit", which is not a cap and is read here as unknown.
 func promptMaxTokens(p tape.PromptRecord) int {
+	if p.MaxTokens > 0 {
+		return p.MaxTokens
+	}
 	for _, key := range []string{"max_tokens", "n_predict"} {
 		if n := paramInt(p.Params[key]); n > 0 {
 			return n

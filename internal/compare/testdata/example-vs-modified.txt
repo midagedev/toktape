@@ -1,21 +1,20 @@
 toktape compare
-  A  20260913-142530-qwen3.5-35b-a3b
-  B  20260913-151212-qwen3.5-35b-a3b
+  A  20260913-142530-llama3.3-70b
+  B  20260913-151212-llama3.3-70b
 ────────────────────────────────────────────────────────────────────────
 metric                                 A               B               Δ
-TTFT                              143 ms          512 ms           +258%
-prefill tok/s                       2450            1980            -19%
-decode tok/s                        68.4            51.2            -25%
-VRAM used                       18.0 GiB        16.0 GiB            -11%
-host RSS                         3.4 GiB         6.4 GiB            +88%
+TTFT                              630 ms          512 ms            -19%
+prefill tok/s                        610            1980           +225%
+decode tok/s                        17.4            51.2           +194%
+VRAM used                       46.6 GiB        44.6 GiB           -4.3%
+host RSS                         1.2 GiB         4.2 GiB           +250%
 maj faults/token                     0.0             1.8                
-cache hit                            78%              0%           -100%
+cache hit                            25%              0%           -100%
 contended                             no             yes                
 
 flags
   -fa           on → off
   -b            2048 → 4096
-  -ot           - blk\.(3[6-9]|4[0-7])\.ffn_.*_exps=CPU
   -ot           + blk\.(4[0-7])\.ffn_.*_exps=CPU
 
 run

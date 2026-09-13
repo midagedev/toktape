@@ -148,7 +148,13 @@ func TestParseScreenReadsTheRealTheme(t *testing.T) {
 	// on green. That is the sequence a real terminal receives too, so the
 	// parser is right to report what it was sent; the tolerance is here to say
 	// that the shift is lipgloss's and is known.
-	m := tui.ModelAt(tui.ExampleTape(), 3*time.Second)
+	// A contended run, so the frame carries the warm hue as well: the example
+	// rig runs on a quiet machine and shows no amber at all (2026-09-13,
+	// TTP-28), and a palette check needs every colour it names to be on screen.
+	tp := tui.ExampleTape()
+	tp.Summary.Contention.Contended = true
+	tp.Summary.Contention.Reasons = []string{"2 other GPU procs"}
+	m := tui.ModelAt(tp, 3*time.Second)
 	m.Theme = tui.ColourTheme()
 	frame := tui.View(m, 3*time.Second, DefaultWidth, DefaultHeight)
 	if !strings.Contains(frame, "\x1b[38;2;") {

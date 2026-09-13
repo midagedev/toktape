@@ -486,11 +486,11 @@ func TestConcurrentHeroShowsBothFigures(t *testing.T) {
 		t.Fatalf("renderCanvas: %v", err)
 	}
 	checks := map[string]string{
-		"hero.left.number":   "96.8",
-		"hero.left.sub1":     "8 × 12.1 tok/s per stream",
+		"hero.left.number":   "72.9",
+		"hero.left.sub1":     "8 × 9.1 tok/s per stream",
 		"hero.left.eyebrow":  "AGGREGATE DECODE",
-		"hero.right.number":  "8250",
-		"hero.right.sub1":    "8 × 1980 tok/s per stream",
+		"hero.right.number":  "2927",
+		"hero.right.sub1":    "8 × 610 tok/s per stream",
 		"hero.right.eyebrow": "AGGREGATE PREFILL",
 	}
 	for id, want := range checks {
@@ -504,12 +504,25 @@ func TestConcurrentHeroShowsBothFigures(t *testing.T) {
 	}
 	// The TTFT spread stays on the prefill side; it is the figure a concurrent
 	// run is actually judged on.
-	if m, _ := c.markByID("hero.right.sub2"); !strings.Contains(m.Text, "p95 480 ms") {
+	if m, _ := c.markByID("hero.right.sub2"); !strings.Contains(m.Text, "p95 1050 ms") {
 		t.Errorf("prefill sub-line = %q, want the p50/p95 TTFT spread", m.Text)
 	}
-	// The cold run's cache pill is red-labelled "cold", not a silent 0%.
-	if m, _ := c.markByID("memory.pill1"); !strings.Contains(m.Text, "cold") {
-		t.Errorf("cache pill = %q, want it to say cold", m.Text)
+	// The cache pill names the verdict and the hit ratio rather than leaving a
+	// bare percentage to be read as a speed.
+	if m, _ := c.markByID("memory.pill1"); !strings.Contains(m.Text, "warm") || !strings.Contains(m.Text, "25%") {
+		t.Errorf("cache pill = %q, want the label and the hit ratio", m.Text)
+	}
+	// And a cold run still says so in words, not as a silent 0%. The example
+	// rig fits in VRAM and never goes cold (2026-09-13, TTP-28), so the cold
+	// case is built here instead of taken from the fixture.
+	cold := card.ExampleConcurrent()
+	cold.Cache = tape.CacheSummary{PromptTotal: 512, Label: tape.CacheCold}
+	cc, err := renderCanvas(cold)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	if m, _ := cc.markByID("memory.pill1"); !strings.Contains(m.Text, "cold") {
+		t.Errorf("a cold run's cache pill = %q, want it to say cold", m.Text)
 	}
 }
 
@@ -523,8 +536,8 @@ func TestSingleStreamPrefillIsNotAggregate(t *testing.T) {
 	if m, _ := c.markByID("hero.right.eyebrow"); m.Text != "PREFILL" {
 		t.Errorf("prefill eyebrow = %q, want %q", m.Text, "PREFILL")
 	}
-	if m, _ := c.markByID("hero.right.number"); m.Text != "2450" {
-		t.Errorf("prefill number = %q, want %q", m.Text, "2450")
+	if m, _ := c.markByID("hero.right.number"); m.Text != "610" {
+		t.Errorf("prefill number = %q, want %q", m.Text, "610")
 	}
 	if m, _ := c.markByID("hero.left.eyebrow"); m.Text != "DECODE" {
 		t.Errorf("decode eyebrow = %q, want %q", m.Text, "DECODE")
@@ -577,9 +590,35 @@ func TestPlacementBarSegments(t *testing.T) {
 			t.Errorf("gap between segment %d and %d: %d != %d", i-1, i, segs[i-1].Rect.Max.X, segs[i].Rect.Min.X)
 		}
 	}
-	if m, ok := c.markByID("memory.legend.text3"); !ok || !strings.HasPrefix(m.Text, "never loaded") {
-		t.Errorf("never-loaded legend = %q (drawn=%v)", m.Text, ok)
+	// The legend is searched rather than indexed: how many entries precede the
+	// never-loaded one depends on how many devices the placement has, and a
+	// fixed index would make this test quietly check a different entry the
+	// next time the example's rig changes.
+	if !hasLegendEntry(c, "never loaded") {
+		t.Errorf("never-loaded legend is missing: %v", legendEntries(c))
 	}
+}
+
+// legendEntries is every memory-legend label the canvas drew, in order.
+func legendEntries(c *canvas) []string {
+	var out []string
+	for i := 0; ; i++ {
+		m, ok := c.markByID(fmt.Sprintf("memory.legend.text%d", i))
+		if !ok {
+			return out
+		}
+		out = append(out, m.Text)
+	}
+}
+
+// hasLegendEntry reports whether any legend entry starts with prefix.
+func hasLegendEntry(c *canvas, prefix string) bool {
+	for _, e := range legendEntries(c) {
+		if strings.HasPrefix(e, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestGPUSegmentsAreSubdivided: when the placement reports the three-way VRAM
@@ -588,6 +627,14 @@ func TestPlacementBarSegments(t *testing.T) {
 // the three recorded totals.
 func TestGPUSegmentsAreSubdivided(t *testing.T) {
 	s := card.Example()
+	// A device on the host as well, so the "VRAM only" check below has a CPU
+	// segment to look at. The example rig is fully offloaded and has none
+	// (2026-09-13, TTP-28).
+	s.Placement.Devices = append(s.Placement.Devices, tape.DevicePlacement{
+		Device:  tape.DeviceCPU,
+		Bytes:   4 * gib,
+		Classes: map[tape.TensorClass]int64{tape.ClassFFN: 4 * gib},
+	})
 	c, err := renderCanvas(s)
 	if err != nil {
 		t.Fatalf("renderCanvas: %v", err)
@@ -622,10 +669,9 @@ func TestGPUSegmentsAreSubdivided(t *testing.T) {
 	if _, ok := c.markByID(segmentID(2) + ".part0"); ok {
 		t.Error("the CPU segment was subdivided; the three-way split is VRAM only")
 	}
-	for i, want := range map[int]string{3: "weights 13.5 GiB", 4: "kv 3.0 GiB", 5: "compute 0.9 GiB"} {
-		m, ok := c.markByID(fmt.Sprintf("memory.legend.text%d", i))
-		if !ok || m.Text != want {
-			t.Errorf("legend entry %d = %q (drawn=%v), want %q", i, m.Text, ok, want)
+	for _, want := range []string{"weights 42.5 GiB", "kv 2.6 GiB", "compute 1.5 GiB"} {
+		if !hasLegendEntry(c, want) {
+			t.Errorf("the legend does not name %q: %v", want, legendEntries(c))
 		}
 	}
 }

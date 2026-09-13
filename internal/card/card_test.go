@@ -43,6 +43,11 @@ func unknownsSummary() *tape.RunSummary {
 	return &tape.RunSummary{Concurrency: 1}
 }
 
+// 2026-09-13 TTP-28: the example and example-concurrent goldens were
+// re-baselined. The fixture is now a dense Llama 3.3 70B Q4_K_M fully offloaded
+// to two 3090s, which is the rig the launch post is about; the derivation is
+// the comment block in example.go. The other four fixtures are built in this
+// file and did not move.
 func TestTextGolden(t *testing.T) {
 	cases := []struct {
 		name string
@@ -65,6 +70,8 @@ func TestTextGolden(t *testing.T) {
 	}
 }
 
+// 2026-09-13 TTP-28: re-baselined with TestTextGolden, and for the same
+// reason — the same two fixtures, rendered as JSON.
 func TestJSONGolden(t *testing.T) {
 	cases := []struct {
 		name string
@@ -233,7 +240,7 @@ func TestConcurrentAddsStreamsLine(t *testing.T) {
 		t.Error("a single-stream run must not print the Streams line")
 	}
 	out := Text(ExampleConcurrent())
-	for _, want := range []string{"Streams", "8 × 12.1 tok/s = 96.8 tok/s aggregate", "TTFT p50 210 ms p95 480 ms", "slots busy max 8"} {
+	for _, want := range []string{"Streams", "8 × 9.1 tok/s = 72.9 tok/s aggregate", "TTFT p50 810 ms p95 1050 ms", "slots busy max 8"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("concurrent card is missing %q:\n%s", want, out)
 		}

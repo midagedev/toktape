@@ -1,36 +1,36 @@
-┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────┐
+┌─ toktape · Llama 3.3 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────────────────────┐
 │ stream 1/4                         answer │ stream 2/4                         answer │ PLACEMENT ────────────────── │
-│ 12.1 tok/s ttft 210 ms · 16/128           │ 12.0 tok/s ttft 250 ms · 15/128           │ GPU0 ███████████████    9.4G │
-│ ▏ The page fault spike you are seeing     │ ▏ 이건 배치 문제인지 대역폭 문제인지      │ GPU1 ███████████████    9.6G │
-│ ▏ is the expert tensors being read back   │ ▏ 먼저 갈라야 한다. 전문가 텐서가         │ CPU  ███████████████    6.3G │
-│ ▏ from NVMe.▍                             │ ▏ ▸ answer                                │ vram ███████████████   17.4G │
-│                                           │ ▏ 레이어 배치를 바꾸면 디코드 속도가▍     │      █ weights  █ kv  █ buf  │
-│                                           │                                           │ never loaded           84.6G │
-│                                           │                                           │                              │
-│                                           │                                           │ MEMORY ───────────────────── │
-│                                           │                                           │ rss       9.0G file     8.3G │
-│                                           │                                           │ virt     40.0G anon     1.1G │
-│                                           │                                           │ maj/tok                  0.0 │
-│                                           │                                           │             ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│                                           │                                           │                              │
-│                                           │                                           │ SPEED ────────────────────── │
-│ ▏               █▆▇▇█▆▇▇█▆▇▇█▆▇  12.2 avg │ ▏                ▆▇▇█▆▇▇█▆▇▇█▆▇  12.1 avg │ prefill           2787 tok/s │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ decode            12.1 tok/s │
-│ stream 3/4 · thinking                     │ stream 4/4 · thinking                     │ ttft      250 ms · 25% cache │
-│ 12.1 tok/s ttft 290 ms · 15/128           │ 12.2 tok/s ttft 330 ms · 15/128           │ 4 streams     48.3 tok/s agg │
-│ ▏ Flash attention: does it touch the      │ ▏ Prefix caching. The user probably       │                              │
-│ ▏ weights or only the buffers? Only the   │ ▏ changed the system prompt and does      │ HOST ─────────────────────── │
-│ ▏ buffers, I▍                             │ ▏ not realise the whole▍                  │ load     5.0 · contended yes │
-│                                           │                                           │ GPU0         61°C  292W  90% │
-│                                           │                                           │ GPU1         61°C  292W  90% │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│ ▏                ▇▇█▆▇▇█▆▇▇█▆▇▇  12.2 avg │ ▏                ▇█▆▇▇█▆▇▇█▆▇▇█  12.3 avg │                              │
+│ 12.5 tok/s ttft 630 ms · 143/320          │ 12.5 tok/s ttft 690 ms · 142/320          │ GPU0 ███████████████   23.1G │
+│ ▏ compute costume, and the arithmetic     │ ▏ 차지하는 채널 수와 컨텍스트 토큰 수를   │ GPU1 ███████████████   22.1G │
+│ ▏ is simple enough to do in your head.    │ ▏ 곱한 다음, 원소 하나가 몇               │ vram ███████████████   46.6G │
+│ ▏ Take the bytes the model has to touch   │ ▏ 바이트인지를 곱하면 된다. 팔십          │      █ weights  █ kv  █ buf  │
+│ ▏ per token, multiply by the tokens per   │ ▏ 레이어짜리 칠십억 단위 모델이 만 육천   │                              │
+│ ▏ second you are getting, and compare     │ ▏ 토큰을 잡으면 반정밀도로는 오           │ MEMORY ───────────────────── │
+│ ▏ the result against what your cards      │ ▏ 기가바이트가 넘고, 캐시 타입을 여덟     │ rss       1.2G file     0.8G │
+│ ▏ can actually move. If the two figures   │ ▏ 비트로 내리면 절반을 조금 넘는          │ virt     48.0G anon     0.4G │
+│ ▏ are close, the placement is fine and    │ ▏ 수준으로 줄어든다. 이 절약분이 그대로   │ maj/tok                  0.0 │
+│ ▏ no flag is going to save you. If they   │ ▏ 가중치를 올릴 공간이 되기 때문에,       │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ are far apart, something is stalling    │ ▏ 카드가 빠듯할 때 가장 먼저 건드릴       │                              │
+│ ▏ and it is worth finding out what.       │ ▏ 손잡이가 캐시 타입이다. 품질 이야기가   │ SPEED ────────────────────── │
+│ ▏ With a layer split the first card       │ ▏ 나오면 대개 과장돼 있다. 키와 값을      │ prefill            610 tok/s │
+│ ▏ holds the lower half▍                   │ ▏ 여덟 비트로 저장하는 것은▍              │ decode            12.5 tok/s │
+│ ▏ ▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█  12.5 avg │ ▏ ▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█  12.5 avg │ ttft      690 ms · 25% cache │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ 4 streams     50.0 tok/s agg │
+│ stream 3/4                         answer │ stream 4/4 · thinking                     │                              │
+│ 12.5 tok/s ttft 750 ms · 141/320          │ 12.5 tok/s ttft 810 ms · 141/320          │ HOST ─────────────────────── │
+│ ▏ whether a person or an agent is         │ ▏ possibility: the prompt is stable but   │ load      3.1 · contended no │
+│ ▏ waiting. I should also mention the      │ ▏ the serialisation is not. Tool          │ GPU0         69°C  344W  98% │
+│ ▏ prefill interference, because their     │ ▏ definitions coming out of a hash map    │ GPU1         65°C  314W  94% │
+│ ▏ stutter complaint sounds like           │ ▏ land in a different order between       │                              │
+│ ▏ arrivals landing on a busy server       │ ▏ processes, and nothing in their own     │                              │
+│ ▏ rather than a decoding problem. Keep    │ ▏ code looks like a change even though    │                              │
+│ ▏ it short and lead with the mechanism.   │ ▏ the bytes differ. Third possibility:    │                              │
+│ ▏ One thing                               │ ▏ the prompt and the serialisation are    │                              │
+│ ▏ ▸ answer                                │ ▏ both stable but the request went to a   │                              │
+│ ▏ The number that changes when you send   │ ▏ different slot, so the cache that       │                              │
+│ ▏ eight requests at once is not the one   │ ▏ holds the prefix belongs to another     │                              │
+│ ▏ most benchmarks print. Each▍            │ ▏ sequence and this one starts▍           │                              │
+│ ▏ ▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█  12.5 avg │ ▏ ▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇  12.5 avg │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
-│ token latency                                                          █▏▏▋▋▏▏██▏▏▋▋▏▏  p50 88 ms  q quit · p prompt │
+│ token latency ██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏  p50 81 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

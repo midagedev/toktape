@@ -149,6 +149,10 @@ func bridgeEvent(ev recorder.Event, t time.Duration) (tui.Event, bool) {
 		out.PID = pid
 	case recorder.EventStreamStarted:
 		out.Kind = tui.EventStreamStart
+		// The cap travels with the start event so a live tile reads "12/320"
+		// from its first token. Without it the tile prints a bare count until
+		// the run ends and the tape supplies the budget.
+		out.MaxTokens = ev.MaxTokens
 	case recorder.EventToken:
 		out.Kind = tui.EventToken
 		out.Token = ev.Token

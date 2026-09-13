@@ -128,7 +128,12 @@ func TestThinkingBadge(t *testing.T) {
 }
 
 // TestStreamBodyDimsReasoning is the visible contract: thinking is dim, the
-// answer is the normal text colour, and the marker sits between them.
+// answer sits one tone above it, and the marker sits between them.
+//
+// 2026-09-13 TTP-28: the answer's settled shade is textMuted rather than text
+// (user: "토큰 내용 자체는 한 톤 내리는 게 맞겠어"). The stream here is Done, so
+// no token is in a glow band and every answer rune is settled. The assertion
+// is the same one, against the shade the contract now names.
 func TestStreamBodyDimsReasoning(t *testing.T) {
 	th := ColourTheme()
 	s := reasoningStream(
@@ -143,9 +148,9 @@ func TestStreamBodyDimsReasoning(t *testing.T) {
 	got := streamBody(Model{Streams: []Stream{s}}, th, 0, s, cw, 6, false)
 
 	dim := th.paint(th.dim, "x")
-	textStyle := th.paint(th.text, "x")
+	textStyle := th.paint(th.textMuted, "x")
 	if dim == textStyle {
-		t.Fatal("the dim and text styles paint identically; this test cannot tell them apart")
+		t.Fatal("the dim and body styles paint identically; this test cannot tell them apart")
 	}
 	dimPrefix, textPrefix := escPrefix(dim), escPrefix(textStyle)
 
@@ -191,8 +196,10 @@ func TestStreamBodyPlainUnchanged(t *testing.T) {
 	s.Done = true
 	got := streamBody(Model{Streams: []Stream{s}}, th, 0, s, 40, 3, false)
 	joined := strings.Join(got, "\n")
-	if !styledWith(joined, "Four", escPrefix(th.paint(th.text, "x"))) {
-		t.Errorf("answer is not drawn in the text style:\n%s", joined)
+	// 2026-09-13 TTP-28: settled answer text is textMuted, one tone under the
+	// header, and this stream is Done so nothing glows.
+	if !styledWith(joined, "Four", escPrefix(th.paint(th.textMuted, "x"))) {
+		t.Errorf("answer is not drawn in the body style:\n%s", joined)
 	}
 	if strings.Contains(joined, answerMarker) {
 		t.Errorf("a stream that never thought got a marker:\n%s", joined)

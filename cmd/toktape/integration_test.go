@@ -633,7 +633,7 @@ func TestCardMarkdownCarriesReproduce(t *testing.T) {
 		"<details><summary>Reproduce</summary>",
 		"Server (as seen from /proc/48213/cmdline):",
 		strings.Join(s.Server.Args, " "),
-		"toktape --url http://127.0.0.1:8080 -n 8 --n-predict 128",
+		"toktape --url http://127.0.0.1:8080 -n 8 --n-predict 307",
 		"Tape: `" + s.ID + tape.Ext + "`",
 		"</details>",
 	} {

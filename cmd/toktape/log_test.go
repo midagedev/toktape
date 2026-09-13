@@ -106,7 +106,7 @@ func TestLogVerbBuildsTheLedger(t *testing.T) {
 	if got := column(rows[0], 2); got != "-" {
 		t.Errorf("the untagged run's TAG column = %q, want -", got)
 	}
-	if !strings.Contains(rows[0], "96.8") {
+	if !strings.Contains(rows[0], "72.9") {
 		t.Errorf("the concurrent run does not show its aggregate rate: %q", rows[0])
 	}
 	if !strings.Contains(stdout, "ngl=99") {
@@ -146,21 +146,21 @@ func TestLogVerbFilterAndLimit(t *testing.T) {
 		t.Errorf("--tag NGL=40 printed %v", rowsOf(stdout))
 	}
 
-	_, stdout, _ = exec(t, "log", "--out", dir, "--model", "qwen")
+	_, stdout, _ = exec(t, "log", "--out", dir, "--model", "llama")
 	if rows := rowsOf(stdout); len(rows) != 4 {
-		t.Errorf("--model qwen printed %d rows, want all four", len(rows))
+		t.Errorf("--model llama printed %d rows, want all four", len(rows))
 	}
 
 	// A filter that matches nothing is not an empty run directory, and saying
 	// "no runs yet" to someone who mistyped a filter names the wrong problem.
-	code, stdout, stderr := exec(t, "log", "--out", dir, "--model", "llama")
+	code, stdout, stderr := exec(t, "log", "--out", dir, "--model", "qwen")
 	if code != exitOK {
 		t.Errorf("a filter that matches nothing is not an error: exit %d", code)
 	}
 	if stdout != "" {
 		t.Errorf("a filter that matches nothing printed a table:\n%s", stdout)
 	}
-	if !strings.Contains(stderr, `None of the 4 runs`) || !strings.Contains(stderr, `--model "llama"`) {
+	if !strings.Contains(stderr, `None of the 4 runs`) || !strings.Contains(stderr, `--model "qwen"`) {
 		t.Errorf("stderr does not say the filter matched nothing:\n%s", stderr)
 	}
 	if strings.Contains(stderr, "No runs yet") {
@@ -173,7 +173,14 @@ func TestLogVerbFilterAndLimit(t *testing.T) {
 // column stays numeric when one run did not observe something.
 func TestLogVerbExportsLeaveUnknownsEmpty(t *testing.T) {
 	dir := t.TempDir()
-	writeTape(t, dir, card.ExampleConcurrent()) // no tag, no note, no cache_n
+	// No tag, no note, and a prompt cache nobody observed: the example rig's
+	// prompt does hit the cache (2026-09-13, TTP-28), so the unobserved case
+	// this test is about is built here.
+	s := card.ExampleConcurrent()
+	s.Timings.CacheN = 0
+	s.Timings.PromptN = 512
+	s.Cache = tape.CacheSummary{PromptTotal: 512, Label: tape.CacheCold}
+	writeTape(t, dir, s)
 
 	code, stdout, stderr := exec(t, "log", "--out", dir, "--tsv")
 	if code != exitOK {
@@ -198,8 +205,8 @@ func TestLogVerbExportsLeaveUnknownsEmpty(t *testing.T) {
 			t.Errorf("%s = %q in the TSV, want an empty cell", col, v)
 		}
 	}
-	if v := fields[ledger.Index("aggregate_tok_s")]; v != "96.8" {
-		t.Errorf("aggregate_tok_s = %q, want 96.8", v)
+	if v := fields[ledger.Index("aggregate_tok_s")]; v != "72.9" {
+		t.Errorf("aggregate_tok_s = %q, want 72.9", v)
 	}
 
 	// The same run on the terminal prints "?" for the tag it does not have.
@@ -213,8 +220,12 @@ func TestLogVerbExportsLeaveUnknownsEmpty(t *testing.T) {
 // with a note that contains a comma and a quote left intact.
 func TestLogVerbCSVAndJSON(t *testing.T) {
 	dir := t.TempDir()
-	s := sweepRun("20260913-100000-qwen3.5-35b-a3b", "ngl=40", "40", 41.2)
+	s := sweepRun("20260913-100000-llama3.3-70b", "ngl=40", "40", 41.2)
 	s.Note = `one, two "three"`
+	// A tensor-override pattern with a pipe in it, which is what the markdown
+	// escaping below is about. The example rig splits by layer and carries no
+	// -ot rules of its own (2026-09-13, TTP-28).
+	s.Server.Flags.OverrideTens = []string{`blk\.(3[6-9]|4[0-7])\.ffn_.*_exps=CPU`}
 	writeTape(t, dir, s)
 
 	_, out, stderr := exec(t, "log", "--out", dir, "--csv")

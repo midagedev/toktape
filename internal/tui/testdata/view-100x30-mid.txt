@@ -1,30 +1,30 @@
-┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────┐
+┌─ toktape · Llama 3.3 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────┐
 │ stream 1/8               answer │ stream 2/8               answer │ PLACEMENT ────────────────── │
-│ 12.1 tok/s ttft 210 ms          │ 12.0 tok/s ttft 250 ms          │ GPU0 ███████████████    9.4G │
-│ ▏ are seeing is the expert      │ ▏ ▸ answer                      │ GPU1 ███████████████    9.6G │
-│ ▏ tensors being read back       │ ▏ 레이어 배치를 바꾸면 디코드   │ CPU  ███████████████    6.3G │
-│ ▏ from NVMe.▍                   │ ▏ 속도가▍                       │ vram ███████████████   17.4G │
-│ ▏     █▆▇▇█▆▇▇█▆▇▇█▆▇  12.2 avg │ ▏      ▆▇▇█▆▇▇█▆▇▇█▆▇  12.1 avg │      █ weights  █ kv  █ buf  │
-├─────────────────────────────────┼─────────────────────────────────┤ never loaded           84.6G │
-│ stream 3/8               answer │ stream 4/8               answer │                              │
-│ 12.1 tok/s ttft 290 ms          │ 12.2 tok/s ttft 330 ms          │ MEMORY ───────────────────── │
-│ ▏ compute buffer size, not      │ ▏ when the system prompt is     │ rss       9.0G file     8.3G │
-│ ▏ the weights. When the         │ ▏ byte identical. A single      │ virt     40.0G anon     1.1G │
-│ ▏ buffer grows past▍            │ ▏ changed character▍            │ maj/tok                  0.0 │
-│ ▏      ▇▇█▆▇▇█▆▇▇█▆▇▇  12.2 avg │ ▏      ▇█▆▇▇█▆▇▇█▆▇▇█  12.3 avg │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-├─────────────────────────────────┼─────────────────────────────────┤                              │
-│ stream 5/8 · thinking           │ stream 6/8               answer │ SPEED ────────────────────── │
-│ 12.2 tok/s ttft 370 ms          │ 12.0 tok/s ttft 410 ms          │ prefill           2253 tok/s │
-│ ▏ 먼저 기계가 조용했는지 묻는   │ ▏ The aggregate rate is what    │ decode            12.1 tok/s │
-│ ▏ 게 맞다. 잡음이 신호보다      │ ▏ the server does; the per      │ ttft      330 ms · 25% cache │
-│ ▏ 크면 나머지 숫자는▍           │ ▏ stream rate is what▍          │ 8 streams     97.0 tok/s agg │
-│ ▏       █▆▇▇█▆▇▇█▆▇▇█  12.3 avg │ ▏       ▆▇▇█▆▇▇█▆▇▇█▆  12.1 avg │                              │
-├─────────────────────────────────┼─────────────────────────────────┤ HOST ─────────────────────── │
-│ stream 7/8 · thinking           │ stream 8/8               answer │ load     4.9 · contended yes │
-│ 12.1 tok/s ttft 450 ms          │ 12.1 tok/s ttft 490 ms          │ GPU0         61°C  292W  90% │
-│ ▏ break even point before I     │ ▏ mmap the resident set is      │ GPU1         61°C  292W  90% │
-│ ▏ can▍                          │ ▏ what this process▍            │                              │
-│ ▏        ▇▇█▆▇▇█▆▇▇█▆  12.2 avg │ ▏        ▇█▆▇▇█▆▇▇█▆▇  12.2 avg │                              │
+│ 9.1 tok/s  ttft 630 ms          │ 9.1 tok/s  ttft 690 ms          │ GPU0 ███████████████   22.9G │
+│ ▏ result against what your      │ ▏ 모델이 만 육천 토큰을         │ GPU1 ███████████████   21.9G │
+│ ▏ cards can actually move. If   │ ▏ 잡으면 반정밀도로는 오        │ vram ███████████████   46.6G │
+│ ▏ the two figures are▍          │ ▏ 기가바이트가 넘고,▍           │      █ weights  █ kv  █ buf  │
+│ ▏ ██▇▇▇██▇▇█▇██▇▇▇██▇   9.1 avg │ ▏ ██▇▇▇██▇▇█▇██▇▇▇██▇   9.1 avg │                              │
+├─────────────────────────────────┼─────────────────────────────────┤ MEMORY ───────────────────── │
+│ stream 3/8               answer │ stream 4/8               answer │ rss       1.2G file     0.8G │
+│ 9.1 tok/s  ttft 750 ms          │ 9.1 tok/s  ttft 810 ms          │ virt     48.0G anon     0.4G │
+│ ▏ ways. What is not amortised   │ ▏ tool list whose order comes   │ maj/tok                  0.0 │
+│ ▏ is the attention step,        │ ▏ out of a map and therefore    │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ where every sequence▍         │ ▏ changes between▍              │                              │
+│ ▏ █▇▇▇██▇▇█▇██▇▇▇██▇▇   9.1 avg │ ▏ █▇▇▇██▇▇█▇██▇▇▇██▇▇   9.1 avg │ SPEED ────────────────────── │
+├─────────────────────────────────┼─────────────────────────────────┤ prefill            610 tok/s │
+│ stream 5/8               answer │ stream 6/8               answer │ decode             9.1 tok/s │
+│ 9.1 tok/s  ttft 870 ms          │ 9.1 tok/s  ttft 930 ms          │ ttft      810 ms · 25% cache │
+│ ▏ 습관이 결국 시간을 아껴       │ ▏ layer. That is why two        │ 8 streams     72.8 tok/s agg │
+│ ▏ 준다. 다른 프로세스가 같은    │ ▏ files with the same label     │                              │
+│ ▏ 카드를▍                       │ ▏ can▍                          │ HOST ─────────────────────── │
+│ ▏ ▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │ ▏ ▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │ load      3.1 · contended no │
+├─────────────────────────────────┼─────────────────────────────────┤ GPU0         69°C  343W  98% │
+│ stream 7/8 · thinking           │ stream 8/8               answer │ GPU1         65°C  313W  94% │
+│ 9.1 tok/s  ttft 990 ms          │ 9.1 tok/s  ttft 1050 ms         │                              │
+│ ▏ costs about four tenths of    │ ▏ recently and what the         │                              │
+│ ▏ a step plus the one step▍     │ ▏ kernel has chosen to▍         │                              │
+│ ▏ ▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │ ▏ ▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │                              │
 ├─────────────────────────────────┴─────────────────────────────────┴──────────────────────────────┤
-│ token latency                                       █▏▏▏████▏▏▏▏██  p50 91 ms  q quit · p prompt │
+│ token latency ████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────┘

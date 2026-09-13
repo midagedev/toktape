@@ -28,6 +28,12 @@ func main() {
 	n := flag.Int("n", 8, "concurrent streams")
 	gridSpec := flag.String("grid", tui.DefaultGrid.String(), "tile grid per page as COLSxROWS (0 = fit)")
 	page := flag.Int("page", 0, "which page of tiles to dump, from zero")
+	// -at exists for the questions the default set cannot answer: whether
+	// something that is supposed to move between two instants actually moves.
+	// Dumping two frames a fifth of a second apart and diffing them is the
+	// cheapest way to check an effect that is a function of clip time, and
+	// before this flag it meant writing a program.
+	at := flag.String("at", "", "comma-separated clip times to dump instead of the default set, e.g. 12s,12.2s")
 	flag.Parse()
 
 	grid, err := tui.ParseGrid(*gridSpec)
@@ -35,28 +41,43 @@ func main() {
 		fail(err)
 	}
 
-	// 0.5 s is the first frame with tokens in it, 3.0 s falls inside the
-	// example's page-in burst so every sparkline has a dip to draw, and 8.0 s
-	// is the finished run.
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		fail(err)
+	}
+	tp := tui.ExampleTapeN(*n)
+	extras, err := parseOffsets(*at)
+	if err != nil {
+		fail(err)
+	}
+
+	// The instants worth looking at (TTP-28): nothing yet, the first frames
+	// with tokens in them, a settled screen three seconds in, the frame the
+	// goldens and the hero are framed at (tui.ExampleMidRun, where one stream
+	// has just crossed into its answer), and the finished run.
+	//
+	// The last one is taken from the run rather than assumed: the stream count
+	// moves the wall clock (eight streams take ten seconds longer than four),
+	// and a "done" frame stamped a few milliseconds early is a live model with
+	// one token still pending — which looks finished and is not.
+	doneAt := time.Duration(tp.Summary.Aggregate.WallMs*float64(time.Millisecond)) + time.Second
 	offsets := []struct {
 		name string
 		at   time.Duration
 	}{
 		{"t0.0s", 0},
-		{"t0.5s", 500 * time.Millisecond},
-		{"t1.5s", 1500 * time.Millisecond},
+		{"t0.7s", 700 * time.Millisecond},
 		{"t3.0s", 3 * time.Second},
-		{"t8.0s-done", 8 * time.Second},
+		{"t10.0s", 10 * time.Second},
+		{fmt.Sprintf("t%.1fs-mid", tui.ExampleMidRun.Seconds()), tui.ExampleMidRun},
+		{fmt.Sprintf("t%.1fs-done", doneAt.Seconds()), doneAt},
 	}
-
-	if err := os.MkdirAll(*out, 0o755); err != nil {
-		fail(err)
+	if len(extras) > 0 {
+		offsets = extras
 	}
-	tp := tui.ExampleTapeN(*n)
 	bad := 0
 	for _, off := range offsets {
 		plain := tui.ModelAt(tp, off.at)
-		plain.TapePath = "~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape"
+		plain.TapePath = "~/.toktape/runs/" + tp.Summary.ID + ".tape"
 		plain.Grid, plain.Page = grid, *page
 		colour := plain
 		colour.Theme = tui.ColourTheme()
@@ -76,8 +97,8 @@ func main() {
 
 	// The card view and the prompt modal are the two states a token timeline
 	// never reaches on its own, so they get their own frames.
-	done := tui.ModelAt(tp, 8*time.Second)
-	done.TapePath = "~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape"
+	done := tui.ModelAt(tp, doneAt)
+	done.TapePath = "~/.toktape/runs/" + tp.Summary.ID + ".tape"
 	done.Grid, done.Page = grid, *page
 	for _, extra := range []struct {
 		name string
@@ -85,9 +106,9 @@ func main() {
 	}{{"card", tui.ModeCard}, {"prompt", tui.ModePrompt}} {
 		m := done
 		m.Mode = extra.mode
-		plain := tui.View(m, 8*time.Second, *w, *h)
+		plain := tui.View(m, doneAt, *w, *h)
 		m.Theme = tui.ColourTheme()
-		colour := tui.View(m, 8*time.Second, *w, *h)
+		colour := tui.View(m, doneAt, *w, *h)
 		base := filepath.Join(*out, fmt.Sprintf("%dx%d-n%d-%s-p%d-%s", *w, *h, *n, grid.String(), *page, extra.name))
 		write(base+".txt", plain)
 		write(base+".ansi", colour)
@@ -100,6 +121,32 @@ func main() {
 	if bad > 0 {
 		os.Exit(1)
 	}
+}
+
+// parseOffsets reads the -at list. Each name carries the millisecond so two
+// frames a fifth of a second apart do not collide on one filename.
+func parseOffsets(spec string) ([]struct {
+	name string
+	at   time.Duration
+}, error) {
+	var out []struct {
+		name string
+		at   time.Duration
+	}
+	if strings.TrimSpace(spec) == "" {
+		return nil, nil
+	}
+	for _, f := range strings.Split(spec, ",") {
+		d, err := time.ParseDuration(strings.TrimSpace(f))
+		if err != nil {
+			return nil, fmt.Errorf("-at %q: %w", f, err)
+		}
+		out = append(out, struct {
+			name string
+			at   time.Duration
+		}{fmt.Sprintf("t%.3fs", d.Seconds()), d})
+	}
+	return out, nil
 }
 
 // check reports whether every line of a frame is exactly w columns and the

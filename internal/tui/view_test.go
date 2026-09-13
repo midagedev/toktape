@@ -18,9 +18,15 @@ var update = flag.Bool("update", false, "rewrite the golden frames in testdata")
 
 // midRun and doneAt are the two interesting offsets into ExampleTape: one
 // while every stream is decoding, one after the last token.
+//
+// 2026-09-13 (TTP-28): the run is twenty-five seconds of streaming rather than
+// seven, so both moved with it — midRun is the fixture's own ExampleMidRun,
+// the instant the goldens and the captures are framed at, and doneAt is past
+// the last token of the eight-stream form, whose reasoning-only stream spends
+// all 320 of its tokens at the eight-way rate.
 const (
-	midRun = 1500 * time.Millisecond
-	doneAt = 8 * time.Second
+	midRun = ExampleMidRun
+	doneAt = 38 * time.Second
 )
 
 func goldenModel(t *testing.T, at time.Duration) Model {
@@ -44,6 +50,13 @@ func goldenModel(t *testing.T, at time.Duration) Model {
 // TTFT left the header, which now carries the state and the prefill bar, for a
 // row of their own under it (user decision — see TestTileGolden for the
 // wording). Again a different layout rather than a loosened assertion.
+//
+// 2026-09-13 TTP-28: re-baselined once more. The example is now a dense
+// Llama 3.3 70B on two 3090s running 320-token answers, so every figure in
+// these frames moved, and the emphasis contract demoted the sparklines, the
+// section titles, the bars and the tile headers out of the accent (see
+// TestOnlyTheRateIsAccent). A third different set of frames, not a loosened
+// assertion: the gates above them were added, not relaxed.
 func TestViewGolden(t *testing.T) {
 	sizes := []struct{ w, h int }{{100, 30}, {140, 40}}
 	offsets := []struct {
@@ -349,11 +362,22 @@ func sgrPrefix(th Theme, st lipgloss.Style) string {
 	return painted[:strings.Index(painted, "\x00")]
 }
 
-// TestColourHierarchy pins the rule the palette rests on: dim is for labels and
-// chrome only. Content wears the text colour, and the three figures the screen
-// exists to show — plus the stream that is currently talking — wear the accent
-// in bold. A round that quietly dimmed the answer text again would pass every
-// other test in this file.
+// TestColourHierarchy pins the rule the palette rests on: content wears the
+// text colour, labels and chrome wear dim, and the accent is spent on the
+// figures the screen exists to show. A round that quietly dimmed the answer
+// text again would pass every other test in this file.
+//
+// 2026-09-13 (TTP-28, user: "화면에 너무 많은 요소들이 강조되어 있다"): the section
+// titles and the active stream's header used to be accent bold, and are now
+// dim and plain respectively. Six lit things on one screen is none. What stayed
+// accent is pinned by TestOnlyTheRateIsAccent and TestAccentIsReserved; what
+// this test still owns is the other half of the rule, that content is not dim.
+//
+// 2026-09-13 TTP-28, later the same day (user: "토큰 내용 자체는 한 톤 내리는 게
+// 맞겠어"): the answer's settled shade is textMuted, one stop under the header,
+// and the header keeps text. The rule is unchanged and the shade it names moved
+// — content is still not dim, and the ladder itself is pinned by
+// TestBodyToneLadderDescends.
 func TestColourHierarchy(t *testing.T) {
 	th := ColourTheme()
 	m := goldenModel(t, midRun)
@@ -362,17 +386,20 @@ func TestColourHierarchy(t *testing.T) {
 
 	dim := sgrPrefix(th, th.dim)
 	text := sgrPrefix(th, th.text)
+	body := sgrPrefix(th, th.textMuted)
 	accentBold := sgrPrefix(th, th.accentBold)
 
+	answer := firstAnswerWord(frame)
 	mustBe := []struct {
 		style, prefix, what string
 	}{
-		{accentBold, "PLACEMENT", "a section title"},
-		{accentBold, "MEMORY", "a section title"},
-		{accentBold, "SPEED", "a section title"},
-		{accentBold, "HOST", "a section title"},
-		{text, "The page fault spike", "answer text"},
-		{dim, "never loaded", "a label"},
+		{dim, "PLACEMENT", "a section title"},
+		{dim, "MEMORY", "a section title"},
+		{dim, "SPEED", "a section title"},
+		{dim, "HOST", "a section title"},
+		{body, answer, "answer text"},
+		{text, "stream 1", "a tile header"},
+		{dim, "maj/tok", "a label"},
 		{dim, "virt", "a label"},
 		{dim, "ttft", "a label"},
 		{dim, "load", "a label"},
@@ -384,8 +411,11 @@ func TestColourHierarchy(t *testing.T) {
 	}
 
 	mustNotBe := []struct{ style, prefix, what string }{
-		{dim, "The page fault spike", "answer text"},
-		{dim, "PLACEMENT", "a section title"},
+		{dim, answer, "answer text"},
+		// Settled answer text does not wear the header's tone: that shade is
+		// reserved for the tile header and for the token that just landed.
+		{text, answer, "settled answer text"},
+		{accentBold, "PLACEMENT", "a section title"},
 		{dim, "stream 1", "a stream header"},
 	}
 	for _, c := range mustNotBe {
@@ -394,17 +424,37 @@ func TestColourHierarchy(t *testing.T) {
 		}
 	}
 
-	// Exactly one stream is the active one, and it is the only stream header
-	// in bold: two bold headers would mean the eye has nowhere to land.
+	// No stream header is lit at all. The one that is talking is marked beside
+	// its text — an accent gutter and a breathing cursor — rather than by
+	// lighting the word above its rate (TTP-28).
 	bold := 0
 	for i := 1; i <= len(m.Streams); i++ {
 		if strings.Contains(frame, accentBold+fmt.Sprintf("stream %d", i)) {
 			bold++
 		}
 	}
-	if bold != 1 {
-		t.Errorf("%d stream headers are accent bold, want exactly 1", bold)
+	if bold != 0 {
+		t.Errorf("%d stream headers are accent bold, want none", bold)
 	}
+}
+
+// firstAnswerWord is a word of answer text taken off the frame itself: the
+// first one on a tile body row, which the gutter glyph marks. Reading it off
+// the frame rather than hard-coding a sentence means the example's material can
+// be rewritten without this test going quietly vacuous.
+func firstAnswerWord(frame string) string {
+	for _, line := range strings.Split(card.StripANSI(frame), "\n") {
+		_, rest, ok := strings.Cut(line, "▏ ")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) < 2 {
+			continue
+		}
+		return strings.Join(fields[:2], " ")
+	}
+	return ""
 }
 
 // TestBarsUseOneGlyph: the filled and empty halves of a bar are the same solid
@@ -457,14 +507,22 @@ func TestPrefillFrameShowsProgress(t *testing.T) {
 		}
 	}
 	// The counts beside the bar are the ones the tape recorded, not a guess.
-	// A tile is a fraction of the pane, so the cache figure is the part that
-	// does not fit there; a header with the room prints all of it.
+	//
+	// What the bar reports is how much of the prompt is done, which is
+	// processed against total: llama-server counts the cached prefix inside
+	// processed, since it fills the field from the slot's prompt buffer and
+	// that buffer starts at the cache length (upstream server-context.cpp; its
+	// README puts the overall progress at processed/total and the timed one at
+	// (processed-cache)/(total-cache), checked 2026-09-13). A tile is a
+	// fraction of the pane, so the cache figure is the part that does not fit
+	// there; a header with the room prints all of it.
 	p := m.Streams[0].Progress[0]
-	if !strings.Contains(frame, fmt.Sprintf("%d/%d", p.Processed, p.Total)) {
-		t.Errorf("the bar does not print the recorded counts %d/%d", p.Processed, p.Total)
+	done := p.Processed
+	if !strings.Contains(frame, fmt.Sprintf("%d/%d", done, p.Total)) {
+		t.Errorf("the bar does not print the recorded counts %d/%d", done, p.Total)
 	}
 	wide := streamHeader(m, PlainTheme(), m.Streams[0], 70, true, false)
-	if !strings.Contains(wide, fmt.Sprintf("%d/%d · cache %d", p.Processed, p.Total, p.Cache)) {
+	if !strings.Contains(wide, fmt.Sprintf("%d/%d · cache %d", done, p.Total, p.Cache)) {
 		t.Errorf("a header with room dropped the cache count: %q", wide)
 	}
 	if strings.Contains(frame, "░") || strings.Contains(frame, "▓") {
@@ -473,9 +531,17 @@ func TestPrefillFrameShowsProgress(t *testing.T) {
 
 	// The bar has to show all three shades, or it is not saying anything the
 	// "176/512 · cache 128" beside it does not already say.
+	//
+	// Not on the opening frame, though: at t = 0 the request has only just
+	// been accepted, so the cached prefix is known and nothing has been
+	// evaluated yet, and a bar drawing a processed share there would be
+	// drawing a measurement that does not exist. Three hundred milliseconds
+	// in, the server is halfway through the part it has to evaluate.
+	const shades = 300 * time.Millisecond
 	th := ColourTheme()
+	m = goldenModel(t, shades)
 	m.Theme = th
-	coloured := View(m, 0, 120, 36)
+	coloured := View(m, shades, 120, 36)
 	for _, part := range []struct {
 		st   lipgloss.Style
 		what string

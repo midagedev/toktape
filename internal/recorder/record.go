@@ -368,7 +368,15 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 
 	st := newState(len(reqs), sampler, r.opts.Progress)
 	for i := range reqs {
-		st.notify(Event{Kind: EventStreamStarted, Stream: i, Streams: len(reqs)})
+		st.notify(Event{
+			Kind:    EventStreamStarted,
+			Stream:  i,
+			Streams: len(reqs),
+			// The cap this request will be sent with, so the live screen can
+			// show progress against it from the first token. It is the same
+			// figure the tape keeps in PromptRecord.MaxTokens.
+			MaxTokens: reqs[i].SentMaxTokens(),
+		})
 	}
 
 	stop := make(chan struct{})

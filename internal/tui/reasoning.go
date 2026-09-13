@@ -1,6 +1,12 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // This file is how the answer pane shows a thinking model thinking.
 //
@@ -28,11 +34,39 @@ const answerMarker = "▸ answer"
 // bodyLine is one drawn line of a stream's text.
 type bodyLine struct {
 	text string
-	// reasoning draws the line dim.
+	// reasoning draws the line one step below the answer text.
 	reasoning bool
 	// marker marks the answerMarker rule, which is chrome rather than text
 	// the model produced.
 	marker bool
+}
+
+// tokenBand is how long ago the text under it arrived. It is a pure function
+// of clip time, so a replayed frame glows exactly where the live one did.
+type tokenBand int
+
+const (
+	bandSettled tokenBand = iota // the text has been on screen a while
+	bandMid                      // it landed between glowFresh and glowSettled ago
+	bandFresh                    // it landed within glowFresh
+)
+
+// The two ages that split the ramp (TTP-28, lead contract 2026-09-13).
+//
+// At the example run's 12.5 tok/s the inter-token latency is about 80 ms, so
+// glowFresh holds one or two tokens and glowSettled four to six: a short
+// bright tail at the write head with everything behind it already settled.
+// Widening either one turns the effect from a write head into a lit paragraph,
+// which is the thing the emphasis contract just finished removing.
+const (
+	glowFresh   = 150 * time.Millisecond
+	glowSettled = 500 * time.Millisecond
+)
+
+// bodySeg is a run of one line's text that shares an age band.
+type bodySeg struct {
+	text string
+	band tokenBand
 }
 
 // streamTextLines wraps a stream's generated text into display lines, keeping
@@ -130,12 +164,120 @@ func thinkingBadge(s Stream) string {
 	return "thinking"
 }
 
-// bodyStyle is the style one body line is drawn in: dim for thinking text and
-// for the answer marker (which is chrome), the normal text colour for the
-// answer itself.
-func bodyStyle(th Theme, bl bodyLine) lipgloss.Style {
-	if bl.reasoning || bl.marker {
+// bodyStyle is the style one segment of a body line is drawn in.
+//
+// Two ladders, two stops apart, so the answer/thinking distinction survives at
+// every age: an answer that has settled wears the shade a thought wears when
+// it has just arrived, and a thought never reaches the shade a fresh answer
+// has. The marker is chrome and stays at the bottom whatever its age.
+func bodyStyle(th Theme, bl bodyLine, band tokenBand) lipgloss.Style {
+	if bl.marker {
 		return th.dim
 	}
-	return th.text
+	if bl.reasoning {
+		switch band {
+		case bandFresh:
+			return th.textMuted
+		case bandMid:
+			return th.dimMid
+		}
+		return th.dim
+	}
+	switch band {
+	case bandFresh:
+		return th.text
+	case bandMid:
+		return th.textMid
+	}
+	return th.textMuted
+}
+
+// bandStarts is where the two glow bands begin, as rune offsets into the text
+// the stream's tokens spell out.
+//
+// Tokens arrive in order, so each band is a suffix and two offsets describe
+// the whole ramp. A finished stream has no bands at all: the glow says "this
+// is being written now", and a card frame must not shimmer.
+func bandStarts(s Stream, t time.Duration) (midStart, freshStart int) {
+	off := 0
+	midStart, freshStart = -1, -1
+	for _, tk := range s.Tokens {
+		age := t - tk.T
+		if midStart < 0 && age < glowSettled {
+			midStart = off
+		}
+		if freshStart < 0 && age < glowFresh {
+			freshStart = off
+		}
+		off += utf8.RuneCountInString(tk.Text)
+	}
+	if s.Done || s.Err != "" {
+		return off, off
+	}
+	if midStart < 0 {
+		midStart = off
+	}
+	if freshStart < 0 {
+		freshStart = off
+	}
+	return midStart, freshStart
+}
+
+// bodyBands splits each drawn line into age-banded segments.
+//
+// The lines come out of the wrapper, which collapses the whitespace between
+// words, so a drawn rune cannot be indexed straight back into the token text.
+// They are aligned instead: the wrapper never reorders and never invents a
+// rune, so walking the source forward to the next occurrence of each drawn
+// rune lands on the token that produced it. A rune the walk cannot find — it
+// should not happen, and a frame is not the place to find out — falls back to
+// the settled band, which is the quiet answer rather than the bright one.
+func bodyBands(s Stream, lines []bodyLine, t time.Duration) [][]bodySeg {
+	midStart, freshStart := bandStarts(s, t)
+	var src []rune
+	for _, tk := range s.Tokens {
+		src = append(src, []rune(tk.Text)...)
+	}
+	out := make([][]bodySeg, len(lines))
+	si := 0
+	for i, bl := range lines {
+		if bl.marker {
+			out[i] = []bodySeg{{text: bl.text, band: bandSettled}}
+			continue
+		}
+		var (
+			segs []bodySeg
+			b    strings.Builder
+			cur  = bandSettled
+		)
+		flush := func() {
+			if b.Len() > 0 {
+				segs = append(segs, bodySeg{text: b.String(), band: cur})
+				b.Reset()
+			}
+		}
+		for _, r := range bl.text {
+			for si < len(src) && src[si] != r {
+				si++
+			}
+			band := bandSettled
+			if si < len(src) {
+				switch {
+				case si >= freshStart:
+					band = bandFresh
+				case si >= midStart:
+					band = bandMid
+				}
+				si++
+			}
+			if band != cur {
+				flush()
+				cur = band
+			}
+			b.WriteRune(r)
+		}
+		flush()
+		out[i] = segs
+	}
+	return out
 }

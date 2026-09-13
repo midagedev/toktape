@@ -19,15 +19,20 @@ import (
 func rightPane(m Model, th Theme, t time.Duration, cw, rows int) []string {
 	var out []string
 	blank := strings.Repeat(" ", cw)
-	// A section title is accent, bold, and carries a dim rule out to the panel
+	// A section title is dim small caps carrying a dim rule out to the panel
 	// edge. The rule is what turns four stacked lists into four panels without
 	// spending a row on a border.
+	//
+	// The title used to be accent and bold. Four lit headings down one column
+	// are four invitations to look, and the pane has exactly one figure worth
+	// looking at first (TTP-28, user 2026-09-13). A heading names a region; it
+	// is not the thing in it, so it wears what every other label wears.
 	section := func(title string) {
 		if len(out) > 0 {
 			out = append(out, blank)
 		}
 		l := newLine(th, cw)
-		l.add(th.accentBold, title)
+		l.add(th.dim, title)
 		l.space(1)
 		l.add(th.dim, repeat('─', l.left()))
 		out = append(out, l.String())
@@ -89,7 +94,7 @@ func placementRows(m Model, th Theme, t time.Duration, cw int) []string {
 		if total > 0 {
 			frac = eased / float64(total)
 		}
-		out = append(out, barRow(th, cw, fmt.Sprintf("GPU%d", g.Index), frac, fmtG(int64(eased)), th.accent))
+		out = append(out, barRow(th, cw, fmt.Sprintf("GPU%d", g.Index), frac, fmtG(int64(eased)), th.accentMuted))
 	}
 
 	if cpu := deviceBytes(m.Summary.Placement, tape.DeviceCPU); cpu > 0 {
@@ -97,7 +102,7 @@ func placementRows(m Model, th Theme, t time.Duration, cw int) []string {
 		if ram := m.Summary.Host.RAMBytes; ram > 0 {
 			frac = float64(cpu) / float64(ram)
 		}
-		out = append(out, barRow(th, cw, "CPU", frac, fmtG(cpu), th.accent))
+		out = append(out, barRow(th, cw, "CPU", frac, fmtG(cpu), th.accentMuted))
 	}
 
 	p := m.Summary.Placement
@@ -109,9 +114,13 @@ func placementRows(m Model, th Theme, t time.Duration, cw int) []string {
 			float64(split), barW)
 		l := newLine(th, cw)
 		l.add(th.dim, pad("vram", labelW))
-		l.add(th.accent, segs[0])
-		l.add(th.accentMid, segs[1])
-		l.add(th.accentLow, segs[2])
+		// Three shades descending, none of them the accent itself: the bar
+		// is a proportion, and the pane's lit figure is the decode rate four
+		// rows down (TTP-28). Weights is the largest share and the lightest
+		// shade, so the bar reads in the same order as the legend under it.
+		l.add(th.accentMuted, segs[0])
+		l.add(th.accentLow, segs[1])
+		l.add(th.dim, segs[2])
 		l.add(th.darkFill, segs[3])
 		l.space(1)
 		l.add(th.text, padLeft(fmtG(split), valueW))
@@ -121,14 +130,21 @@ func placementRows(m Model, th Theme, t time.Duration, cw int) []string {
 		for _, key := range []struct {
 			st    lipgloss.Style
 			label string
-		}{{th.accent, " weights  "}, {th.accentMid, " kv  "}, {th.accentLow, " buf"}} {
+		}{{th.accentMuted, " weights  "}, {th.accentLow, " kv  "}, {th.dim, " buf"}} {
 			l2.add(key.st, "█")
 			l2.add(th.dim, key.label)
 		}
 		out = append(out, l2.String())
 	}
 
-	out = append(out, kvRow(th, cw, "never loaded", fmtG(p.NeverLoadedBytes), th.text))
+	// "never loaded" is the figure that settles the mmap argument, and it is
+	// also a figure a fully offloaded dense model does not have. Zero bytes is
+	// not "0.0G", and it is not the "?" fmtG would print either — there is
+	// nothing to report, so the row is absent, the way the card and the PNG
+	// already handle it.
+	if p.NeverLoadedBytes > 0 {
+		out = append(out, kvRow(th, cw, "never loaded", fmtG(p.NeverLoadedBytes), th.text))
+	}
 	return out
 }
 
@@ -145,25 +161,29 @@ func memoryRows(m Model, th Theme, t time.Duration, cw int) []string {
 	out = append(out, pairRow(th, cw, "rss", fmtG(mem.RSSBytes), "file", fmtG(mem.RSSFileBytes)))
 	out = append(out, pairRow(th, cw, "virt", fmtG(mem.VirtBytes), "anon", fmtG(mem.RSSAnonBytes)))
 
-	// maj/tok is one of the three figures the screen exists to show, so it is
-	// accent bold the moment it is not zero, and red once the run qualifies as
-	// cold (tape.ColdMajFaultsPerToken).
+	// maj/tok reads as plain text until the run is actually cold.
+	//
+	// It used to go accent bold the moment it was not zero, which lit a third
+	// figure on a screen with room for one (TTP-28) — and lit it at 0.3, which
+	// is a run doing nothing wrong. At or above tape.ColdMajFaultsPerToken the
+	// weights are being paged in from disk during decode, which is a warning,
+	// and it wears the warm hue like "contended yes".
 	perTok := majFaultsPerToken(m)
-	st := th.dim
-	switch {
-	case perTok >= tape.ColdMajFaultsPerToken:
-		st = th.bad
-	case perTok > 0:
-		st = th.accentBold
-	}
-	out = append(out, kvRow(th, cw, "maj/tok", fmtFloat1(perTok), st))
+	cold := perTok >= tape.ColdMajFaultsPerToken
+	out = append(out, kvRow(th, cw, "maj/tok", fmtFloat1(perTok), styleFor(th, cold)))
 
 	l := newLine(th, cw)
 	cells := Sparkline(m.majFaultSeries(cw), cw, tape.ColdMajFaultsPerToken)
 	// Newest on the right: the line scrolls left under a fixed edge rather
-	// than growing rightward out of nothing.
+	// than growing rightward out of nothing. Dim while the run is warm — an
+	// unbroken row of ▁ is the shape of nothing happening, and it has no
+	// business being the brightest thing in the section.
+	pal := cellPalette{base: th.dim, warn: th.warn, bad: th.warn}
+	if cold {
+		pal.base = th.warn
+	}
 	l.space(cw - len(cells))
-	writeCells(l, th, cells, th.accent)
+	writeCells(l, th, cells, pal)
 	out = append(out, l.String())
 	return out
 }
@@ -318,10 +338,17 @@ func livePromptRate(m Model) float64 {
 			continue
 		}
 		p := s.Progress[len(s.Progress)-1]
-		if p.Processed <= 0 || p.TimeMs <= 0 {
+		// The evaluated share is processed minus cache: the server counts the
+		// cached prefix inside processed but not inside the elapsed time, and
+		// its own README divides the two the same way
+		// ((processed-cache)/(total-cache), checked against upstream
+		// 2026-09-13). Dividing processed by the time would credit the cache's
+		// tokens to the prefill and inflate the rate.
+		evaluated := p.Processed - p.Cache
+		if evaluated <= 0 || p.TimeMs <= 0 {
 			continue
 		}
-		total += float64(p.Processed) / (p.TimeMs / 1000)
+		total += float64(evaluated) / (p.TimeMs / 1000)
 		n++
 	}
 	if n == 0 {

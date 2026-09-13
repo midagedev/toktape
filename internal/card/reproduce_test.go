@@ -14,6 +14,10 @@ import (
 // launch research says kill a benchmark thread ("what was your batch", "was
 // the prompt cached", "paste your command") are answered by this text and by
 // nothing else on the card.
+//
+// 2026-09-13 TTP-28: re-baselined for the new example — Llama 3.3 70B dense,
+// eight streams at 320 tokens. The words the test exists for are unchanged;
+// what moved is the model, the flags and the figures quoted inside them.
 func TestReproduceGolden(t *testing.T) {
 	golden(t, "example-concurrent.md", []byte(Markdown(ExampleConcurrent())))
 }
@@ -73,12 +77,12 @@ func TestReproduceRecordedWithLine(t *testing.T) {
 		{
 			name: "concurrent run names every option",
 			s:    ExampleConcurrent(),
-			want: "toktape --url http://127.0.0.1:8080 -n 8 --n-predict 128",
+			want: "toktape --url http://127.0.0.1:8080 -n 8 --n-predict 307",
 		},
 		{
 			name: "a single stream does not print -n",
 			s:    Example(),
-			want: "toktape --url http://127.0.0.1:8080 --n-predict 128",
+			want: "toktape --url http://127.0.0.1:8080 --n-predict 320",
 			not:  []string{"-n 1"},
 		},
 		{
@@ -124,7 +128,7 @@ func TestReproduceWithoutAnArgvSaysSo(t *testing.T) {
 // checkable, so the block names the file and the verb that replays it.
 func TestReproduceNamesTheTape(t *testing.T) {
 	block := Reproduce(ExampleConcurrent())
-	want := "20260913-150210-qwen3.5-35b-a3b" + tape.Ext
+	want := "20260913-150210-llama3.3-70b" + tape.Ext
 	if !strings.Contains(block, want) {
 		t.Errorf("block does not name the tape %q:\n%s", want, block)
 	}

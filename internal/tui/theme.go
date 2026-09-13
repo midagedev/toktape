@@ -34,6 +34,54 @@ const (
 	colAccentHigh = "#bde8ff"
 )
 
+// colAccentMuted is the accent blended 45% toward the terminal background
+// (#11111b, the ground internal/render rasterises frames on): 0x7d→0x4c,
+// 0xd3→0x7c, 0xfc→0x97.
+//
+// It exists because of the emphasis contract (TTP-28, user 2026-09-13: "화면에
+// 너무 많은 요소들이 강조되어 있다"). The shapes that used to be painted in the
+// accent itself — every tile's sparkline, the fault sparkline, the placement
+// bars — are the largest lit areas on the screen, so they were the first thing
+// the eye found and the figures they qualify were the last. They keep the hue,
+// which is what says they belong to the same reading, and give up the
+// lightness, which is what says they are not the point.
+//
+// It is not colAccentLow: that shade already means "the third segment of a
+// gauge" in the vram legend, and it is dark enough that a whole sparkline in it
+// stops reading as a line.
+const colAccentMuted = "#4c7c97"
+
+// The body-text ladder (TTP-28, user 2026-09-13: "토큰 내용 자체는 한 톤 내리는
+// 게 맞겠어", then "방금 막 나온 토큰 정도만 조금 밝게 해서 속도감은 살리자").
+//
+// The text a model generated is the largest area on the screen, so drawing it
+// at colText made the body the brightest thing in every tile and left the
+// header and the rate to compete with it. The body drops one tone, and the
+// tokens that have just landed keep the header's tone for a moment, so the
+// write head reads as motion rather than the whole paragraph reading as new.
+//
+// Five stops, measured as WCAG relative luminance on this theme's ground:
+//
+//	colText       #e5e7eb  0.798   headers, labels, right-pane values
+//	colTextMid    #d6d8dc  0.686   an answer token 150–500 ms old
+//	colTextMuted  #c6c8cc  0.577   settled answer text, and a fresh thought
+//	colDimMid     #989da6  0.335   a reasoning token 150–500 ms old
+//	colDim        #6b7280  0.167   settled reasoning, chrome, labels
+//
+// colTextMuted is colText blended toward the ground until its luminance is
+// 72 % of colText's; the measured ratio is 0.723. colTextMid is the sRGB
+// midpoint of colText and colTextMuted, colDimMid the midpoint of colTextMuted
+// and colDim, so the reasoning ramp is the answer ramp shifted two stops down
+// and the two never collide at the same age.
+//
+// colDim is unchanged: the contract asks that reasoning sit at or below 80 %
+// of colTextMuted's luminance, and 0.167/0.577 = 0.29 clears it with room.
+const (
+	colTextMid   = "#d6d8dc"
+	colTextMuted = "#c6c8cc"
+	colDimMid    = "#989da6"
+)
+
 // Theme carries the styles View paints with. The zero Theme is plain: every
 // paint call returns its argument unchanged, which is what the golden tests
 // render. Colour comes from ColourTheme.
@@ -60,6 +108,17 @@ type Theme struct {
 	accentLow  lipgloss.Style
 	accentMid  lipgloss.Style
 	accentHigh lipgloss.Style
+	// accentMuted is what the shapes wear: sparklines and placement bars. It
+	// is the accent with its lightness spent (see colAccentMuted), so a bar
+	// still reads as one of the screen's measures without competing with the
+	// figure it qualifies.
+	accentMuted lipgloss.Style
+
+	// textMid, textMuted and dimMid are the body-text ladder above. Nothing
+	// but a stream's generated text wears them.
+	textMid   lipgloss.Style
+	textMuted lipgloss.Style
+	dimMid    lipgloss.Style
 }
 
 // PlainTheme returns the theme that emits no escape sequences. It is the zero
@@ -87,17 +146,21 @@ func ColourTheme() Theme {
 			return r.NewStyle().Foreground(lipgloss.Color(hex))
 		}
 		colourTheme = Theme{
-			colour:     true,
-			accent:     fg(colAccent),
-			accentBold: fg(colAccent).Bold(true),
-			darkFill:   fg(colDarkFill),
-			warn:       fg(colWarn),
-			bad:        fg(colBad),
-			text:       fg(colText),
-			dim:        fg(colDim),
-			accentLow:  fg(colAccentLow),
-			accentMid:  fg(colAccentMid),
-			accentHigh: fg(colAccentHigh),
+			colour:      true,
+			accent:      fg(colAccent),
+			accentBold:  fg(colAccent).Bold(true),
+			darkFill:    fg(colDarkFill),
+			warn:        fg(colWarn),
+			bad:         fg(colBad),
+			text:        fg(colText),
+			dim:         fg(colDim),
+			accentLow:   fg(colAccentLow),
+			accentMid:   fg(colAccentMid),
+			accentHigh:  fg(colAccentHigh),
+			accentMuted: fg(colAccentMuted),
+			textMid:     fg(colTextMid),
+			textMuted:   fg(colTextMuted),
+			dimMid:      fg(colDimMid),
 		}
 	})
 	return colourTheme

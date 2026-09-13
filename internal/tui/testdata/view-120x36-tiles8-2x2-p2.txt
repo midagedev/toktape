@@ -1,36 +1,36 @@
-┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────┐
-│ stream 5/8 · thinking                     │ stream 6/8                         answer │ PLACEMENT ────────────────── │
-│ 12.2 tok/s ttft 370 ms · 14/128           │ 12.0 tok/s ttft 410 ms · 14/128           │ GPU0 ███████████████    9.4G │
-│ ▏ 측정이 흔들린다고 했으니 먼저 기계가    │ ▏ The aggregate rate is what the server   │ GPU1 ███████████████    9.6G │
-│ ▏ 조용했는지 묻는 게 맞다. 잡음이         │ ▏ does; the per stream rate is what▍      │ CPU  ███████████████    6.3G │
-│ ▏ 신호보다 크면 나머지 숫자는▍            │                                           │ vram ███████████████   17.4G │
-│                                           │                                           │      █ weights  █ kv  █ buf  │
-│                                           │                                           │ never loaded           84.6G │
-│                                           │                                           │                              │
-│                                           │                                           │ MEMORY ───────────────────── │
-│                                           │                                           │ rss       9.0G file     8.3G │
-│                                           │                                           │ virt     40.0G anon     1.1G │
-│                                           │                                           │ maj/tok                  0.0 │
-│                                           │                                           │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│                                           │                                           │                              │
-│                                           │                                           │ SPEED ────────────────────── │
-│ ▏                 █▆▇▇█▆▇▇█▆▇▇█  12.3 avg │ ▏                 ▆▇▇█▆▇▇█▆▇▇█▆  12.1 avg │ prefill           2253 tok/s │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ decode            12.1 tok/s │
-│ stream 7/8 · thinking                     │ stream 8/8                         answer │ ttft      330 ms · 25% cache │
-│ 12.1 tok/s ttft 450 ms · 13/128           │ 12.1 tok/s ttft 490 ms · 13/128           │ 8 streams     97.0 tok/s agg │
-│ ▏ Speculative decoding, acceptance        │ ▏ RSS is not loaded. Under mmap the       │                              │
-│ ▏ rate. I need the break even point       │ ▏ resident set is what this process▍      │ HOST ─────────────────────── │
-│ ▏ before I can▍                           │                                           │ load     4.9 · contended yes │
-│                                           │                                           │ GPU0         61°C  292W  90% │
-│                                           │                                           │ GPU1         61°C  292W  90% │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│                                           │                                           │                              │
-│ ▏                  ▇▇█▆▇▇█▆▇▇█▆  12.2 avg │ ▏                  ▇█▆▇▇█▆▇▇█▆▇  12.2 avg │                              │
+┌─ toktape · Llama 3.3 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────────────────────┐
+│ stream 5/8                         answer │ stream 6/8                         answer │ PLACEMENT ────────────────── │
+│ 9.1 tok/s  ttft 870 ms · 102/320          │ 9.1 tok/s  ttft 930 ms · 101/320          │ GPU0 ███████████████   22.9G │
+│ ▏ 차가웠던 것이고, 그러면 페이지 캐시     │ ▏ quality. In the common mixed schemes    │ GPU1 ███████████████   21.9G │
+│ ▏ 이야기만 하면 끝난다. 여기서 토큰당     │ ▏ the file is built tensor by tensor,     │ vram ███████████████   46.6G │
+│ ▏ 메이저 폴트 값을 같이 보게 하면         │ ▏ and different tensors get different     │      █ weights  █ kv  █ buf  │
+│ ▏ 추측이 측정으로 바뀐다. 그 다음이       │ ▏ treatment. The attention projections    │                              │
+│ ▏ 다른 프로세스다. 로드 평균과 다른       │ ▏ and the feed forward matrices that      │ MEMORY ───────────────────── │
+│ ▏ 연산 프로세스 수를 같이 보라고 하면     │ ▏ dominate the file size take the low     │ rss       1.2G file     0.8G │
+│ ▏ 되는데, 화면에 이미 둘 다 있으니        │ ▏ bit width the name advertises. The      │ virt     48.0G anon     0.4G │
+│ ▏ 어디를 보라고만 말하면 된다.            │ ▏ embedding table and the output head     │ maj/tok                  0.0 │
+│ ▏ 여기까지가                              │ ▏ are usually kept at a higher width,     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▏ ▸ answer                                │ ▏ because an error there lands on every   │                              │
+│ ▏ 숫자를 재기 전에 기계가 조용한지부터    │ ▏ token rather than being averaged away   │ SPEED ────────────────────── │
+│ ▏ 확인하는 습관이 결국 시간을 아껴        │ ▏ inside a layer. That is why two files   │ prefill            610 tok/s │
+│ ▏ 준다. 다른 프로세스가 같은 카드를▍      │ ▏ with the same label can▍                │ decode             9.1 tok/s │
+│ ▏ ▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │ ▏ ▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │ ttft      810 ms · 25% cache │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
+│ stream 7/8 · thinking                     │ stream 8/8                         answer │                              │
+│ 9.1 tok/s  ttft 990 ms · 101/320          │ 9.1 tok/s  ttft 1050 ms · 100/320         │ HOST ─────────────────────── │
+│ ▏ let me work it rather than quoting      │ ▏ The server maps the model file rather   │ load      3.1 · contended no │
+│ ▏ the number I half remember. Each        │ ▏ than reading it into its own memory.    │ GPU0         69°C  343W  98% │
+│ ▏ verification pass costs roughly one     │ ▏ A mapping costs address space, not      │ GPU1         65°C  313W  94% │
+│ ▏ ordinary decoding step, because the     │ ▏ pages. Pages appear in the resident     │                              │
+│ ▏ cost is reading the weights and a       │ ▏ set when they are touched, and they     │                              │
+│ ▏ batch of four candidate tokens reads    │ ▏ can leave again whenever the kernel     │                              │
+│ ▏ them once. The draft costs whatever     │ ▏ needs the memory, because a clean       │                              │
+│ ▏ its own forward passes cost, one per    │ ▏ file backed page can be dropped and     │                              │
+│ ▏ proposed token. So for a draft that     │ ▏ read back later. So the resident        │                              │
+│ ▏ is a tenth the size, proposing four     │ ▏ figure tells you what this process      │                              │
+│ ▏ tokens costs about four tenths of a     │ ▏ has touched recently and what the       │                              │
+│ ▏ step plus the one step▍                 │ ▏ kernel has chosen to▍                   │                              │
+│ ▏ █▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │ ▏ █▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
-│ token latency                                           █▏▏▏████▏▏▏▏██  p50 91 ms  page 2/2 · ←/→  q quit · p prompt │
+│ token latency ▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  page 2/2 · ←/→  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

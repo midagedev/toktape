@@ -108,13 +108,16 @@ func streamBlock(m Model, th Theme, t time.Duration, s Stream, cw, rows int, sho
 // is a bar and two counts rather than a word.
 func streamHeader(m Model, th Theme, s Stream, cw int, showIndex, active bool) string {
 	l := newLine(th, cw)
-	// The stream that received the newest token is the one the eye should land
-	// on, so it alone is accent and bold; the others are ordinary text. Dim is
-	// reserved for labels and chrome.
+	// Every stream's name is ordinary text, the active one included.
+	//
+	// It used to be accent and bold on whichever tile had the newest token,
+	// which put a lit word directly above the one figure the tile exists to
+	// report, and moved it from tile to tile every few frames (TTP-28, user
+	// 2026-09-13: "화면에 너무 많은 요소들이 강조되어 있다"). Which stream is
+	// talking is still said twice — by the accent gutter down the left of its
+	// answer and by the cursor breathing at the end of it — and both of those
+	// sit beside the text they describe rather than on top of a number.
 	label := th.text
-	if active {
-		label = th.accentBold
-	}
 	name, total := "stream", ""
 	if showIndex {
 		name = fmt.Sprintf("stream %d", s.Index+1)
@@ -244,11 +247,18 @@ func streamBody(m Model, th Theme, t time.Duration, s Stream, cw, rows int, acti
 	// Two columns are held back so the cursor never forces a re-wrap when it
 	// appears at the end of the last line.
 	lines := streamTextLines(s, cw-indent-2)
+	// The bands are computed over the whole text and then cut to the visible
+	// tail with it, so scrolling a tile cannot move the glow relative to the
+	// words it belongs to.
+	bands := bodyBands(s, lines, t)
+	first := len(lines) - len(tail(lines, rows))
 	lastIsText := true
-	for _, bl := range tail(lines, rows) {
+	for i, bl := range tail(lines, rows) {
 		l := newLine(th, cw)
 		gutter(l, th, active)
-		l.add(bodyStyle(th, bl), bl.text)
+		for _, sg := range bands[first+i] {
+			l.add(bodyStyle(th, bl, sg.band), sg.text)
+		}
 		out = append(out, l.String())
 		lastIsText = !bl.marker
 	}
@@ -345,9 +355,19 @@ func fitPrefill(s Stream, room int) prefillSeg {
 	if p.Total > 0 {
 		bar = 1 + prefillMinBarW
 	}
+	// processed counts the whole prefix the slot holds, the cached share
+	// included: llama-server fills it from the slot's prompt buffer, which
+	// starts at the cache length and grows as chunks are evaluated
+	// (tools/server/server-context.cpp, `progress.processed =
+	// slot.prompt.tokens.size()` after `keep_first(n_past)`; its README puts
+	// the overall progress at processed/total and the timed one at
+	// (processed-cache)/(total-cache), checked 2026-09-13). So the counts print
+	// processed against total directly, and the bar draws the cached share as a
+	// second shade underneath the same length.
+	done := p.Processed
 	for _, cand := range []string{
-		fmt.Sprintf(" %d/%d · cache %d", p.Processed, p.Total, p.Cache),
-		fmt.Sprintf(" %d/%d", p.Processed, p.Total),
+		fmt.Sprintf(" %d/%d · cache %d", done, p.Total, p.Cache),
+		fmt.Sprintf(" %d/%d", done, p.Total),
 		"",
 	} {
 		if seg.w+width(cand)+bar <= room {
@@ -369,7 +389,7 @@ func fitPrefill(s Stream, room int) prefillSeg {
 	}
 	seg.barW = barW
 	seg.cacheN = cells(float64(p.Cache)/float64(p.Total), barW)
-	seg.procN = cells(float64(p.Processed)/float64(p.Total), barW)
+	seg.procN = cells(float64(done)/float64(p.Total), barW)
 	if seg.procN < seg.cacheN {
 		seg.procN = seg.cacheN
 	}

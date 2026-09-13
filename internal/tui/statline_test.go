@@ -31,13 +31,13 @@ func TestStatLineLeadsWithTheRate(t *testing.T) {
 
 	// One arrival is not a rate: the gap before the first token is a TTFT, a
 	// different measurement (handover lesson 1).
-	one := ModelAt(ExampleTapeN(4), 215*time.Millisecond).Streams[0]
+	one := ModelAt(ExampleTapeN(4), 640*time.Millisecond).Streams[0]
 	if got := len(one.Tokens); got != 1 {
 		t.Fatalf("the fixture's first stream has %d tokens just after its TTFT, want 1", got)
 	}
 	if line := tileStatLine(th, one, cw); !strings.Contains(line, "? tok/s") {
 		t.Errorf("a stream with one token prints a rate: %q", line)
-	} else if !strings.Contains(line, "ttft 210 ms") {
+	} else if !strings.Contains(line, "ttft 630 ms") {
 		t.Errorf("a stream with one token has a TTFT and does not print it: %q", line)
 	}
 
@@ -114,22 +114,22 @@ func TestStatLineDegradesInOrder(t *testing.T) {
 	// The widths each part survives down to. They are the reserved widths
 	// rather than the printed ones (see TestStatLineDoesNotReflowAsFiguresGrow)
 	// and so they are wider than the figures look: the median needs "p50 250
-	// ms" and the count needs room for "128/128", whatever this frame prints.
+	// ms" and the count needs room for "320/320", whatever this frame prints.
 	tests := []struct {
 		cw    int
 		parts []string
 		gone  []string
 	}{
-		{60, []string{"tok/s", "ttft", "/128", "p50"}, nil},
-		{45, []string{"tok/s", "ttft", "/128", "p50"}, nil},
-		{44, []string{"tok/s", "ttft", "/128"}, []string{"p50"}},
-		{32, []string{"tok/s", "ttft", "/128"}, []string{"p50"}},
-		{31, []string{"tok/s", "ttft"}, []string{"p50", "/128"}},
-		{30, []string{"tok/s", "ttft"}, []string{"p50", "/128"}},
-		{24, []string{"tok/s", "ttft"}, []string{"p50", "/128"}},
-		{22, []string{"tok/s", "ttft"}, []string{"p50", "/128"}},
-		{21, []string{"tok/s"}, []string{"p50", "/128", "ttft"}},
-		{18, []string{"tok/s"}, []string{"p50", "/128", "ttft"}},
+		{60, []string{"tok/s", "ttft", "/320", "p50"}, nil},
+		{45, []string{"tok/s", "ttft", "/320", "p50"}, nil},
+		{44, []string{"tok/s", "ttft", "/320"}, []string{"p50"}},
+		{32, []string{"tok/s", "ttft", "/320"}, []string{"p50"}},
+		{31, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
+		{30, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
+		{24, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
+		{22, []string{"tok/s", "ttft"}, []string{"p50", "/320"}},
+		{21, []string{"tok/s"}, []string{"p50", "/320", "ttft"}},
+		{18, []string{"tok/s"}, []string{"p50", "/320", "ttft"}},
 	}
 	for _, tc := range tests {
 		got := tileStatLine(th, s, tc.cw)
@@ -157,7 +157,7 @@ func TestStatLineDegradesInOrder(t *testing.T) {
 		present := [4]bool{
 			strings.Contains(got, "tok/s") || strings.Contains(got, fmtRate(streamRate(s))),
 			strings.Contains(got, "ttft"),
-			strings.Contains(got, "/128"),
+			strings.Contains(got, "/320"),
 			strings.Contains(got, "p50"),
 		}
 		for i, on := range present {
@@ -251,10 +251,10 @@ func statShape(line string) string {
 // when it does not. A budget is never invented (CLAUDE.md).
 func TestStatLineCountsAgainstTheBudget(t *testing.T) {
 	s := ModelAt(ExampleTapeN(4), 3*time.Second).Streams[0]
-	if s.MaxTokens != 128 {
-		t.Fatalf("the fixture's max_tokens came through as %d, want 128", s.MaxTokens)
+	if s.MaxTokens != exampleMaxTokens {
+		t.Fatalf("the fixture's max_tokens came through as %d, want %d", s.MaxTokens, exampleMaxTokens)
 	}
-	if want := fmt.Sprintf("%d/128", len(s.Tokens)); !strings.Contains(tileStatLine(PlainTheme(), s, 60), want) {
+	if want := fmt.Sprintf("%d/%d", len(s.Tokens), exampleMaxTokens); !strings.Contains(tileStatLine(PlainTheme(), s, 60), want) {
 		t.Errorf("the stat line does not count against the budget (%q)", want)
 	}
 
@@ -349,4 +349,42 @@ func footerMean(line string) (float64, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+// TestPromptMaxTokensPrefersTheRecordedField: the cap has a field of its own on
+// tape.PromptRecord now (the recorder fills it with what the request was sent
+// with). Params stays the fallback so a tape written before that field existed
+// still draws "80/128" rather than a bare count.
+func TestPromptMaxTokensPrefersTheRecordedField(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rec  tape.PromptRecord
+		want int
+	}{
+		{"the recorded field", tape.PromptRecord{MaxTokens: 320}, 320},
+		{
+			"an older tape, max_tokens in params",
+			tape.PromptRecord{Params: map[string]any{"max_tokens": 128}},
+			128,
+		},
+		{
+			"an older tape, llama.cpp's own name",
+			tape.PromptRecord{Params: map[string]any{"n_predict": 96}},
+			96,
+		},
+		{
+			// The field is the record: a tape whose params disagree with it
+			// was sent with the field's figure.
+			"the field wins over params",
+			tape.PromptRecord{MaxTokens: 320, Params: map[string]any{"max_tokens": 128}},
+			320,
+		},
+		{"no cap anywhere", tape.PromptRecord{}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := promptMaxTokens(tc.rec); got != tc.want {
+				t.Errorf("promptMaxTokens() = %d, want %d", got, tc.want)
+			}
+		})
+	}
 }

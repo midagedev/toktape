@@ -18,11 +18,11 @@ func TestLlamaBenchTable(t *testing.T) {
 	}
 	// pp counts the tokens the server actually processed (prompt_n), not the
 	// cached prefix, because that is the denominator of prompt_per_second.
-	wantPP := "| qwen3moe UD-Q4_K_M | 19.83 GiB | 35.00 B | ? | 99 | on | pp112 | 2450.00 |"
+	wantPP := "| llama Q4_K_M | 42.52 GiB | 70.55 B | ? | 99 | on | pp384 | 610.00 |"
 	if lines[2] != wantPP {
 		t.Errorf("pp row =\n%q\nwant\n%q", lines[2], wantPP)
 	}
-	wantTG := "| qwen3moe UD-Q4_K_M | 19.83 GiB | 35.00 B | ? | 99 | on | tg128 | 68.40 |"
+	wantTG := "| llama Q4_K_M | 42.52 GiB | 70.55 B | ? | 99 | on | tg320 | 17.40 |"
 	if lines[3] != wantTG {
 		t.Errorf("tg row =\n%q\nwant\n%q", lines[3], wantTG)
 	}

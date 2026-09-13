@@ -1,40 +1,40 @@
-┌─ toktape · Qwen3.5 35B A3B UD-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────────────────────────────────────────┐
+┌─ toktape · Llama 3.3 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────────────────────────────────────────┐
 │ stream 1/8                                   answer │ stream 2/8                                   answer │ PLACEMENT ────────────────── │
-│ 12.1 tok/s ttft 210 ms · 16/128 · p50 79 ms         │ 12.0 tok/s ttft 250 ms · 15/128 · p50 79 ms         │ GPU0 ███████████████    9.4G │
-│ ▏ The page fault spike you are seeing is the        │ ▏ 이건 배치 문제인지 대역폭 문제인지 먼저 갈라야    │ GPU1 ███████████████    9.6G │
-│ ▏ expert tensors being read back from NVMe.▍        │ ▏ 한다. 전문가 텐서가                               │ CPU  ███████████████    6.3G │
-│                                                     │ ▏ ▸ answer                                          │ vram ███████████████   17.4G │
-│                                                     │ ▏ 레이어 배치를 바꾸면 디코드 속도가▍               │      █ weights  █ kv  █ buf  │
-│                                                     │                                                     │ never loaded           84.6G │
-│                                                     │                                                     │                              │
-│ ▏                         █▆▇▇█▆▇▇█▆▇▇█▆▇  12.2 avg │ ▏                          ▆▇▇█▆▇▇█▆▇▇█▆▇  12.1 avg │ MEMORY ───────────────────── │
-├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ rss       9.0G file     8.3G │
-│ stream 3/8                                   answer │ stream 4/8                                   answer │ virt     40.0G anon     1.1G │
-│ 12.1 tok/s ttft 290 ms · 15/128 · p50 79 ms         │ 12.2 tok/s ttft 330 ms · 15/128 · p50 79 ms         │ maj/tok                  0.0 │
-│ ▏ Flash attention changes the compute buffer        │ ▏ Prefix caching only helps when the system         │              ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▏ size, not the weights. When the buffer grows      │ ▏ prompt is byte identical. A single changed        │                              │
-│ ▏ past▍                                             │ ▏ character▍                                        │ SPEED ────────────────────── │
-│                                                     │                                                     │ prefill           2253 tok/s │
-│                                                     │                                                     │ decode            12.1 tok/s │
-│ ▏                          ▇▇█▆▇▇█▆▇▇█▆▇▇  12.2 avg │ ▏                          ▇█▆▇▇█▆▇▇█▆▇▇█  12.3 avg │ ttft      330 ms · 25% cache │
-├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ 8 streams     97.0 tok/s agg │
-│ stream 5/8 · thinking                               │ stream 6/8                                   answer │                              │
-│ 12.2 tok/s ttft 370 ms · 14/128 · p50 79 ms         │ 12.0 tok/s ttft 410 ms · 14/128 · p50 86 ms         │ HOST ─────────────────────── │
-│ ▏ 측정이 흔들린다고 했으니 먼저 기계가 조용했는지   │ ▏ The aggregate rate is what the server does; the   │ load     4.9 · contended yes │
-│ ▏ 묻는 게 맞다. 잡음이 신호보다 크면 나머지         │ ▏ per stream rate is what▍                          │ GPU0         61°C  292W  90% │
-│ ▏ 숫자는▍                                           │                                                     │ GPU1         61°C  292W  90% │
-│                                                     │                                                     │                              │
-│                                                     │                                                     │                              │
-│ ▏                           █▆▇▇█▆▇▇█▆▇▇█  12.3 avg │ ▏                           ▆▇▇█▆▇▇█▆▇▇█▆  12.1 avg │                              │
+│ 9.1 tok/s  ttft 630 ms · 104/320 · p50 111 ms       │ 9.1 tok/s  ttft 690 ms · 103/320 · p50 111 ms       │ GPU0 ███████████████   22.9G │
+│ ▏ costume, and the arithmetic is simple enough to   │ ▏ 모자란다. 계산은 어렵지 않다. 레이어 수에 키와    │ GPU1 ███████████████   21.9G │
+│ ▏ do in your head. Take the bytes the model has     │ ▏ 값 두 벌을 곱하고, 거기에 KV 헤드가 차지하는      │ vram ███████████████   46.6G │
+│ ▏ to touch per token, multiply by the tokens per    │ ▏ 채널 수와 컨텍스트 토큰 수를 곱한 다음, 원소      │      █ weights  █ kv  █ buf  │
+│ ▏ second you are getting, and compare the result    │ ▏ 하나가 몇 바이트인지를 곱하면 된다. 팔십          │                              │
+│ ▏ against what your cards can actually move. If     │ ▏ 레이어짜리 칠십억 단위 모델이 만 육천 토큰을      │ MEMORY ───────────────────── │
+│ ▏ the two figures are▍                              │ ▏ 잡으면 반정밀도로는 오 기가바이트가 넘고,▍        │ rss       1.2G file     0.8G │
+│ ▏ █▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇   9.1 avg │ ▏ █▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇   9.1 avg │ virt     48.0G anon     0.4G │
+├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ maj/tok                  0.0 │
+│ stream 3/8                                   answer │ stream 4/8                                   answer │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ 9.1 tok/s  ttft 750 ms · 103/320 · p50 111 ms       │ 9.1 tok/s  ttft 810 ms · 102/320 · p50 111 ms       │                              │
+│ ▏ produces eight tokens from it, one for each       │ ▏ everything after it is evaluated again, however   │ SPEED ────────────────────── │
+│ ▏ sequence, because the matrix multiply is          │ ▏ small the difference was. One extra space in      │ prefill            610 tok/s │
+│ ▏ batched across them. The expensive part is        │ ▏ your system message, a timestamp you helpfully    │ decode             9.1 tok/s │
+│ ▏ amortised eight ways. What is not amortised is    │ ▏ injected, a tool list whose order comes out of    │ ttft      810 ms · 25% cache │
+│ ▏ the attention step, where every sequence▍         │ ▏ a map and therefore changes between▍              │ 8 streams     72.8 tok/s agg │
+│ ▏ ▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇   9.1 avg │ ▏ ▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇   9.1 avg │                              │
+├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤ HOST ─────────────────────── │
+│ stream 5/8                                   answer │ stream 6/8                                   answer │ load      3.1 · contended no │
+│ 9.1 tok/s  ttft 870 ms · 102/320 · p50 110 ms       │ 9.1 tok/s  ttft 930 ms · 101/320 · p50 110 ms       │ GPU0         69°C  343W  98% │
+│ ▏ 여기까지가                                        │ ▏ embedding table and the output head are usually   │ GPU1         65°C  313W  94% │
+│ ▏ ▸ answer                                          │ ▏ kept at a higher width, because an error there    │                              │
+│ ▏ 숫자를 재기 전에 기계가 조용한지부터 확인하는     │ ▏ lands on every token rather than being averaged   │                              │
+│ ▏ 습관이 결국 시간을 아껴 준다. 다른 프로세스가     │ ▏ away inside a layer. That is why two files with   │                              │
+│ ▏ 같은 카드를▍                                      │ ▏ the same label can▍                               │                              │
+│ ▏ ▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │ ▏ ▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇   9.1 avg │                              │
 ├─────────────────────────────────────────────────────┼─────────────────────────────────────────────────────┤                              │
 │ stream 7/8 · thinking                               │ stream 8/8                                   answer │                              │
-│ 12.1 tok/s ttft 450 ms · 13/128 · p50 79 ms         │ 12.1 tok/s ttft 490 ms · 13/128 · p50 79 ms         │                              │
-│ ▏ Speculative decoding, acceptance rate. I need     │ ▏ RSS is not loaded. Under mmap the resident set    │                              │
-│ ▏ the break even point before I can▍                │ ▏ is what this process▍                             │                              │
-│                                                     │                                                     │                              │
-│                                                     │                                                     │                              │
-│                                                     │                                                     │                              │
-│ ▏                            ▇▇█▆▇▇█▆▇▇█▆  12.2 avg │ ▏                            ▇█▆▇▇█▆▇▇█▆▇  12.2 avg │                              │
+│ 9.1 tok/s  ttft 990 ms · 101/320 · p50 110 ms       │ 9.1 tok/s  ttft 1050 ms · 100/320 · p50 110 ms      │                              │
+│ ▏ The draft costs whatever its own forward passes   │ ▏ can leave again whenever the kernel needs the     │                              │
+│ ▏ cost, one per proposed token. So for a draft      │ ▏ memory, because a clean file backed page can be   │                              │
+│ ▏ that is a tenth the size, proposing four tokens   │ ▏ dropped and read back later. So the resident      │                              │
+│ ▏ costs about four tenths of a step plus the one    │ ▏ figure tells you what this process has touched    │                              │
+│ ▏ step▍                                             │ ▏ recently and what the kernel has chosen to▍       │                              │
+│ ▏ ▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │ ▏ ▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇██▇▇█▇██▇▇▇██▇▇▇█   9.1 avg │                              │
 ├─────────────────────────────────────────────────────┴─────────────────────────────────────────────────────┴──────────────────────────────┤
-│ token latency                                                                               █▏▏▏████▏▏▏▏██  p50 91 ms  q quit · p prompt │
+│ token latency ▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

@@ -269,7 +269,10 @@ func tileFooter(th Theme, s Stream, cw int, active bool) string {
 		rates = streamRates(s, barW)
 		cells := Sparkline(rates, barW, 0)
 		l.space(barW - len(cells))
-		writeCells(l, th, cells, th.accent)
+		// Muted, not the accent: the tile's one lit figure is the rate two
+		// rows above, and a full-accent sparkline is the larger shape of the
+		// two (TTP-28).
+		writeCells(l, th, cells, cellPalette{base: th.accentMuted, warn: th.warn, bad: th.warn})
 	}
 	label := fmtRate(mean(rates)) + " avg"
 	if width(label) > l.left() {
