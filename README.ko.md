@@ -197,7 +197,8 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 | `version` | 버전 출력 | `toktape version` |
 
 **record:** `--url`(기본은 자동 탐색), `-n`/`--concurrency`, `--prompt`(반복
-가능, `-n`만큼 순환), `--n-predict`(기본 256), `--out`(기본
+가능, `-n`만큼 순환), `--prompts`(JSONL 파일. 한 줄이 `-n`개 스트림의
+한 라운드이고, 순서대로 돌려 테이프 하나에 담습니다), `--n-predict`(기본 256), `--out`(기본
 `~/.toktape/runs`), `--tag`, `--note`, `--wait`, `--tui`,
 `--grid COLSxROWS`(기본 `2x4`, `0`이면 터미널에 맞춤), `--no-card`,
 `--json`, `--quiet`.

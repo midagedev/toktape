@@ -201,7 +201,9 @@ side by side. Each field is there because it settles an argument.
 | `version` | print the version | `toktape version` |
 
 **Record:** `--url` (default: discover), `-n`/`--concurrency`, `--prompt`
-(repeatable, cycled to fill `-n`), `--n-predict` (default 256), `--out`
+(repeatable, cycled to fill `-n`), `--prompts`
+(a JSONL file; each line is one round of `-n` streams, run in order into one
+tape), `--n-predict` (default 256), `--out`
 (default `~/.toktape/runs`), `--tag`, `--note`, `--wait`, `--tui`,
 `--grid COLSxROWS` (default `2x4`, `0` fits the terminal), `--no-card`,
 `--json`, `--quiet`.

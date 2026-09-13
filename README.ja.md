@@ -203,7 +203,8 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 | `version` | バージョンを表示する | `toktape version` |
 
 **record:** `--url`（既定は自動探索）、`-n`/`--concurrency`、`--prompt`（複数
-指定可、`-n` 分まで循環）、`--n-predict`（既定 256）、`--out`（既定
+指定可、`-n` 分まで循環）、`--prompts`（JSONL ファイル。1 行が `-n` 本の
+ストリームからなる 1 ラウンドで、順番に 1 本のテープへ記録）、`--n-predict`（既定 256）、`--out`（既定
 `~/.toktape/runs`）、`--tag`、`--note`、`--wait`、`--tui`、
 `--grid COLSxROWS`（既定 `2x4`、`0` で端末に合わせる）、`--no-card`、
 `--json`、`--quiet`。
