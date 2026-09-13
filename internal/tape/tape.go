@@ -64,9 +64,10 @@ type Tape struct {
 
 // RequestRecord is one stream: its prompt, every token, and its own timings.
 type RequestRecord struct {
-	Index     int              `json:"index"`      // 0..Concurrency-1
-	Slot      int              `json:"slot"`       // server slot id when known, else -1
-	StartedAt time.Duration    `json:"started_at"` // since run start
+	Index     int              `json:"index"`           // 0..Concurrency-1 within its round
+	Round     int              `json:"round,omitempty"` // 0-based sequential round (TTP-31)
+	Slot      int              `json:"slot"`            // server slot id when known, else -1
+	StartedAt time.Duration    `json:"started_at"`      // since run start
 	Prompt    PromptRecord     `json:"prompt"`
 	Tokens    []TokenEvent     `json:"tokens"`
 	Progress  []PromptProgress `json:"progress,omitempty"`
@@ -93,12 +94,21 @@ type RunSummary struct {
 	// Timings is the representative single stream: Requests[0] when
 	// Concurrency == 1, otherwise the per-stream mean. Aggregate is the
 	// whole-server view.
-	Timings    TimingsSummary   `json:"timings"`
-	Aggregate  AggregateTimings `json:"aggregate"`
-	Cache      CacheSummary     `json:"cache"`
-	Contention ContentionInfo   `json:"contention"`
-	Template   TemplateInfo     `json:"template"`
-	GPUsAtEnd  []GPUSample      `json:"gpus_at_end,omitempty"`
+	Timings   TimingsSummary   `json:"timings"`
+	Aggregate AggregateTimings `json:"aggregate"`
+	// Rounds is the number of sequential prompt rounds (TTP-31, 2026-09-13):
+	// `record --prompts file.jsonl` sends each line as its own round of
+	// Concurrency streams, all into this one tape. 0 or 1 = a single round,
+	// and PerRound / Spread are then empty. Timings and Aggregate are over
+	// every stream of every round; Aggregate.WallMs is the sum of the rounds'
+	// own windows, never the gaps between them.
+	Rounds     int            `json:"rounds,omitempty"`
+	PerRound   []RoundSummary `json:"per_round,omitempty"`
+	Spread     *RoundSpread   `json:"spread,omitempty"` // nil for a single round
+	Cache      CacheSummary   `json:"cache"`
+	Contention ContentionInfo `json:"contention"`
+	Template   TemplateInfo   `json:"template"`
+	GPUsAtEnd  []GPUSample    `json:"gpus_at_end,omitempty"`
 
 	// Tag and Note label the experiment this run belongs to (`--tag ngl=40
 	// --note "fa on"`). They are the user's words, recorded so the run ledger
@@ -148,13 +158,29 @@ type ServerFlags struct {
 	OverrideTens []string `json:"ot,omitempty"`        // -ot patterns, verbatim
 	CPUMoE       string   `json:"cpu_moe,omitempty"`   // -cmoe / -ncmoe N
 	Threads      string   `json:"t,omitempty"`
-	Other        []string `json:"other,omitempty"` // anything else worth printing, verbatim
+	// Speculative decoding (TTP-30, 2026-09-13). DraftModel is the -md /
+	// --model-draft argument's base name; the block size and thresholds are
+	// verbatim. "" = not passed (the server's default), and the card omits
+	// the row when no draft was involved.
+	DraftModel string   `json:"model_draft,omitempty"`
+	DraftMax   string   `json:"draft_max,omitempty"`   // --draft-max / --draft / --draft-n
+	DraftMin   string   `json:"draft_min,omitempty"`   // --draft-min / --draft-n-min
+	DraftPMin  string   `json:"draft_p_min,omitempty"` // --draft-p-min
+	Other      []string `json:"other,omitempty"`       // anything else worth printing, verbatim
 }
 
 // ModelInfo comes from the GGUF header (via /props model_path) and the file.
 type ModelInfo struct {
-	Path         string `json:"path"`
-	FileName     string `json:"file_name"`
+	Path     string `json:"path"`
+	FileName string `json:"file_name"`
+	// Dir is the base name of the directory holding the file (TTP-32,
+	// 2026-09-13). Variants of one model — a hard-linked shard set with a
+	// different embedding quant — often share every file name and differ
+	// only here, so the card keeps it when the file is sharded.
+	Dir string `json:"dir,omitempty"`
+	// Shards is N when FileName is one part of an -00001-of-0000N set;
+	// FileBytes is then the sum of all N parts. 0 = a single file.
+	Shards       int    `json:"shards,omitempty"`
 	Name         string `json:"name,omitempty"`  // general.name
 	Arch         string `json:"arch,omitempty"`  // general.architecture
 	Quant        string `json:"quant,omitempty"` // exact sub-type: Q4_K_M, IQ4_NL, UD-Q4_K_M — never "Q4"
@@ -324,6 +350,44 @@ type AggregateTimings struct {
 	Scaling float64 `json:"scaling,omitempty"`
 }
 
+// RoundSummary is one sequential prompt round of a multi-prompt run (TTP-31).
+// The figures are the same reductions the run-level Timings and Aggregate
+// use, restricted to the round's streams, so a round is a run in miniature.
+type RoundSummary struct {
+	Index int `json:"index"`
+	// Name is the JSONL line's "name" when it had one, else "" and the card
+	// labels the round by its 1-based number.
+	Name    string `json:"name,omitempty"`
+	Streams int    `json:"streams"`
+	// PerStreamPredictedPerSecond is the mean over the round's streams;
+	// AggregatePredictedPerSecond the round's server-wide rate.
+	PerStreamPredictedPerSecond float64 `json:"per_stream_predicted_per_second"`
+	AggregatePredictedPerSecond float64 `json:"aggregate_predicted_per_second"`
+	PredictedN                  int     `json:"predicted_n"` // sum over streams
+	TTFTp50Ms                   float64 `json:"ttft_p50_ms"`
+	// Speculative decoding totals over the round's streams; nil = not reported.
+	DraftN         *int `json:"draft_n,omitempty"`
+	DraftNAccepted *int `json:"draft_n_accepted,omitempty"`
+}
+
+// Spread is a median with its range over the rounds of a run. Min == Max ==
+// Median == 0 means unobserved.
+type Spread struct {
+	Median float64 `json:"median"`
+	Min    float64 `json:"min"`
+	Max    float64 `json:"max"`
+}
+
+// RoundSpread is how much the per-round figures moved across a multi-prompt
+// run: one prompt's card is misleading when the same draft model is accepted
+// 13 % on prose and 87 % on SQL, so the card prints the median with its range.
+type RoundSpread struct {
+	PerStreamPredictedPerSecond Spread `json:"per_stream_predicted_per_second"`
+	// DraftAcceptRate is DraftNAccepted/DraftN per round, 0..1. All-zero when
+	// no round reported a draft.
+	DraftAcceptRate Spread `json:"draft_accept_rate"`
+}
+
 // CacheLabel is the cold/warm verdict printed on the card.
 type CacheLabel string
 
@@ -362,6 +426,7 @@ type TemplateInfo struct {
 // PromptRecord is the request as sent and the answer as received.
 type PromptRecord struct {
 	Messages       []Message      `json:"messages"`
+	Name           string         `json:"name,omitempty"`            // the JSONL line's name in a multi-prompt run (TTP-31)
 	RenderedPrompt string         `json:"rendered_prompt,omitempty"` // from /apply-template
 	Params         map[string]any `json:"params,omitempty"`          // temperature, n_predict, ...
 	Completion     string         `json:"completion"`                // concatenated answer token text (reasoning excluded)
