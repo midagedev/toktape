@@ -12,10 +12,10 @@
 │ 9.1 tok/s  ██▇▇▇██▇▇█▇██▇▇ ttft 750 ms · 306/320       │ 9.1 tok/s  █▇▇█▇██▇▇▇██▇▇▇ ttft 810 ms · 311/320        │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ the decode batch, and while a slot is doing that it    │ than letting a hash map decide the order for you. If    │                                       │
 │ competes with the sessions already generating. That    │ several agents share a preamble, send them to the       │ SPEED ─────────────────────────────── │
-│ is why time to first token spreads out as the slots    │ same server so they share the slot that holds it. And   │ prefill                     610 tok/s │
-│ fill, and why a burst of arrivals makes ongoing        │ when you cannot avoid a change, make it late rather     │ decode                      9.1 tok/s │
+│ is why time to first token spreads out as the slots    │ same server so they share the slot that holds it. And   │ prefill                    2927 tok/s │
+│ fill, and why a burst of arrivals makes ongoing        │ when you cannot avoid a change, make it late rather     │ decode                     72.9 tok/s │
 │ streams                                                │ than early, because the cost is not the size            │ ttft               810 ms · 25% cache │
-├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ 8 streams              72.9 tok/s agg │
+├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ 8 streams              9.1 tok/s each │
 │ stream 5/8                                        done │ stream 6/8                                         done │                                       │
 │ 9.1 tok/s  █▇▇███▇▇███▇▇██ ttft 870 ms · 316/320       │ 9.1 tok/s  ▇▇▇██▇▇▇██▇▇█▇█ ttft 930 ms · 300/320        │ RESOURCES ────────────── contended no │
 │ 나는 이유가 대부분 여기에 있다. 마지막으로 한 번만     │ that quantisation does not change the arithmetic the    │ CPU           0%  0.1 cores  load 3.1 │

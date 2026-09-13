@@ -85,7 +85,7 @@ func emphasisFrames(t *testing.T) []emphasisFrame {
 //
 // A rate is recognised structurally rather than by value: it is the figure a
 // tile's stat line leads with (the row under a "stream N/M" header), or the one
-// the right pane's "decode" or "N streams … agg" row is built around. The test
+// the right pane's "decode" row is built around. The test
 // therefore keeps holding when the example's figures change, and still fails
 // the moment a second figure is lit.
 func TestOnlyTheRateIsAccent(t *testing.T) {
@@ -154,11 +154,11 @@ func visibleRates(m Model, at time.Duration, w, h int) int {
 			n++
 		}
 	}
+	// One right-pane figure whatever the stream count (2026-09-14): the
+	// decode row leads with the aggregate and the "N streams … each" row
+	// under it is the per-stream mean, demoted.
 	if _, cur, _ := m.decodeRateAt(at); cur > 0 || m.Done {
 		n++
-		if m.Summary.Concurrency > 1 {
-			n++
-		}
 	}
 	return n
 }
@@ -181,9 +181,8 @@ func rateSpans(rows [][]pcell, y int) []span {
 		case len(fields) > 0 && (fields[0] == "decode" || fields[0] == "sample"):
 			// "decode            17.4 tok/s"
 			out = append(out, figureSpan(seg))
-		case len(fields) > 1 && fields[1] == "streams" && strings.HasSuffix(strings.TrimRight(seg.text, " "), "agg"):
-			// "4 streams      50.1 tok/s agg"
-			out = append(out, figureSpan(seg))
+			// The "N streams … each" row is not a span: its figure is the
+			// per-stream mean and wears plain text (2026-09-14).
 		}
 	}
 	return out

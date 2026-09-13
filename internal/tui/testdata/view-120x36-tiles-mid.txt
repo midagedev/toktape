@@ -12,10 +12,10 @@
 │ figures are close, the placement is       │ 줄어든다. 이 절약분이 그대로 가중치를     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ fine and no flag is going to save you.    │ 올릴 공간이 되기 때문에, 카드가 빠듯할    │                              │
 │ If they are far apart, something is       │ 때 가장 먼저 건드릴 손잡이가 캐시         │ SPEED ────────────────────── │
-│ stalling and it is worth finding out      │ 타입이다. 품질 이야기가 나오면 대개       │ prefill            610 tok/s │
-│ what. With a layer split the first card   │ 과장돼 있다. 키와 값을 여덟 비트로        │ decode            12.5 tok/s │
+│ stalling and it is worth finding out      │ 타입이다. 품질 이야기가 나오면 대개       │ prefill           2440 tok/s │
+│ what. With a layer split the first card   │ 과장돼 있다. 키와 값을 여덟 비트로        │ decode            50.0 tok/s │
 │ holds the lower half▍                     │ 저장하는 것은▍                            │ ttft      690 ms · 25% cache │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ 4 streams     50.0 tok/s agg │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ 4 streams    12.5 tok/s each │
 │ stream 3/4                         answer │ stream 4/4 · thinking                     │                              │
 │ 12.5 tok/s ▇▇███▇▇█ ttft 750 ms · 141/320 │ 12.5 tok/s ▇███▇▇██ ttft 810 ms · 141/320 │ RESOURCES ───── contended no │
 │ total rises. Then the practical half,     │ most common mistake by a wide margin.     │ CPU  6%  1.9 cores  load 3.1 │

@@ -15,7 +15,7 @@
 │                                                  │                                                   │ prefill ◐                 ? tok/s │
 │                                                  │                                                   │ decode                    ? tok/s │
 │                                                  │                                                   │ ttft                ? · 25% cache │
-│                                                  │                                                   │ 8 streams             ? tok/s agg │
+│                                                  │                                                   │ 8 streams            ? tok/s each │
 │                                                  │                                                   │                                   │
 ├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤ RESOURCES ────────── contended no │
 │ stream 5/8 prefill █████████ 128/512 · cache 128 │ stream 6/8 prefill ██████████ 128/512 · cache 128 │ CPU          ?  ? cores  load 3.1 │

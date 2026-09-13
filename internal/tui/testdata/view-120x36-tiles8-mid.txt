@@ -12,10 +12,10 @@
 │ 9.1 tok/s  ██▇███▇▇ ttft 750 ms · 103/320 │ 9.1 tok/s  ██▇███▇▇ ttft 810 ms · 102/320 │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ it, one for each sequence, because the    │ difference was. One extra space in your   │                              │
 │ matrix multiply is batched across them.   │ system message, a timestamp you           │ SPEED ────────────────────── │
-│ The expensive part is amortised eight     │ helpfully injected, a tool list whose     │ prefill            610 tok/s │
-│ ways. What is not amortised is the        │ order comes out of a map and therefore    │ decode             9.1 tok/s │
+│ The expensive part is amortised eight     │ helpfully injected, a tool list whose     │ prefill           4880 tok/s │
+│ ways. What is not amortised is the        │ order comes out of a map and therefore    │ decode            72.8 tok/s │
 │ attention step, where every sequence▍     │ changes between▍                          │ ttft      810 ms · 25% cache │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     9.1 tok/s each │
 │ stream 5/8                         answer │ stream 6/8                         answer │                              │
 │ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │ RESOURCES ───── contended no │
 │ 여기까지가                                │ usually kept at a higher width, because   │ CPU  6%  1.9 cores  load 3.1 │

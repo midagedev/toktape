@@ -96,7 +96,7 @@ func TestExamplePrefillAgreesWithTheSummary(t *testing.T) {
 		tp := ExampleTapeN(n)
 		want := tp.Summary.Timings.PromptPerSecond
 		for at := time.Duration(0); at <= 3*time.Second; at += 50 * time.Millisecond {
-			live := livePromptRate(ModelAt(tp, at))
+			live := livePromptRate(ModelAt(tp, at), false)
 			if live == 0 {
 				continue // nothing has been evaluated yet; the row prints "?"
 			}
@@ -224,7 +224,7 @@ func TestPrefillReadsProcessedTheWayTheServerWritesIt(t *testing.T) {
 	// The rate is the evaluated remainder over the elapsed time, which is what
 	// the server's own timings report as prompt_per_second.
 	want := float64(evaluated) / (elapsedMs / 1000)
-	if got := livePromptRate(m); got != want {
+	if got := livePromptRate(m, false); got != want {
 		t.Errorf("the live prefill rate is %.0f tok/s, want %.0f — processed carries the cache, and dividing it whole credits the prefix to the prefill", got, want)
 	}
 

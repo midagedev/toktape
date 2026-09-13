@@ -12,10 +12,10 @@
 │ 9.1 tok/s  ▇▇██▇▇█▇██▇▇ ttft 750 ms · 306/320    │ 9.1 tok/s  █▇██▇▇▇██▇▇▇ ttft 810 ms · 311/320     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ has its own prompt to chew through before it     │ letting a hash map decide the order for you. If   │                                   │
 │ can join the decode batch, and while a slot is   │ several agents share a preamble, send them to     │ SPEED ─────────────────────────── │
-│ doing that it competes with the sessions         │ the same server so they share the slot that       │ prefill                 610 tok/s │
-│ already generating. That is why time to first    │ holds it. And when you cannot avoid a change,     │ decode                  9.1 tok/s │
+│ doing that it competes with the sessions         │ the same server so they share the slot that       │ prefill                2927 tok/s │
+│ already generating. That is why time to first    │ holds it. And when you cannot avoid a change,     │ decode                 72.9 tok/s │
 │ token spreads out as the slots fill, and why a   │ make it late rather than early, because the       │ ttft           810 ms · 25% cache │
-│ burst of arrivals makes ongoing streams          │ cost is not the size                              │ 8 streams          72.9 tok/s agg │
+│ burst of arrivals makes ongoing streams          │ cost is not the size                              │ 8 streams          9.1 tok/s each │
 ├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤                                   │
 │ stream 5/8                                  done │ stream 6/8                                   done │ RESOURCES ────────── contended no │
 │ 9.1 tok/s  ███▇▇███▇▇██ ttft 870 ms · 316/320    │ 9.1 tok/s  ██▇▇▇██▇▇█▇█ ttft 930 ms · 300/320     │ CPU       0%  0.1 cores  load 3.1 │

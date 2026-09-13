@@ -12,10 +12,10 @@
 │ not amortised is the            │ list whose order comes out of   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ attention step, where every     │ a map and therefore changes     │                              │
 │ sequence▍                       │ between▍                        │ SPEED ────────────────────── │
-├─────────────────────────────────┼─────────────────────────────────┤ prefill            610 tok/s │
-│ stream 5/8               answer │ stream 6/8               answer │ decode             9.1 tok/s │
+├─────────────────────────────────┼─────────────────────────────────┤ prefill           4880 tok/s │
+│ stream 5/8               answer │ stream 6/8               answer │ decode            72.8 tok/s │
 │ 9.1 tok/s  ttft 870 ms          │ 9.1 tok/s  ttft 930 ms          │ ttft      810 ms · 25% cache │
-│ 숫자를 재기 전에 기계가         │ than being averaged away        │ 8 streams     72.8 tok/s agg │
+│ 숫자를 재기 전에 기계가         │ than being averaged away        │ 8 streams     9.1 tok/s each │
 │ 조용한지부터 확인하는 습관이    │ inside a layer. That is why     │                              │
 │ 결국 시간을 아껴 준다. 다른     │ two files with the same label   │ RESOURCES ───── contended no │
 │ 프로세스가 같은 카드를▍         │ can▍                            │ CPU  6%  1.9 cores  load 3.1 │

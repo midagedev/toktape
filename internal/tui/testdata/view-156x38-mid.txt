@@ -12,10 +12,10 @@
 │ 9.1 tok/s  ██▇▇█▇██▇▇▇██▇▇ ttft 750 ms · 103/320       │ 9.1 tok/s  ██▇▇█▇██▇▇▇██▇▇ ttft 810 ms · 102/320        │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ slots are busy it reads that same set once and         │ position that differs ends the reuse, and everything    │                                       │
 │ produces eight tokens from it, one for each            │ after it is evaluated again, however small the          │ SPEED ─────────────────────────────── │
-│ sequence, because the matrix multiply is batched       │ difference was. One extra space in your system          │ prefill                     610 tok/s │
-│ across them. The expensive part is amortised eight     │ message, a timestamp you helpfully injected, a tool     │ decode                      9.1 tok/s │
+│ sequence, because the matrix multiply is batched       │ difference was. One extra space in your system          │ prefill                    4880 tok/s │
+│ across them. The expensive part is amortised eight     │ message, a timestamp you helpfully injected, a tool     │ decode                     72.8 tok/s │
 │ ways. What is not amortised is the attention step,     │ list whose order comes out of a map and therefore       │ ttft               810 ms · 25% cache │
-│ where every sequence▍                                  │ changes between▍                                        │ 8 streams              72.8 tok/s agg │
+│ where every sequence▍                                  │ changes between▍                                        │ 8 streams              9.1 tok/s each │
 ├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤                                       │
 │ stream 5/8                                      answer │ stream 6/8                                       answer │ RESOURCES ────────────── contended no │
 │ 9.1 tok/s  █▇▇█▇██▇▇▇██▇▇▇ ttft 870 ms · 102/320       │ 9.1 tok/s  █▇▇█▇██▇▇▇██▇▇▇ ttft 930 ms · 101/320        │ CPU           6%  1.9 cores  load 3.1 │

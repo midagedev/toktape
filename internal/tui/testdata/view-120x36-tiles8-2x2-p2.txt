@@ -12,10 +12,10 @@
 │ 있으니 어디를 보라고만 말하면 된다.       │ embedding table and the output head are   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ 여기까지가                                │ usually kept at a higher width, because   │                              │
 │ ▸ answer                                  │ an error there lands on every token       │ SPEED ────────────────────── │
-│ 숫자를 재기 전에 기계가 조용한지부터      │ rather than being averaged away inside    │ prefill            610 tok/s │
-│ 확인하는 습관이 결국 시간을 아껴 준다.    │ a layer. That is why two files with the   │ decode             9.1 tok/s │
+│ 숫자를 재기 전에 기계가 조용한지부터      │ rather than being averaged away inside    │ prefill           4880 tok/s │
+│ 확인하는 습관이 결국 시간을 아껴 준다.    │ a layer. That is why two files with the   │ decode            72.8 tok/s │
 │ 다른 프로세스가 같은 카드를▍              │ same label can▍                           │ ttft      810 ms · 25% cache │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     72.8 tok/s agg │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     9.1 tok/s each │
 │ stream 7/8 · thinking                     │ stream 8/8                         answer │                              │
 │ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1.05 s · 100/320 │ RESOURCES ───── contended no │
 │ need the break even point before I can    │ them is where a whole genre of confused   │ CPU  6%  1.9 cores  load 3.1 │

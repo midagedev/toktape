@@ -263,14 +263,21 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	// the server reports prompt progress, TTFT when a first token lands, a
 	// decode rate when a second one does.
 	//
-	// Per stream, to match the decode row directly below it. Mixing a
-	// server-wide prefill figure with a per-stream decode figure on adjacent
-	// rows is exactly the confusion M3 exists to end
-	// (docs/toktape-spec.ko.md §3); the aggregate has its own line lower down.
-	prefill := livePromptRate(m)
+	// The box's rate, whichever the run is (2026-09-14, user: "개별 tps때문에
+	// 병렬세션에서 좀 애매하게 느껴진다"). A one-stream run's rate is that
+	// stream's; a run of several streams leads with the aggregate on both the
+	// prefill and the decode row, so the two rows are the same kind of figure
+	// (the confusion M3 exists to end, docs/toktape-spec.ko.md §3), and the
+	// per-stream mean is the "each" row under them. The tiles carry every
+	// stream's own rate already.
+	many := m.Summary.Concurrency > 1
+	prefill := livePromptRate(m, many)
 	if m.Done {
 		prefill = m.Summary.Timings.PromptPerSecond
-		if prefill <= 0 && m.Summary.Concurrency == 1 {
+		if many {
+			prefill = m.Summary.Aggregate.AggregatePromptPerSecond
+		}
+		if prefill <= 0 {
 			prefill = m.Summary.Aggregate.AggregatePromptPerSecond
 		}
 	}
@@ -314,7 +321,11 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	if m.Summary.Timings.DecodeLabel == "sample" {
 		label = "sample"
 	}
-	out = append(out, kvRow(th, cw, label, fmtRate(perStreamRate)+" tok/s", th.accentBold))
+	lead := perStreamRate
+	if many {
+		lead = agg
+	}
+	out = append(out, kvRow(th, cw, label, fmtRate(lead)+" tok/s", th.accentBold))
 
 	ttft := liveTTFT(m)
 	if m.Done {
@@ -345,14 +356,13 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	out = append(out, l.String())
 
 	if c := m.Summary.Concurrency; c > 1 {
-		// "aggregate" spelled out does not fit a 30-column pane beside the
-		// stream count, so the unit carries the word in short form. The
-		// figure itself is a headline: accent, bold, and no arrow.
+		// The per-stream mean, dim: the headline above it is the aggregate,
+		// and this row says what each stream saw of it.
 		l = newLine(th, cw)
 		l.add(th.dim, fmt.Sprintf("%d streams", c))
-		num, unit := fmtRate(agg), " tok/s agg"
+		num, unit := fmtRate(perStreamRate), " tok/s each"
 		l.gapTo(width(num) + width(unit))
-		l.add(th.accentBold, num)
+		l.add(th.text, num)
 		l.add(th.dim, unit)
 		out = append(out, l.String())
 	}
@@ -412,7 +422,10 @@ func liveDraft(m Model) (drafted, accepted int, ok bool) {
 // progress at all contributes nothing rather than a guess: without a progress
 // row the prompt's length is not known live, and the only place it exists is
 // the summary, which is the figure this function is here to stop leaking.
-func livePromptRate(m Model) float64 {
+// livePromptRate is the prefill rate the streams' progress rows report right
+// now: the sum across streams when the run is several (the box's throughput),
+// the one stream's own rate otherwise.
+func livePromptRate(m Model, sum bool) float64 {
 	var total float64
 	n := 0
 	for _, s := range m.Streams {
@@ -435,6 +448,9 @@ func livePromptRate(m Model) float64 {
 	}
 	if n == 0 {
 		return 0
+	}
+	if sum {
+		return total
 	}
 	return total / float64(n)
 }

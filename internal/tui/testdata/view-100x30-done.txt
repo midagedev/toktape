@@ -12,10 +12,10 @@
 │ arrivals makes ongoing          │ rather than early, because      │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ streams                         │ the cost is not the size        │                              │
 ├─────────────────────────────────┼─────────────────────────────────┤ SPEED ────────────────────── │
-│ stream 5/8                 done │ stream 6/8                 done │ prefill            610 tok/s │
-│ 9.1 tok/s  ttft 870 ms          │ 9.1 tok/s  ttft 930 ms          │ decode             9.1 tok/s │
+│ stream 5/8                 done │ stream 6/8                 done │ prefill           2927 tok/s │
+│ 9.1 tok/s  ttft 870 ms          │ 9.1 tok/s  ttft 930 ms          │ decode            72.9 tok/s │
 │ 측정은 평균을 낼 대상이         │ comes from moving fewer bytes   │ ttft      810 ms · 25% cache │
-│ 아니라 원인을 찾아야 할         │ rather than from doing          │ 8 streams     72.9 tok/s agg │
+│ 아니라 원인을 찾아야 할         │ rather than from doing          │ 8 streams     9.1 tok/s each │
 │ 증상이다. 이 도구가 실행마다    │ cheaper multiplications. The    │                              │
 ├─────────────────────────────────┼─────────────────────────────────┤ RESOURCES ───── contended no │
 │ stream 7/8 · thinking · cut     │ stream 8/8                 done │ CPU  0%  0.1 cores  load 3.1 │

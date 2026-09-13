@@ -96,8 +96,11 @@ func TestSpeedPaneFillsInAsFiguresBecomeObservable(t *testing.T) {
 	}
 	pane = speedPane(t, done, doneAt)
 	sum := tp.Summary
+	// 2026-09-14: a run of several streams leads with the aggregate prefill
+	// rate, not the per-stream Timings.PromptPerSecond (was 610 here, now
+	// 4880); the per-stream decode mean is the "each" row.
 	for _, want := range []string{
-		fmtRate(sum.Timings.PromptPerSecond),
+		fmtRate(sum.Aggregate.AggregatePromptPerSecond),
 		fmtRate(sum.Aggregate.PerStreamPredictedPerSecond),
 		fmtRate(sum.Aggregate.AggregatePredictedPerSecond),
 		fmtMs(sum.Aggregate.TTFTp50Ms),

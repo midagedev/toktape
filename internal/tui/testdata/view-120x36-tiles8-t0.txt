@@ -15,7 +15,7 @@
 │                                           │                                           │ prefill ◐            ? tok/s │
 │                                           │                                           │ decode               ? tok/s │
 │                                           │                                           │ ttft           ? · 25% cache │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams        ? tok/s agg │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams       ? tok/s each │
 │ stream 5/8   prefill ████████████ 128/512 │ stream 6/8   prefill ████████████ 128/512 │                              │
 │ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ RESOURCES ───── contended no │
 │ ◐ waiting for the first token             │ ◐ waiting for the first token             │ CPU     ?  ? cores  load 3.1 │
