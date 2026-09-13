@@ -37,8 +37,12 @@ func TestBigFigureIsMonospaced(t *testing.T) {
 func TestResultModalFitsTheSmallestScreen(t *testing.T) {
 	m := goldenModel(t, doneAt)
 	m.Mode = ModeCard
+	// Both sources, so the four-digit case is exercised whichever one the
+	// example's stream count makes heroFigures read.
 	m.Summary.Aggregate.AggregatePredictedPerSecond = 2787
 	m.Summary.Aggregate.AggregatePromptPerSecond = 9999
+	m.Summary.Timings.PredictedPerSecond = 2787
+	m.Summary.Timings.PromptPerSecond = 9999
 	frame := View(m, doneAt, MinWidth, MinHeight)
 	checkFrame(t, frame, MinWidth, MinHeight)
 	rows := parseFrame(frame, MinWidth, MinHeight)
