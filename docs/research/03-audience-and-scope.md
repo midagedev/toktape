@@ -64,8 +64,12 @@ As detailed in the [llama.cpp HTTP Server documentation](https://raw.githubuserc
 2. **Real-time TTFT & Prompt Cache Progress (`return_progress: true`):**
    - When calling `POST /completion` or `POST /v1/chat/completions`, passing `"return_progress": true` instructs `llama-server` to emit intermediate Server-Sent Events (SSE) *during prompt evaluation* before the first generated token:
      ```json
-     data: {"prompt_progress": {"total": 4096, "cache": 2048, "processed": 1024, "time_ms": 312.4}}
+     data: {"prompt_progress": {"total": 4096, "cache": 2048, "processed": 3072, "time_ms": 312.4}}
      ```
+   - Note (lead, 2026-09-13): `processed` *includes* the cached prefix — upstream sets
+     `progress.processed = slot.prompt.tokens.size()` after `keep_first(n_past)`, so it never
+     drops below `cache`. Wall progress is `processed/total`; the evaluated fraction is
+     `(processed-cache)/(total-cache)`. The original example here had 1024 and misled a round.
    - **Feature Enablement:** This enables a real-time progress bar for Time-To-First-Token (TTFT), visually tracking how many prompt tokens were served directly from the KV cache versus evaluated cold.
 
 3. **Per-Token Generation Latencies (`timings_per_token: true`):**
