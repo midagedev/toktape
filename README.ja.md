@@ -15,40 +15,52 @@ toktape は、すでに起動している llama-server にアタッチし、1 �
 それが 1 枚に収まります。1 ストリームでも同時 8 ストリームでも、記録の仕方は
 同じです。
 
-<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording 4 concurrent streams, from the command being typed to the result card"></p>
+<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording two concurrent streams of a 440 GiB model, from the command being typed to the result"></p>
 
-<p align="center"><em>セッションの全体です。プロンプトにコマンドを打ち、サーバーを見つけてアタッチし、4 ストリームが同時に流れ、カードが出ます。画面録画ではなく、テープを <code>toktape render</code> と同じレンダラーで描き直したものです。</em></p>
+<p align="center"><em>演出ではなく実際の実行です。DeepSeek V4.1 Flash Q3_K_M、440 GiB、エキスパートの大半をホスト RAM に置いたカード 2 枚のワークステーション。プロンプトにコマンドを打ち、サーバーを見つけてアタッチし、2 ストリームが同時にコードを書き、結果が出ます。<code>assets/hero.tape</code> を <code>toktape render</code> と同じレンダラーで描き直したもので、下のカードは同じファイルから <code>toktape card assets/hero.tape</code> で出ます。</em></p>
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ toktape v0.1.0                  20260913-150210-r1-distill-llama-70b │
+│ toktape v0.1.0              20260914-070458-deepseek-v4-1-flash-q3-k │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MODEL    DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf · Q4_K_M          │
-│          42.5 GiB                                                    │
-│ ENGINE   llama-server b3650 (a1b2c3d) · linux 6.8.0-45-generic       │
-│          workstation                                                 │
-│ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
+│ MODEL    DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16 · 9 shards  │
+│          Q3_K_M · 440.5 GiB                                          │
+│ ENGINE   llama-server b96 (e42d711e5) · linux 6.8.0-139-generic · ws │
+│ RIG      RTX A6000 48G · RTX 3090 24G                                │
+│          AMD Ryzen Threadripper PRO 5975WX 32-Cores · 252 GB         │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        72.9 tok/s aggregate · 9.1 tok/s each                  │
-│               ≈ 410 GB/s, 44% of peak                                │
-│ Prefill       2927 tok/s aggregate · 610 tok/s each                  │
-│               TTFT p50 810 ms · 512 prompt tokens                    │
-│ Context       16384 (512 in / 307 out)                               │
-│ Prefix cache  25% hit (128/512) · warm                               │
+│ Decode        26.9 tok/s aggregate · 13.5 tok/s each                 │
+│               ≈ 87 GB/s from RAM                                     │
+│ Prefill       49.5 tok/s aggregate · 26.0 tok/s each                 │
+│               TTFT p50 1212 ms · 30 prompt tokens                    │
+│ Draft         DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf   │
+│               n_max 3 · 71% accepted (324/459)                       │
+│ Context       16384 (30 in / 240 out · 64 thinking)                  │
+│ Prefix cache  0% hit (0/30) · cold                                   │
 │ Sampling      temp default · chat                                    │
-│ Streams       8 × 9.1 tok/s = 72.9 tok/s aggregate                   │
-│               TTFT p50 810 ms p95 1050 ms · slots busy max 8         │
+│ Streams       2 × 13.5 tok/s = 26.9 tok/s aggregate                  │
+│               TTFT p50 1212 ms p95 1212 ms · slots busy max 2        │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MEMORY   GPU0 [██████████] 23.8/24.0 GiB                             │
-│          GPU1 [██████████] 22.8/24.0 GiB                             │
-│          weights 42.5 | kv 2.6 | compute 1.5 GiB                     │
-│          Host RSS 1.2 GiB (file 0.8 / anon 0.4)                      │
-│          Page faults 0.0 maj/token (0 during decode)                 │
+│ MEMORY   GPU0 [██████████] 46.0/48.0 GiB                             │
+│          GPU1 [█████████░] 22.6/24.0 GiB                             │
+│          weights 52.4 | kv ? | compute ? GiB                         │
+│          Host placed 388.1 GiB (186.8 in RAM / 201.3 on disk)        │
+│          Host RSS 188.2 GiB (file 186.8 / anon 0.9)                  │
+│          Page faults 5.8 maj/token (2775 during decode)              │
 ├──────────────────────────────────────────────────────────────────────┤
-│ HOST     GPU0 71°C 348 W · GPU1 67°C 318 W · throttled: no           │
+│ HOST     GPU0 68°C 122 W · GPU1 48°C 144 W · throttled: no           │
 │          contended: no                                               │
+│          conditions changed: k10temp Tctl 69 → 84 °C                 │
 ├──────────────────────────────────────────────────────────────────────┤
-│ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0 -t 16    │
+│ FLAGS    -ngl 99 -fa default -b 2048 -ub 512 -ctk default            │
+│          -ctv default -t 32                                          │
+│          -md DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf    │
+│          --draft-max 3                                               │
+│          -m /models/DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16… │
+│          --alias DeepSeek-V4.1-Flash -c 16384 --lazy-mode auto       │
+│          --spec-type draft-dspark -otd output_norm=CUDA0 --jinja     │
+│          --reasoning-budget 64 --host 127.0.0.1 --port 8001          │
+│          -ot blk\.[0-3]\.ffn_.*_exps=CUDA0 -ot blk\.6\.ffn_down_exp… │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │
 └──────────────────────────────────────────────────────────────────────┘
@@ -142,6 +154,9 @@ N が増えるとストリームあたりの tok/s が下がるのは正常で�
 マークではこの数字は見えません。
 
 **リアルタイムで見る。** ストリームごとにタイル 1 枚、右側にマシンのペインです。
+回答の中のフェンス付きコードブロックは、届いたそばから形が整います。キーワードは
+太さを得て、コメントと記号は一段下がる。画面に新しい色をひとつも足さずに、コードが
+コードとして読めます。
 
 ```sh
 toktape -n 4 --tui
@@ -182,6 +197,26 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
   分だけです。カードはホスト RSS を file/anon に、VRAM を weights/KV/compute に
   分け、未ロードのバイト数を「ファイルサイズ − RSS」ではなく GGUF テンソル
   ヘッダから計算します。
+- **CPU に置かれたことと RAM にあることは別です。** `-ot ... exps=CPU` は
+  バックエンドの割り当てであって常駐の話ではありません。上のカードはホストに
+  388 GiB を割り当てていますが、RAM にあるのはそのうち 187 GiB だけで、残りの
+  201 GiB はデコードのあいだずっとディスクから読み直されています。
+  `Host placed 388.1 GiB (186.8 in RAM / 201.3 on disk)` がその境目を言い、
+  ライブ画面では「ない側」が警告色で塗られて、すぐ下のフォールト数とつながります。
+- **バイトが実際に渡ったバスで測ります。** VRAM とホスト RAM に分かれたモデルに
+  単一の帯域幅はありません。三つのバスのトラフィックを足すと、ホストバスの上限が
+  116 GB/s のマシンで `≈ 155 GB/s` が出ます。カードは壁になっている側を名指しして
+  `≈ 87 GB/s from RAM` と書き、配置がホストの読み出し量を証明できるときだけ
+  割合を添えます。
+- **リクエストが何を求めたか。** greedy、サーバー既定のサンプリング、思考させた
+  ままの推論モデル — 同じエンジンで 11 % の開きが出ます。
+  `Sampling  temp default · chat` がその速度はどれのものかを言い、送っていない
+  温度を作り出しません。
+- **ドラフトがあったならその内訳。** モデル、ブロックサイズ、ターゲットが同意した
+  割合を分母つきで: `n_max 3 · 71% accepted (324/459)`。
+- **条件が変わったなら。** ラウンドの開始と終了ごとにクロック上限と CPU 温度を
+  読みます。実行中にウォッチドッグが上限を下げたら、カードがそう書きます。
+  説明のつかない遅い数字を残しません。
 - **フラグはすべて。** `-ngl -fa -b -ub -ctk -ctv --load-mode -ot`。Flash
   Attention の有無とバッチサイズ、この 2 つが抜けると結果の投稿がコメント 50 件の
   スレッドになります。
@@ -236,7 +271,8 @@ speculative `n_max` の値ごとに 1 回ずつ流して同じテープに記録
 
 **render:** `--gif FILE`、`--mp4 FILE`（`PATH` に ffmpeg が必要）、`--cast FILE`
 （asciicast v2）、`--frames DIR`（PNG シーケンス）、`--duration`、`--fps`、
-`--size WxH`。複数の出力を一度に指定すると、同じフレームから一緒に生成されます。
+`--size WxH`、`--open`（実行の前に、シェルプロンプトでコマンドを打つ場面を
+付けます）。複数の出力を一度に指定すると、同じフレームから一緒に生成されます。
 テープを指定しなければ最新の実行が使われます。
 
 **log:** `--sort`、`--model`、`--tag`、`-n`、`--tsv`、`--csv`、`--json`、
@@ -274,10 +310,12 @@ toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
 ```
 
 クリップは実行が始まる画面から始まり、実行全体を実速度で再生して、結果で
-止まります。見ていた画面の上に、二つの速度とマシン、モデルの置き場所が出ます。
-`--open` を付けると、このページ冒頭のクリップのようにコマンドを打つ場面が前に
-付き、`--duration` で好きな長さに収められます。同じテープからはいつも同じ
-クリップになります。
+止まります。見ていた画面の上に、二つの速度がフィードのサイズでも読める大きさで
+出て、マシンとエンジンとモデルの置き場所が添えられます。`--open` を付けると、
+このページ冒頭のクリップのようにコマンドを打つ場面が前に付き、`--duration` で
+好きな長さに収められます。頼まれない限り何も圧縮しません。長さに合わせて実行を
+早送りしたクリップは、このページが語ろうとしているその数字を偽ることになるから
+です。同じテープからはいつも同じクリップになります。
 
 ## どう測っているか
 
@@ -295,6 +333,15 @@ toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
   デコードトークンとして記録され、ライブ画面では薄く表示されます。TTFT は
   どちらの種類でも最初に届いたトークンです。
 - **「未ロード」は GGUF テンソルヘッダから**、テンソル種別ごとに読みます。
+- **常駐量は記録ではなく導出です。** ホスト配置のうち RAM にある分は、その瞬間の
+  プロセスのファイル由来常駐集合であり、それはモデルのマッピングのページ以外の
+  何物でもありません。だからペインもカードもクリップも、同じサンプルから出た
+  一つの分割を表示し、実行中はサンプルに従って動きます。`/proc` が見えないときは
+  ゼロで埋めるのではなく、分割そのものを出しません。
+- **ラウンドの境目ごとにマシンの証人を残します。** ロードアベレージ、IO 圧、
+  ページキャッシュ、生きている `llama-*` プロセス、cpufreq の上限、hwmon の温度
+  ひとつ。実行の途中でマシンが変わったなら、その数値はそもそも一つの設定のもの
+  ではなく、カードがそう言います。
 - **PID がない場合**（リモートサーバー、中を覗けないコンテナ）でも、速度、
   プレフィックスキャッシュのヒット率、GPU 状態は記録されます。ホスト RSS、ページ
   フォールト、フラグは `?` になり、カードに `/proc` ビューが使えなかった旨が

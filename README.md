@@ -14,40 +14,52 @@ into a `.tape` file, and prints a card that says where the model sits, what the
 process actually touched, and how fast the request really was — for one
 stream or for eight at once.
 
-<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording 4 concurrent streams, from the command being typed to the result card"></p>
+<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording two concurrent streams of a 440 GiB model, from the command being typed to the result"></p>
 
-<p align="center"><em>The whole session: the command typed at a prompt, the server found and attached, four streams at once, then the card — replayed from a tape through the same renderer <code>toktape render</code> uses, with no terminal recorder involved.</em></p>
+<p align="center"><em>A real run, not a mock-up: DeepSeek V4.1 Flash Q3_K_M, 440 GiB, most of its experts in host RAM on a two-card workstation. The command typed at a prompt, the server found and attached, two streams writing code at once, then the result. It is <code>assets/hero.tape</code> replayed through the same renderer <code>toktape render</code> uses — no terminal recorder involved, and <code>toktape card assets/hero.tape</code> prints the card below from the same file.</em></p>
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ toktape v0.1.0                  20260913-150210-r1-distill-llama-70b │
+│ toktape v0.1.0              20260914-070458-deepseek-v4-1-flash-q3-k │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MODEL    DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf · Q4_K_M          │
-│          42.5 GiB                                                    │
-│ ENGINE   llama-server b3650 (a1b2c3d) · linux 6.8.0-45-generic       │
-│          workstation                                                 │
-│ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
+│ MODEL    DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16 · 9 shards  │
+│          Q3_K_M · 440.5 GiB                                          │
+│ ENGINE   llama-server b96 (e42d711e5) · linux 6.8.0-139-generic · ws │
+│ RIG      RTX A6000 48G · RTX 3090 24G                                │
+│          AMD Ryzen Threadripper PRO 5975WX 32-Cores · 252 GB         │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        72.9 tok/s aggregate · 9.1 tok/s each                  │
-│               ≈ 410 GB/s, 44% of peak                                │
-│ Prefill       2927 tok/s aggregate · 610 tok/s each                  │
-│               TTFT p50 810 ms · 512 prompt tokens                    │
-│ Context       16384 (512 in / 307 out)                               │
-│ Prefix cache  25% hit (128/512) · warm                               │
+│ Decode        26.9 tok/s aggregate · 13.5 tok/s each                 │
+│               ≈ 87 GB/s from RAM                                     │
+│ Prefill       49.5 tok/s aggregate · 26.0 tok/s each                 │
+│               TTFT p50 1212 ms · 30 prompt tokens                    │
+│ Draft         DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf   │
+│               n_max 3 · 71% accepted (324/459)                       │
+│ Context       16384 (30 in / 240 out · 64 thinking)                  │
+│ Prefix cache  0% hit (0/30) · cold                                   │
 │ Sampling      temp default · chat                                    │
-│ Streams       8 × 9.1 tok/s = 72.9 tok/s aggregate                   │
-│               TTFT p50 810 ms p95 1050 ms · slots busy max 8         │
+│ Streams       2 × 13.5 tok/s = 26.9 tok/s aggregate                  │
+│               TTFT p50 1212 ms p95 1212 ms · slots busy max 2        │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MEMORY   GPU0 [██████████] 23.8/24.0 GiB                             │
-│          GPU1 [██████████] 22.8/24.0 GiB                             │
-│          weights 42.5 | kv 2.6 | compute 1.5 GiB                     │
-│          Host RSS 1.2 GiB (file 0.8 / anon 0.4)                      │
-│          Page faults 0.0 maj/token (0 during decode)                 │
+│ MEMORY   GPU0 [██████████] 46.0/48.0 GiB                             │
+│          GPU1 [█████████░] 22.6/24.0 GiB                             │
+│          weights 52.4 | kv ? | compute ? GiB                         │
+│          Host placed 388.1 GiB (186.8 in RAM / 201.3 on disk)        │
+│          Host RSS 188.2 GiB (file 186.8 / anon 0.9)                  │
+│          Page faults 5.8 maj/token (2775 during decode)              │
 ├──────────────────────────────────────────────────────────────────────┤
-│ HOST     GPU0 71°C 348 W · GPU1 67°C 318 W · throttled: no           │
+│ HOST     GPU0 68°C 122 W · GPU1 48°C 144 W · throttled: no           │
 │          contended: no                                               │
+│          conditions changed: k10temp Tctl 69 → 84 °C                 │
 ├──────────────────────────────────────────────────────────────────────┤
-│ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0 -t 16    │
+│ FLAGS    -ngl 99 -fa default -b 2048 -ub 512 -ctk default            │
+│          -ctv default -t 32                                          │
+│          -md DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf    │
+│          --draft-max 3                                               │
+│          -m /models/DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16… │
+│          --alias DeepSeek-V4.1-Flash -c 16384 --lazy-mode auto       │
+│          --spec-type draft-dspark -otd output_norm=CUDA0 --jinja     │
+│          --reasoning-budget 64 --host 127.0.0.1 --port 8001          │
+│          -ot blk\.[0-3]\.ffn_.*_exps=CUDA0 -ot blk\.6\.ffn_down_exp… │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │
 └──────────────────────────────────────────────────────────────────────┘
@@ -139,7 +151,10 @@ Per-stream tok/s falls as N rises and that is expected; the aggregate is the
 number that answers "can this rig serve eight agents", and a single-stream
 benchmark cannot show it.
 
-**Watch it live**, tiles per stream plus a machine pane:
+**Watch it live**, tiles per stream plus a machine pane. A fenced code block
+in an answer is shaped as it arrives — keywords carry weight, comments and
+punctuation step back — so a code answer reads as code without a second
+colour on the screen:
 
 ```sh
 toktape -n 4 --tui
@@ -180,6 +195,26 @@ side by side. Each field is there because it settles an argument.
   touched. The card splits host RSS into file and anon, splits VRAM into
   weights, KV cache and compute buffers, and computes never-loaded bytes from
   the GGUF tensor headers rather than from file size minus RSS.
+- **Placed on the CPU is not the same as in RAM.** `-ot ... exps=CPU` is a
+  backend assignment, not a residency: the card above places 388 GiB on the
+  host and only 187 of it is resident, so 201 GiB is read back off the disk as
+  the model decodes. `Host placed 388.1 GiB (186.8 in RAM / 201.3 on disk)`
+  says which, and on the live screen the part that is not there is drawn in
+  the warning colour beside the fault count that explains it.
+- **Bandwidth against the bus the bytes crossed.** A model split between VRAM
+  and host RAM has no single bandwidth: adding the three buses' traffic
+  together produced `≈ 155 GB/s` on a machine whose host bus tops out at 116.
+  The card names the side that is the wall — `≈ 87 GB/s from RAM` — and prints
+  a percentage only when the placement proves what the host reads.
+- **What the request asked for.** Greedy against the server's default sampling
+  against a thinking model left to think is an eleven per cent spread on one
+  engine. `Sampling  temp default · chat` says which of them the rates belong
+  to, and never invents a temperature nobody sent.
+- **The draft, when there was one.** The model, the block size and how often
+  the target agreed, with the counts: `n_max 3 · 71% accepted (324/459)`.
+- **Conditions changed.** The clock cap and a CPU temperature are read at the
+  start and the end of every round. When a thermal watchdog moves the cap
+  mid-run, the card says so instead of leaving a slow number unexplained.
 - **Flags, in full.** `-ngl -fa -b -ub -ctk -ctv --load-mode -ot`. Flash
   attention state and batch sizing are the two omissions that reliably turn a
   results post into a fifty-comment thread.
@@ -235,8 +270,9 @@ they say why they are not.
 
 **Render:** `--gif FILE`, `--mp4 FILE` (needs ffmpeg on `PATH`), `--cast FILE`
 (asciicast v2), `--frames DIR` (PNG sequence), `--duration`, `--fps`,
-`--size WxH`. Name several outputs at once and they come out of the same
-frames. With no tape named, the newest run is used.
+`--size WxH`, `--open` (the command typed at a shell prompt in front of the
+run). Name several outputs at once and they come out of the same frames. With
+no tape named, the newest run is used.
 
 **Log:** `--sort`, `--model`, `--tag`, `-n`, `--tsv`, `--csv`, `--json`,
 `--md`, `--rebuild`, `--out`.
@@ -273,11 +309,13 @@ toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
 ```
 
 A clip opens on the screen at the run's start, plays the whole run at real
-speed, and holds on the result: the two rates, the rig and where the model
-sits, over the screen you were watching. `--open` puts the command being
-typed in front of it, the way the clip at the top of this page starts;
-`--duration` fits the run into a length you choose. The same tape always
-renders the same clip.
+speed, and holds on the result: the two rates drawn large enough to read at
+feed size, the rig, the engine and where the model sits, over the screen you
+were watching. `--open` puts the command being typed in front of it, the way
+the clip at the top of this page starts; `--duration` fits the run into a
+length you choose. Nothing is compressed unless you ask for it — a clip that
+sped a run up to fit a limit would be lying about the one number the page is
+about. The same tape always renders the same clip.
 
 ## How it measures
 
@@ -296,6 +334,16 @@ renders the same clip.
   are recorded as decode tokens, shown dimmed on the live screen, and TTFT is
   the first token of either kind.
 - **"Never loaded" is read from the GGUF tensor headers**, per tensor class.
+- **Residency is derived, never recorded.** What is in RAM of a host
+  placement is the process's file-backed resident set at that instant, which
+  is the model mapping's pages and nothing else — so the pane, the card and
+  the clip all print one split from one sample, and it moves during the run as
+  the sample does. Without a `/proc` view the split is not printed at all
+  rather than defaulted to zero.
+- **A machine witness at every round edge.** Load average, IO pressure, the
+  page cache, the live `llama-*` processes, the cpufreq cap and one hwmon
+  temperature. A run whose machine changed under it was never one
+  measurement, and the card says so.
 - **Without a PID** (a remote server, a container you cannot see into) the
   rates, prefix-cache hit and GPU state are still recorded. Host RSS, page
   faults and flags print as `?`, and the card says the `/proc` view was

@@ -20,34 +20,46 @@ toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.ta
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ toktape v0.1.0                  20260913-150210-r1-distill-llama-70b │
+│ toktape v0.1.0              20260914-070458-deepseek-v4-1-flash-q3-k │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MODEL    DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf · Q4_K_M          │
-│          42.5 GiB                                                    │
-│ ENGINE   llama-server b3650 (a1b2c3d) · linux 6.8.0-45-generic       │
-│          workstation                                                 │
-│ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
+│ MODEL    DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16 · 9 shards  │
+│          Q3_K_M · 440.5 GiB                                          │
+│ ENGINE   llama-server b96 (e42d711e5) · linux 6.8.0-139-generic · ws │
+│ RIG      RTX A6000 48G · RTX 3090 24G                                │
+│          AMD Ryzen Threadripper PRO 5975WX 32-Cores · 252 GB         │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        72.9 tok/s aggregate · 9.1 tok/s each                  │
-│               ≈ 410 GB/s, 44% of peak                                │
-│ Prefill       2927 tok/s aggregate · 610 tok/s each                  │
-│               TTFT p50 810 ms · 512 prompt tokens                    │
-│ Context       16384 (512 in / 307 out)                               │
-│ Prefix cache  25% hit (128/512) · warm                               │
+│ Decode        26.9 tok/s aggregate · 13.5 tok/s each                 │
+│               ≈ 87 GB/s from RAM                                     │
+│ Prefill       49.5 tok/s aggregate · 26.0 tok/s each                 │
+│               TTFT p50 1212 ms · 30 prompt tokens                    │
+│ Draft         DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf   │
+│               n_max 3 · 71% accepted (324/459)                       │
+│ Context       16384 (30 in / 240 out · 64 thinking)                  │
+│ Prefix cache  0% hit (0/30) · cold                                   │
 │ Sampling      temp default · chat                                    │
-│ Streams       8 × 9.1 tok/s = 72.9 tok/s aggregate                   │
-│               TTFT p50 810 ms p95 1050 ms · slots busy max 8         │
+│ Streams       2 × 13.5 tok/s = 26.9 tok/s aggregate                  │
+│               TTFT p50 1212 ms p95 1212 ms · slots busy max 2        │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MEMORY   GPU0 [██████████] 23.8/24.0 GiB                             │
-│          GPU1 [██████████] 22.8/24.0 GiB                             │
-│          weights 42.5 | kv 2.6 | compute 1.5 GiB                     │
-│          Host RSS 1.2 GiB (file 0.8 / anon 0.4)                      │
-│          Page faults 0.0 maj/token (0 during decode)                 │
+│ MEMORY   GPU0 [██████████] 46.0/48.0 GiB                             │
+│          GPU1 [█████████░] 22.6/24.0 GiB                             │
+│          weights 52.4 | kv ? | compute ? GiB                         │
+│          Host placed 388.1 GiB (186.8 in RAM / 201.3 on disk)        │
+│          Host RSS 188.2 GiB (file 186.8 / anon 0.9)                  │
+│          Page faults 5.8 maj/token (2775 during decode)              │
 ├──────────────────────────────────────────────────────────────────────┤
-│ HOST     GPU0 71°C 348 W · GPU1 67°C 318 W · throttled: no           │
+│ HOST     GPU0 68°C 122 W · GPU1 48°C 144 W · throttled: no           │
 │          contended: no                                               │
+│          conditions changed: k10temp Tctl 69 → 84 °C                 │
 ├──────────────────────────────────────────────────────────────────────┤
-│ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0 -t 16    │
+│ FLAGS    -ngl 99 -fa default -b 2048 -ub 512 -ctk default            │
+│          -ctv default -t 32                                          │
+│          -md DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf    │
+│          --draft-max 3                                               │
+│          -m /models/DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16… │
+│          --alias DeepSeek-V4.1-Flash -c 16384 --lazy-mode auto       │
+│          --spec-type draft-dspark -otd output_norm=CUDA0 --jinja     │
+│          --reasoning-budget 64 --host 127.0.0.1 --port 8001          │
+│          -ot blk\.[0-3]\.ffn_.*_exps=CUDA0 -ot blk\.6\.ffn_down_exp… │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │
 └──────────────────────────────────────────────────────────────────────┘
@@ -136,7 +148,10 @@ N이 늘면 스트림당 tok/s는 떨어지는 게 정상입니다. "이 장비�
 감당하느냐"에 답하는 숫자는 합계이고, 단일 스트림 벤치마크로는 이 숫자를
 볼 수 없습니다.
 
-**실시간으로 보기.** 스트림마다 타일 하나, 오른쪽에 머신 패널입니다.
+**실시간으로 보기.** 스트림마다 타일 하나, 오른쪽에 머신 패널입니다. 답변 안의
+펜스 코드 블록은 도착하는 대로 모양이 잡힙니다. 키워드는 무게를 얻고 주석과
+구두점은 한 단계 물러나서, 화면에 색을 하나도 더하지 않고도 코드가 코드로
+읽힙니다.
 
 ```sh
 toktape -n 4 --tui
@@ -229,8 +244,9 @@ raw 엔드포인트에 greedy로 보낸 쪽이 25.6 tok/s, 같은 엔드포인�
 
 **render:** `--gif FILE`, `--mp4 FILE`(`PATH`에 ffmpeg 필요), `--cast FILE`
 (asciicast v2), `--frames DIR`(PNG 시퀀스), `--duration`, `--fps`,
-`--size WxH`. 여러 출력을 한 번에 지정하면 같은 프레임에서 함께 나옵니다.
-테이프를 지정하지 않으면 가장 최근 실행을 씁니다.
+`--size WxH`, `--open`(실행 앞에 셸 프롬프트에서 명령을 치는 장면을 붙입니다).
+여러 출력을 한 번에 지정하면 같은 프레임에서 함께 나옵니다. 테이프를 지정하지
+않으면 가장 최근 실행을 씁니다.
 
 **log:** `--sort`, `--model`, `--tag`, `-n`, `--tsv`, `--csv`, `--json`,
 `--md`, `--rebuild`, `--out`.
@@ -287,6 +303,15 @@ toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
   토큰으로 기록되고 라이브 화면에서 흐리게 표시됩니다. TTFT는 두 종류 중 먼저
   온 토큰입니다.
 - **"아직 로드되지 않음"은 GGUF 텐서 헤더에서** 텐서 종류별로 읽습니다.
+- **상주량은 기록이 아니라 파생입니다.** 호스트 배치 중 RAM에 있는 몫은 그
+  순간 프로세스의 파일 기반 상주 집합이고, 그것은 모델 매핑의 페이지 외에는
+  아무것도 아닙니다. 그래서 패널과 카드와 클립이 같은 표본에서 나온 하나의
+  분할을 찍고, 실행 중에는 표본을 따라 움직입니다. `/proc`을 못 보면 0으로
+  채우는 대신 분할 자체를 찍지 않습니다.
+- **라운드 경계마다 기계의 증인을 남깁니다.** 로드 애버리지, IO 압력, 페이지
+  캐시, 살아 있는 `llama-*` 프로세스, cpufreq 캡, hwmon 온도 하나. 실행 도중
+  기계가 변했다면 그 수치는 애초에 한 가지 설정의 것이 아니었고, 카드가 그렇게
+  말합니다.
 - **PID가 없으면**(원격 서버, 들여다볼 수 없는 컨테이너) 속도, 프리픽스 캐시
   히트, GPU 상태는 그대로 기록됩니다. 호스트 RSS, 페이지 폴트, 플래그는 `?`로
   찍히고 카드에 `/proc` 뷰를 쓸 수 없었다고 적힙니다. 폴트를 측정하지 못한

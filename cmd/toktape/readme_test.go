@@ -6,6 +6,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/midagedev/toktape/internal/card"
+	"github.com/midagedev/toktape/internal/tape"
 )
 
 // The three READMEs are one document in three languages. Prose differs; the
@@ -25,14 +28,24 @@ func repoFile(t *testing.T, rel string) string {
 	return string(b)
 }
 
-// TestREADMECardIsTheGolden: the pasted card is the concurrent example
-// exactly as internal/card renders it. When the example changes, the goldens
-// move and this test says the READMEs must move with them.
+// TestREADMECardIsTheGolden: the card pasted at the top of every README is
+// the one internal/card renders from assets/hero.tape, the recording the hero
+// clip above it plays (2026-09-14).
+//
+// It used to be a fixture's card. A reader had no way to check that one; this
+// one they can render themselves — `toktape card assets/hero.tape` is in the
+// caption — and it is the same run the image shows, so the page makes one
+// claim instead of two. When the card's layout changes, this says the READMEs
+// must be re-pasted with it.
 func TestREADMECardIsTheGolden(t *testing.T) {
-	golden := strings.TrimRight(repoFile(t, "internal/card/testdata/example-concurrent.txt"), "\n")
+	tp, err := tape.Read(filepath.Join("..", "..", "assets", "hero.tape"))
+	if err != nil {
+		t.Fatalf("the hero's recording is missing: %v", err)
+	}
+	golden := strings.TrimRight(card.Text(&tp.Summary), "\n")
 	for _, name := range readmes {
 		if !strings.Contains(repoFile(t, name), golden) {
-			t.Errorf("%s: card block is not internal/card/testdata/example-concurrent.txt; re-paste it", name)
+			t.Errorf("%s: card block is not `toktape card assets/hero.tape`; re-paste it", name)
 		}
 	}
 }
