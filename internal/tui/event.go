@@ -60,6 +60,16 @@ type Event struct {
 	// not know.
 	MaxTokens int
 
+	// Round is the 0-based prompt round a stream belongs to, Rounds how many
+	// rounds the run sends (0 when it is not a rounds run) and RoundName the
+	// prompts file's name for the round, "" when the line had none. All three
+	// are set on EventStreamStart (TTP-38): a `record --prompts` run reuses
+	// stream indices 0..N-1 in every round, and without them the screen
+	// cannot tell round 2's stream 0 from round 1's.
+	Round     int
+	Rounds    int
+	RoundName string
+
 	// Tape is the finished run, set on EventDone. TapePath is where it was
 	// written, empty when it was not.
 	Tape     *tape.Tape
@@ -96,6 +106,12 @@ func (m Model) Apply(e Event) Model {
 		m.PID = e.PID
 		m.Summary.Server.PID = e.PID
 	case EventStreamStart:
+		// A rounds run sends stream indices 0..N-1 again in every round, so
+		// the first start of a new round clears the tiles before anything of
+		// the round lands on them (TTP-38).
+		if e.Rounds > 1 && (m.Rounds == 0 || e.Round != m.Round) {
+			m.beginRound(e)
+		}
 		m.ensureStream(e.Stream)
 		s := &m.Streams[m.streamPos(e.Stream)]
 		s.StartedAt = e.T
@@ -166,6 +182,27 @@ func (m Model) Apply(e Event) Model {
 		}
 	}
 	return m
+}
+
+// beginRound switches the model to the round e starts.
+//
+// Everything a tile shows is per round — the text, the tokens and therefore
+// the thinking badge, the count against the cap, the prefill rows, the final
+// timings, the error — and is cleared. The slice keeps its length: a round is
+// N streams, as the one before it was, and Summary.Concurrency stays N. What
+// is not per round is kept: the host samples run across the whole tape, and
+// RunEnd is the run's. The first token of the round finds no previous token,
+// so its ITL is 0 rather than the gap between the rounds.
+//
+// The slice is a new one rather than the old one zeroed in place, so a frame
+// still holding the previous model keeps drawing the previous round.
+func (m *Model) beginRound(e Event) {
+	m.Round, m.Rounds, m.RoundName = e.Round, e.Rounds, e.RoundName
+	fresh := make([]Stream, len(m.Streams))
+	for i, s := range m.Streams {
+		fresh[i] = Stream{Index: s.Index, Slot: s.Slot}
+	}
+	m.Streams = fresh
 }
 
 // ensureStream grows the stream slice so index i exists.

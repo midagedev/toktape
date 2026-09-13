@@ -219,6 +219,10 @@ func openCommand(tp *tape.Tape) string {
 // openStreams is how many streams the run had: the summary's figure, or the
 // requests actually recorded when the summary does not say. Zero when there is
 // no tape, which prints no prefill lines rather than an invented one.
+//
+// A `record --prompts` tape holds N requests per round (TTP-38), and the
+// command it was run with sent N at a time, so the fallback counts the first
+// round's requests; a single-round tape's requests are all round 0.
 func openStreams(tp *tape.Tape) int {
 	if tp == nil {
 		return 0
@@ -226,7 +230,13 @@ func openStreams(tp *tape.Tape) int {
 	if n := tp.Summary.Concurrency; n > 0 {
 		return n
 	}
-	return len(tp.Requests)
+	n := 0
+	for _, req := range tp.Requests {
+		if req.Round == 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // typedPrefix is the part of cmd that has been typed at open time t.
@@ -287,8 +297,8 @@ func openAttachLine(l *openLine, tp *tape.Tape) *openLine {
 		s = tp.Summary
 	}
 	kind := string(s.Server.Kind)
-	if kind == "" {
-		kind = string(tape.ServerUnknown)
+	if kind == "" || s.Server.Kind == tape.ServerUnknown {
+		kind = "?"
 	}
 	url := s.Server.URL
 	if url == "" {

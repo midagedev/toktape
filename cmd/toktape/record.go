@@ -148,6 +148,7 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 // on stdout.
 func recordPlain(ctx context.Context, stdout, stderr io.Writer, opts recorder.Options, cfg recordConfig) int {
 	pr := newProgress(stderr, cfg.quiet)
+	pr.rounds = opts.Rounds
 	opts.Progress = pr.handle
 
 	pr.start()
@@ -358,9 +359,11 @@ func promptRequests(prompts []string) []server.StreamRequest {
 // headerLine is the one line printed the moment the run is attached:
 // what server, what build, what model, which process.
 func headerLine(s *tape.RunSummary) string {
+	// An engine that did not identify itself is "?", the card's word for an
+	// unknown, never "unknown" (TTP-37).
 	kind := string(s.Server.Kind)
-	if kind == "" {
-		kind = string(tape.ServerUnknown)
+	if kind == "" || s.Server.Kind == tape.ServerUnknown {
+		kind = "?"
 	}
 	parts := []string{fmt.Sprintf("→ %s at %s", kind, s.Server.URL)}
 	if s.Server.Build != "" {

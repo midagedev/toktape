@@ -34,6 +34,10 @@ func main() {
 	// cheapest way to check an effect that is a function of clip time, and
 	// before this flag it meant writing a program.
 	at := flag.String("at", "", "comma-separated clip times to dump instead of the default set, e.g. 12s,12.2s")
+	// -rounds dumps the multi-round example (TTP-38): K sequential prompt
+	// rounds of -n streams in one tape, the shape `record --prompts` writes.
+	// 0 or 1 is the ordinary single-round example.
+	rounds := flag.Int("rounds", 0, "sequential prompt rounds (2..3) instead of one; 0 = the single-round example")
 	flag.Parse()
 
 	grid, err := tui.ParseGrid(*gridSpec)
@@ -45,6 +49,13 @@ func main() {
 		fail(err)
 	}
 	tp := tui.ExampleTapeN(*n)
+	// tag goes into every file name, so a rounds dump never overwrites the
+	// single-round frames it is compared against.
+	tag := ""
+	if *rounds > 1 {
+		tp = tui.ExampleRoundsTape(*n, *rounds)
+		tag = fmt.Sprintf("-r%d", tp.Summary.Rounds)
+	}
 	extras, err := parseOffsets(*at)
 	if err != nil {
 		fail(err)
@@ -60,6 +71,12 @@ func main() {
 	// and a "done" frame stamped a few milliseconds early is a live model with
 	// one token still pending — which looks finished and is not.
 	doneAt := time.Duration(tp.Summary.Aggregate.WallMs*float64(time.Millisecond)) + time.Second
+	if *rounds > 1 {
+		// A rounds run's WallMs is the sum of its rounds' own windows and
+		// leaves out the gaps between them, so it ends early on the clip's
+		// timeline; the last token is the end that frame has to be past.
+		doneAt = tui.ModelAt(tp, time.Duration(1<<62)).RunEnd + time.Second
+	}
 	offsets := []struct {
 		name string
 		at   time.Duration
@@ -85,7 +102,7 @@ func main() {
 		p := tui.View(plain, off.at, *w, *h)
 		c := tui.View(colour, off.at, *w, *h)
 
-		base := filepath.Join(*out, fmt.Sprintf("%dx%d-n%d-%s-p%d-%s", *w, *h, *n, grid.String(), *page, off.name))
+		base := filepath.Join(*out, fmt.Sprintf("%dx%d-n%d%s-%s-p%d-%s", *w, *h, *n, tag, grid.String(), *page, off.name))
 		write(base+".txt", p)
 		write(base+".ansi", c)
 		bad += check(base+".txt", p, *w, *h)
@@ -109,7 +126,7 @@ func main() {
 		plain := tui.View(m, doneAt, *w, *h)
 		m.Theme = tui.ColourTheme()
 		colour := tui.View(m, doneAt, *w, *h)
-		base := filepath.Join(*out, fmt.Sprintf("%dx%d-n%d-%s-p%d-%s", *w, *h, *n, grid.String(), *page, extra.name))
+		base := filepath.Join(*out, fmt.Sprintf("%dx%d-n%d%s-%s-p%d-%s", *w, *h, *n, tag, grid.String(), *page, extra.name))
 		write(base+".txt", plain)
 		write(base+".ansi", colour)
 		bad += check(base+".txt", plain, *w, *h)

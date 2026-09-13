@@ -56,9 +56,10 @@ func recordTUI(ctx context.Context, stdout, stderr io.Writer, opts recorder.Opti
 		default:
 		}
 	}
+	rounds := opts.Rounds
 	opts.Progress = func(ev recorder.Event) {
 		if e, ok := bridgeEvent(ev, time.Since(start)); ok {
-			send(e)
+			send(stampRound(e, rounds))
 		}
 	}
 
@@ -116,6 +117,23 @@ func recordTUI(ctx context.Context, stdout, stderr io.Writer, opts recorder.Opti
 	return exitOK
 }
 
+// stampRound adds what a stream start needs from the prompts file: how many
+// rounds the run sends and the name of the one this stream belongs to
+// (TTP-38). The recorder's event carries the round index but not the file, so
+// bridgeEvent stays a pure mapping of one event and this is the part that
+// needs the run's options. A run of one round is not a rounds run and is
+// left as it is, as is every event other than a stream start.
+func stampRound(e tui.Event, rounds []recorder.Round) tui.Event {
+	if e.Kind != tui.EventStreamStart || len(rounds) < 2 {
+		return e
+	}
+	e.Rounds = len(rounds)
+	if e.Round >= 0 && e.Round < len(rounds) {
+		e.RoundName = rounds[e.Round].Name
+	}
+	return e
+}
+
 // bridgeEvent translates one recorder observation into one the screen draws,
 // reporting false for the ones it does not.
 //
@@ -153,6 +171,9 @@ func bridgeEvent(ev recorder.Event, t time.Duration) (tui.Event, bool) {
 		// from its first token. Without it the tile prints a bare count until
 		// the run ends and the tape supplies the budget.
 		out.MaxTokens = ev.MaxTokens
+		// The round, so the screen clears the tiles when a new one begins
+		// rather than appending its tokens to the last one's (TTP-38).
+		out.Round = ev.Round
 	case recorder.EventToken:
 		out.Kind = tui.EventToken
 		out.Token = ev.Token

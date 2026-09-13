@@ -132,7 +132,10 @@ func TestOpenScreenOfNoTape(t *testing.T) {
 	if strings.Contains(screen, "stream 1/") {
 		t.Errorf("a run with no streams still drew a prefill line:\n%s", trimScreen(screen))
 	}
-	if !strings.Contains(screen, "unknown at ?") {
+	// 2026-09-13 TTP-37: the unidentified engine is "?" rather than the word
+	// "unknown", the same change headerLine made; the attach line still names
+	// no server it did not observe. FAIL-first: the base prints "unknown at ?".
+	if !strings.Contains(screen, "→ ? at ?") {
 		t.Errorf("the attach line invented a server:\n%s", trimScreen(screen))
 	}
 }

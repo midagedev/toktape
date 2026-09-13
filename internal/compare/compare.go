@@ -289,7 +289,9 @@ func metaChanges(a, b *tape.RunSummary) []Change {
 		{"quant", a.Model.Quant, b.Model.Quant},
 		{"build", a.Server.Build, b.Server.Build},
 		{"commit", a.Server.Commit, b.Server.Commit},
-		{"engine", string(a.Server.Kind), string(b.Server.Kind)},
+		// An engine that did not identify itself is unknown however the tape
+		// spells it, "" or tape.ServerUnknown, and prints "?" (TTP-37).
+		{"engine", engineKind(a.Server.Kind), engineKind(b.Server.Kind)},
 		// Which draft produced the acceptance rate in the metric table, and
 		// how many tokens it was allowed to guess at a time (TTP-30). A rate
 		// that moved says nothing if the draft moved with it.
@@ -323,6 +325,15 @@ func modelDir(s, other *tape.RunSummary) string {
 		return ""
 	}
 	return s.Model.Dir
+}
+
+// engineKind is the engine's name for the run section, "" for one that did not
+// identify itself so orUnknown prints it as "?" and two unknowns are equal.
+func engineKind(k tape.ServerKind) string {
+	if k == tape.ServerUnknown {
+		return ""
+	}
+	return string(k)
 }
 
 // orUnknown is the card's rule: a value that was not observed prints "?".

@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/midagedev/toktape/internal/card"
+	"github.com/midagedev/toktape/internal/tape"
 )
 
 // Screen geometry. The right pane is a fixed 30 columns because every figure
@@ -163,9 +164,17 @@ func topBorder(m Model, th Theme, t time.Duration, inner int) string {
 	return th.paint(th.dim, "┌") + l.String() + th.paint(th.dim, "┐")
 }
 
-// titleSegments builds "toktape · <model> · <engine> · <rig>". Anything the
-// recorder has not learned yet is left out rather than guessed, so the bar
-// fills in as /props and the GPU probe answer.
+// titleSegments builds "toktape · <model> · <round> · <engine> · <rig>".
+// The model and the rig are left out until the recorder has learned them, so
+// the bar fills in as /props and the GPU probe answer. So is the engine until
+// attach; after it, an engine that has not identified itself prints "?"
+// (TTP-37), the word the card uses, never "unknown" or a kind nobody observed.
+//
+// The round segment ("round 2/6 sql-2") exists only on a rounds run (TTP-38).
+// Its place is the order the bar gives segments up in when it is too narrow:
+// topBorder cuts from the end, so the rig goes first, then the engine, then
+// the round, and the model — the thing a reader of the bar is looking for —
+// last.
 func titleSegments(m Model) []titleSeg {
 	s := m.Summary
 	segs := []titleSeg{{text: "toktape", role: roleBrand}}
@@ -176,9 +185,40 @@ func titleSegments(m Model) []titleSeg {
 		segs = append(segs, titleSeg{text: " · ", role: roleDim}, titleSeg{text: text, role: role})
 	}
 	add(strings.Join(nonEmpty(modelName(s.Model), s.Model.Quant), " "), roleText)
-	add(strings.Join(nonEmpty(string(s.Server.Kind), s.Server.Build), " "), roleDim)
+	if m.Rounds > 1 {
+		add(roundLabel(m), roleDim)
+	}
+	// Before attach the live model has neither a kind nor a build: nothing has
+	// been observed yet, so the segment waits like the model's does. After
+	// attach the recorder always stamps a kind (tape.ServerUnknown when it
+	// could not tell), so the "?" appears exactly when there is an answer.
+	if s.Server.Kind != "" || s.Server.Build != "" {
+		add(strings.Join(nonEmpty(engineKind(s.Server.Kind), s.Server.Build), " "), roleDim)
+	}
 	add(rigSummary(s.Host), roleDim)
 	return segs
+}
+
+// roundLabel is "round 2/6 sql-2", or "round 2/6" for a round the prompts
+// file did not name.
+func roundLabel(m Model) string {
+	label := fmt.Sprintf("round %d/%d", m.Round+1, m.Rounds)
+	if m.RoundName != "" {
+		label += " " + m.RoundName
+	}
+	return label
+}
+
+// engineKind is the engine's name as the title prints it: "?" for an engine
+// that has not identified itself, "" or tape.ServerUnknown alike (TTP-37).
+// The build joins it the way internal/card's engineString joins them, so an
+// unknown engine with a build reads "? b3650" and one with nothing is a lone
+// "?". The title never carried the commit and still does not.
+func engineKind(k tape.ServerKind) string {
+	if k == "" || k == tape.ServerUnknown {
+		return "?"
+	}
+	return string(k)
 }
 
 // footerLine is the token latency strip and the key hints.

@@ -966,6 +966,9 @@ func TestEngineStringIKLlamaHasNoBuildNumber(t *testing.T) {
 	}{
 		{"ik with a bare commit", tape.ServerInfo{Kind: tape.ServerIKLlama, Commit: "7b79b229"}, "ik_llama.cpp 7b79b229"},
 		{"ik that did stamp a build keeps the pair", tape.ServerInfo{Kind: tape.ServerIKLlama, Build: "b3650", Commit: "7b79b229"}, "ik_llama.cpp b3650 (7b79b229)"},
+		// 2026-09-13 TTP-37: the card's case for an ik attach that reported
+		// neither a build nor a commit, run against this package's copy.
+		{"ik with neither", tape.ServerInfo{Kind: tape.ServerIKLlama}, "ik_llama.cpp ?"},
 		{"mainline with a bare commit keeps the brackets", tape.ServerInfo{Kind: tape.ServerLlamaCPP, Commit: "abcdef12"}, "llama-server (abcdef12)"},
 	}
 	for _, tc := range cases {

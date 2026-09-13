@@ -102,6 +102,14 @@ type Model struct {
 	Streams []Stream
 	Samples []tape.RunSample
 
+	// Round is the 0-based prompt round the tiles show, Rounds how many the
+	// run has (0 or 1 = not a rounds run) and RoundName that round's name from
+	// the prompts file, "" when it had none (TTP-38). A rounds run draws one
+	// round at a time: Streams are that round's N requests, never N×K.
+	Round     int
+	Rounds    int
+	RoundName string
+
 	// At is the instant the state was cut at: no token, sample or progress
 	// row later than At is in the model. For the live program it is the
 	// arrival time of the newest event.
@@ -144,10 +152,21 @@ func ModelAt(tp *tape.Tape, at time.Duration) Model {
 	m.Summary = tp.Summary
 	m.PID = tp.Summary.Server.PID
 
-	m.Streams = make([]Stream, 0, len(tp.Requests))
+	// A rounds run is drawn one round at a time: the round active at `at`,
+	// and only its requests become tiles (TTP-38). A single-round tape takes
+	// the whole request list, exactly as before rounds existed.
+	reqs := tp.Requests
+	if tp.Summary.Rounds > 1 {
+		m.Rounds = tp.Summary.Rounds
+		m.Round = roundAt(tp, at)
+		m.RoundName = roundName(tp.Summary, m.Round)
+		reqs = roundRequests(tp, m.Round)
+	}
+
+	m.Streams = make([]Stream, 0, len(reqs))
 	runEnd := time.Duration(0)
-	allDone := len(tp.Requests) > 0
-	for _, req := range tp.Requests {
+	allDone := len(reqs) > 0
+	for _, req := range reqs {
 		s := Stream{
 			Index:          req.Index,
 			Slot:           req.Slot,
@@ -207,6 +226,12 @@ func ModelAt(tp *tape.Tape, at time.Duration) Model {
 		}
 		m.Streams = append(m.Streams, s)
 	}
+	if m.Rounds > 1 {
+		// The run ends with its last round, not with the round on screen: a
+		// round that has finished with more to come is not a finished run,
+		// and the done footer and the card hint must not flash up in the gap.
+		runEnd = tapeEnd(tp)
+	}
 	m.RunEnd = runEnd
 	m.Done = allDone && at >= runEnd
 
@@ -217,6 +242,47 @@ func ModelAt(tp *tape.Tape, at time.Duration) Model {
 		m.Samples = append(m.Samples, sm)
 	}
 	return m
+}
+
+// roundAt is the round of tp on screen at clip time at: the last round whose
+// earliest request was sent at or before at, and round 0 before any was.
+// Past the run's end that is the last round.
+func roundAt(tp *tape.Tape, at time.Duration) int {
+	starts := map[int]time.Duration{}
+	for _, req := range tp.Requests {
+		if s, ok := starts[req.Round]; !ok || req.StartedAt < s {
+			starts[req.Round] = req.StartedAt
+		}
+	}
+	round, best := 0, time.Duration(-1)
+	for k, s := range starts {
+		if s <= at && (s > best || s == best && k > round) {
+			round, best = k, s
+		}
+	}
+	return round
+}
+
+// roundRequests is round k's requests, in the tape's order.
+func roundRequests(tp *tape.Tape, k int) []tape.RequestRecord {
+	out := make([]tape.RequestRecord, 0, len(tp.Requests))
+	for _, req := range tp.Requests {
+		if req.Round == k {
+			out = append(out, req)
+		}
+	}
+	return out
+}
+
+// roundName is round k's name from the prompts file, "" when the line had
+// none or the summary does not carry the round.
+func roundName(s tape.RunSummary, k int) string {
+	for _, r := range s.PerRound {
+		if r.Index == k {
+			return r.Name
+		}
+	}
+	return ""
 }
 
 // tokenWindow returns the last n tokens of the whole run, ordered by arrival.
