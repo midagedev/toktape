@@ -53,7 +53,7 @@ func main() {
 	// run has no file on disk, so the path is derived from its own ID rather
 	// than typed in: a hard-coded string would keep showing the old ID after
 	// the fixture changed.
-	opts := render.Options{FPS: HeroFPS, TapePath: "~/.toktape/runs/" + tp.Summary.ID + tape.Ext}
+	opts := render.Options{FPS: HeroFPS, ColdOpen: true, TapePath: "~/.toktape/runs/" + tp.Summary.ID + tape.Ext}
 
 	if dir := filepath.Dir(*out); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -68,7 +68,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	sched := render.NewSchedule(render.RunEnd(tp), HeroFPS, 0)
+	sched := render.NewSchedule(render.RunEnd(tp), HeroFPS, 0, true)
 	fmt.Printf("hero %s — %d bytes, %d frames, %v at %d fps (%v)\n",
 		*out, fi.Size(), sched.Count, sched.Duration.Round(time.Millisecond), sched.FPS,
 		time.Since(start).Round(time.Millisecond))

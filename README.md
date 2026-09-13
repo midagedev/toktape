@@ -252,10 +252,12 @@ toktape render ~/.toktape/runs/<id>.tape
 toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
 ```
 
-A clip opens on the command being typed, attaches, plays the run at real
-speed (runs past 30 s are compressed to fit), and holds on the card. Every
-frame is a pure function of clip time, so the same tape always renders the
-same clip.
+A clip opens on the screen at the run's start, plays the run at real speed
+(runs past 30 s are compressed to fit), and holds on the result: the two
+rates, the rig and where the model sits, over the screen you were watching.
+`--open` puts the command being typed in front of it, the way the clip at
+the top of this page starts. Every frame is a pure function of clip time,
+so the same tape always renders the same clip.
 
 ## How it measures
 

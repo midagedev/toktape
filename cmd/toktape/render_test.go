@@ -323,7 +323,7 @@ func TestHeroGIFIsPostable(t *testing.T) {
 	// upper bound, and identical frames are folded into the one before them,
 	// so the stored count is at most that and nowhere near it only if the
 	// clip stopped early.
-	sched := render.NewSchedule(render.RunEnd(tui.ExampleTapeN(4)), heroFPS, 0)
+	sched := render.NewSchedule(render.RunEnd(tui.ExampleTapeN(4)), heroFPS, 0, true)
 	if len(g.Image) > sched.Count {
 		t.Errorf("the hero has %d frames, more than the schedule's %d", len(g.Image), sched.Count)
 	}

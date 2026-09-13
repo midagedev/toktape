@@ -15,6 +15,11 @@ const (
 	// reads as a mock-up; one that starts on an empty prompt reads as a
 	// session, and a reader who has never run the tool learns the command
 	// from the clip. open.go draws it and owns the beats inside it.
+	//
+	// It is opt-in (Options.ColdOpen, 2026-09-14): the README hero sells the
+	// tool, so it opens on the command; a clip of someone's own run is shared
+	// for its numbers, and opens on the screen (user: "실 공유는 시작이
+	// 메인화면이어야").
 	OpenHold = 6 * time.Second
 	// IntroHold is the opening: the screen before the first token, so a
 	// viewer reads the rig and the model before anything moves.
@@ -30,15 +35,16 @@ const (
 	// 짧아"). Only a run past this is compressed, and then linearly: a
 	// four-minute run is not worth four minutes of anyone's feed.
 	MaxStream = 30 * time.Second
-	// MinDuration and MaxDuration are the bounds a derived clip falls inside,
-	// derived themselves from the phases above: the floor is a run with no
-	// tokens at all (the cold open and the two holds and nothing between
-	// them) and the ceiling is the floor plus a fully compressed stream.
+	// MinDuration and MaxDuration are the bounds a derived clip without the
+	// cold open falls inside, derived themselves from the phases above: the
+	// floor is a run with no tokens at all (the two holds and nothing between
+	// them) and the ceiling is the floor plus a fully compressed stream. A
+	// clip with the cold open is OpenHold longer at both ends.
 	// Nothing clamps to them — they are what the arithmetic can produce, not
 	// a rule imposed on it — so they are here for callers and tests that want
 	// to say "a clip is between twelve and forty-two seconds" without
 	// re-deriving it.
-	MinDuration = OpenHold + IntroHold + CardHold
+	MinDuration = IntroHold + CardHold
 	MaxDuration = MinDuration + MaxStream
 
 	// holdShare caps the three held phases at four fifths of a short clip, so
@@ -133,11 +139,12 @@ type Schedule struct {
 	oneToOne bool
 }
 
-// NewSchedule plans a clip of a run that ends at runEnd.
+// NewSchedule plans a clip of a run that ends at runEnd. open puts the cold
+// open in front of it; without it the clip starts on the live screen.
 //
 // dur of zero derives the length, which is the default and the interesting
-// case: the cold open, the intro, the run at 1:1 (or MaxStream of it,
-// compressed, if the run is longer than that), and the card hold. There is no
+// case: the cold open if asked for, the intro, the run at 1:1 (or MaxStream
+// of it, compressed, if the run is longer than that), and the card hold. There is no
 // floor and no ceiling on the result beyond what those four add up to — see
 // MinDuration and MaxDuration, which are that arithmetic and not a clamp.
 //
@@ -146,12 +153,16 @@ type Schedule struct {
 // too short to hold them the holds shrink in proportion too. That is the path
 // a test renders a two-second clip on; it is not how a clip anyone watches is
 // built.
-func NewSchedule(runEnd time.Duration, fps int, dur time.Duration) Schedule {
+func NewSchedule(runEnd time.Duration, fps int, dur time.Duration, open bool) Schedule {
 	if runEnd < 0 {
 		runEnd = 0
 	}
 	if fps <= 0 {
 		fps = DefaultFPS
+	}
+	openHold := time.Duration(0)
+	if open {
+		openHold = OpenHold
 	}
 	derived := dur <= 0
 	oneToOne := derived && runEnd <= MaxStream
@@ -160,7 +171,7 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration) Schedule {
 		if stream > MaxStream {
 			stream = MaxStream
 		}
-		dur = OpenHold + IntroHold + stream + CardHold
+		dur = openHold + IntroHold + stream + CardHold
 	}
 
 	// Snap the clip up to a whole number of frames. A derived length almost
@@ -188,25 +199,25 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration) Schedule {
 	// The arithmetic goes through float64 because the exact form
 	// (room × OpenHold / holds) overflows int64 at these magnitudes: six
 	// seconds is 6e9 nanoseconds and the product is past 9.2e18.
-	open, intro, card := OpenHold, IntroHold, CardHold
-	if holds, room := open+intro+card, dur-dur/holdShare; !derived && holds > room {
+	open_, intro, card := openHold, IntroHold, CardHold
+	if holds, room := open_+intro+card, dur-dur/holdShare; !derived && holds > room {
 		share := func(d time.Duration) time.Duration {
 			return time.Duration(float64(room) * float64(d) / float64(holds))
 		}
-		open, intro, card = share(OpenHold), share(IntroHold), share(CardHold)
+		open_, intro, card = share(openHold), share(IntroHold), share(CardHold)
 	}
 	s := Schedule{
 		Duration: dur,
 		FPS:      fps,
 		RunEnd:   runEnd,
-		Open:     open,
+		Open:     open_,
 		Intro:    intro,
 		Card:     card,
 		// The streaming phase takes the rounding: the four phases must sum to
 		// the duration exactly or the last frame lands in the wrong one. In
 		// the 1:1 case this leaves it a fraction of a frame longer than the
 		// run, which Frame absorbs by clamping At.
-		Stream:   dur - open - intro - card,
+		Stream:   dur - open_ - intro - card,
 		oneToOne: oneToOne,
 	}
 	s.Count = int(frames) + 1

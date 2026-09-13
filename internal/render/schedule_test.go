@@ -7,8 +7,31 @@ import (
 	"github.com/midagedev/toktape/internal/tui"
 )
 
-// holds is the fixed part of every clip: the cold open and the two holds.
+// holds is the fixed part of a clip with the cold open: the open and the two
+// holds. Every schedule below asks for the open unless it is the subject.
 const holds = OpenHold + IntroHold + CardHold
+
+// TestScheduleWithoutTheColdOpen: the default clip of a run opens on the live
+// screen (user, 2026-09-14). FAIL-first: on the source that always drew the
+// open, Frame(0) was in the open and the clip was OpenHold longer.
+func TestScheduleWithoutTheColdOpen(t *testing.T) {
+	s := NewSchedule(7*time.Second, 30, 0, false)
+	if s.Open != 0 || s.Duration != MinDuration+7*time.Second {
+		t.Errorf("open %v, duration %v; want no open and %v", s.Open, s.Duration, MinDuration+7*time.Second)
+	}
+	first := s.Frame(0)
+	if first.InOpen || first.At != 0 || first.Mode != tui.ModeLive {
+		t.Errorf("first frame = {InOpen %v, At %v, mode %v}, want the live screen at the run's start", first.InOpen, first.At, first.Mode)
+	}
+	for _, f := range s.Frames() {
+		if f.InOpen {
+			t.Fatalf("frame %d is in the open", f.Index)
+		}
+	}
+	if last := s.Frame(s.Count - 1); last.Mode != tui.ModeCard {
+		t.Errorf("the clip does not end on the result")
+	}
+}
 
 func TestNewScheduleDerivesDuration(t *testing.T) {
 	// The clip is as long as the run needs (TTP-27, user 2026-09-13: the old
@@ -24,14 +47,14 @@ func TestNewScheduleDerivesDuration(t *testing.T) {
 		{"a short run gives a short clip", 2 * time.Second, holds + 2*time.Second, 2 * time.Second},
 		{"the example run today", 6600 * time.Millisecond, 18600 * time.Millisecond, 6600 * time.Millisecond},
 		{"the example run once it is lengthened", 25 * time.Second, 37 * time.Second, 25 * time.Second},
-		{"exactly at the ceiling", MaxStream, MaxDuration, MaxStream},
-		{"a second past the ceiling is compressed into it", MaxStream + time.Second, MaxDuration, MaxStream},
-		{"a long run is compressed into the ceiling", 5 * time.Minute, MaxDuration, MaxStream},
-		{"an empty run is the holds and nothing else", 0, MinDuration, 0},
+		{"exactly at the ceiling", MaxStream, holds + MaxStream, MaxStream},
+		{"a second past the ceiling is compressed into it", MaxStream + time.Second, holds + MaxStream, MaxStream},
+		{"a long run is compressed into the ceiling", 5 * time.Minute, holds + MaxStream, MaxStream},
+		{"an empty run is the holds and nothing else", 0, holds, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			s := NewSchedule(tc.runEnd, DefaultFPS, 0)
+			s := NewSchedule(tc.runEnd, DefaultFPS, 0, true)
 			if s.Duration != tc.wantDur {
 				t.Errorf("duration = %v, want %v", s.Duration, tc.wantDur)
 			}
@@ -56,7 +79,7 @@ func TestScheduleStreamsAtRealSpeed(t *testing.T) {
 	// scrolls the sparklines and breathes the cursor at the wrong speed, and
 	// the error grows across a twenty-five-second stream.
 	for _, runEnd := range []time.Duration{6600 * time.Millisecond, 25 * time.Second, MaxStream} {
-		s := NewSchedule(runEnd, DefaultFPS, 0)
+		s := NewSchedule(runEnd, DefaultFPS, 0, true)
 		start := s.Open + s.Intro
 		var checked int
 		for i := 0; i < s.Count; i++ {
@@ -93,9 +116,9 @@ func TestScheduleCompressesOnlyPastTheCeiling(t *testing.T) {
 	// linearly — the only case where clip time and run time run at different
 	// speeds by default.
 	const runEnd = 2 * time.Minute
-	s := NewSchedule(runEnd, DefaultFPS, 0)
-	if s.Stream != MaxStream || s.Duration != MaxDuration {
-		t.Fatalf("a %v run gives stream %v of a %v clip, want %v of %v", runEnd, s.Stream, s.Duration, MaxStream, MaxDuration)
+	s := NewSchedule(runEnd, DefaultFPS, 0, true)
+	if s.Stream != MaxStream || s.Duration != holds+MaxStream {
+		t.Fatalf("a %v run gives stream %v of a %v clip, want %v of %v", runEnd, s.Stream, s.Duration, MaxStream, holds+MaxStream)
 	}
 	mid := s.Frame(int((s.Open + s.Intro + s.Stream/2) * time.Duration(s.FPS) / time.Second))
 	if want, tol := runEnd/2, time.Second; mid.At < want-tol || mid.At > want+tol {
@@ -114,7 +137,7 @@ func TestScheduleExplicitDurationIsExact(t *testing.T) {
 	// All three are long enough to hold the holds; the squeeze below that is
 	// TestNewScheduleShortExplicitDuration's subject.
 	for _, want := range []time.Duration{15 * time.Second, 30 * time.Second, time.Minute} {
-		s := NewSchedule(7*time.Second, DefaultFPS, want)
+		s := NewSchedule(7*time.Second, DefaultFPS, want, true)
 		if s.Duration != want {
 			t.Errorf("asked for %v, got %v", want, s.Duration)
 		}
@@ -137,7 +160,7 @@ func TestNewScheduleShortExplicitDuration(t *testing.T) {
 	// clip too short to hold them still has a streaming phase, and they keep
 	// their ratio so a squeezed clip is the same clip played fast rather than
 	// one with its cold open cut off.
-	s := NewSchedule(7*time.Second, 30, 2*time.Second)
+	s := NewSchedule(7*time.Second, 30, 2*time.Second, true)
 	if s.Duration != 2*time.Second {
 		t.Fatalf("duration = %v, want 2s", s.Duration)
 	}
@@ -166,7 +189,7 @@ func TestScheduleOpensOnTheColdOpen(t *testing.T) {
 	// The clip starts in a terminal, not in the TUI (user, 2026-09-13). The
 	// open runs on a clock of its own that covers the whole nominal OpenHold
 	// however long the phase itself ended up.
-	s := NewSchedule(7*time.Second, 30, 0)
+	s := NewSchedule(7*time.Second, 30, 0, true)
 	first := s.Frame(0)
 	if !first.InOpen || first.Open != 0 {
 		t.Errorf("first frame = {InOpen %v, open %v}, want the open at its start", first.InOpen, first.Open)
@@ -191,7 +214,7 @@ func TestScheduleOpensOnTheColdOpen(t *testing.T) {
 
 	// A clip too short for a six-second open plays the whole script faster
 	// rather than cutting it off part way through the typing.
-	short := NewSchedule(7*time.Second, 30, 2*time.Second)
+	short := NewSchedule(7*time.Second, 30, 2*time.Second, true)
 	if short.Open >= OpenHold {
 		t.Fatalf("a two-second clip kept a %v open", short.Open)
 	}
@@ -208,7 +231,7 @@ func TestScheduleFrameCount(t *testing.T) {
 	for _, fps := range []int{12, 24, 30, 60} {
 		// 7.4 s, so the derived clip is not a whole number of seconds and a
 		// truncating expectation would be off by a fifth of a second's frames.
-		s := NewSchedule(7400*time.Millisecond, fps, 0)
+		s := NewSchedule(7400*time.Millisecond, fps, 0, true)
 		// Rounded, not truncated: a duration of n frames is n×(1s/fps) with the
 		// division floored, so it is a few nanoseconds under the exact value.
 		want := int((s.Duration*time.Duration(fps) + time.Second/2) / time.Second)
@@ -223,7 +246,7 @@ func TestScheduleFrameCount(t *testing.T) {
 }
 
 func TestScheduleFramePhases(t *testing.T) {
-	s := NewSchedule(7*time.Second, 30, 0)
+	s := NewSchedule(7*time.Second, 30, 0, true)
 
 	first := s.Frame(0)
 	if first.At != 0 || first.Mode != tui.ModeLive {
@@ -258,7 +281,7 @@ func TestScheduleIntroHandsOverOnACycleBoundary(t *testing.T) {
 	// sides of the seam. Without this the highlight jumps a quarter of the
 	// title bar at the one-second mark.
 	for _, runEnd := range []time.Duration{0, 2 * time.Second, 7 * time.Second, time.Minute} {
-		s := NewSchedule(runEnd, 30, 0)
+		s := NewSchedule(runEnd, 30, 0, true)
 		if got := (s.introLead + s.Intro) % shimmerPeriod; got != 0 {
 			t.Errorf("runEnd %v: hand-over at %v into a shimmer cycle, want 0", runEnd, got)
 		}
@@ -269,7 +292,7 @@ func TestScheduleIntroHandsOverOnACycleBoundary(t *testing.T) {
 }
 
 func TestScheduleFrameIndexIsClamped(t *testing.T) {
-	s := NewSchedule(7*time.Second, 30, 0)
+	s := NewSchedule(7*time.Second, 30, 0, true)
 	if got := s.Frame(-5); got.Index != 0 {
 		t.Errorf("Frame(-5).Index = %d, want 0", got.Index)
 	}
@@ -279,7 +302,7 @@ func TestScheduleFrameIndexIsClamped(t *testing.T) {
 }
 
 func TestScheduleFramesAreMonotonic(t *testing.T) {
-	s := NewSchedule(7*time.Second, 30, 0)
+	s := NewSchedule(7*time.Second, 30, 0, true)
 	frames := s.Frames()
 	if len(frames) != s.Count {
 		t.Fatalf("Frames() returned %d, want %d", len(frames), s.Count)

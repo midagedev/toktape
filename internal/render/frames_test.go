@@ -55,7 +55,7 @@ func TestFramesWritesReadablePNGs(t *testing.T) {
 		t.Fatalf("wrote %d frames, want 3", len(paths))
 	}
 
-	sched := NewSchedule(RunEnd(tui.ExampleTape()), 2, time.Second)
+	sched := NewSchedule(RunEnd(tui.ExampleTape()), 2, time.Second, false)
 	var bounds image.Rectangle
 	for i, p := range paths {
 		if want := filepath.Join(dir, "frame_0000"+string(rune('0'+i))+".png"); p != want {
@@ -95,7 +95,7 @@ func TestFrameImageMatchesTheCellGrid(t *testing.T) {
 	}
 	defer rs.Close()
 
-	sched := NewSchedule(RunEnd(tui.ExampleTape()), DefaultFPS, 0)
+	sched := NewSchedule(RunEnd(tui.ExampleTape()), DefaultFPS, 0, false)
 	img, err := FrameImage(tui.ExampleTape(), Options{}, sched.Frame(sched.Count/2))
 	if err != nil {
 		t.Fatalf("FrameImage: %v", err)
@@ -155,7 +155,7 @@ func TestRasteriserCoversEveryRuneTheTUIDraws(t *testing.T) {
 	defer rs.Close()
 
 	tp := tui.ExampleTape()
-	sched := NewSchedule(RunEnd(tp), DefaultFPS, 0)
+	sched := NewSchedule(RunEnd(tp), DefaultFPS, 0, false)
 	seen := map[rune]bool{}
 	for _, i := range sampleIndices(sched.Count, 40) {
 		sc := parseScreen(FrameText(tp, Options{}.withDefaults(), sched.Frame(i)), DefaultWidth, DefaultHeight)

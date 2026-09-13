@@ -65,7 +65,7 @@ func TestAsciicastOfAConcurrentRun(t *testing.T) {
 	}
 
 	events := lines[1:]
-	sched := NewSchedule(RunEnd(tp), DefaultFPS, 0)
+	sched := NewSchedule(RunEnd(tp), DefaultFPS, 0, false)
 	if len(events) != sched.Count {
 		t.Errorf("recording has %d events, want the schedule's %d frames", len(events), sched.Count)
 	}

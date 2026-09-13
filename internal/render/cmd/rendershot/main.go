@@ -54,8 +54,9 @@ func main() {
 		// tape name in the footer that names no run in the clip
 		// (2026-09-13, TTP-28).
 		TapePath: "~/.toktape/runs/" + tp.Summary.ID + tape.Ext,
+		ColdOpen: true,
 	}
-	sched := render.NewSchedule(render.RunEnd(tp), *fps, 0)
+	sched := render.NewSchedule(render.RunEnd(tp), *fps, 0, true)
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fail(err)

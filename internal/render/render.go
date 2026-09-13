@@ -87,9 +87,15 @@ type Options struct {
 	// GIF, MP4). Zero means DefaultFontSize, except in GIF where it means
 	// GIFFontSize.
 	FontSize float64
-	// TapePath is printed in the card's footer ("✓ saved <path>"). Empty
-	// leaves the footer to the key hints, which is what an unsaved run shows.
+	// TapePath is printed in the answer pane's footer ("✓ tape saved <path>")
+	// once the run is done. Empty prints "run complete", which is what an
+	// unsaved run shows.
 	TapePath string
+	// ColdOpen puts the shell prompt, the command being typed and the attach
+	// in front of the TUI (OpenHold). Off, the clip opens on the live screen
+	// at the run's start: a clip of a run is shared for its numbers, and the
+	// hero is the one clip that has to teach the command.
+	ColdOpen bool
 	// Timestamp is the asciicast header's recording time. Zero uses the run's
 	// own start time, which keeps the header reproducible.
 	Timestamp time.Time
@@ -145,7 +151,7 @@ func prepare(tp *tape.Tape, o Options) (Options, Schedule, error) {
 	if err := o.validate(); err != nil {
 		return o, Schedule{}, err
 	}
-	return o, NewSchedule(RunEnd(tp), o.FPS, o.Duration), nil
+	return o, NewSchedule(RunEnd(tp), o.FPS, o.Duration, o.ColdOpen), nil
 }
 
 // RunEnd is when the last token of the run arrived.
@@ -185,5 +191,6 @@ func FrameText(tp *tape.Tape, o Options, f Frame) string {
 	m.Theme = tui.ColourTheme()
 	m.Mode = f.Mode
 	m.TapePath = o.TapePath
+	m.Replay = true
 	return tui.View(m, f.Anim, o.Width, o.Height)
 }
