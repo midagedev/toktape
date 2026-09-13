@@ -27,7 +27,10 @@ several rounds, viewing the images directly (this overrides the general
 - Server figures are the record; client figures are the check
   (`tape.RateTolerance`). Never "fix" a disagreement by picking the nicer number.
 - Unknown is `""`/`0` and prints as `?`. Never print a default you did not observe.
-- UI strings and README are English. Design docs are Korean.
+- UI strings, code and `README.md` are English. `README.ko.md` and `README.ja.md`
+  are the same document written for each language by the lead, never a literal
+  translation; their fenced code blocks and the card are byte-identical to
+  `README.md` (`cmd/toktape/readme_test.go` pins it). Design docs are Korean.
 - Linux is the primary target (`GOOS=linux GOARCH=amd64` must build); macOS
   builds with stubs. No cgo.
 
