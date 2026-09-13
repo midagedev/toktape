@@ -329,6 +329,9 @@ func (r *run) collectHost(ctx context.Context) {
 	if err != nil {
 		r.warn("/proc not readable, CPU, RAM and kernel unknown")
 	}
+	// What the operator stated wins over what the machine could be read for,
+	// because on Linux the machine cannot be read for it at all (TTP-45).
+	r.opts.HostRAM.apply(&host)
 	r.host = host
 
 	r.gpus = r.opts.GPU

@@ -362,20 +362,45 @@ func TestLogVerbRebuildNamesUnreadableTapes(t *testing.T) {
 
 // TestLogVerbUsageErrors: the flags that cannot be combined, and the sort key
 // that does not exist, fail with the usage code instead of guessing.
+//
+// stdout stays empty — a failed table is not a table — except under --json,
+// where it carries the error object instead (TTP-71, 2026-09-14). The
+// assertion was "stdout is empty" until then; a caller that asked to be
+// answered in JSON and got an empty stdout has two parse paths and no way to
+// tell which one it is on, so the empty answer was the bug.
 func TestLogVerbUsageErrors(t *testing.T) {
 	dir := seedRuns(t)
-	cases := [][]string{
-		{"log", "--out", dir, "--sort", "vram"},
-		{"log", "--out", dir, "--tsv", "--json"},
-		{"log", "--out", dir, "stray-argument"},
+	cases := []struct {
+		args []string
+		json bool
+	}{
+		{[]string{"log", "--out", dir, "--sort", "vram"}, false},
+		{[]string{"log", "--out", dir, "--tsv", "--json"}, true},
+		{[]string{"log", "--out", dir, "stray-argument"}, false},
 	}
-	for _, args := range cases {
-		code, stdout, stderr := exec(t, args...)
+	for _, tc := range cases {
+		code, stdout, stderr := exec(t, tc.args...)
 		if code != exitUsage {
-			t.Errorf("%v: exit %d, want %d\n%s", args, code, exitUsage, stderr)
+			t.Errorf("%v: exit %d, want %d\n%s", tc.args, code, exitUsage, stderr)
 		}
-		if stdout != "" {
-			t.Errorf("%v printed to stdout:\n%s", args, stdout)
+		if !tc.json {
+			if stdout != "" {
+				t.Errorf("%v printed to stdout:\n%s", tc.args, stdout)
+			}
+			continue
+		}
+		var got struct {
+			Error struct {
+				Code string `json:"code"`
+				Exit int    `json:"exit"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+			t.Errorf("%v: --json failure is not a JSON object on stdout: %v\nstdout: %q", tc.args, err, stdout)
+			continue
+		}
+		if got.Error.Code != "usage" || got.Error.Exit != exitUsage {
+			t.Errorf("%v: error %+v, want the usage code", tc.args, got.Error)
 		}
 	}
 }

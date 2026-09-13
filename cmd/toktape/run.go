@@ -13,12 +13,21 @@ import (
 )
 
 // Exit codes. They are part of the CLI contract: a wrapper script branches on
-// them without parsing the message.
+// them without parsing the message. Their names are in exitCodeNames, they are
+// listed in usageText, and every one of them is reached through cli.fail, so
+// the code, the sentence and the --json object cannot disagree.
 const (
-	exitOK          = 0
-	exitUsage       = 1
+	exitOK    = 0
+	exitUsage = 1
+	// exitUnreachable: no server answered, or one never finished loading.
 	exitUnreachable = 2
-	exitStreams     = 3
+	// exitStreams: the server answered and every stream failed.
+	exitStreams = 3
+	// exitUnavailable: this machine is missing something the requested
+	// output needs — today that is ffmpeg for --mp4. It is separate from
+	// exitStreams because "this box has no encoder" and "the server answered
+	// nothing" are different things for a wrapper script to branch on.
+	exitUnavailable = 4
 )
 
 const usageText = `toktape — the black-box tape for local LLM serving
@@ -33,28 +42,35 @@ Usage:
   toktape log [--out DIR]         the experiment ledger of every run
   toktape compare <a> <b>         diff two runs
   toktape version                 print the version
+  toktape help agents             the contract a script or coding agent needs
 
 Record flags:
   --url URL             server to attach to (default: discover)
   -n, --concurrency N   concurrent streams (default 1)
   --prompt TEXT         prompt to send; repeatable, cycled to fill -n
-  --prompts FILE        a JSONL file: each line is one round of -n streams,
-                        run in order into one tape
+  --prompts FILE        a JSONL file, one round of -n streams per line, e.g.
+                        {"name":"sql","prompt":"Write a query that ..."}
   --spec-n-max LIST     run the prompt set once per speculative.n_max (e.g. 3,5)
   --n-predict N         max tokens per stream (default 256)
   --temp N              sampling temperature (0 = greedy; unset = server default)
   --no-think            ask a reasoning model not to think (chat only)
+  --think-budget N      cap a reasoning model's thinking at N tokens (chat only)
   --endpoint NAME       chat (templated) or completion (prompt sent verbatim)
   --param key=value     extra request parameter, repeatable (JSON value if valid)
+  --ram-gbs N           host memory bandwidth in GB/s, as you state it
+  --ram-gbs-measured N  the same, as STREAM measured it (the tape says which)
+  --ram-speed NAME      memory type, e.g. DDR5-5200 (Linux cannot read it)
+  --ram-channels N      populated memory channels, e.g. 8 (with --ram-speed)
   --out DIR             where run files are written (default ~/.toktape/runs)
   --tag TEXT            label this run for the experiment log (e.g. ngl=40)
   --note TEXT           a free-text note recorded with the run
-  --wait DURATION       how long to wait for a loading model (default 10m,
-                        0 = fail fast; naming it also waits for the server
-                        itself to come up)
+  --wait DURATION       how long to wait for a loading model. The default is
+                        10m, so one invocation can block that long; --wait 0
+                        fails fast, which is what a script with a command
+                        timeout wants. Naming it also waits for the server
   --tui                 watch the run on the live two-pane screen
-  --grid COLSxROWS      tiles per page on the live screen (default 2x4;
-                        0 fits the grid to the terminal). ←/→ change page
+  --grid COLSxROWS      tiles per page on the live screen (default 2x4; 0
+                        fits it to the terminal). ←/→ change page
   --no-card             do not render or save the card
   --json                print the run summary as JSON instead of the card
   --quiet               no progress lines on stderr
@@ -64,6 +80,37 @@ Card flags:
   --json                the run summary as JSON
   --png [FILE]          write the 1200x675 share image (default: next to the tape)
   --copy                also copy the output to the clipboard (OSC 52)
+
+Examples:
+  # One stream against a server toktape finds itself. No flags to learn.
+  toktape
+
+  # A server on a port discovery does not probe, four streams at once, and a
+  # generation long enough to be a decode rate rather than a sample.
+  toktape --url http://127.0.0.1:8001 -n 4 --n-predict 256
+
+  # Machine-readable: the run summary on stdout and nothing else.
+  toktape --json --quiet > run.json
+
+  # Re-render the card of a run you already have. Costs nothing and touches
+  # no server.
+  toktape card ~/.toktape/runs/20260914-070458-my-model.tape
+
+  # A clip of that run, opening on the command being typed.
+  # toktape help render has the arithmetic for aiming its length.
+  toktape render ~/.toktape/runs/20260914-070458-my-model.tape --mp4 run.mp4 --open
+
+Exit codes:
+  0  ok
+  1  usage        the invocation or its inputs were rejected: a bad flag, an
+                  unreadable tape, an output that could not be written
+  2  unreachable  no server answered, or one never finished loading
+  3  streams      the server answered and every stream failed
+  4  unavailable  this machine lacks something the output needs (ffmpeg)
+
+With --json every outcome is one JSON object on stdout: the run summary on
+success, {"error":{"code":...}} on failure, code being the name above. The
+fields worth reading: toktape help agents
 `
 
 // Run executes one invocation and returns the process exit code. It writes
@@ -72,38 +119,45 @@ Card flags:
 func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 	card.Version = version
 
+	// The verb sets c.json once its own flags are parsed. Until then the raw
+	// arguments are the only answer available, and they are what an
+	// invocation rejected before any parsing (an unknown verb) is answered
+	// from.
+	c := &cli{stdout: stdout, stderr: stderr}
+
 	verb, rest := splitVerb(args)
 	switch verb {
 	case "help":
-		fmt.Fprint(stdout, usageText)
-		return exitOK
+		c.json = jsonRequested(args)
+		return runHelp(c, rest)
 	case "version":
 		fmt.Fprintf(stdout, "toktape %s\n", version)
 		return exitOK
 	case "record":
-		return runRecord(ctx, stdout, stderr, rest)
+		return runRecord(ctx, c, rest)
 	case "card":
-		return runCard(stdout, stderr, rest)
+		return runCard(c, rest)
 	case "play":
-		return runPlay(ctx, stdout, stderr, rest)
+		return runPlay(ctx, c, rest)
 	case "render":
-		return runRender(stdout, stderr, rest)
+		return runRender(c, rest)
 	case "ls":
-		return runLs(stdout, stderr, rest)
+		return runLs(c, rest)
 	case "log":
-		return runLog(stdout, stderr, rest)
+		return runLog(c, rest)
 	case "compare":
-		return runCompare(stdout, stderr, rest)
+		return runCompare(c, rest)
 	default:
-		fmt.Fprintf(stderr, "toktape: unknown command %q\n\n%s", verb, usageText)
-		return exitUsage
+		c.json = jsonRequested(args)
+		return c.usageTextf(usageText, "toktape: unknown command %q", verb)
 	}
 }
 
 // verbs are the commands Run dispatches on. The root verb is "record", so
 // `toktape` and `toktape --url ...` both record.
 var verbs = map[string]bool{
-	"record": true, "card": true, "play": true, "ls": true, "log": true, "compare": true, "version": true,
+	"record": true, "card": true, "play": true, "render": true,
+	"ls": true, "log": true, "compare": true, "version": true,
 }
 
 // splitVerb picks the verb out of the argument list.
@@ -117,6 +171,12 @@ var verbs = map[string]bool{
 // mistyped `toktape recrd` with a complaint about a stray argument, which
 // names the wrong problem.
 func splitVerb(args []string) (verb string, rest []string) {
+	// `toktape help <topic>` is the one spelling whose remainder matters, so
+	// it is recognised first; a help token found anywhere else is the
+	// "show me the flags" gesture and takes no topic.
+	if len(args) > 0 && args[0] == "help" {
+		return "help", args[1:]
+	}
 	for _, a := range args {
 		if a == "-h" || a == "--help" || a == "help" {
 			return "help", nil
@@ -149,12 +209,17 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-// newFlagSet returns a flag set that reports its errors on stderr and never
-// calls os.Exit, so Run stays testable.
-func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
+// newFlagSet returns a flag set that never calls os.Exit, so Run stays
+// testable, and that says nothing of its own.
+//
+// Its output is discarded because a rejected invocation owes three things at
+// once — an exit code, a sentence and, under --json, an object on stdout — and
+// the flag package can only provide one of them. cli.badFlags writes all three
+// from the error it returns instead (TTP-71).
+func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() { fmt.Fprint(stderr, usageText) }
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
 	return fs
 }
 

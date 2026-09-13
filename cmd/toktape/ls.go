@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,26 +14,24 @@ import (
 // runLs lists the recorded runs. A file that does not load is listed with the
 // reason rather than skipped: a run directory that silently shrinks is worse
 // than one row saying a tape is unreadable.
-func runLs(stdout, stderr io.Writer, args []string) int {
-	fs := newFlagSet("ls", stderr)
+func runLs(c *cli, args []string) int {
+	fs := newFlagSet("ls")
 	outDir := fs.String("out", defaultRunsDir(), "directory to list")
 	extra, err := parseArgs(fs, args)
 	if err != nil {
-		return exitUsage
+		return c.badFlags("ls", usageText, args, err)
 	}
 	if len(extra) > 0 {
-		fmt.Fprintf(stderr, "toktape ls: unexpected argument %q\n", extra[0])
-		return exitUsage
+		return c.usagef("toktape ls: unexpected argument %q", extra[0])
 	}
 
 	entries, err := os.ReadDir(*outDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Fprint(stderr, noRunsMessage(*outDir))
+			fmt.Fprint(c.stderr, noRunsMessage(*outDir))
 			return exitOK
 		}
-		fmt.Fprintf(stderr, "toktape: %v\n", err)
-		return exitUsage
+		return c.usagef("toktape: %v", err)
 	}
 
 	var rows [][]string
@@ -59,7 +56,7 @@ func runLs(stdout, stderr io.Writer, args []string) int {
 		})
 	}
 	if len(rows) == 0 {
-		fmt.Fprint(stderr, noRunsMessage(*outDir))
+		fmt.Fprint(c.stderr, noRunsMessage(*outDir))
 		return exitOK
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i][0] > rows[j][0] })
@@ -68,7 +65,7 @@ func runLs(stdout, stderr io.Writer, args []string) int {
 	// Right-align the two numeric columns so rates and stream counts line up
 	// as a column of digits rather than as ragged text.
 	right := map[int]bool{3: true, 4: true}
-	fmt.Fprint(stdout, table(header, rows, right))
+	fmt.Fprint(c.stdout, table(header, rows, right))
 	return exitOK
 }
 

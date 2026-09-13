@@ -2,33 +2,29 @@ package main
 
 import (
 	"fmt"
-	"io"
 
 	"github.com/midagedev/toktape/internal/compare"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
 // runCompare diffs two recorded runs.
-func runCompare(stdout, stderr io.Writer, args []string) int {
-	fs := newFlagSet("compare", stderr)
+func runCompare(c *cli, args []string) int {
+	fs := newFlagSet("compare")
 	files, err := parseArgs(fs, args)
 	if err != nil {
-		return exitUsage
+		return c.badFlags("compare", usageText, args, err)
 	}
 	if len(files) != 2 {
-		fmt.Fprintf(stderr, "toktape compare: expected two tape files\n\n%s", usageText)
-		return exitUsage
+		return c.usageTextf(usageText, "toktape compare: expected two tape files")
 	}
 	a, err := tape.Read(files[0])
 	if err != nil {
-		fmt.Fprintf(stderr, "toktape: %v\n", err)
-		return exitUsage
+		return c.usagef("toktape: %v", err)
 	}
 	b, err := tape.Read(files[1])
 	if err != nil {
-		fmt.Fprintf(stderr, "toktape: %v\n", err)
-		return exitUsage
+		return c.usagef("toktape: %v", err)
 	}
-	fmt.Fprint(stdout, compare.Text(compare.Diff(&a.Summary, &b.Summary)))
+	fmt.Fprint(c.stdout, compare.Text(compare.Diff(&a.Summary, &b.Summary)))
 	return exitOK
 }

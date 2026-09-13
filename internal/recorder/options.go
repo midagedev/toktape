@@ -147,6 +147,52 @@ type Options struct {
 	// LoadingPoll is the gap between attach attempts while waiting. 0 means
 	// DefaultLoadingPoll.
 	LoadingPoll time.Duration
+	// HostRAM is what the operator said about the host's memory bandwidth
+	// (TTP-45). Its zero value changes nothing: the run records whatever the
+	// machine could be asked, which on Linux is neither the memory speed nor
+	// the channel count.
+	HostRAM HostRAM
+}
+
+// HostRAM is the operator's answer to a question the machine cannot be asked.
+//
+// On Linux the memory speed and the channel count live in the DMI tables and
+// /sys/firmware/dmi/tables/DMI is mode 0400 root-only, so procmon leaves both
+// empty and a partially offloaded run has no host bandwidth ceiling at all.
+// These fields are `record --ram-gbs` and friends, and they are written into
+// tape.HostInfo after the machine has been read, never instead of it: only the
+// fields the operator actually named are replaced.
+//
+// Source is the tape.RAMSource* the figure is recorded under, which is how the
+// card avoids presenting a number somebody typed as one it observed. The zero
+// value of the whole struct overrides nothing.
+type HostRAM struct {
+	// BytesPerSec is the bandwidth itself, 0 when it was not stated.
+	BytesPerSec int64
+	// Speed and Channels are the DMI-shaped pair, "" and 0 when not stated.
+	Speed    string
+	Channels int
+	// Source is tape.RAMSourceStated or tape.RAMSourceMeasured, "" when
+	// nothing was stated at all.
+	Source string
+}
+
+// apply writes what the operator stated over what the machine could be read
+// for. A field they did not name is left exactly as collected.
+func (r HostRAM) apply(h *tape.HostInfo) {
+	if r.Source == "" {
+		return
+	}
+	if r.BytesPerSec > 0 {
+		h.RAMBytesPerSec = r.BytesPerSec
+	}
+	if r.Speed != "" {
+		h.RAMSpeed = r.Speed
+	}
+	if r.Channels > 0 {
+		h.RAMChannels = r.Channels
+	}
+	h.RAMSource = r.Source
 }
 
 // EventKind names a step of the run. The CLI prints some of them and the TUI

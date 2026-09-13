@@ -442,7 +442,7 @@ func TestTUIRunHonoursCancellation(t *testing.T) {
 func runRecordFor(ctx context.Context, url, dir string) int {
 	opts := pinCollectors(recorder.Options{BaseURL: url, MaxTokens: 16})
 	var sink strings.Builder
-	return recordPlain(ctx, &sink, &sink, opts, recordConfig{outDir: dir, card: true, quiet: true})
+	return recordPlain(ctx, &cli{stdout: &sink, stderr: &sink}, opts, recordConfig{outDir: dir, card: true, quiet: true})
 }
 
 // A run whose output directory cannot be written still reports the failure
@@ -484,7 +484,7 @@ func TestRecordTUIWiring(t *testing.T) {
 
 	done := make(chan int, 1)
 	go func() {
-		done <- recordTUI(context.Background(), &stdout, &stderr, opts, cfg)
+		done <- recordTUI(context.Background(), &cli{stdout: &stdout, stderr: &stderr}, opts, cfg)
 	}()
 	select {
 	case <-done:
@@ -527,7 +527,7 @@ func TestRecordTUIToQuit(t *testing.T) {
 
 	done := make(chan int, 1)
 	go func() {
-		done <- recordTUI(context.Background(), &stdout, &stderr, opts, cfg)
+		done <- recordTUI(context.Background(), &cli{stdout: &stdout, stderr: &stderr}, opts, cfg)
 	}()
 
 	// Wait for the run to have produced its tape, then quit the screen. The

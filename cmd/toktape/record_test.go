@@ -313,7 +313,7 @@ func TestSamplingOptions(t *testing.T) {
 
 	// An unnamed --temp sends nothing: the server's own default stays in
 	// effect, and the card must not print a figure nobody chose.
-	got, err := samplingOptions(tape.EndpointChat, false, 0, false, nil)
+	got, err := samplingOptions(samplingFlags{endpoint: tape.EndpointChat})
 	if err != nil {
 		t.Fatalf("plain run: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestSamplingOptions(t *testing.T) {
 
 	// --temp 0 is greedy and must reach the wire. Zero is the value, not the
 	// absence of one.
-	got, err = samplingOptions(tape.EndpointChat, true, 0, false, nil)
+	got, err = samplingOptions(samplingFlags{endpoint: tape.EndpointChat, tempSet: true})
 	if err != nil {
 		t.Fatalf("--temp 0: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestSamplingOptions(t *testing.T) {
 		t.Fatalf("--temp 0 params %+v, want temperature 0", got.params)
 	}
 
-	got, err = samplingOptions(tape.EndpointChat, true, 0.7, false, nil)
+	got, err = samplingOptions(samplingFlags{endpoint: tape.EndpointChat, tempSet: true, temp: 0.7})
 	if err != nil {
 		t.Fatalf("--temp 0.7: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestSamplingOptions(t *testing.T) {
 	}
 
 	// --no-think sends the engine's own switch.
-	got, err = samplingOptions(tape.EndpointChat, false, 0, true, nil)
+	got, err = samplingOptions(samplingFlags{endpoint: tape.EndpointChat, noThink: true})
 	if err != nil {
 		t.Fatalf("--no-think: %v", err)
 	}
@@ -350,8 +350,8 @@ func TestSamplingOptions(t *testing.T) {
 
 	// --no-think and a user's own kwargs share that object rather than one
 	// overwriting the other.
-	got, err = samplingOptions(tape.EndpointChat, false, 0, true,
-		[]string{`chat_template_kwargs={"tools":"none"}`})
+	got, err = samplingOptions(samplingFlags{endpoint: tape.EndpointChat, noThink: true,
+		params: []string{`chat_template_kwargs={"tools":"none"}`}})
 	if err != nil {
 		t.Fatalf("--no-think with kwargs: %v", err)
 	}
@@ -361,7 +361,7 @@ func TestSamplingOptions(t *testing.T) {
 	}
 
 	// --endpoint completion carries through untouched.
-	got, err = samplingOptions(tape.EndpointCompletion, true, 0, false, nil)
+	got, err = samplingOptions(samplingFlags{endpoint: tape.EndpointCompletion, tempSet: true})
 	if err != nil {
 		t.Fatalf("--endpoint completion: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestSamplingOptionsRefusals(t *testing.T) {
 		{"--param without a key", tape.EndpointChat, false, []string{"=4"}, "expected key=value"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := samplingOptions(tc.endpoint, false, 0, tc.noThink, tc.params)
+			_, err := samplingOptions(samplingFlags{endpoint: tc.endpoint, noThink: tc.noThink, params: tc.params})
 			if err == nil {
 				t.Fatalf("accepted %v", tc.params)
 			}

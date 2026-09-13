@@ -42,7 +42,7 @@ var recordGrid = tui.DefaultGrid
 // The recorder owns a goroutine, the screen owns the terminal, and they meet
 // on one channel. The tape is written by the recording side, so the Done event
 // the screen freezes on is the run as it was actually saved.
-func recordTUI(ctx context.Context, stdout, stderr io.Writer, opts recorder.Options, cfg recordConfig) int {
+func recordTUI(ctx context.Context, c *cli, opts recorder.Options, cfg recordConfig) int {
 	// Quitting the screen ends the run: the user asked for the terminal back
 	// and a recorder still streaming into a closed screen has nobody to show
 	// its result to.
@@ -92,27 +92,27 @@ func recordTUI(ctx context.Context, stdout, stderr io.Writer, opts recorder.Opti
 	}()
 
 	screenErr := tui.Run(ctx, tui.Options{
-		Events: events, Out: stdout, In: tuiInput, Colour: true, Grid: recordGrid,
+		Events: events, Out: c.stdout, In: tuiInput, Colour: true, Grid: recordGrid,
 	})
 	cancel()
 	r := <-res
 
 	if r.err != nil && r.tp == nil {
-		return reportRecordError(stderr, r.err)
+		return c.reportRecordError(r.err, opts.BaseURL != "")
 	}
 	if screenErr != nil {
-		fmt.Fprintf(stderr, "toktape: %v\n", screenErr)
+		fmt.Fprintf(c.stderr, "toktape: %v\n", screenErr)
 	}
 	if r.err != nil {
-		fmt.Fprintf(stderr, "toktape: %v\n", r.err)
+		fmt.Fprintf(c.stderr, "toktape: %v\n", r.err)
 	}
 	// The screen is gone by now, so the card lands in the scrollback where
 	// the run's own output would have been.
-	if code := printCard(stdout, stderr, r.tp, cfg); code != exitOK {
+	if code := printCard(c, r.tp, cfg); code != exitOK {
 		return code
 	}
 	if !cfg.quiet {
-		fmt.Fprint(stderr, shareHint(cfg.outDir, r.tp, r.arts))
+		fmt.Fprint(c.stderr, shareHint(cfg.outDir, r.tp, r.arts))
 	}
 	return exitOK
 }

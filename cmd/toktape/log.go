@@ -21,8 +21,8 @@ import (
 // by a build with different columns it is regenerated here rather than
 // patched, so the answer to "which setting won" is always derived from the
 // runs themselves.
-func runLog(stdout, stderr io.Writer, args []string) int {
-	fs := newFlagSet("log", stderr)
+func runLog(c *cli, args []string) int {
+	fs := newFlagSet("log")
 	outDir := fs.String("out", defaultRunsDir(), "directory holding the runs")
 	model := fs.String("model", "", "only runs whose model contains this text")
 	tag := fs.String("tag", "", "only runs whose tag contains this text")
@@ -35,30 +35,27 @@ func runLog(stdout, stderr io.Writer, args []string) int {
 	rebuild := fs.Bool("rebuild", false, "regenerate the ledger from the tapes first")
 	extra, err := parseArgs(fs, args)
 	if err != nil {
-		return exitUsage
+		return c.badFlags("log", usageText, args, err)
 	}
+	c.json = *asJSON
 	if len(extra) > 0 {
-		fmt.Fprintf(stderr, "toktape log: unexpected argument %q\n", extra[0])
-		return exitUsage
+		return c.usagef("toktape log: unexpected argument %q", extra[0])
 	}
 	if !validSort(*sortBy) {
-		fmt.Fprintf(stderr, "toktape log: --sort %q is not one of date, decode, prefill, ttft\n", *sortBy)
-		return exitUsage
+		return c.usagef("toktape log: --sort %q is not one of date, decode, prefill, ttft", *sortBy)
 	}
 	format, err := exportFormat(*asTSV, *asCSV, *asJSON, *asMD)
 	if err != nil {
-		fmt.Fprintf(stderr, "toktape log: %v\n", err)
-		return exitUsage
+		return c.usagef("toktape log: %v", err)
 	}
 
-	rows, err := loadLedger(stderr, *outDir, *rebuild)
+	rows, err := loadLedger(c.stderr, *outDir, *rebuild)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Fprint(stderr, noRunsMessage(*outDir))
+			fmt.Fprint(c.stderr, noRunsMessage(*outDir))
 			return exitOK
 		}
-		fmt.Fprintf(stderr, "toktape: %v\n", err)
-		return exitUsage
+		return c.usagef("toktape: %v", err)
 	}
 
 	recorded := len(rows)
@@ -72,17 +69,16 @@ func runLog(stdout, stderr io.Writer, args []string) int {
 		// An export is a file someone pipes somewhere, so an empty ledger
 		// still writes its header: an importable table with no rows is a
 		// usable answer, a friendly sentence in the middle of a TSV is not.
-		if err := writeExport(stdout, format, rows); err != nil {
-			fmt.Fprintf(stderr, "toktape: %v\n", err)
-			return exitUsage
+		if err := writeExport(c.stdout, format, rows); err != nil {
+			return c.usagef("toktape: %v", err)
 		}
 		return exitOK
 	}
 	if len(rows) == 0 {
-		fmt.Fprint(stderr, emptyLine(*outDir, recorded, *model, *tag))
+		fmt.Fprint(c.stderr, emptyLine(*outDir, recorded, *model, *tag))
 		return exitOK
 	}
-	fmt.Fprint(stdout, logTable(rows))
+	fmt.Fprint(c.stdout, logTable(rows))
 	return exitOK
 }
 

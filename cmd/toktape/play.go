@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,35 +16,34 @@ import (
 // the design buys: the screen is a pure function of the run and a clip time,
 // so a tape from another machine reproduces the frames its owner watched
 // rather than a summary of them.
-func runPlay(ctx context.Context, stdout, stderr io.Writer, args []string) int {
-	fs := newFlagSet("play", stderr)
+func runPlay(ctx context.Context, c *cli, args []string) int {
+	fs := newFlagSet("play")
 	speed := fs.Float64("speed", 1, "replay speed multiplier (4 plays four times as fast)")
 	grid := fs.String("grid", tui.DefaultGrid.String(), "tile grid per page as COLSxROWS (0 = fit to the terminal)")
 	files, err := parseArgs(fs, args)
 	if err != nil {
-		return exitUsage
+		return c.badFlags("play", usageText, args, err)
 	}
 	if len(files) != 1 {
-		fmt.Fprintf(stderr, "toktape play: expected one tape file\n\n%s", usageText)
-		return exitUsage
+		return c.usageTextf(usageText, "toktape play: expected one tape file")
 	}
 	if *speed <= 0 {
-		fmt.Fprintf(stderr, "toktape play: --speed must be positive, got %v\n", *speed)
-		return exitUsage
+		return c.usagef("toktape play: --speed must be positive, got %v", *speed)
 	}
 	parsedGrid, err := tui.ParseGrid(*grid)
 	if err != nil {
-		fmt.Fprintf(stderr, "toktape play: --%v\n", err)
-		return exitUsage
+		return c.usagef("toktape play: --%v", err)
 	}
 	tp, err := tape.Read(files[0])
 	if err != nil {
-		fmt.Fprintf(stderr, "toktape: %v\n", err)
-		return exitUsage
+		return c.usagef("toktape: %v", err)
 	}
-	if !isTTY(stdout) {
-		fmt.Fprintln(stderr, "toktape play: needs a terminal; use `toktape card <tape>` to print the result instead")
-		return exitUsage
+	if !isTTY(c.stdout) {
+		return c.fail(failure{
+			code: exitUsage,
+			msg:  "toktape play: needs a terminal",
+			hint: "use `toktape card <tape>` to print the result instead",
+		})
 	}
 
 	p := &player{
@@ -58,12 +55,11 @@ func runPlay(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		end:     tapeDuration(tp),
 		playing: true,
 	}
-	if _, err := tea.NewProgram(p, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithOutput(stdout)).Run(); err != nil {
+	if _, err := tea.NewProgram(p, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithOutput(c.stdout)).Run(); err != nil {
 		if ctx.Err() != nil {
 			return exitOK
 		}
-		fmt.Fprintf(stderr, "toktape: %v\n", err)
-		return exitUsage
+		return c.usagef("toktape: %v", err)
 	}
 	return exitOK
 }
