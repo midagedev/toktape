@@ -69,3 +69,17 @@ func TestSweepClauseNamesTheBestNMax(t *testing.T) {
 		t.Logf("wrote %s", abs)
 	})
 }
+
+// TestDraftClauseNamesTheSweptNMax (TTP-35, 2026-09-13): the share image's
+// draft clause names the n_max values a sweep's requests carried, as the text
+// card's Draft row does, never the server flag they overrode.
+func TestDraftClauseNamesTheSweptNMax(t *testing.T) {
+	if got := draftString(card.ExampleSweep()); got != "draft DSpark-0.6B-Q8_0.gguf · n_max 3,5 · 30% accepted" {
+		t.Errorf("sweep draft clause = %q", got)
+	}
+	s := card.ExampleSweep()
+	s.SpecNMax = nil
+	if got := draftString(s); got != "draft DSpark-0.6B-Q8_0.gguf · n_max 3 · 30% accepted" {
+		t.Errorf("draft clause without a sweep = %q", got)
+	}
+}

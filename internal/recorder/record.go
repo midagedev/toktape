@@ -73,12 +73,7 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	r.planSweep()
 
 	if len(r.opts.Rounds) > 0 {
-		t, err := r.recordRounds(ctx)
-		if err != nil {
-			return nil, err
-		}
-		applySweep(&t.Summary, t.Requests)
-		return t, nil
+		return r.recordRounds(ctx)
 	}
 
 	reqs := buildRequests(opts, r.model.ActiveBytesPerToken)

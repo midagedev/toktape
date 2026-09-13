@@ -159,3 +159,31 @@ func TestDraftSweepRow(t *testing.T) {
 		}
 	})
 }
+
+// TestDraftRowNamesTheSweptNMax (TTP-35, 2026-09-13) is the FAIL-first gate
+// for the Draft row of a sweep. The requests overrode the server's --draft-max,
+// so the flag's value is not what ran: the row names the values the requests
+// carried, and a sweep of one value names that value, not the flag's.
+func TestDraftRowNamesTheSweptNMax(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		nmax []int
+		want string
+	}{
+		{"two values", []int{3, 5}, "Draft         DSpark-0.6B-Q8_0.gguf · n_max 3,5"},
+		{"one value over a flag of 3", []int{5}, "Draft         DSpark-0.6B-Q8_0.gguf · n_max 5"},
+		{"no sweep keeps the flag", nil, "Draft         DSpark-0.6B-Q8_0.gguf · n_max 3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := ExampleSweep()
+			s.SpecNMax = tc.nmax
+			got := rowLines(s, "Draft")
+			if len(got) == 0 || !strings.HasPrefix(got[0], tc.want) {
+				t.Fatalf("Draft row = %q, want it to start %q", got, tc.want)
+			}
+			if rest := strings.TrimPrefix(got[0], tc.want); rest != "" && !strings.HasPrefix(rest, " ·") {
+				t.Errorf("Draft row = %q: the n_max clause runs on past %q", got[0], tc.want)
+			}
+		})
+	}
+}

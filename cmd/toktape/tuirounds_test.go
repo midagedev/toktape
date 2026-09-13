@@ -12,52 +12,63 @@ import (
 )
 
 // TestBridgeEventCarriesTheRound (TTP-38): a stream start reaches the screen
-// with its round, and recordTUI's stamp adds the round count and the name from
-// the prompts file, so the screen can tell round 2's stream 1 from round 1's.
+// with its round, the round count and the round's name, all from the recorder's
+// event. The recorder owns the plan (TTP-35): a --spec-n-max sweep only becomes
+// rounds inside Record, so the name carries the n_max a sweep sent it at.
 func TestBridgeEventCarriesTheRound(t *testing.T) {
 	const at = 1500 * time.Millisecond
-	got, ok := bridgeEvent(recorder.Event{Kind: recorder.EventStreamStarted, Stream: 1, Streams: 4, Round: 1, MaxTokens: 32}, at)
+	start := recorder.Event{Kind: recorder.EventStreamStarted, Stream: 1, Streams: 4, Round: 1, Rounds: 3, RoundName: "prose-1", MaxTokens: 32}
+	got, ok := bridgeEvent(start, at)
 	if !ok {
 		t.Fatal("a stream start was dropped")
 	}
 	if got.Round != 1 || got.Stream != 1 || got.MaxTokens != 32 {
 		t.Errorf("stream start = round %d stream %d cap %d, want 1 1 32", got.Round, got.Stream, got.MaxTokens)
 	}
+	if got.Rounds != 3 || got.RoundName != "prose-1" {
+		t.Errorf("stream start = %d rounds, name %q; want 3, prose-1", got.Rounds, got.RoundName)
+	}
 
-	rounds := []recorder.Round{{Name: "sql-1"}, {Name: "prose-1"}, {}}
-	stamped := stampRound(got, rounds)
-	if stamped.Rounds != 3 || stamped.RoundName != "prose-1" {
-		t.Errorf("stamped = %d rounds, name %q; want 3, prose-1", stamped.Rounds, stamped.RoundName)
+	for _, tc := range []struct {
+		name string
+		nmax int
+		want string
+	}{
+		{"", 0, ""},
+		{"prose-1", 5, "prose-1 n_max 5"},
+		{"", 5, "n_max 5"},
+	} {
+		ev := start
+		ev.RoundName, ev.SpecNMax = tc.name, tc.nmax
+		if s, _ := bridgeEvent(ev, at); s.RoundName != tc.want {
+			t.Errorf("round %q at n_max %d is named %q, want %q", tc.name, tc.nmax, s.RoundName, tc.want)
+		}
 	}
-	got.Round = 2
-	if s := stampRound(got, rounds); s.Rounds != 3 || s.RoundName != "" {
-		t.Errorf("an unnamed round stamped = %d rounds, name %q; want 3, empty", s.Rounds, s.RoundName)
-	}
-	got.Round = 7
-	if s := stampRound(got, rounds); s.RoundName != "" {
-		t.Errorf("a round past the file stamped the name %q", s.RoundName)
-	}
-	// A single-round run is not a rounds run: nothing is stamped.
-	if s := stampRound(got, nil); s.Rounds != 0 || s.RoundName != "" {
-		t.Errorf("a single-round run stamped %d rounds, name %q", s.Rounds, s.RoundName)
+
+	// A single-round run is not a rounds run: nothing is carried.
+	one := start
+	one.Round, one.Rounds, one.SpecNMax = 0, 1, 5
+	if s, _ := bridgeEvent(one, at); s.Rounds != 0 || s.RoundName != "" {
+		t.Errorf("a single-round run carried %d rounds, name %q", s.Rounds, s.RoundName)
 	}
 	// Only stream starts carry a round.
-	tok, _ := bridgeEvent(recorder.Event{Kind: recorder.EventToken, Stream: 1, Round: 1}, at)
-	if s := stampRound(tok, rounds); s.Rounds != 0 || s.RoundName != "" {
-		t.Errorf("a token was stamped with %d rounds, name %q", s.Rounds, s.RoundName)
+	tok, _ := bridgeEvent(recorder.Event{Kind: recorder.EventToken, Stream: 1, Round: 1, Rounds: 3, RoundName: "prose-1"}, at)
+	if tok.Rounds != 0 || tok.RoundName != "" {
+		t.Errorf("a token carried %d rounds, name %q", tok.Rounds, tok.RoundName)
 	}
 }
 
 // TestProgressAnnouncesEachRound (TTP-38): the plain progress lines say when a
 // new round begins and count its streams afresh, rather than accumulating
-// round 2's tokens onto round 1's.
+// round 2's tokens onto round 1's. The round count and names come with the
+// events, as the recorder planned them (TTP-35).
 func TestProgressAnnouncesEachRound(t *testing.T) {
 	var buf bytes.Buffer
 	p := newProgress(&buf, false)
-	p.rounds = []recorder.Round{{Name: "sql-1"}, {Name: "prose-1"}, {}}
+	names := []string{"sql-1", "prose-1", ""}
 
 	start := func(round, stream int) {
-		p.handle(recorder.Event{Kind: recorder.EventStreamStarted, Stream: stream, Streams: 2, Round: round})
+		p.handle(recorder.Event{Kind: recorder.EventStreamStarted, Stream: stream, Streams: 2, Round: round, Rounds: 3, RoundName: names[round]})
 	}
 	token := func(round, stream int) {
 		p.handle(recorder.Event{Kind: recorder.EventToken, Stream: stream, Streams: 2, Round: round,
@@ -104,10 +115,18 @@ func TestProgressAnnouncesEachRound(t *testing.T) {
 		t.Errorf("an unnamed round was not announced by its number alone: %q", buf.String())
 	}
 
+	// A sweep round says the n_max it runs at (TTP-35).
+	buf.Reset()
+	w := newProgress(&buf, false)
+	w.handle(recorder.Event{Kind: recorder.EventStreamStarted, Streams: 1, Round: 2, Rounds: 4, RoundName: "sql", SpecNMax: 5})
+	if !strings.Contains(buf.String(), "  round 3/4 sql n_max 5\n") {
+		t.Errorf("a sweep round was announced as %q", buf.String())
+	}
+
 	// A single-round run prints no round line at all.
 	buf.Reset()
 	q := newProgress(&buf, false)
-	q.handle(recorder.Event{Kind: recorder.EventStreamStarted, Stream: 0, Streams: 1})
+	q.handle(recorder.Event{Kind: recorder.EventStreamStarted, Stream: 0, Streams: 1, Rounds: 1})
 	if strings.Contains(buf.String(), "round") {
 		t.Errorf("a single-round run announced a round: %q", buf.String())
 	}

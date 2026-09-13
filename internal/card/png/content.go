@@ -329,7 +329,8 @@ func thinkingString(reasoningN int) string {
 func reasoningTokens(s *tape.RunSummary) int { return s.Timings.ReasoningN }
 
 // draftString is the PNG's form of the text card's Draft row:
-// "draft DSpark-0.6B-Q8_0.gguf · n_max 3 · 60% accepted". Empty when the
+// "draft DSpark-0.6B-Q8_0.gguf · n_max 3 · 60% accepted", with a sweep's
+// values in place of the flag (card.DraftNMax). Empty when the
 // server reported no draft figure. The counts stay on the text card, and the
 // rules are its rules: an unread model is "?", and zero drafted is "0 drafted"
 // rather than a rate over nothing.
@@ -338,7 +339,6 @@ func draftString(s *tape.RunSummary) string {
 	if t.DraftN == nil {
 		return ""
 	}
-	f := s.Server.Flags
 	rate := "0 drafted"
 	if *t.DraftN > 0 {
 		accepted := 0
@@ -347,7 +347,7 @@ func draftString(s *tape.RunSummary) string {
 		}
 		rate = formatPct(float64(accepted)/float64(*t.DraftN)) + " accepted"
 	}
-	return joinParts(" · ", "draft "+orUnknown(f.DraftModel), "n_max "+orUnknown(f.DraftMax), rate)
+	return joinParts(" · ", "draft "+orUnknown(s.Server.Flags.DraftModel), "n_max "+card.DraftNMax(s), rate)
 }
 
 func itlString(t tape.TimingsSummary) string {

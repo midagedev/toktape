@@ -320,3 +320,57 @@ func TestRecordRoundsWithoutSweepSendNoNMax(t *testing.T) {
 		t.Errorf("SpecNMax %v, BySpecNMax %v, PerRound[0].SpecNMax %d; want none", s.SpecNMax, s.BySpecNMax, s.PerRound[0].SpecNMax)
 	}
 }
+
+// TestSweepEventsCarryThePlan (TTP-35, 2026-09-13) is the FAIL-first gate for
+// the live views of a sweep. The sweep becomes rounds inside Record, after the
+// argv is read, so a caller counting rounds from its own Options saw none for
+// a sweep without a prompts file. Every stream start carries the round count,
+// name and n_max as planned, and EventDone's summary carries the sweep groups
+// the tape holds.
+func TestSweepEventsCarryThePlan(t *testing.T) {
+	srv, _ := sweepServer(t)
+	var (
+		mu     sync.Mutex
+		starts []recorder.Event
+		done   *tape.RunSummary
+	)
+	tp, err := recorder.Record(context.Background(), recorder.Options{
+		BaseURL: srv.URL,
+		Rounds: []recorder.Round{
+			{Name: "sql", Prompts: []server.StreamRequest{userPrompt("alpha", 0)}},
+			{Name: "prose", Prompts: []server.StreamRequest{userPrompt("beta", 0)}},
+		},
+		SpecNMax:       []int{3, 5},
+		SampleInterval: 20 * time.Millisecond,
+		FSRoot:         draftProc(t),
+		GPU:            gpu.Null{},
+		Progress: func(ev recorder.Event) {
+			mu.Lock()
+			defer mu.Unlock()
+			switch ev.Kind {
+			case recorder.EventStreamStarted:
+				starts = append(starts, ev)
+			case recorder.EventDone:
+				done = ev.Summary
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	var got []string
+	for _, ev := range starts {
+		got = append(got, fmt.Sprintf("%d/%d %s@%d", ev.Round, ev.Rounds, ev.RoundName, ev.SpecNMax))
+	}
+	if want := []string{"0/4 sql@3", "1/4 prose@3", "2/4 sql@5", "3/4 prose@5"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("stream starts = %v, want %v", got, want)
+	}
+	if done == nil || len(done.BySpecNMax) != 2 || !reflect.DeepEqual(done.SpecNMax, []int{3, 5}) {
+		t.Errorf("EventDone summary sweep = %v / %+v, want [3 5] and two groups", done.SpecNMax, done.BySpecNMax)
+	}
+	if !reflect.DeepEqual(done.BySpecNMax, tp.Summary.BySpecNMax) {
+		t.Errorf("EventDone groups %+v differ from the tape's %+v", done.BySpecNMax, tp.Summary.BySpecNMax)
+	}
+}

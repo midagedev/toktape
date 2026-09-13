@@ -161,7 +161,6 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 // on stdout.
 func recordPlain(ctx context.Context, stdout, stderr io.Writer, opts recorder.Options, cfg recordConfig) int {
 	pr := newProgress(stderr, cfg.quiet)
-	pr.rounds = opts.Rounds
 	opts.Progress = pr.handle
 
 	pr.start()

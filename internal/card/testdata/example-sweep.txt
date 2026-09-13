@@ -8,7 +8,7 @@
 ├──────────────────────────────────────────────────────────────────────┤
 │ Decode        14.7 tok/s · ≈ 99 GB/s, 5% of peak                     │
 │ Prefill       817 tok/s · TTFT 640 ms · 512 prompt tokens            │
-│ Draft         DSpark-0.6B-Q8_0.gguf · n_max 3                        │
+│ Draft         DSpark-0.6B-Q8_0.gguf · n_max 3,5                      │
 │               30% accepted (2248/7560)                               │
 │ Context       16384 (512 in / 86 out)                                │
 │ Prefix cache  25% hit (128/512) · warm                               │

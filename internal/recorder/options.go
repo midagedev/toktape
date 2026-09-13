@@ -183,6 +183,15 @@ type Event struct {
 	// Round is the 0-based prompt round the event belongs to (TTP-31). It is
 	// always 0 in a single-round run.
 	Round int
+	// Rounds, RoundName and SpecNMax are filled for EventStreamStarted in a
+	// multi-round run: how many rounds the run sends, the name of this one,
+	// and the speculative.n_max it was sent with (0 outside a sweep). The
+	// recorder fills them because it owns the plan — a --spec-n-max sweep is
+	// expanded into rounds only after the server's argv is read — so a caller
+	// never counts rounds from the Options it passed in (TTP-35).
+	Rounds    int
+	RoundName string
+	SpecNMax  int
 	// Message is human-readable detail: the URL, the warning sentence, the
 	// build and model line.
 	Message string

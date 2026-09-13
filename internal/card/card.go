@@ -560,7 +560,7 @@ func draftParts(s *tape.RunSummary) []string {
 	f := s.Server.Flags
 	parts := []string{
 		orUnknown(f.DraftModel),
-		"n_max " + orUnknown(f.DraftMax),
+		"n_max " + DraftNMax(s),
 	}
 	// Zero drafted is a reading, and it is not "0% accepted": there was no
 	// denominator, so there is no rate to report.
@@ -573,6 +573,22 @@ func draftParts(s *tape.RunSummary) []string {
 	}
 	return append(parts, fmt.Sprintf("%s accepted (%d/%d)",
 		formatPct(float64(accepted)/float64(*t.DraftN)), accepted, *t.DraftN))
+}
+
+// DraftNMax is the block size the Draft row names: the speculative.n_max
+// values a --spec-n-max sweep's requests carried, "3,5", or the server's
+// --draft-max when the run swept nothing. A sweep overrode the flag on every
+// request, so printing the flag beside a sweep's acceptance would name a value
+// that never ran (TTP-35, 2026-09-13). The PNG's draft clause uses it too.
+func DraftNMax(s *tape.RunSummary) string {
+	if len(s.SpecNMax) == 0 {
+		return orUnknown(s.Server.Flags.DraftMax)
+	}
+	parts := make([]string, len(s.SpecNMax))
+	for i, v := range s.SpecNMax {
+		parts[i] = strconv.Itoa(v)
+	}
+	return strings.Join(parts, ",")
 }
 
 // contextString is the value of the Context row: the window the server was

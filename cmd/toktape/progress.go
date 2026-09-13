@@ -46,12 +46,11 @@ type progress struct {
 	firstToken time.Time
 	lastToken  time.Time
 	perStream  map[int]int
-	// rounds are the prompt rounds the run sends (`record --prompts`), empty
-	// for a single-round run, and round is the 1-based round the counters
-	// above describe, 0 before the first has been announced (TTP-38). Stream
-	// indices restart at 0 in every round, so the counters are one round's.
-	rounds []recorder.Round
-	round  int
+	// round is the 1-based round the counters above describe, 0 before the
+	// first has been announced (TTP-38). Stream indices restart at 0 in every
+	// round, so the counters are one round's. How many rounds there are comes
+	// with each stream start, from the recorder's plan (TTP-35).
+	round int
 
 	// waiting is the attach wait: the server is there and is not ready. It
 	// is the only state in which the ticker draws something other than the
@@ -137,8 +136,8 @@ func (p *progress) handle(ev recorder.Event) {
 			fmt.Fprintf(p.w, "  ! %s\n", ev.Message)
 		}
 	case recorder.EventStreamStarted:
-		if len(p.rounds) > 1 && ev.Round+1 != p.round {
-			p.beginRound(ev.Round)
+		if ev.Rounds > 1 && ev.Round+1 != p.round {
+			p.beginRound(ev)
 		}
 		if ev.Streams > p.streams {
 			p.streams = ev.Streams
@@ -155,7 +154,7 @@ func (p *progress) handle(ev recorder.Event) {
 	}
 }
 
-// beginRound announces round k and starts its counters afresh. The caller
+// beginRound announces the round ev starts and starts its counters afresh. The caller
 // holds the mutex.
 //
 // The token count, the fault total and the rate window are reset along with
@@ -163,17 +162,17 @@ func (p *progress) handle(ev recorder.Event) {
 // them, and a rate measured from round 1's first token to round 2's latest
 // would count that pause as decode time — handover lesson 1 again, one level
 // up.
-func (p *progress) beginRound(k int) {
-	p.round = k + 1
+func (p *progress) beginRound(ev recorder.Event) {
+	p.round = ev.Round + 1
 	p.tokens, p.majTotal = 0, 0
 	p.firstToken, p.lastToken = time.Time{}, time.Time{}
 	p.perStream = map[int]int{}
 	if p.quiet {
 		return
 	}
-	label := fmt.Sprintf("round %d/%d", k+1, len(p.rounds))
-	if k >= 0 && k < len(p.rounds) && p.rounds[k].Name != "" {
-		label += " " + p.rounds[k].Name
+	label := fmt.Sprintf("round %d/%d", ev.Round+1, ev.Rounds)
+	if name := roundName(ev.RoundName, ev.SpecNMax); name != "" {
+		label += " " + name
 	}
 	fmt.Fprintf(p.w, "  %s\n", label)
 }

@@ -139,6 +139,9 @@ func (r *run) streamRounds(ctx context.Context, rounds [][]server.StreamRequest)
 				Kind:      EventStreamStarted,
 				Stream:    i,
 				Round:     k,
+				Rounds:    len(rounds),
+				RoundName: r.opts.Rounds[k].Name,
+				SpecNMax:  specNMaxOf(reqs[i].Params),
 				Streams:   n,
 				MaxTokens: reqs[i].SentMaxTokens(),
 			})

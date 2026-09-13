@@ -88,6 +88,12 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		Warnings:    r.warnings,
 	}
 	summary.Server.Build, summary.Server.Commit = r.build, r.commit
+	if st.perRound > 0 {
+		// A --spec-n-max sweep groups its rounds by the value each was sent
+		// with (TTP-35). It is filled here, not after Record returns, so the
+		// summary EventDone carries is the one the tape holds.
+		applySweep(&summary, recs)
+	}
 
 	return &tape.Tape{
 		Schema:   tape.SchemaVersion,
