@@ -39,7 +39,6 @@ process actually touched, and how fast the request really was.
 │          --load-mode mmap -ncmoe 12 -t 16                            │
 │          -ot blk\.(3[6-9]|4[0-7])\.ffn_.*_exps=CPU                   │
 ├──────────────────────────────────────────────────────────────────────┤
-│ ! nvml unavailable, VRAM read from nvidia-smi                        │
 │ ! cold run: 1.4 major faults per token during decode                 │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │

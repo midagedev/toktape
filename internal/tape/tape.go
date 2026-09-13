@@ -106,7 +106,7 @@ type RunSummary struct {
 	Tag  string `json:"tag,omitempty"`
 	Note string `json:"note,omitempty"`
 	// Warnings are human-readable caveats the card prints verbatim
-	// ("nvml unavailable, VRAM from nvidia-smi", "pid not found, no /proc view").
+	// ("cold run: 1.4 major faults per token", "pid not found, no /proc view").
 	Warnings []string `json:"warnings,omitempty"`
 }
 
