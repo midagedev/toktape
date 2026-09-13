@@ -271,18 +271,50 @@ func TestGIFOfTheWholeClipStaysPostable(t *testing.T) {
 	// almost free here — every frame of it is one dirty rectangle of a few
 	// cells — so a looser gate would have bought headroom nobody needs and
 	// given up the one that caught a 7× regression before.
+	tp := tui.ExampleTape()
 	out := filepath.Join(t.TempDir(), "clip.gif")
-	if err := GIF(tui.ExampleTape(), Options{}, out); err != nil {
+	if err := GIF(tp, Options{}, out); err != nil {
 		t.Fatalf("GIF: %v", err)
 	}
-	// Re-pinned 1.5 → 2.0 MB by the lead on 2026-09-13 (TTP-24): the tile
-	// layout gives each of the eight streams its own scrolling sparkline, so
-	// more pixels change per frame. FAIL-first: the same clip measured
-	// 1,521,741 bytes against the old 1.5 MB bound (list layout: 1.22 MB).
-	// 2 MB is still a comfortable Reddit/GitHub embed; the README hero has
-	// its own 1.5 MB cap in cmd/toktape (four streams, 0.87 MB).
-	if got := fileSize(t, out); got > 2_000_000 {
-		t.Errorf("the clip is %d bytes, want under 2.0 MB", got)
+
+	// The budget is per *streaming* second, not a fixed total and not per
+	// clip second (TTP-27, 2026-09-13). Since the clip plays the run at 1:1
+	// its length now follows the tape, so a fixed total would have to be
+	// re-pinned every time the fixture changes — which is exactly the kind of
+	// gate that gets loosened until it stops catching anything.
+	//
+	// Streaming seconds is the denominator that holds still. The cold open,
+	// the intro and the card hold are nearly free: every frame of them is one
+	// small dirty rectangle, and the card folds into a single stored frame.
+	// So essentially all of the file is the streaming phase, and dividing by
+	// the whole clip would make the number drift with the hold fraction.
+	// Measured 2026-09-13 at GIFFontSize, 30 fps, on this fixture and on a
+	// synthetic twenty-five-second lengthening of it (repeat the token
+	// cadence until the run lasts 25 s):
+	//
+	//	streams  run      clip    stream   bytes      kB/clip-s  kB/stream-s
+	//	8        7.47 s   19.5 s   7.50 s  1,540,971       77.2        200.6
+	//	4        7.31 s   19.3 s   7.33 s  1,041,309       52.6        138.7
+	//	8       24.98 s   37.0 s  25.00 s  5,381,963      142.0        210.2
+	//	4       24.98 s   37.0 s  25.00 s  5,232,166      138.1        204.4
+	//
+	// 250 kB per streaming second is that 210 plus a quarter of headroom. It
+	// is tighter than the 2.0 MB flat cap it replaces (1.88 MB on this
+	// fixture), so nothing was loosened; it is the same gate expressed in the
+	// one unit that survives a longer run. What it still catches is the thing
+	// it was written for: without the transparency pass the earlier
+	// list-layout clip measured 19.3 MB, an order of magnitude over.
+	//
+	// The absolute size is now the lead's problem rather than this test's: a
+	// four-stream twenty-five-second run lands near 5 MB, which is past the
+	// 1.5 MB the README hero is capped at in cmd/toktape. Reducing it is a
+	// cell-size or frame-rate decision, not a density one.
+	const perStreamSecond = 250_000
+	s := NewSchedule(RunEnd(tp), DefaultFPS, 0)
+	budget := int64(perStreamSecond * s.Stream.Seconds())
+	if got := fileSize(t, out); got > budget {
+		t.Errorf("the clip is %d bytes over a %v stream, %.1f kB per streaming second; want at most %d (%d kB/s)",
+			got, s.Stream, float64(got)/1024/s.Stream.Seconds(), budget, perStreamSecond/1000)
 	}
 }
 

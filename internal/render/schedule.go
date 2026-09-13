@@ -21,16 +21,30 @@ const (
 	IntroHold = 1 * time.Second
 	// CardHold is the payoff: the result card, held long enough to read the
 	// two hero numbers and screenshot it.
-	CardHold = 4 * time.Second
-	// MinDuration and MaxDuration bound the derived clip length. The cold
-	// open and the two holds are eleven seconds of it, so under twenty the
-	// streaming phase is too short to show a stall; over twenty-five the clip
-	// stops being scrollable-past-able on a feed.
-	MinDuration = 20 * time.Second
-	MaxDuration = 25 * time.Second
+	CardHold = 5 * time.Second
+	// MaxStream is the longest the streaming phase is ever played for. Below
+	// it the run plays at 1:1 — a clip of a twenty-five-second run is a
+	// twenty-five-second stream — because the thing a reader came to watch is
+	// tokens arriving at the speed the machine produced them (user,
+	// 2026-09-13: "토큰 생성하는 화면을 충분히 살펴보기에 재생 시간이 너무
+	// 짧아"). Only a run past this is compressed, and then linearly: a
+	// four-minute run is not worth four minutes of anyone's feed.
+	MaxStream = 30 * time.Second
+	// MinDuration and MaxDuration are the bounds a derived clip falls inside,
+	// derived themselves from the phases above: the floor is a run with no
+	// tokens at all (the cold open and the two holds and nothing between
+	// them) and the ceiling is the floor plus a fully compressed stream.
+	// Nothing clamps to them — they are what the arithmetic can produce, not
+	// a rule imposed on it — so they are here for callers and tests that want
+	// to say "a clip is between twelve and forty-two seconds" without
+	// re-deriving it.
+	MinDuration = OpenHold + IntroHold + CardHold
+	MaxDuration = MinDuration + MaxStream
 
 	// holdShare caps the three held phases at four fifths of a short clip, so
-	// an explicitly requested two-second clip still has a streaming phase.
+	// an explicitly requested two-second clip still has a streaming phase. It
+	// applies only to an explicit Options.Duration; a derived clip is built
+	// around the holds and can never be too short for them.
 	holdShare = 5
 )
 
@@ -70,10 +84,16 @@ type Frame struct {
 // Schedule maps frame indices onto the run's timeline.
 //
 // A clip is four phases: OpenHold on the cold open, IntroHold on the pre-run
-// screen, the run itself stretched or compressed uniformly into whatever is
-// left, and CardHold on the result card. The streaming phase is the only one
-// that scales, so a two-minute run and a four-second run produce clips of the
-// same shape — which is what makes two clips comparable at a glance.
+// screen, the run, and CardHold on the result card. The streaming phase is the
+// only one whose length depends on the tape: it is the run itself, played at
+// 1:1, and a clip is therefore as long as its run needs. A run past MaxStream
+// is the single exception and is compressed linearly into it.
+//
+// 1:1 is the whole point. Compressing a run to fit a fixed budget makes the
+// tokens fly, and a viewer cannot see whether a stream stalled, whether the
+// tiles are in step, or what the decode rate actually feels like — which is
+// the thing the clip exists to show. A short run gives a short clip; it is not
+// stretched to fill a floor, because slow motion is a lie about the machine.
 //
 // Two clocks, on purpose. tui.View's t is both an animation phase and a data
 // cut: sampleAt(t) and decodeRateAt(t) read it, and ease(prev, cur, since, t)
@@ -104,15 +124,28 @@ type Schedule struct {
 
 	// introLead is added to clip time during the intro; see the type comment.
 	introLead time.Duration
+	// oneToOne marks the ordinary case: the streaming phase is the run, at
+	// its own speed, and Frame maps it by subtraction rather than by a ratio.
+	// It is not the same as Stream == RunEnd — snapping the clip to a whole
+	// number of frames leaves Stream a fraction of a frame longer — and the
+	// difference matters, because a ratio close to but not exactly one drifts
+	// the animation clock away from the run clock over a long stream.
+	oneToOne bool
 }
 
 // NewSchedule plans a clip of a run that ends at runEnd.
 //
-// dur of zero derives the length: the natural open-plus-intro-plus-run-plus-
-// card clip, clamped to [MinDuration, MaxDuration]. A run longer than that is
-// compressed uniformly; a shorter one plays in slow motion, which is the right
-// reading of a run too fast to watch. A non-zero dur is used as given — the
-// clamp describes the default, not the API.
+// dur of zero derives the length, which is the default and the interesting
+// case: the cold open, the intro, the run at 1:1 (or MaxStream of it,
+// compressed, if the run is longer than that), and the card hold. There is no
+// floor and no ceiling on the result beyond what those four add up to — see
+// MinDuration and MaxDuration, which are that arithmetic and not a clamp.
+//
+// A non-zero dur is an explicit override and is honoured exactly: the run is
+// compressed or stretched into whatever the holds leave, and if the request is
+// too short to hold them the holds shrink in proportion too. That is the path
+// a test renders a two-second clip on; it is not how a clip anyone watches is
+// built.
 func NewSchedule(runEnd time.Duration, fps int, dur time.Duration) Schedule {
 	if runEnd < 0 {
 		runEnd = 0
@@ -120,21 +153,24 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration) Schedule {
 	if fps <= 0 {
 		fps = DefaultFPS
 	}
-	if dur <= 0 {
-		dur = OpenHold + IntroHold + runEnd + CardHold
-		if dur < MinDuration {
-			dur = MinDuration
+	derived := dur <= 0
+	oneToOne := derived && runEnd <= MaxStream
+	if derived {
+		stream := runEnd
+		if stream > MaxStream {
+			stream = MaxStream
 		}
-		if dur > MaxDuration {
-			dur = MaxDuration
-		}
+		dur = OpenHold + IntroHold + stream + CardHold
 	}
 
-	// Snap the clip to a whole number of frames. A derived length is almost
-	// never one (a seven-and-a-bit-second run gives an eleven-and-a-bit-second
-	// clip), and a trailing part-frame would make the last frame shorter than
-	// every other one and the clip's length disagree with count ÷ fps.
-	frames := (dur*time.Duration(fps) + time.Second/2) / time.Second
+	// Snap the clip up to a whole number of frames. A derived length almost
+	// never is one (a seven-and-a-bit-second run gives a nineteen-and-a-bit-
+	// second clip), and a trailing part-frame would make the last frame
+	// shorter than every other one and the clip's length disagree with
+	// count ÷ fps. Up rather than to-nearest: rounding down would leave the
+	// streaming phase a few milliseconds short of the run and drop the last
+	// token or two into the cut to the card.
+	frames := (dur*time.Duration(fps) + time.Second - 1) / time.Second
 	if frames < 1 {
 		frames = 1
 	}
@@ -142,17 +178,18 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration) Schedule {
 	// duration exactly rather than a nanosecond either side of it.
 	dur = frames * time.Second / time.Duration(fps)
 
-	// The three held phases are fixed until the clip is short enough that they
-	// would eat it, at which point all three shrink in proportion and keep
-	// their 6:1:4 ratio. Frame rescales the open's own clock by the same
-	// factor, so a squeezed clip plays the whole cold open faster rather than
-	// cutting it off half way through the typing.
+	// The three held phases are fixed until an explicitly requested clip is
+	// short enough that they would eat it, at which point all three shrink in
+	// proportion and keep their 6:1:5 ratio. Frame rescales the open's own
+	// clock by the same factor, so a squeezed clip plays the whole cold open
+	// faster rather than cutting it off half way through the typing. A derived
+	// clip is built around the holds and never reaches this.
 	//
 	// The arithmetic goes through float64 because the exact form
 	// (room × OpenHold / holds) overflows int64 at these magnitudes: six
 	// seconds is 6e9 nanoseconds and the product is past 9.2e18.
 	open, intro, card := OpenHold, IntroHold, CardHold
-	if holds, room := open+intro+card, dur-dur/holdShare; holds > room {
+	if holds, room := open+intro+card, dur-dur/holdShare; !derived && holds > room {
 		share := func(d time.Duration) time.Duration {
 			return time.Duration(float64(room) * float64(d) / float64(holds))
 		}
@@ -166,8 +203,11 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration) Schedule {
 		Intro:    intro,
 		Card:     card,
 		// The streaming phase takes the rounding: the four phases must sum to
-		// the duration exactly or the last frame lands in the wrong one.
-		Stream: dur - open - intro - card,
+		// the duration exactly or the last frame lands in the wrong one. In
+		// the 1:1 case this leaves it a fraction of a frame longer than the
+		// run, which Frame absorbs by clamping At.
+		Stream:   dur - open - intro - card,
+		oneToOne: oneToOne,
 	}
 	s.Count = int(frames) + 1
 
@@ -203,8 +243,19 @@ func (s Schedule) Frame(i int) Frame {
 		f.At = 0
 		f.Anim = clip - s.Open + s.introLead
 	case clip < s.Open+s.Intro+s.Stream && s.Stream > 0:
-		p := float64(clip-s.Open-s.Intro) / float64(s.Stream)
-		f.At = time.Duration(float64(s.RunEnd) * p)
+		if s.oneToOne {
+			// Exactly clip − start: integer subtraction, not a ratio, so the
+			// run clock and the clip clock stay locked to the nanosecond and
+			// the sparklines scroll at the speed the operator saw. The clamp
+			// covers the part-frame the snapping added past the run's end.
+			f.At = clip - s.Open - s.Intro
+			if f.At > s.RunEnd {
+				f.At = s.RunEnd
+			}
+		} else {
+			p := float64(clip-s.Open-s.Intro) / float64(s.Stream)
+			f.At = time.Duration(float64(s.RunEnd) * p)
+		}
 		f.Anim = f.At
 	default:
 		f.At = s.RunEnd

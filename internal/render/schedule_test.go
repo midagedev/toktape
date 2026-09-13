@@ -11,18 +11,23 @@ import (
 const holds = OpenHold + IntroHold + CardHold
 
 func TestNewScheduleDerivesDuration(t *testing.T) {
+	// The clip is as long as the run needs (TTP-27, user 2026-09-13: the old
+	// twenty-second budget made the tokens fly). Every case below the
+	// MaxStream ceiling is holds + the run, exactly.
 	tests := []struct {
 		name    string
 		runEnd  time.Duration
 		wantDur time.Duration
 		wantStr time.Duration // streaming phase
 	}{
-		{"natural length is kept", 10 * time.Second, 21 * time.Second, 10 * time.Second},
-		{"a short run is stretched to the floor", 2 * time.Second, MinDuration, MinDuration - holds},
-		{"a long run is compressed to the ceiling", 5 * time.Minute, MaxDuration, MaxDuration - holds},
-		{"exactly at the floor", 9 * time.Second, MinDuration, 9 * time.Second},
-		{"exactly at the ceiling", 14 * time.Second, MaxDuration, 14 * time.Second},
-		{"an empty run still gets a clip", 0, MinDuration, MinDuration - holds},
+		{"the run is the clip", 10 * time.Second, holds + 10*time.Second, 10 * time.Second},
+		{"a short run gives a short clip", 2 * time.Second, holds + 2*time.Second, 2 * time.Second},
+		{"the example run today", 6600 * time.Millisecond, 18600 * time.Millisecond, 6600 * time.Millisecond},
+		{"the example run once it is lengthened", 25 * time.Second, 37 * time.Second, 25 * time.Second},
+		{"exactly at the ceiling", MaxStream, MaxDuration, MaxStream},
+		{"a second past the ceiling is compressed into it", MaxStream + time.Second, MaxDuration, MaxStream},
+		{"a long run is compressed into the ceiling", 5 * time.Minute, MaxDuration, MaxStream},
+		{"an empty run is the holds and nothing else", 0, MinDuration, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,6 +46,88 @@ func TestNewScheduleDerivesDuration(t *testing.T) {
 				t.Errorf("phases sum to %v, want %v", got, s.Duration)
 			}
 		})
+	}
+}
+
+func TestScheduleStreamsAtRealSpeed(t *testing.T) {
+	// The contract of TTP-27, frame by frame: inside the streaming phase the
+	// instant of the run a frame draws is exactly its distance into that
+	// phase. Anything else — even a ratio that is 0.998 rather than 1 —
+	// scrolls the sparklines and breathes the cursor at the wrong speed, and
+	// the error grows across a twenty-five-second stream.
+	for _, runEnd := range []time.Duration{6600 * time.Millisecond, 25 * time.Second, MaxStream} {
+		s := NewSchedule(runEnd, DefaultFPS, 0)
+		start := s.Open + s.Intro
+		var checked int
+		for i := 0; i < s.Count; i++ {
+			f := s.Frame(i)
+			if f.Clip < start || f.Clip >= start+s.Stream || f.Mode == tui.ModeCard {
+				continue
+			}
+			checked++
+			want := f.Clip - start
+			if want > runEnd {
+				want = runEnd
+			}
+			if f.At != want {
+				t.Fatalf("runEnd %v: frame %d at clip %v is cut at %v, want %v", runEnd, i, f.Clip, f.At, want)
+			}
+			if f.Anim != f.At {
+				t.Fatalf("runEnd %v: frame %d animates on %v, want the run clock %v", runEnd, i, f.Anim, f.At)
+			}
+		}
+		if want := int(s.Stream*time.Duration(s.FPS)/time.Second) - 1; checked < want {
+			t.Errorf("runEnd %v: only %d streaming frames seen, want at least %d", runEnd, checked, want)
+		}
+		// The last streaming frame reaches the run's end rather than stopping
+		// a few frames short of it.
+		last := s.Frame(int((start+s.Stream)*time.Duration(s.FPS)/time.Second) - 1)
+		if gap := runEnd - last.At; gap < 0 || gap > 2*time.Second/DefaultFPS {
+			t.Errorf("runEnd %v: the stream's last frame is cut at %v, want within two frames of the end", runEnd, last.At)
+		}
+	}
+}
+
+func TestScheduleCompressesOnlyPastTheCeiling(t *testing.T) {
+	// Above MaxStream the phase is capped and the run is squeezed into it
+	// linearly — the only case where clip time and run time run at different
+	// speeds by default.
+	const runEnd = 2 * time.Minute
+	s := NewSchedule(runEnd, DefaultFPS, 0)
+	if s.Stream != MaxStream || s.Duration != MaxDuration {
+		t.Fatalf("a %v run gives stream %v of a %v clip, want %v of %v", runEnd, s.Stream, s.Duration, MaxStream, MaxDuration)
+	}
+	mid := s.Frame(int((s.Open + s.Intro + s.Stream/2) * time.Duration(s.FPS) / time.Second))
+	if want, tol := runEnd/2, time.Second; mid.At < want-tol || mid.At > want+tol {
+		t.Errorf("half way through the phase is cut at %v, want ~%v", mid.At, want)
+	}
+	// Four times life, and the animation clock follows the run so the frames
+	// are the ones the operator saw.
+	if mid.Anim != mid.At {
+		t.Errorf("animation clock = %v, want the run clock %v", mid.Anim, mid.At)
+	}
+}
+
+func TestScheduleExplicitDurationIsExact(t *testing.T) {
+	// The override path, kept: a caller who names a length gets it, and the
+	// run is compressed or stretched into what the holds leave.
+	// All three are long enough to hold the holds; the squeeze below that is
+	// TestNewScheduleShortExplicitDuration's subject.
+	for _, want := range []time.Duration{15 * time.Second, 30 * time.Second, time.Minute} {
+		s := NewSchedule(7*time.Second, DefaultFPS, want)
+		if s.Duration != want {
+			t.Errorf("asked for %v, got %v", want, s.Duration)
+		}
+		if s.Open != OpenHold || s.Intro != IntroHold || s.Card != CardHold {
+			t.Errorf("%v clip holds = %v/%v/%v, want %v/%v/%v", want, s.Open, s.Intro, s.Card, OpenHold, IntroHold, CardHold)
+		}
+		if got := s.Open + s.Intro + s.Stream + s.Card; got != want {
+			t.Errorf("%v clip's phases sum to %v", want, got)
+		}
+		last := s.Frame(s.Count - 1)
+		if last.Clip != want || last.At != s.RunEnd {
+			t.Errorf("%v clip ends at clip %v / run %v, want %v / %v", want, last.Clip, last.At, want, s.RunEnd)
+		}
 	}
 }
 
@@ -119,8 +206,12 @@ func TestScheduleOpensOnTheColdOpen(t *testing.T) {
 
 func TestScheduleFrameCount(t *testing.T) {
 	for _, fps := range []int{12, 24, 30, 60} {
-		s := NewSchedule(7*time.Second, fps, 0)
-		want := fps * int(s.Duration/time.Second)
+		// 7.4 s, so the derived clip is not a whole number of seconds and a
+		// truncating expectation would be off by a fifth of a second's frames.
+		s := NewSchedule(7400*time.Millisecond, fps, 0)
+		// Rounded, not truncated: a duration of n frames is n×(1s/fps) with the
+		// division floored, so it is a few nanoseconds under the exact value.
+		want := int((s.Duration*time.Duration(fps) + time.Second/2) / time.Second)
 		if diff := s.Count - want; diff < 0 || diff > 1 {
 			t.Errorf("fps %d: %d frames, want %d ± 1", fps, s.Count, want)
 		}

@@ -4,8 +4,10 @@
 // It exists for the same reason internal/tui's tuidump does — a visual change
 // is judged by looking at what it renders, and nobody should have to write a
 // program to see one. Every still is named with both clocks: the time in the
-// finished clip and the instant of the run it draws, which are not the same
-// number once the streaming phase has been stretched or compressed.
+// finished clip and the instant of the run it draws. Those differ by the cold
+// open and the intro while the run plays at 1:1, and by more than that only
+// when the clip length was overridden or the run was long enough to compress
+// (see render.MaxStream).
 package main
 
 import (
@@ -32,8 +34,12 @@ func main() {
 	size := flag.Float64("size", render.DefaultFontSize, "cell size in pixels for the stills and the mp4")
 	// The default set walks the whole clip: the empty prompt, the command
 	// half typed, the search, the streams in prefill, the TUI just after it
-	// takes the screen, and the run mid-flight. The last frame is added below.
-	at := flag.String("at", "0.4,1.8,3.5,5,6.5,12", "clip times to write stills for, in seconds")
+	// takes the screen, one second into the run and five seconds into it. The
+	// last two are the stills a look round is actually judged on, so they are
+	// placed relative to the streaming phase (OpenHold + IntroHold = 7 s) and
+	// not at absolute times that would drift as the run gets longer. The last
+	// two frames of the clip are added below.
+	at := flag.String("at", "0.4,1.8,3.5,5,6.5,8,12", "clip times to write stills for, in seconds")
 	flag.Parse()
 
 	// Four streams, the shape the README hero uses (tui.ExampleTapeN).
