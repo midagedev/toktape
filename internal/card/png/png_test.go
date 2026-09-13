@@ -812,3 +812,50 @@ func TestAllDefaultFlagsStripFits(t *testing.T) {
 		t.Errorf("flags line ends at x=%d, past the content box (%d)", m.Rect.Max.X, contentR)
 	}
 }
+
+// TestQueuedStreamsAreNamed: the PNG says the same thing the text card does
+// about a run that asked for more streams than the server has slots. The
+// per-stream figure it sits under is the one the queue explains, so the note
+// goes on that line.
+func TestQueuedStreamsAreNamed(t *testing.T) {
+	s := card.ExampleConcurrent()
+	s.Server.NSlots = 4
+	s.Aggregate.SlotsBusyMax = 4
+	c, err := renderCanvas(s)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	m, ok := c.markByID("hero.left.sub1")
+	if !ok {
+		t.Fatal("hero.left.sub1 was never drawn")
+	}
+	if !strings.Contains(m.Text, "4 slots, 4 queued") {
+		t.Errorf("hero.left.sub1 = %q, want it to name the queue", m.Text)
+	}
+	if !strings.Contains(m.Text, "per stream") {
+		t.Errorf("hero.left.sub1 lost the per-stream rate: %q", m.Text)
+	}
+	if strings.HasSuffix(m.Text, ellipsis) {
+		t.Errorf("the queue note pushed the per-stream line past its column: %q", m.Text)
+	}
+
+	// Streams that all fit, a server whose slot count was never read, and a
+	// single-stream run each report no queue: two of them have nothing to
+	// report and the third would be guessing.
+	for name, s := range map[string]*tape.RunSummary{
+		"all fit":    card.ExampleConcurrent(),
+		"no /props":  func() *tape.RunSummary { x := card.ExampleConcurrent(); x.Server.NSlots = 0; return x }(),
+		"one stream": func() *tape.RunSummary { x := card.Example(); x.Server.NSlots = 0; return x }(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, err := renderCanvas(s)
+			if err != nil {
+				t.Fatalf("renderCanvas: %v", err)
+			}
+			m, ok := c.markByID("hero.left.sub1")
+			if ok && strings.Contains(m.Text, "queued") {
+				t.Errorf("hero.left.sub1 = %q, want no queue", m.Text)
+			}
+		})
+	}
+}

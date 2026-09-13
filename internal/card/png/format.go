@@ -159,6 +159,17 @@ func flagValue(v string, argvWasRead bool) string {
 	return unknown
 }
 
+// queuedString names the streams that had to wait for a slot, or "" when none
+// did or when the server's slot count was never read. Character-for-character
+// the text card's rule (internal/card/format.go carries the derivation).
+func queuedString(s *tape.RunSummary) string {
+	slots := s.Server.NSlots
+	if slots <= 0 || s.Concurrency <= slots {
+		return ""
+	}
+	return fmt.Sprintf("%d slots, %d queued", slots, s.Concurrency-slots)
+}
+
 func yesNo(b bool) string {
 	if b {
 		return "yes"

@@ -54,6 +54,8 @@ func TestTextGolden(t *testing.T) {
 		// read what a Hangul rig and an oversized -ot actually render as.
 		{"hangul", hangulSummary()},
 		{"long-ot", longOTSummary()},
+		// More streams than slots: the Streams block must show the queue.
+		{"queued", queuedSummary()},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -128,6 +130,7 @@ func TestBorderColumn(t *testing.T) {
 		"unknowns":           unknownsSummary(),
 		"hangul":             hangulSummary(),
 		"long-ot":            longOTSummary(),
+		"queued":             queuedSummary(),
 		"nil":                nil,
 	}
 	left := "┌│├└"
@@ -413,5 +416,47 @@ func TestBenchTableFollowsTheDefaultRule(t *testing.T) {
 	unread := &tape.RunSummary{Concurrency: 1}
 	if got := LlamaBenchTable(unread); strings.Contains(got, "default") {
 		t.Errorf("bench table claimed a default from an argv nobody read:\n%s", got)
+	}
+}
+
+// queuedSummary is the case the real 8-stream run on a 4-slot server hit: the
+// card printed "slots busy max 4" and said nothing about the other four
+// streams waiting their turn, so the per-stream rate looked like a server that
+// simply ran slowly.
+func queuedSummary() *tape.RunSummary {
+	s := ExampleConcurrent()
+	s.Server.NSlots = 4
+	s.Aggregate.SlotsBusyMax = 4
+	return s
+}
+
+// TestQueuedStreamsAreNamed: a run that asked for more streams than the server
+// has slots was partly serialised, and the Streams block has to say so. The
+// per-stream figure of a queued run is not the per-stream figure of a run that
+// fitted, and a reader comparing two cards cannot see the difference otherwise.
+func TestQueuedStreamsAreNamed(t *testing.T) {
+	out := Text(queuedSummary())
+	if !strings.Contains(out, "4 slots, 4 queued") {
+		t.Errorf("a run with more streams than slots does not say so:\n%s", out)
+	}
+	if !strings.Contains(out, "slots busy max 4") {
+		t.Errorf("the slots-busy figure disappeared:\n%s", out)
+	}
+
+	// Streams that all fit are not queued, and the line stays as it was.
+	if got := Text(ExampleConcurrent()); strings.Contains(got, "queued") {
+		t.Errorf("8 streams on 8 slots reported a queue:\n%s", got)
+	}
+	// An unread /props has no slot count, and a queue would be a guess.
+	noSlots := queuedSummary()
+	noSlots.Server.NSlots = 0
+	if got := Text(noSlots); strings.Contains(got, "queued") {
+		t.Errorf("a run with no slot count claimed a queue:\n%s", got)
+	}
+	// A single-stream run has no Streams block at all.
+	single := Example()
+	single.Server.NSlots = 0
+	if got := Text(single); strings.Contains(got, "queued") {
+		t.Errorf("a single-stream run reported a queue:\n%s", got)
 	}
 }

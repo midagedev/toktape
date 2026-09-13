@@ -383,9 +383,15 @@ func streamLines(s *tape.RunSummary) []string {
 	if a.StreamsFailed > 0 {
 		first += fmt.Sprintf(" · %d failed", a.StreamsFailed)
 	}
-	second := fmt.Sprintf("TTFT p50 %s p95 %s · slots busy max %s",
-		formatMs(a.TTFTp50Ms), formatMs(a.TTFTp95Ms), formatInt(a.SlotsBusyMax))
-	return labelled("Streams", speedLabelW, []string{first, second})
+	// The slots line wraps rather than truncating: on a server with fewer
+	// slots than streams the queue note is the part that explains the
+	// per-stream rate above it, so it is never the part that gets cut.
+	second := wrapJoin([]string{
+		fmt.Sprintf("TTFT p50 %s p95 %s", formatMs(a.TTFTp50Ms), formatMs(a.TTFTp95Ms)),
+		"slots busy max " + formatInt(a.SlotsBusyMax),
+		queuedString(s),
+	}, " · ", innerWidth-speedLabelW)
+	return labelled("Streams", speedLabelW, append([]string{first}, second...))
 }
 
 func memorySection(s *tape.RunSummary) []string {

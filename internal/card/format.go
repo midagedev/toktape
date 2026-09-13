@@ -168,6 +168,26 @@ func flagValue(v string, argvWasRead bool) string {
 	return unknown
 }
 
+// queuedString names the streams that had to wait for a slot, or "" when none
+// did or when the server's slot count was never read.
+//
+// A run of N streams on a server with fewer than N slots is partly serialised:
+// the server admits as many as it has slots and the rest queue. Its per-stream
+// rate is then not the per-stream rate of a run that fitted, and two cards
+// compared side by side look like a difference in the machine when the
+// difference was in the request. The card says which it was.
+//
+// NSlots is /props total_slots. Zero means /props was never read (or the
+// server did not report it), and a queue derived from an unread slot count
+// would be exactly the invented figure the repo rule forbids.
+func queuedString(s *tape.RunSummary) string {
+	slots := s.Server.NSlots
+	if slots <= 0 || s.Concurrency <= slots {
+		return ""
+	}
+	return fmt.Sprintf("%d slots, %d queued", slots, s.Concurrency-slots)
+}
+
 // yesNo renders a bool the way the card's labels read.
 func yesNo(b bool) string {
 	if b {

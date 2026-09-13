@@ -144,8 +144,14 @@ func (c *content) buildHero(s *tape.RunSummary) {
 			eyebrow: "aggregate " + label,
 			number:  formatRate(a.AggregatePredictedPerSecond),
 			unit:    "tok/s",
-			sub1: fmt.Sprintf("%d × %s per stream",
-				streams, formatRateUnit(a.PerStreamPredictedPerSecond)),
+			// The queue note rides on the per-stream line because that is
+			// the figure it qualifies: streams that waited for a slot were
+			// partly serialised, and their per-stream rate is not the rate
+			// of a run that fitted the server.
+			sub1: joinParts(" · ",
+				fmt.Sprintf("%d × %s per stream",
+					streams, formatRateUnit(a.PerStreamPredictedPerSecond)),
+				queuedString(s)),
 			sub2: joinParts(" · ",
 				formatInt(a.TotalPredictedN)+" tokens",
 				formatSeconds(a.WallMs)+" wall",
