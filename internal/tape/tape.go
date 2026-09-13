@@ -281,6 +281,7 @@ type TimingsSummary struct {
 	PromptMs           float64 `json:"prompt_ms"`
 	PromptPerSecond    float64 `json:"prompt_per_second"`
 	PredictedN         int     `json:"predicted_n"`
+	ReasoningN         int     `json:"reasoning_n,omitempty"` // reasoning tokens among PredictedN (thinking models)
 	PredictedMs        float64 `json:"predicted_ms"`
 	PredictedPerSecond float64 `json:"predicted_per_second"`
 	// Speculative decoding, when the server reports it. nil = not reported.
@@ -288,9 +289,9 @@ type TimingsSummary struct {
 	DraftNAccepted *int `json:"draft_n_accepted,omitempty"`
 
 	// Client-side.
-	TTFTMs                   float64 `json:"ttft_ms"` // request sent → first content token
+	TTFTMs                   float64 `json:"ttft_ms"` // request sent → first token (reasoning or answer)
 	ClientPromptPerSecond    float64 `json:"client_prompt_per_second"`
-	ClientPredictedPerSecond float64 `json:"client_predicted_per_second"` // content window only
+	ClientPredictedPerSecond float64 `json:"client_predicted_per_second"` // decode window, reasoning tokens included
 	ClientAgreesWithServer   bool    `json:"client_agrees_with_server"`   // within RateTolerance
 	// DecodeLabel is "decode" when PredictedN >= MinDecodeTokens, else "sample".
 	DecodeLabel string `json:"decode_label"`
