@@ -1,12 +1,12 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────────────────────────────────────────┐
 │ stream 1/8                                        done │ stream 2/8                                         done │ PLACEMENT ─────────────────────────── │
 │ 9.1 tok/s  ▇██▇▇█▇██▇▇▇██▇ ttft 630 ms · 296/320       │ 9.1 tok/s  ▇██▇▇▇██▇▇▇██▇▇ ttft 690 ms · 301/320        │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
-│ you can serve at once, and that is usually the thing   │ 나온 숫자로 캐시 크기를 다시 계산해 보라. 화면          │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
-│ people actually want. Tensor parallelism would split   │ 오른쪽의 메모리 칸이 그 계산과 실제 장치 사용량을       │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ each matrix instead of each layer and let both         │ 나란히 보여 주는 이유도 그것이다. 두 값이 어긋나면      │      ▆ weights  ▆ kv  ▆ buf           │
-│ devices work together on the same token, but it        │ 설정이 생각과 다르게 잡혀 있다는 뜻이고, 그때는         │                                       │
-│ wants a fast link between them and it is not what      │ 속도를 재기 전에 배치부터 고쳐야 한다. 실제로 자리가    │ MEMORY ────────────────────────────── │
-│ this server does                                       │ 모자랄 때 손대는                                        │ rss           1.2G file          0.8G │
+│ second waits, then the activations cross the bus,      │ 나온 숫자로 캐시 크기를 다시 계산해 보라. 화면          │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
+│ which costs almost nothing because an activation is    │ 오른쪽의 메모리 칸이 그 계산과 실제 장치 사용량을       │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ a few kilobytes, and the second card runs the rest     │ 나란히 보여 주는 이유도 그것이다. 두 값이 어긋나면      │      ▆ weights  ▆ kv  ▆ buf           │
+│ while the first waits. Each token therefore takes      │ 설정이 생각과 다르게 잡혀 있다는 뜻이고, 그때는         │                                       │
+│ the sum of the two halves rather than the maximum,     │ 속도를 재기 전에 배치부터 고쳐야 한다. 실제로 자리가    │ MEMORY ────────────────────────────── │
+│ which is why adding a card raises the memory you       │ 모자랄 때 손대는                                        │ rss           1.2G file          0.8G │
 ├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ virt         48.0G anon          0.4G │
 │ stream 3/8                                        done │ stream 4/8                                         done │ maj/tok                           0.0 │
 │ 9.1 tok/s  ██▇▇▇██▇▇█▇██▇▇ ttft 750 ms · 306/320       │ 9.1 tok/s  █▇▇█▇██▇▇▇██▇▇▇ ttft 810 ms · 311/320        │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -500,42 +499,92 @@ func exampleWords(i, n, reasoningN int) []string {
 			fields, at = thinking, j
 		}
 		w := fields[at%len(fields)]
-		// No leading space at the start of the text or at the start of the
-		// answer: the wrap treats a leading space as an empty first word, and
-		// the answer begins its own line under the marker anyway.
+		// The whitespace belongs to the token that follows it, which is how a
+		// real tokeniser emits it and what lets a token carry a newline and
+		// the indentation under it. At the start of the text and at the start
+		// of the answer that leading space is dropped: the wrap reads it as an
+		// empty first word, and the answer begins its own line anyway.
 		if j == 0 || j == reasoningN {
-			out = append(out, w)
-			continue
+			w = strings.TrimLeft(w, " ")
 		}
-		out = append(out, " "+w)
+		out = append(out, w)
 	}
 	return out
 }
 
-// exampleFields splits one example paragraph into words, never returning an
-// empty slice: the token loop indexes it modulo its length.
+// exampleFields splits one example paragraph into tokens, each carrying the
+// whitespace in front of it. Never returns an empty slice: the token loop
+// indexes it modulo its length.
+//
+// A run of spaces collapses to one, but a run containing a newline is kept
+// verbatim — the newline and the indentation under it (TTP-52, 2026-09-14).
+// strings.Fields threw both away, and an example answer therefore could not
+// contain a fenced code block, which is the one kind of answer whose shape on
+// screen the pane does something with. Prose is unaffected: every token of a
+// paragraph with no newline in it comes out as " word", exactly as before.
 func exampleFields(s string) []string {
-	fields := strings.Fields(s)
-	if len(fields) == 0 {
+	var (
+		out   []string
+		space strings.Builder
+		word  strings.Builder
+	)
+	flush := func() {
+		if word.Len() == 0 {
+			return
+		}
+		out = append(out, space.String()+word.String())
+		space.Reset()
+		word.Reset()
+	}
+	for _, r := range s {
+		if r != ' ' && r != '\t' && r != '\n' && r != '\r' {
+			word.WriteRune(r)
+			continue
+		}
+		flush()
+		space.WriteRune(r)
+	}
+	flush()
+	for i, w := range out {
+		if strings.ContainsRune(w, '\n') {
+			continue
+		}
+		// No newline in this token's whitespace, so it is ordinary prose
+		// spacing and collapses to one space — never more, and never none
+		// except at the very start.
+		trimmed := strings.TrimLeft(w, " \t")
+		if i > 0 {
+			trimmed = " " + trimmed
+		}
+		out[i] = trimmed
+	}
+	if len(out) == 0 {
 		return []string{"…"}
 	}
-	return fields
+	return out
 }
 
-// examplePrompt is what stream i was asked. It is the first line of the answer
-// turned back into a question, so a reader of the prompt modal sees a request
-// that matches the reply under it.
+// examplePrompts is what each stream was asked, one per answer.
+//
+// They used to be derived — the answer's first eight words with " — explain."
+// after them — which produced half-sentences like "A dense seventy billion
+// parameter model at Q4_K_M — explain." in the prompt modal. A fixture's
+// prompt is read by a person looking at the clip's opening frame, so it is
+// written rather than cut (2026-09-14).
+var examplePrompts = []string{
+	"Write the decode loop of a transformer in Go, then tell me where the time actually goes.",
+	"KV 캐시가 가중치와 뭐가 다른지, 컨텍스트를 늘리면 왜 갑자기 자리가 모자라는지 설명해 주세요.",
+	"If I send eight requests at once instead of one, which number actually changes and why?",
+	"What exactly does the prefix cache reuse, and when does it silently stop helping?",
+	"수치를 재기 전에 기계가 조용한지 어떻게 확인하나요? 오염된 측정은 어떻게 알아보나요?",
+	"How do I read a quantisation name like Q4_K_M, and what does it not tell me?",
+	"Speculative decoding: when is it worth it, and what makes the acceptance rate collapse?",
+	"Why is resident memory not the same as loaded weights, and what is the gap made of?",
+}
+
+// examplePrompt is what stream i was asked.
 func examplePrompt(i int) string {
-	return fmt.Sprintf("%s — explain.", firstWords(exampleAnswers[i%len(exampleAnswers)], 8))
-}
-
-// firstWords is the first n words of s.
-func firstWords(s string, n int) string {
-	fields := strings.Fields(s)
-	if len(fields) > n {
-		fields = fields[:n]
-	}
-	return strings.Join(fields, " ")
+	return examplePrompts[i%len(examplePrompts)]
 }
 
 func exampleRendered(i int) string {

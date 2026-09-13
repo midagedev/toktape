@@ -96,9 +96,30 @@ func TestCodeClassesFollowTheFence(t *testing.T) {
 	if got := codeClasses(r); got != nil {
 		t.Errorf("a reasoning stream produced classes")
 	}
-	// Prose alone costs nothing.
-	if got := codeClasses(ModelAt(ExampleTape(), doneAt).Streams[0]); got != nil {
-		t.Errorf("the prose example produced classes")
+	// Prose alone costs nothing — stream 1 is the Korean KV-cache answer and
+	// has no fence in it.
+	m := ModelAt(ExampleTape(), doneAt)
+	if got := codeClasses(m.Streams[1]); got != nil {
+		t.Errorf("a prose answer produced classes")
+	}
+	// The example's own first stream opens on a fenced Go block (2026-09-14):
+	// the hero clip is rendered from this fixture, so the highlighting has to
+	// be exercised by it and not only by a stream built inside a test.
+	exClasses := codeClasses(m.Streams[0])
+	if exClasses == nil {
+		t.Fatal("the example's code answer produced no classes")
+	}
+	for word, want := range map[string]codeClass{
+		"```go":        classFence,
+		"// one token": classComment,
+		"func (m":      classKeyword,
+		"range":        classKeyword,
+		"argmax":       classPlain,
+		"Nothing in":   classPlain,
+	} {
+		if got := classAt(t, m.Streams[0], exClasses, word); got != want {
+			t.Errorf("the example answer: %q is class %d, want %d", word, got, want)
+		}
 	}
 }
 

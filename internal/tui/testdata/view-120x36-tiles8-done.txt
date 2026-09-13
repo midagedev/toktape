@@ -1,11 +1,11 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
 │ stream 1/8                           done │ stream 2/8                           done │ PLACEMENT ────────────────── │
 │ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 296/320 │ 9.1 tok/s  █▇▇███▇▇ ttft 690 ms · 301/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
-│ instead of each layer and let both        │ 사용량을 나란히 보여 주는 이유도          │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
-│ devices work together on the same         │ 그것이다. 두 값이 어긋나면 설정이         │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ token, but it wants a fast link between   │ 생각과 다르게 잡혀 있다는 뜻이고,         │      ▆ weights  ▆ kv  ▆ buf  │
-│ them and it is not what this server       │ 그때는 속도를 재기 전에 배치부터 고쳐야   │                              │
-│ does                                      │ 한다. 실제로 자리가 모자랄 때 손대는      │ MEMORY ───────────────────── │
+│ rest while the first waits. Each token    │ 사용량을 나란히 보여 주는 이유도          │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
+│ therefore takes the sum of the two        │ 그것이다. 두 값이 어긋나면 설정이         │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ halves rather than the maximum, which     │ 생각과 다르게 잡혀 있다는 뜻이고,         │      ▆ weights  ▆ kv  ▆ buf  │
+│ is why adding a card raises the memory    │ 그때는 속도를 재기 전에 배치부터 고쳐야   │                              │
+│ you                                       │ 한다. 실제로 자리가 모자랄 때 손대는      │ MEMORY ───────────────────── │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤ rss       1.2G file     0.8G │
 │ stream 3/8                           done │ stream 4/8                           done │ virt     48.0G anon     0.4G │
 │ 9.1 tok/s  ▇▇█▇██▇▇ ttft 750 ms · 306/320 │ 9.1 tok/s  █▇███▇▇█ ttft 810 ms · 311/320 │ maj/tok                  0.0 │

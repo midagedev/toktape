@@ -1,10 +1,10 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────┐
 │ stream 1/8               answer │ stream 2/8               answer │ PLACEMENT ────────────────── │
 │ 9.1 tok/s  ttft 630 ms          │ 9.1 tok/s  ttft 690 ms          │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│ getting, and compare the        │ 된다. 팔십 레이어짜리 칠십억    │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-│ result against what your        │ 단위 모델이 만 육천 토큰을      │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ cards can actually move. If     │ 잡으면 반정밀도로는 오          │      ▆ weights  ▆ kv  ▆ buf  │
-│ the two figures are▍            │ 기가바이트가 넘고,▍             │                              │
+│ every single one of those       │ 된다. 팔십 레이어짜리 칠십억    │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+│ bytes is read again for every   │ 단위 모델이 만 육천 토큰을      │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ token you generate. That one    │ 잡으면 반정밀도로는 오          │      ▆ weights  ▆ kv  ▆ buf  │
+│ sentence explains▍              │ 기가바이트가 넘고,▍             │                              │
 ├─────────────────────────────────┼─────────────────────────────────┤ MEMORY ───────────────────── │
 │ stream 3/8               answer │ stream 4/8               answer │ rss       1.2G file     0.8G │
 │ 9.1 tok/s  ttft 750 ms          │ 9.1 tok/s  ttft 810 ms          │ virt     48.0G anon     0.4G │

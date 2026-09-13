@@ -1,13 +1,13 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────────────────────────┐
 │ stream 1/8                                answer │ stream 2/8                                 answer │ PLACEMENT ─────────────────────── │
 │ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 630 ms · 104/320    │ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 690 ms · 103/320     │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│ wearing a compute costume, and the arithmetic    │ 컨텍스트를 네 배로 늘리면 갑자기 자리가           │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-│ is simple enough to do in your head. Take the    │ 모자란다. 계산은 어렵지 않다. 레이어 수에 키와    │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ bytes the model has to touch per token,          │ 값 두 벌을 곱하고, 거기에 KV 헤드가 차지하는      │      ▆ weights  ▆ kv  ▆ buf       │
-│ multiply by the tokens per second you are        │ 채널 수와 컨텍스트 토큰 수를 곱한 다음, 원소      │                                   │
-│ getting, and compare the result against what     │ 하나가 몇 바이트인지를 곱하면 된다. 팔십          │ MEMORY ────────────────────────── │
-│ your cards can actually move. If the two         │ 레이어짜리 칠십억 단위 모델이 만 육천 토큰을      │ rss         1.2G file        0.8G │
-│ figures are▍                                     │ 잡으면 반정밀도로는 오 기가바이트가 넘고,▍        │ virt       48.0G anon        0.4G │
+│                                                  │ 컨텍스트를 네 배로 늘리면 갑자기 자리가           │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+│ Nothing in there is clever, and that is          │ 모자란다. 계산은 어렵지 않다. 레이어 수에 키와    │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ exactly the point. A dense seventy billion       │ 값 두 벌을 곱하고, 거기에 KV 헤드가 차지하는      │      ▆ weights  ▆ kv  ▆ buf       │
+│ parameter model at Q4_K_M is about forty two     │ 채널 수와 컨텍스트 토큰 수를 곱한 다음, 원소      │                                   │
+│ gigabytes of weights, and every single one of    │ 하나가 몇 바이트인지를 곱하면 된다. 팔십          │ MEMORY ────────────────────────── │
+│ those bytes is read again for every token you    │ 레이어짜리 칠십억 단위 모델이 만 육천 토큰을      │ rss         1.2G file        0.8G │
+│ generate. That one sentence explains▍            │ 잡으면 반정밀도로는 오 기가바이트가 넘고,▍        │ virt       48.0G anon        0.4G │
 ├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤ maj/tok                       0.0 │
 │ stream 3/8                                answer │ stream 4/8                                 answer │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ 9.1 tok/s  ▇█▇██▇▇▇██▇▇ ttft 750 ms · 103/320    │ 9.1 tok/s  ▇█▇██▇▇▇██▇▇ ttft 810 ms · 102/320     │                                   │

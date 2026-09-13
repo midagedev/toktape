@@ -21,8 +21,33 @@ package tui
 // the 320-token budget a stream can spend, so no stream reaches the end of its
 // own material.
 var exampleAnswers = []string{
-	// 0 — layer split across two cards, and why decode is memory-bound.
-	"A dense seventy billion parameter model at Q4_K_M is about forty two " +
+	// 0 — the decode loop, then the layer split and why decode is memory-bound.
+	//
+	// It opens on a fenced Go block because a fenced block is the one kind of
+	// answer the pane does something with (TTP-52, 2026-09-14: keywords carry
+	// weight, comments and punctuation step down the body's own ladder), and
+	// the goldens are where that has to be pinned. Stream 0 answers from its
+	// first token, so the block is on screen from the clip's first frame. The
+	// prose under it is unchanged, which is also the point: the treatment
+	// stops at the closing fence. Lines are kept inside forty columns so they
+	// read in a tile without wrapping; the one that does wrap is deliberate,
+	// since a wrapped code line has to keep its indent (TTP-48).
+	"Here is the loop the argument is about:\n\n" +
+		"```go\n" +
+		"// one token out, every weight read again\n" +
+		"func (m *Model) decode(kv *Cache) int32 {\n" +
+		"\tx := m.embed(m.last)\n" +
+		"\tfor _, blk := range m.blocks {\n" +
+		"\t\t// attention reads the cache\n" +
+		"\t\tx = blk.attn(x, kv)\n" +
+		"\t\t// the stack below is most of it\n" +
+		"\t\tx = blk.ffn(x)\n" +
+		"\t}\n" +
+		"\treturn argmax(m.head(x))\n" +
+		"}\n" +
+		"```\n\n" +
+		"Nothing in there is clever, and that is exactly the point. " +
+		"A dense seventy billion parameter model at Q4_K_M is about forty two " +
 		"gigabytes of weights, and every single one of those bytes is read " +
 		"again for every token you generate. That one sentence explains most " +
 		"of what you are seeing. Decoding is not compute bound on this rig. " +

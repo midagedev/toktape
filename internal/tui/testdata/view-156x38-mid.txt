@@ -1,12 +1,12 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────────────────────────────────────────┐
 │ stream 1/8                                      answer │ stream 2/8                                       answer │ PLACEMENT ─────────────────────────── │
 │ 9.1 tok/s  ▇██▇▇█▇██▇▇▇██▇ ttft 630 ms · 104/320       │ 9.1 tok/s  ▇██▇▇█▇██▇▇▇██▇ ttft 690 ms · 103/320        │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│ wearing a compute costume, and the arithmetic is       │ 자리가 모자란다. 계산은 어렵지 않다. 레이어 수에 키와   │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-│ simple enough to do in your head. Take the bytes the   │ 값 두 벌을 곱하고, 거기에 KV 헤드가 차지하는 채널       │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ model has to touch per token, multiply by the tokens   │ 수와 컨텍스트 토큰 수를 곱한 다음, 원소 하나가 몇       │      ▆ weights  ▆ kv  ▆ buf           │
-│ per second you are getting, and compare the result     │ 바이트인지를 곱하면 된다. 팔십 레이어짜리 칠십억 단위   │                                       │
-│ against what your cards can actually move. If the      │ 모델이 만 육천 토큰을 잡으면 반정밀도로는 오            │ MEMORY ────────────────────────────── │
-│ two figures are▍                                       │ 기가바이트가 넘고,▍                                     │ rss           1.2G file          0.8G │
+│                                                        │ 자리가 모자란다. 계산은 어렵지 않다. 레이어 수에 키와   │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+│ Nothing in there is clever, and that is exactly the    │ 값 두 벌을 곱하고, 거기에 KV 헤드가 차지하는 채널       │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ point. A dense seventy billion parameter model at      │ 수와 컨텍스트 토큰 수를 곱한 다음, 원소 하나가 몇       │      ▆ weights  ▆ kv  ▆ buf           │
+│ Q4_K_M is about forty two gigabytes of weights, and    │ 바이트인지를 곱하면 된다. 팔십 레이어짜리 칠십억 단위   │                                       │
+│ every single one of those bytes is read again for      │ 모델이 만 육천 토큰을 잡으면 반정밀도로는 오            │ MEMORY ────────────────────────────── │
+│ every token you generate. That one sentence explains▍  │ 기가바이트가 넘고,▍                                     │ rss           1.2G file          0.8G │
 ├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ virt         48.0G anon          0.4G │
 │ stream 3/8                                      answer │ stream 4/8                                       answer │ maj/tok                           0.0 │
 │ 9.1 tok/s  ██▇▇█▇██▇▇▇██▇▇ ttft 750 ms · 103/320       │ 9.1 tok/s  ██▇▇█▇██▇▇▇██▇▇ ttft 810 ms · 102/320        │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
