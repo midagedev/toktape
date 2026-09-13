@@ -297,6 +297,11 @@ type MemSample struct {
 	SwapBytes     int64  `json:"swap_bytes"`
 	MajFaults     uint64 `json:"maj_faults"` // cumulative, /proc/<pid>/stat field 12
 	MinFaults     uint64 `json:"min_faults"` // cumulative
+	// CPUSeconds is the server process's cumulative CPU time, user plus
+	// system, /proc/<pid>/stat fields 14 and 15 over the clock tick (TTP-39,
+	// 2026-09-13). Two samples' difference over their interval is the
+	// process's CPU use in cores; 0 means it was not read (macOS, remote).
+	CPUSeconds float64 `json:"cpu_s,omitempty"`
 }
 
 // MemorySummary reduces the samples for the card.
