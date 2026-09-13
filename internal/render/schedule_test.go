@@ -47,9 +47,10 @@ func TestNewScheduleDerivesDuration(t *testing.T) {
 		{"a short run gives a short clip", 2 * time.Second, holds + 2*time.Second, 2 * time.Second},
 		{"the example run today", 6600 * time.Millisecond, 18600 * time.Millisecond, 6600 * time.Millisecond},
 		{"the example run once it is lengthened", 25 * time.Second, 37 * time.Second, 25 * time.Second},
-		{"exactly at the ceiling", MaxStream, holds + MaxStream, MaxStream},
-		{"a second past the ceiling is compressed into it", MaxStream + time.Second, holds + MaxStream, MaxStream},
-		{"a long run is compressed into the ceiling", 5 * time.Minute, holds + MaxStream, MaxStream},
+		// No ceiling (user, 2026-09-14): the thirty-second cap that
+		// compressed a longer run is gone, and a five-minute run is a
+		// five-minute stream. FAIL-first: the capped source gave 30 s.
+		{"a long run plays whole", 5 * time.Minute, holds + 5*time.Minute, 5 * time.Minute},
 		{"an empty run is the holds and nothing else", 0, holds, 0},
 	}
 	for _, tc := range tests {
@@ -78,7 +79,7 @@ func TestScheduleStreamsAtRealSpeed(t *testing.T) {
 	// phase. Anything else — even a ratio that is 0.998 rather than 1 —
 	// scrolls the sparklines and breathes the cursor at the wrong speed, and
 	// the error grows across a twenty-five-second stream.
-	for _, runEnd := range []time.Duration{6600 * time.Millisecond, 25 * time.Second, MaxStream} {
+	for _, runEnd := range []time.Duration{6600 * time.Millisecond, 25 * time.Second, 2 * time.Minute} {
 		s := NewSchedule(runEnd, DefaultFPS, 0, true)
 		start := s.Open + s.Intro
 		var checked int
@@ -111,21 +112,19 @@ func TestScheduleStreamsAtRealSpeed(t *testing.T) {
 	}
 }
 
-func TestScheduleCompressesOnlyPastTheCeiling(t *testing.T) {
-	// Above MaxStream the phase is capped and the run is squeezed into it
-	// linearly — the only case where clip time and run time run at different
-	// speeds by default.
+func TestScheduleNeverCompressesADerivedClip(t *testing.T) {
+	// A derived clip plays the run at 1:1 however long it is (user,
+	// 2026-09-14). The old thirty-second cap squeezed a two-minute run into
+	// thirty seconds; FAIL-first on that source: stream 30 s, not 2 min.
 	const runEnd = 2 * time.Minute
 	s := NewSchedule(runEnd, DefaultFPS, 0, true)
-	if s.Stream != MaxStream || s.Duration != holds+MaxStream {
-		t.Fatalf("a %v run gives stream %v of a %v clip, want %v of %v", runEnd, s.Stream, s.Duration, MaxStream, holds+MaxStream)
+	if s.Stream < runEnd || s.Duration < holds+runEnd {
+		t.Fatalf("a %v run gives stream %v of a %v clip, want the whole run", runEnd, s.Stream, s.Duration)
 	}
-	mid := s.Frame(int((s.Open + s.Intro + s.Stream/2) * time.Duration(s.FPS) / time.Second))
-	if want, tol := runEnd/2, time.Second; mid.At < want-tol || mid.At > want+tol {
-		t.Errorf("half way through the phase is cut at %v, want ~%v", mid.At, want)
+	mid := s.Frame(int((s.Open + s.Intro + runEnd/2) * time.Duration(s.FPS) / time.Second))
+	if want, tol := runEnd/2, time.Second/DefaultFPS; mid.At < want-tol || mid.At > want+tol {
+		t.Errorf("a minute into the stream is cut at %v, want the run's minute", mid.At)
 	}
-	// Four times life, and the animation clock follows the run so the frames
-	// are the ones the operator saw.
 	if mid.Anim != mid.At {
 		t.Errorf("animation clock = %v, want the run clock %v", mid.Anim, mid.At)
 	}

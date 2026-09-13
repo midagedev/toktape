@@ -94,7 +94,10 @@ func TestAsciicastOfAConcurrentRun(t *testing.T) {
 			}
 		}
 	}
-	if lo, hi := MinDuration.Seconds(), MaxDuration.Seconds(); last < lo || last > hi {
+	// The clip is the holds plus the whole run, snapped up to a whole frame
+	// (no cap on the run since 2026-09-14), so the last event lands within one
+	// frame past that sum.
+	if lo, hi := MinDuration.Seconds(), (MinDuration + RunEnd(tp) + time.Second/DefaultFPS).Seconds(); last < lo || last > hi {
 		t.Errorf("recording ends at %.3fs, want it inside [%.0fs, %.0fs]", last, lo, hi)
 	}
 }

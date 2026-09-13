@@ -6,8 +6,7 @@
 // program to see one. Every still is named with both clocks: the time in the
 // finished clip and the instant of the run it draws. Those differ by the cold
 // open and the intro while the run plays at 1:1, and by more than that only
-// when the clip length was overridden or the run was long enough to compress
-// (see render.MaxStream).
+// when the clip length was overridden.
 package main
 
 import (

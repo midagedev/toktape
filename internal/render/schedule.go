@@ -27,25 +27,14 @@ const (
 	// CardHold is the payoff: the result card, held long enough to read the
 	// two hero numbers and screenshot it.
 	CardHold = 5 * time.Second
-	// MaxStream is the longest the streaming phase is ever played for. Below
-	// it the run plays at 1:1 — a clip of a twenty-five-second run is a
-	// twenty-five-second stream — because the thing a reader came to watch is
-	// tokens arriving at the speed the machine produced them (user,
-	// 2026-09-13: "토큰 생성하는 화면을 충분히 살펴보기에 재생 시간이 너무
-	// 짧아"). Only a run past this is compressed, and then linearly: a
-	// four-minute run is not worth four minutes of anyone's feed.
-	MaxStream = 30 * time.Second
-	// MinDuration and MaxDuration are the bounds a derived clip without the
-	// cold open falls inside, derived themselves from the phases above: the
-	// floor is a run with no tokens at all (the two holds and nothing between
-	// them) and the ceiling is the floor plus a fully compressed stream. A
-	// clip with the cold open is OpenHold longer at both ends.
-	// Nothing clamps to them — they are what the arithmetic can produce, not
-	// a rule imposed on it — so they are here for callers and tests that want
-	// to say "a clip is between twelve and forty-two seconds" without
-	// re-deriving it.
+	// MinDuration is the shortest a derived clip without the cold open can
+	// be: a run with no tokens at all, the two holds and nothing between them.
+	// A clip with the cold open is OpenHold longer. There is no ceiling: the
+	// run plays at 1:1 however long it is (user, 2026-09-13: "토큰 생성하는
+	// 화면을 충분히 살펴보기에 재생 시간이 너무 짧아"; 2026-09-14, on the
+	// thirty-second cap that compressed longer runs: "꼭 고정된 시간일 필요
+	// 없지 않니"). A caller who wants a shorter clip names a Duration.
 	MinDuration = IntroHold + CardHold
-	MaxDuration = MinDuration + MaxStream
 
 	// holdShare caps the three held phases at four fifths of a short clip, so
 	// an explicitly requested two-second clip still has a streaming phase. It
@@ -92,8 +81,7 @@ type Frame struct {
 // A clip is four phases: OpenHold on the cold open, IntroHold on the pre-run
 // screen, the run, and CardHold on the result card. The streaming phase is the
 // only one whose length depends on the tape: it is the run itself, played at
-// 1:1, and a clip is therefore as long as its run needs. A run past MaxStream
-// is the single exception and is compressed linearly into it.
+// 1:1, and a clip is therefore as long as its run needs.
 //
 // 1:1 is the whole point. Compressing a run to fit a fixed budget makes the
 // tokens fly, and a viewer cannot see whether a stream stalled, whether the
@@ -143,10 +131,9 @@ type Schedule struct {
 // open in front of it; without it the clip starts on the live screen.
 //
 // dur of zero derives the length, which is the default and the interesting
-// case: the cold open if asked for, the intro, the run at 1:1 (or MaxStream
-// of it, compressed, if the run is longer than that), and the card hold. There is no
-// floor and no ceiling on the result beyond what those four add up to — see
-// MinDuration and MaxDuration, which are that arithmetic and not a clamp.
+// case: the cold open if asked for, the intro, the run at 1:1, and the card
+// hold. There is no floor and no ceiling on the result beyond what those
+// four add up to — see MinDuration, which is that arithmetic and not a clamp.
 //
 // A non-zero dur is an explicit override and is honoured exactly: the run is
 // compressed or stretched into whatever the holds leave, and if the request is
@@ -165,13 +152,9 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration, open bool) Sc
 		openHold = OpenHold
 	}
 	derived := dur <= 0
-	oneToOne := derived && runEnd <= MaxStream
+	oneToOne := derived
 	if derived {
-		stream := runEnd
-		if stream > MaxStream {
-			stream = MaxStream
-		}
-		dur = openHold + IntroHold + stream + CardHold
+		dur = openHold + IntroHold + runEnd + CardHold
 	}
 
 	// Snap the clip up to a whole number of frames. A derived length almost
