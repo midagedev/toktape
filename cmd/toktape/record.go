@@ -13,6 +13,7 @@ import (
 
 	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/card/png"
+	"github.com/midagedev/toktape/internal/ledger"
 	"github.com/midagedev/toktape/internal/recorder"
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
@@ -29,6 +30,20 @@ const defaultNPredict = 256
 // CLI run cannot scan the real process table or exec nvidia-smi, which would
 // make the result depend on the box the suite happens to run on.
 var pinCollectors = func(o recorder.Options) recorder.Options { return o }
+
+// runLabels are the --tag and --note of one invocation: the user's words for
+// the experiment this run belongs to.
+type runLabels struct{ tag, note string }
+
+// recordLabels is where runRecord leaves them for saveRun.
+//
+// saveRun is the one place both the plain run and the --tui run pass through
+// on their way to the tape, and it lives here; threading the labels through
+// its arguments instead would change a signature that cmd/toktape/tui.go
+// calls, which this track does not own. One invocation records one run, and
+// runRecord always assigns the pair, so nothing leaks between two Run calls
+// in the same process.
+var recordLabels runLabels
 
 // recordConfig is what the record verb decided from its flags, apart from the
 // recorder's own options. It exists so the plain run and the --tui run take
@@ -56,6 +71,11 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 		useTUI      = fs.Bool("tui", false, "watch the run on the live two-pane screen")
 		wait        = fs.Duration("wait", recorder.DefaultWaitForModel,
 			"how long to wait for a server that is still loading its model (0 = fail fast)")
+		// tag and note label the experiment this run belongs to. They are
+		// recorded in the tape, not only in the ledger, so `toktape log
+		// --rebuild` can never lose them.
+		tag     = fs.String("tag", "", "label this run for the experiment log (e.g. ngl=40)")
+		note    = fs.String("note", "", "a free-text note recorded with the run")
 		prompts repeatedFlag
 	)
 	fs.IntVar(concurrency, "n", 0, "concurrent streams (shorthand)")
@@ -83,6 +103,7 @@ func runRecord(ctx context.Context, stdout, stderr io.Writer, args []string) int
 		WaitForStart: flagSet(fs, "wait") && *wait > 0,
 	}
 	opts = pinCollectors(opts)
+	recordLabels = runLabels{tag: *tag, note: *note}
 	cfg := recordConfig{outDir: *outDir, card: !*noCard, asJSON: *asJSON, quiet: *quiet}
 
 	if *useTUI {
@@ -170,27 +191,37 @@ type artifacts struct {
 // and it is already on disk by then.
 func saveRun(outDir string, tp *tape.Tape, wantCard bool) (artifacts, error) {
 	var a artifacts
+	// The labels go into the tape, not only into the ledger, so
+	// `toktape log --rebuild` regenerates the table with them intact.
+	tp.Summary.Tag, tp.Summary.Note = recordLabels.tag, recordLabels.note
 	a.tape = filepath.Join(outDir, tp.Summary.ID+tape.Ext)
 	if err := tape.Write(a.tape, tp); err != nil {
 		a.tape = ""
 		return a, fmt.Errorf("saving the run file: %w", err)
 	}
+	// The experiment ledger is a cache of the tapes, and the tape is already
+	// safe by now, so a ledger that could not be appended to is a warning the
+	// callers print, never a failed run.
+	ledgerErr := ledger.Append(outDir, tp)
+	if ledgerErr != nil {
+		ledgerErr = fmt.Errorf("updating the experiment log: %w", ledgerErr)
+	}
 	if !wantCard {
-		return a, nil
+		return a, ledgerErr
 	}
 
 	textPath := filepath.Join(outDir, tp.Summary.ID+".card.txt")
 	if err := os.WriteFile(textPath, []byte(card.Text(&tp.Summary)), 0o644); err != nil {
-		return a, fmt.Errorf("saving the card: %w", err)
+		return a, errors.Join(ledgerErr, fmt.Errorf("saving the card: %w", err))
 	}
 	a.cardText = textPath
 
 	pngPath := filepath.Join(outDir, tp.Summary.ID+".card.png")
 	if err := png.Write(pngPath, &tp.Summary); err != nil {
-		return a, fmt.Errorf("saving the image card: %w", err)
+		return a, errors.Join(ledgerErr, fmt.Errorf("saving the image card: %w", err))
 	}
 	a.cardPNG = pngPath
-	return a, nil
+	return a, ledgerErr
 }
 
 // shareHint is the block a finished run ends with.

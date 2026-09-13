@@ -131,10 +131,12 @@ by side. Each field is there because it settles an argument.
 | `record` | attach and record a run; the default verb | `toktape record -n 4 --n-predict 512` |
 | `card` | re-render a card from a tape | `toktape card ~/.toktape/runs/<id>.tape` |
 | `ls` | list the runs you have recorded | `toktape ls --out ~/.toktape/runs` |
+| `log` | the experiment ledger of every run | `toktape log --sort decode` |
 | `compare` | diff two runs, metrics and flags | `toktape compare a.tape b.tape` |
 
 Record flags: `--url`, `-n` / `--concurrency`, `--prompt` (repeatable, cycled to
-fill `-n`), `--n-predict`, `--out`, `--no-card`, `--json`, `--quiet`.
+fill `-n`), `--n-predict`, `--out`, `--tag`, `--note`, `--no-card`, `--json`,
+`--quiet`.
 
 Card flags: `--md` renders the card in a fence plus a llama-bench compatible
 table, `--json` renders the run summary, `--copy` sends the output to the
@@ -142,6 +144,28 @@ clipboard over OSC 52. `--md` and `--json` are alternatives, not a pair.
 
 ```sh
 toktape card ~/.toktape/runs/<id>.tape --md --copy
+```
+
+## Experiment log
+
+Every run appends a row to `runs.tsv` next to the tapes, so a sweep is one
+table instead of a folder of cards. Label the runs as you go with `--tag` and
+`--note`; both are stored in the tape, so the ledger can always be rebuilt.
+
+```sh
+toktape --tag ngl=40 --note "fa on"          # record, labelled
+toktape log --sort decode                     # which setting won
+toktape log --tag ngl --md                    # paste into an issue
+toktape log --rebuild                         # regenerate from the tapes
+```
+
+`--tsv`, `--csv`, `--json` and `--md` write every column; `--model`, `--tag`
+and `-n` narrow the table. Unknown is `?` on the terminal and an empty cell in
+every export, so the numeric columns import as numbers:
+
+```sh
+sqlite3 runs.db ".import --tsv ~/.toktape/runs/runs.tsv runs"
+duckdb -c "select tag, decode_tok_s from read_csv('~/.toktape/runs/runs.tsv')"
 ```
 
 ## How it measures

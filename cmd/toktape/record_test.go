@@ -14,6 +14,7 @@ import (
 
 	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/gpu"
+	"github.com/midagedev/toktape/internal/ledger"
 	"github.com/midagedev/toktape/internal/recorder"
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -142,6 +143,15 @@ func TestRecordVerbEndToEnd(t *testing.T) {
 		t.Fatalf("image cards = %v (err %v), want one", images, err)
 	}
 	checkShareImage(t, images[0])
+	// The run also lands in the experiment ledger, so a sweep is one table
+	// without the user having to ask for it.
+	rows, err := ledger.Read(dir)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("the ledger holds %d rows (err %v), want the run just recorded", len(rows), err)
+	}
+	if rows[0].Get("id") != strings.TrimSuffix(filepath.Base(tapes[0]), tape.Ext) {
+		t.Errorf("the ledger row is %q, not the tape that was written", rows[0].Get("id"))
+	}
 	tp, err := tape.Read(tapes[0])
 	if err != nil {
 		t.Fatalf("the saved tape does not reload: %v", err)

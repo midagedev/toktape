@@ -29,6 +29,7 @@ Usage:
   toktape card <tape> [flags]     re-render a card from a run file
   toktape play <tape> [--speed N] replay a run on the live screen
   toktape ls [--out DIR]          list recorded runs
+  toktape log [--out DIR]         the experiment ledger of every run
   toktape compare <a> <b>         diff two runs
   toktape version                 print the version
 
@@ -38,6 +39,8 @@ Record flags:
   --prompt TEXT         prompt to send; repeatable, cycled to fill -n
   --n-predict N         max tokens per stream (default 256)
   --out DIR             where run files are written (default ~/.toktape/runs)
+  --tag TEXT            label this run for the experiment log (e.g. ngl=40)
+  --note TEXT           a free-text note recorded with the run
   --wait DURATION       how long to wait for a loading model (default 10m,
                         0 = fail fast; naming it also waits for the server
                         itself to come up)
@@ -75,6 +78,8 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		return runPlay(ctx, stdout, stderr, rest)
 	case "ls":
 		return runLs(stdout, stderr, rest)
+	case "log":
+		return runLog(stdout, stderr, rest)
 	case "compare":
 		return runCompare(stdout, stderr, rest)
 	default:
@@ -86,7 +91,7 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 // verbs are the commands Run dispatches on. The root verb is "record", so
 // `toktape` and `toktape --url ...` both record.
 var verbs = map[string]bool{
-	"record": true, "card": true, "play": true, "ls": true, "compare": true, "version": true,
+	"record": true, "card": true, "play": true, "ls": true, "log": true, "compare": true, "version": true,
 }
 
 // splitVerb picks the verb out of the argument list.
