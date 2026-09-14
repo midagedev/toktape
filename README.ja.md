@@ -17,7 +17,7 @@ toktape は、すでに起動している llama-server にアタッチし、1 �
 
 <p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording two concurrent streams of a 444 GiB model, from the command being typed to the result"></p>
 
-<p align="center"><em>演出ではなく実際の実行です。DeepSeek V4.1 Flash Q3_K_M、444 GiB、エキスパートの大半をホスト RAM に置いたカード 2 枚のワークステーション。プロンプトにコマンドを打ち、サーバーを見つけてアタッチし、2 ストリームが同時にコードを書き、結果が出ます。<code>assets/hero.tape</code> を <code>toktape render</code> と同じレンダラーで描き直したもので、下のカードは同じファイルから <code>toktape card assets/hero.tape</code> で出ます。</em></p>
+<p align="center"><em>演出ではなく実際の実行です。DeepSeek V4.1 Flash Q3_K_M、444 GiB、エキスパートの大半をホスト RAM に置いたカード 2 枚のワークステーション。プロンプトにコマンドを打ち、サーバーを見つけてアタッチし、2 ストリームが同時にコードを書き、結果が出ます。クリップは最初のトークンの 3 秒前から始まります（<code>--prefill-lead 3s</code>）。プリフィルを待った残りの時間は、テープと、クリップが開いた時点ですでに画面に出ている時計のほうに残っています。見えているものはすべて 1:1 です。<code>assets/hero.tape</code> を <code>toktape render</code> と同じレンダラーで描き直したもので、下のカードは同じファイルから <code>toktape card assets/hero.tape</code> で出ます。</em></p>
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -318,7 +318,10 @@ speculative `n_max` の値ごとに 1 回ずつ流して同じテープに記録
 **render:** `--gif FILE`、`--mp4 FILE`（`PATH` に ffmpeg が必要）、`--cast FILE`
 （asciicast v2）、`--frames DIR`（PNG シーケンス）、`--duration`、`--fps`、
 `--size WxH`、`--open`（実行の前に、シェルプロンプトでコマンドを打つ場面を
-付けます）。複数の出力を一度に指定すると、同じフレームから一緒に生成されます。
+付けます）、`--prefill-lead D`（実行の先頭ではなく最初のトークンの D 秒前から
+クリップを始め、プリフィルを待った残りをクリップの外に置きます。残ったフレーム
+はすべてそのまま 1:1 で、画面の時計が切った地点から始まるので、断りは要りません）。
+複数の出力を一度に指定すると、同じフレームから一緒に生成されます。
 テープを指定しなければ最新の実行が使われます。
 
 **log:** `--sort`、`--model`、`--tag`、`--limit N`、`-o FORMAT`、`--rebuild`、

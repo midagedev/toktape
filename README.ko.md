@@ -16,7 +16,7 @@ toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.ta
 
 <p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording two concurrent streams of a 444 GiB model, from the command being typed to the result"></p>
 
-<p align="center"><em>연출이 아니라 실제 실행입니다. DeepSeek V4.1 Flash Q3_K_M, 444 GiB, expert 대부분을 호스트 RAM에 둔 2카드 워크스테이션. 프롬프트에 명령을 치고, 서버를 찾아 붙고, 두 스트림이 동시에 코드를 쓰고, 결과가 나옵니다. 화면 녹화가 아니라 <code>assets/hero.tape</code>를 <code>toktape render</code>와 같은 렌더러로 다시 그린 것이고, 아래 카드는 같은 파일에서 <code>toktape card assets/hero.tape</code>로 나옵니다.</em></p>
+<p align="center"><em>연출이 아니라 실제 실행입니다. DeepSeek V4.1 Flash Q3_K_M, 444 GiB, expert 대부분을 호스트 RAM에 둔 2카드 워크스테이션. 프롬프트에 명령을 치고, 서버를 찾아 붙고, 두 스트림이 동시에 코드를 쓰고, 결과가 나옵니다. 클립은 첫 토큰 3초 전부터 시작합니다(<code>--prefill-lead 3s</code>). 프리필을 기다린 나머지 시간은 테이프와, 클립이 열릴 때 화면에 이미 올라가 있는 시계에 남아 있습니다. 보이는 것은 전부 1:1입니다. 화면 녹화가 아니라 <code>assets/hero.tape</code>를 <code>toktape render</code>와 같은 렌더러로 다시 그린 것이고, 아래 카드는 같은 파일에서 <code>toktape card assets/hero.tape</code>로 나옵니다.</em></p>
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -307,7 +307,10 @@ Markdown 표입니다. `sql`은 `runs` 테이블이 없으면 만들고 실행�
 
 **render:** `--gif FILE`, `--mp4 FILE`(`PATH`에 ffmpeg 필요), `--cast FILE`
 (asciicast v2), `--frames DIR`(PNG 시퀀스), `--duration`, `--fps`,
-`--size WxH`, `--open`(실행 앞에 셸 프롬프트에서 명령을 치는 장면을 붙입니다).
+`--size WxH`, `--open`(실행 앞에 셸 프롬프트에서 명령을 치는 장면을 붙입니다),
+`--prefill-lead D`(실행의 처음이 아니라 첫 토큰 D초 전에서 클립을 시작해,
+프리필을 기다린 나머지 시간을 클립 밖에 둡니다. 남은 프레임은 전부 그대로
+1:1이고, 화면의 시계가 잘라낸 지점부터 시작하므로 별도 표시가 필요 없습니다).
 여러 출력을 한 번에 지정하면 같은 프레임에서 함께 나옵니다. 테이프를 지정하지
 않으면 가장 최근 실행을 씁니다.
 

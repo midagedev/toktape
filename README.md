@@ -16,7 +16,7 @@ stream or for eight at once.
 
 <p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording two concurrent streams of a 444 GiB model, from the command being typed to the result"></p>
 
-<p align="center"><em>A real run, not a mock-up: DeepSeek V4.1 Flash Q3_K_M, 444 GiB, most of its experts in host RAM on a two-card workstation. The command typed at a prompt, the server found and attached, two streams writing code at once, then the result. It is <code>assets/hero.tape</code> replayed through the same renderer <code>toktape render</code> uses — no terminal recorder involved, and <code>toktape card assets/hero.tape</code> prints the card below from the same file.</em></p>
+<p align="center"><em>A real run, not a mock-up: DeepSeek V4.1 Flash Q3_K_M, 444 GiB, most of its experts in host RAM on a two-card workstation. The command typed at a prompt, the server found and attached, two streams writing code at once, then the result. It joins the run three seconds before its first token (<code>--prefill-lead 3s</code>): the rest of the wait for prefill is in the tape and on the clock the clip opens on, not in the clip. Everything you see plays at 1:1. It is <code>assets/hero.tape</code> replayed through the same renderer <code>toktape render</code> uses — no terminal recorder involved, and <code>toktape card assets/hero.tape</code> prints the card below from the same file.</em></p>
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -319,8 +319,10 @@ over OSC 52).
 **Render:** `--gif FILE`, `--mp4 FILE` (needs ffmpeg on `PATH`), `--cast FILE`
 (asciicast v2), `--frames DIR` (PNG sequence), `--duration`, `--fps`,
 `--size WxH`, `--open` (the command typed at a shell prompt in front of the
-run). Name several outputs at once and they come out of the same frames. With
-no tape named, the newest run is used.
+run), `--prefill-lead D` (open the clip D before the first token, leaving the
+rest of the wait out of it — every frame that is in it is still 1:1, and the
+clock on screen starts where it was cut). Name several outputs at once and they
+come out of the same frames. With no tape named, the newest run is used.
 
 **Log:** `--sort`, `--model`, `--tag`, `--limit N`, `-o FORMAT`, `--rebuild`,
 `--out`.
