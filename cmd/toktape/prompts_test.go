@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/midagedev/toktape/internal/recorder"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -134,9 +135,12 @@ func TestRecordVerbPrompts(t *testing.T) {
 	if tp.Requests[0].Prompt.Name != "sql-1" || tp.Requests[3].Prompt.Name != "" || tp.Requests[3].Round != 1 {
 		t.Errorf("records carry names %q / %q and round %d", tp.Requests[0].Prompt.Name, tp.Requests[3].Prompt.Name, tp.Requests[3].Round)
 	}
-	// The line's cap wins over --n-predict's default; the other line keeps it.
-	if tp.Requests[0].Prompt.MaxTokens != defaultNPredict || tp.Requests[2].Prompt.MaxTokens != 32 {
-		t.Errorf("caps = %d / %d, want %d / 32", tp.Requests[0].Prompt.MaxTokens, tp.Requests[2].Prompt.MaxTokens, defaultNPredict)
+	// The line's own cap wins over the run's; a line without one gets the
+	// run's. That cap was --n-predict's default of 256 until TTP-76
+	// (2026-09-14) and is now the recorder's runaway guard, because the
+	// default limit on "how long" is a wall clock and not a token count.
+	if tp.Requests[0].Prompt.MaxTokens != recorder.DefaultMaxTokens || tp.Requests[2].Prompt.MaxTokens != 32 {
+		t.Errorf("caps = %d / %d, want %d / 32", tp.Requests[0].Prompt.MaxTokens, tp.Requests[2].Prompt.MaxTokens, recorder.DefaultMaxTokens)
 	}
 	if !strings.Contains(stdout, "│ Prompts       2 rounds · ") {
 		t.Errorf("the card has no Prompts row:\n%s", stdout)

@@ -51,6 +51,17 @@ type state struct {
 	// sequential, so round k's tokens are timeline[roundStart[k]:roundStart[k+1]].
 	roundStart []int
 
+	// started and ended track which streams are live, for the run's clock
+	// (TTP-76). A stream is live once its request has gone out and until it
+	// has stopped for any reason. The clock reads both: the floor is about the
+	// streams it would cut, and a stream that has not started — a later round
+	// of a multi-round run — or that ended on its own is not one of them.
+	//
+	// They are here rather than in clock because they are written by the
+	// stream goroutines and must share the mutex OnToken already takes; that
+	// is also what makes cutSnapshot exact.
+	started, ended []bool
+
 	// slotsDead latches a /slots route that answered with an error (a server
 	// started with --no-slots returns 501), so the poll is not retried every
 	// interval for the length of the run.
@@ -62,6 +73,8 @@ func newState(n int, sampler *procmon.Sampler, progress func(Event)) *state {
 		sampler:   sampler,
 		perStream: make([][]uint64, n),
 		firstIdx:  make([]int, n),
+		started:   make([]bool, n),
+		ended:     make([]bool, n),
 		progress:  progress,
 		streams:   n,
 	}
@@ -95,6 +108,13 @@ func (st *state) notify(ev Event) {
 // stitched into the records after RunConcurrent returns.
 func (st *state) hooks(i int) server.StreamHooks {
 	return server.StreamHooks{
+		OnEnd: func() {
+			st.mu.Lock()
+			if i < len(st.ended) {
+				st.ended[i] = true
+			}
+			st.mu.Unlock()
+		},
 		OnToken: func(ev tape.TokenEvent) {
 			st.mu.Lock()
 			var maj uint64
@@ -116,6 +136,50 @@ func (st *state) hooks(i int) server.StreamHooks {
 			st.mu.Unlock()
 		},
 	}
+}
+
+// beginStream marks stream g live. It is called as the request goes out, so
+// that a stream which has not been sent yet — a later round's — never holds
+// the clock's floor open (TTP-76).
+func (st *state) beginStream(g int) {
+	st.mu.Lock()
+	if g >= 0 && g < len(st.started) {
+		st.started[g] = true
+	}
+	st.mu.Unlock()
+}
+
+// atFloor reports whether every live stream has produced min tokens, which is
+// when the clock's cut becomes legal. With min 0, or with nothing live, it is
+// vacuously true: the first is a run with no floor and the second is a run
+// whose streams have all ended, and in neither is there anything to wait for.
+func (st *state) atFloor(min int) bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for i, on := range st.started {
+		if !on || st.ended[i] {
+			continue
+		}
+		if len(st.perStream[i]) < min {
+			return false
+		}
+	}
+	return true
+}
+
+// cutSnapshot is the live streams at the instant the clock decides to cut: the
+// ones the cancel is about to end. The caller holds no lock; taking it here,
+// under the same mutex the OnEnd hook takes, is what makes the answer exact —
+// a stream that ends from now on has to wait for this mutex, so it is in the
+// snapshot and was indeed ended by the cut.
+func (st *state) cutSnapshot() []bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	live := make([]bool, len(st.started))
+	for i := range st.started {
+		live[i] = st.started[i] && !st.ended[i]
+	}
+	return live
 }
 
 // applyDeltas writes the recorded per-token major-fault deltas back into the

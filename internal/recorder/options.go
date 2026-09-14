@@ -94,8 +94,20 @@ type Options struct {
 	// or len(Prompts) when prompts were supplied, or the longest round's
 	// prompt count when Rounds were.
 	Concurrency int
+	// For is the run's wall-clock budget, measured from the first request
+	// going out (TTP-76). 0 means "the user named none", which is what
+	// DefaultFor is for; NoClock means they named none on purpose. It is
+	// resolved together with MaxTokens — see Options.limit for the table, and
+	// do not read either field as the answer on its own.
+	For time.Duration
 	// MaxTokens caps every stream's answer (the server's max_tokens /
-	// n_predict). 0 leaves whatever the prompt itself carries.
+	// n_predict). 0 means the user named no cap, and Record then sends
+	// DefaultMaxTokens: a request with no cap at all generates unbounded, and
+	// a clock that failed would have nothing behind it. Naming a cap here is
+	// also what silences the default clock (Options.limit).
+	//
+	// Callers below Record — buildRequests, roundRequests — see the resolved
+	// value, so 0 there still means "leave whatever the prompt carries".
 	MaxTokens int
 	// Params are merged verbatim into every request body (TTP-55,
 	// 2026-09-14): temperature, seed, chat_template_kwargs, and anything else

@@ -45,13 +45,18 @@ Usage:
   toktape help agents             the contract a script or coding agent needs
 
 Record flags:
+  --for DURATION        end the run after this much wall clock, from the first
+                        request (default 20s, --for 0 = none). No stream is
+                        cut under 64 tokens, so a slow box runs longer
+  --n-predict N         max tokens per stream. An answer on the same axis, so
+                        naming it turns the clock off; name both and the run
+                        ends at whichever comes first
   --url URL             server to attach to (default: discover)
   -n, --concurrency N   concurrent streams (default 1)
   --prompt TEXT         prompt to send; repeatable, cycled to fill -n
   --prompts FILE        a JSONL file, one round of -n streams per line, e.g.
                         {"name":"sql","prompt":"Write a query that ..."}
   --spec-n-max LIST     run the prompt set once per speculative.n_max (e.g. 3,5)
-  --n-predict N         max tokens per stream (default 256)
   --temp N              sampling temperature (0 = greedy; unset = server default)
   --no-think            ask a reasoning model not to think (chat only)
   --think-budget N      cap a reasoning model's thinking at N tokens (chat only)
@@ -82,12 +87,17 @@ Card flags:
   --copy                also copy the output to the clipboard (OSC 52)
 
 Examples:
-  # One stream against a server toktape finds itself. No flags to learn.
+  # One stream against a server toktape finds itself, for 20s. No flags.
   toktape
 
+  # Aim the run at a clip length: a clip is the run at 1:1 plus 6s of frame,
+  # 12s with --open, so --for 18s makes a ~30s one. EOS usually arrives first
+  # and the run is then shorter — the prompt's doing, not the machine's.
+  toktape --for 18s
+
   # A server on a port discovery does not probe, four streams at once, and a
-  # generation long enough to be a decode rate rather than a sample.
-  toktape --url http://127.0.0.1:8001 -n 4 --n-predict 256
+  # generation aimed by token count instead — which turns the clock off.
+  toktape --url http://127.0.0.1:9000 -n 4 --n-predict 256
 
   # Machine-readable: the run summary on stdout and nothing else.
   toktape --json --quiet > run.json
@@ -96,8 +106,9 @@ Examples:
   # no server.
   toktape card ~/.toktape/runs/20260914-070458-my-model.tape
 
-  # A clip of that run, opening on the command being typed.
-  # toktape help render has the arithmetic for aiming its length.
+  # A clip of that run. --for aims the run when you record; render --duration
+  # is not the same flag — it squeezes the run you have into the time you
+  # name. toktape help render has the arithmetic.
   toktape render ~/.toktape/runs/20260914-070458-my-model.tape --mp4 run.mp4 --open
 
 Exit codes:

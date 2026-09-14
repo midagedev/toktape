@@ -21,10 +21,15 @@ import (
 	"github.com/midagedev/toktape/internal/tui"
 )
 
-// defaultNPredict caps the answer so the zero-config run finishes in a few
-// seconds and still clears tape.MinDecodeTokens by a wide margin — a rate
-// measured over fewer tokens may not be called "decode" at all.
-const defaultNPredict = 256
+// How long a run is, is a question about seconds (TTP-76, 2026-09-14).
+//
+// --n-predict used to default to 256, which is 1.8 s on one box and two
+// minutes on another; the unit was wrong, not the number. The default is now a
+// wall-clock budget (recorder.DefaultFor) with a generous cap behind it
+// (recorder.DefaultMaxTokens), and both flags default to "unset" here so that
+// recorder.Options.limit — the one owner of the table — can see what the user
+// actually named. Naming --n-predict is still an answer on the "how long" axis
+// and still silences the clock.
 
 // pinCollectors is the seam the tests use to keep the record verb off this
 // machine. In production it is the identity: the recorder then reads the live
@@ -69,6 +74,7 @@ type recordConfig struct {
 type recordFlags struct {
 	url            *string
 	concurrency    *int
+	forD           *time.Duration
 	nPredict       *int
 	outDir         *string
 	noCard         *bool
@@ -99,7 +105,12 @@ func declareRecordFlags(fs *flag.FlagSet) *recordFlags {
 	f.url = fs.String("url", "", "server base URL (default: discover)")
 	f.concurrency = fs.Int("concurrency", 0, "concurrent streams")
 	fs.IntVar(f.concurrency, "n", 0, "concurrent streams (shorthand)")
-	f.nPredict = fs.Int("n-predict", defaultNPredict, "max tokens per stream")
+	// The "how long" axis, clock first (TTP-76). Both default to 0, which is
+	// "the user named none": recorder.Options.limit turns that into the
+	// default budget and the runaway cap, and reads a named --n-predict as the
+	// choice that silences the clock.
+	f.forD = fs.Duration("for", 0, "stop the run after this much wall clock (0 = no clock)")
+	f.nPredict = fs.Int("n-predict", 0, "max tokens per stream; naming it turns the clock off")
 	f.outDir = fs.String("out", defaultRunsDir(), "directory for run files")
 	f.noCard = fs.Bool("no-card", false, "do not render or save the card")
 	f.asJSON = fs.Bool("json", false, "print the run summary as JSON")
@@ -157,6 +168,14 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 	c.json = *f.asJSON
 	if len(extra) > 0 {
 		return c.usagef("toktape record: unexpected argument %q", extra[0])
+	}
+
+	if *f.forD < 0 {
+		return c.fail(failure{
+			code: exitUsage,
+			msg:  fmt.Sprintf("toktape record: --for %s: a budget cannot be negative", *f.forD),
+			hint: "--for 30s aims the run at thirty seconds; --for 0 turns the clock off",
+		})
 	}
 
 	var rounds []recorder.Round
@@ -220,6 +239,7 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 		Rounds:       rounds,
 		SpecNMax:     sweep,
 		Concurrency:  *f.concurrency,
+		For:          clockBudget(fs, *f.forD),
 		MaxTokens:    *f.nPredict,
 		Params:       sampling.params,
 		Endpoint:     sampling.endpoint,
@@ -416,6 +436,23 @@ func waitBudget(fs *flag.FlagSet, wait time.Duration) time.Duration {
 		return recorder.NoWait
 	}
 	return wait
+}
+
+// clockBudget is what the recorder is told about --for (TTP-76).
+//
+// The flag has three states and a duration has two, so a sentinel carries the
+// third, exactly as waitBudget does: not named at all is 0 and gets
+// recorder.DefaultFor, `--for 0` is recorder.NoClock and gets no clock at all,
+// and a named duration is itself. The CLI decides nothing else about it —
+// which of the two limits applies is recorder.Options.limit's table.
+func clockBudget(fs *flag.FlagSet, d time.Duration) time.Duration {
+	if !flagSet(fs, "for") {
+		return 0
+	}
+	if d == 0 {
+		return recorder.NoClock
+	}
+	return d
 }
 
 // flagSet reports whether the named flag was given on the command line, as

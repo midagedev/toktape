@@ -51,6 +51,13 @@ func RunConcurrent(ctx context.Context, c *Client, reqs []StreamRequest, hooks f
 			defer wg.Done()
 			startedAt := time.Since(runStart)
 			rec, _, err := c.Stream(ctx, reqs[i], h)
+			// This stream is over, whatever it produced. Fired here rather
+			// than inside Stream so that a request which failed before a
+			// single chunk arrived — a refused POST, a non-2xx — ends too;
+			// Stream returns early on both of those.
+			if h.OnEnd != nil {
+				h.OnEnd()
+			}
 			if rec == nil {
 				rec = &tape.RequestRecord{Slot: -1}
 				rec.Prompt.Messages = reqs[i].Messages

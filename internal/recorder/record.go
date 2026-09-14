@@ -44,6 +44,11 @@ type run struct {
 	// witnesses are the contention readings taken at the start and the end
 	// of every measurement round (TTP-36); nil when the server is not local.
 	witnesses []tape.ContentionWitness
+	// limit is what may end this run's generation, resolved once by
+	// Options.limit (TTP-76). cutAt is filled in only if the clock actually
+	// ended something, and is what the tape's LimitSummary.CutAt carries.
+	limit tape.LimitSummary
+	cutAt time.Duration
 }
 
 // Record performs one run end to end: attach, collect the static picture,
@@ -51,10 +56,17 @@ type run struct {
 //
 // Every collector degrades into a warning. Only two conditions fail the run:
 // a server that cannot be reached (ErrUnreachable) and a run in which no
-// stream produced a record (ErrAllStreamsFailed).
+// stream produced a record (ErrAllStreamsFailed). A run the clock cut is not
+// one of them — it is a run, and the tape says the clock ended it (TTP-76).
 func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	opts = opts.normalize()
-	r := &run{opts: opts}
+	// The one place the "what may end this generation" table is read, and
+	// before anything is built from the options: the resolved cap is what
+	// every request carries from here down, so no later step has to ask the
+	// question again.
+	limit := opts.limit()
+	opts.MaxTokens = limit.MaxTokens
+	r := &run{opts: opts, limit: limit}
 
 	if err := r.attach(ctx); err != nil {
 		return nil, err
@@ -130,6 +142,12 @@ func (r *run) emitAttached() {
 		Concurrency: r.opts.Concurrency,
 		Template:    r.template,
 		Warnings:    r.warnings,
+		// What may end this run, before it starts (TTP-76). CutAt is
+		// necessarily 0 here — nothing has been cut yet — but For and
+		// MaxTokens are already decided, and a live screen that draws a
+		// stream's progress against its token cap needs to know when the
+		// budget, not the cap, is what the run will end on.
+		Limit: r.limit,
 	}
 	s.Server.Build, s.Server.Commit = r.build, r.commit
 	r.emit(Event{Kind: EventAttached, Stream: -1, Summary: s})
@@ -171,15 +189,20 @@ func (r *run) attach(ctx context.Context) error {
 		reason, waitable := r.waitReason(err)
 		elapsed := time.Since(start)
 		if !waitable {
-			return fmt.Errorf("%w: %v", ErrUnreachable, err)
+			return fmt.Errorf("%w: %w", ErrUnreachable, err)
 		}
 		if elapsed >= r.opts.WaitForModel {
 			// The exit code stays 2: a wrapper script branches on it and
 			// "the server never became ready" is still "could not attach".
+			//
+			// The cause is wrapped rather than formatted (TTP-75): the CLI
+			// tells "nothing was listening on the ports I probed" from "a
+			// server was there and never became ready" by asking the chain,
+			// and those two failures need different instructions.
 			if r.opts.WaitForModel == 0 {
-				return fmt.Errorf("%w: %v", ErrUnreachable, err)
+				return fmt.Errorf("%w: %w", ErrUnreachable, err)
 			}
-			return fmt.Errorf("%w: gave up after %s: %v",
+			return fmt.Errorf("%w: gave up after %s: %w",
 				ErrUnreachable, r.opts.WaitForModel.Round(time.Second), err)
 		}
 		r.emit(Event{Kind: EventLoading, Stream: -1, Elapsed: elapsed, Message: reason})
@@ -422,13 +445,19 @@ func (r *run) collectTemplate(ctx context.Context, reqs []server.StreamRequest) 
 }
 
 // stream opens the sampler, starts the periodic host reader, sends every
-// request at once and stops the reader again.
+// request at once under the run's clock, and stops the reader again.
+//
+// The clock cancels a context derived from ctx, never ctx itself: the sampler
+// keeps its own, so a cut run still takes its last host reading, and a
+// cancellation that came from the caller stays distinguishable from one this
+// run made.
 func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.RequestRecord, *state, error) {
 	sampler, closeSampler := r.openSampler()
 	defer closeSampler()
 
 	st := newState(len(reqs), sampler, r.opts.Progress)
 	for i := range reqs {
+		st.beginStream(i)
 		st.notify(Event{
 			Kind:    EventStreamStarted,
 			Stream:  i,
@@ -443,11 +472,27 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 	stopSampling := r.startSampling(ctx, st)
 	r.observe(0, 0, witnessStart)
 	origin := time.Now() // the origin RunConcurrent stamps StartedAt against
-	recs, err := server.RunConcurrent(ctx, r.client, reqs, st.hooks)
+	runCtx, clk := r.startClock(ctx, st, origin)
+	recs, err := server.RunConcurrent(runCtx, r.client, reqs, st.hooks)
+	clk.stop()
 	r.observe(time.Since(origin), 0, witnessEnd)
 	stopSampling()
 
-	if err != nil {
+	if recs == nil {
+		return nil, nil, fmt.Errorf("%w: %v", ErrAllStreamsFailed, err)
+	}
+	// The clock's cut is applied before the run is judged: cutting every live
+	// stream makes RunConcurrent report that all of them failed, and a run
+	// ended by its own budget is not a failed run.
+	if at, live := clk.cut(); at > 0 {
+		if markCut(recs, live) > 0 {
+			r.cutAt = at
+		}
+	}
+	if allFailed(recs) {
+		if err == nil {
+			err = errors.New(recs[0].Error)
+		}
 		return nil, nil, fmt.Errorf("%w: %v", ErrAllStreamsFailed, err)
 	}
 	st.applyDeltas(recs)

@@ -112,6 +112,19 @@ type StreamHooks struct {
 	// OnToken for it. The event it receives is the one in Tokens, so its
 	// Index is that token's place in the shared sequence, not -1.
 	OnReasoning func(tape.TokenEvent)
+	// OnEnd fires exactly once per stream, after it has stopped for any
+	// reason at all: EOS, the token cap, a server error, a dropped socket or
+	// a cancelled context. RunConcurrent fires it, not Stream, so a request
+	// that failed before a single chunk arrived still ends (TTP-76,
+	// 2026-09-14).
+	//
+	// It exists because a caller that has to decide something about the
+	// streams still live — the recorder's wall-clock budget, which will not
+	// cut a stream under tape.MinCutTokens — otherwise cannot tell "this
+	// stream is slow" from "this stream is finished". Counting tokens is not
+	// enough: a stream that stopped at EOS with ten tokens would hold such a
+	// floor open forever.
+	OnEnd func()
 }
 
 // Body builds the JSON request body. timings_per_token, return_progress and

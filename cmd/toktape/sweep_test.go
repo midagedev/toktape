@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/midagedev/toktape/internal/recorder"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -81,9 +82,14 @@ func TestRecordVerbSpecNMax(t *testing.T) {
 		if s := tp.Summary; s.Rounds != 2 || len(tp.Requests) != 2 || !reflect.DeepEqual(s.SpecNMax, []int{3, 5}) {
 			t.Fatalf("Rounds %d, %d requests, SpecNMax %v; want 2, 2, [3 5]", s.Rounds, len(tp.Requests), s.SpecNMax)
 		}
+		// Was --n-predict's own default of 256 until TTP-76 (2026-09-14),
+		// when "how long" became a wall-clock question: --n-predict now
+		// defaults to unset and the cap a request carries is the recorder's
+		// runaway guard. What the row asserts is unchanged — every request of
+		// a sweep carries the run's cap, never the default prompt's own.
 		for k, r := range tp.Requests {
-			if r.Prompt.MaxTokens != defaultNPredict {
-				t.Errorf("request %d MaxTokens = %d, want --n-predict's default %d", k, r.Prompt.MaxTokens, defaultNPredict)
+			if r.Prompt.MaxTokens != recorder.DefaultMaxTokens {
+				t.Errorf("request %d MaxTokens = %d, want the run's cap %d", k, r.Prompt.MaxTokens, recorder.DefaultMaxTokens)
 			}
 		}
 	})

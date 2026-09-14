@@ -107,6 +107,12 @@ func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 // and the run goes on to the next round. Only a run in which every round failed
 // is ErrAllStreamsFailed. A cancelled context stops the run between rounds:
 // the rounds already sent are reduced and a warning says where it stopped.
+//
+// The run's clock (TTP-76) spans every round, not each round separately,
+// because the budget is a statement about the run: `--for 20s` over a
+// four-round prompts file is twenty seconds of run, not eighty. It cuts the
+// round that is live and the rounds after it are never sent, which is a cut of
+// the run and not a cancellation — they get different sentences.
 func (r *run) streamRounds(ctx context.Context, rounds [][]server.StreamRequest) ([]tape.RequestRecord, *state, error) {
 	sampler, closeSampler := r.openSampler()
 	defer closeSampler()
@@ -121,6 +127,14 @@ func (r *run) streamRounds(ctx context.Context, rounds [][]server.StreamRequest)
 		origin       time.Time
 		failed       int
 		firstErr     error
+		runCtx       = ctx
+		clk          *clock
+		// marked is how many streams the clock actually ended, and cutAfter
+		// the round count sent before it stopped the run. Either one makes the
+		// run a cut one; a budget that ran out between two rounds ends the run
+		// without ending a stream.
+		marked   int
+		cutAfter int
 		// cancelledAfter is the round count sent before a cancellation, 0 when
 		// the run was not cancelled. The warning is emitted after the sampler
 		// stops: r.warn calls Progress, and Options.Progress promises calls
@@ -129,12 +143,21 @@ func (r *run) streamRounds(ctx context.Context, rounds [][]server.StreamRequest)
 	)
 	r.roundNames = nil
 	for k, reqs := range rounds {
-		if k > 0 && ctx.Err() != nil {
-			cancelledAfter = k
+		if k > 0 && runCtx.Err() != nil {
+			// The clock's own cut reads as a cancelled context down here, so
+			// it is asked about first: "the budget ran out" and "you pressed
+			// ^C" are different things to tell a reader.
+			if at, _ := clk.cut(); at > 0 {
+				cutAfter = k
+			} else {
+				cancelledAfter = k
+			}
 			break
 		}
 		st.beginRound(k)
+		base := k * n
 		for i := range reqs {
+			st.beginStream(base + i)
 			st.notify(Event{
 				Kind:      EventStreamStarted,
 				Stream:    i,
@@ -154,11 +177,11 @@ func (r *run) streamRounds(ctx context.Context, rounds [][]server.StreamRequest)
 		if k == 0 {
 			stopSampling = r.startSampling(ctx, st)
 			origin = time.Now()
+			runCtx, clk = r.startClock(ctx, st, origin)
 		} else {
 			offset = time.Since(origin)
 		}
-		base := k * n
-		got, err := server.RunConcurrent(ctx, r.client, reqs, func(i int) server.StreamHooks {
+		got, err := server.RunConcurrent(runCtx, r.client, reqs, func(i int) server.StreamHooks {
 			return st.hooks(base + i)
 		})
 		r.observe(time.Since(origin), k+1, witnessEnd)
@@ -168,16 +191,31 @@ func (r *run) streamRounds(ctx context.Context, rounds [][]server.StreamRequest)
 			got[i].StartedAt += offset
 			got[i].Prompt.Name = name
 		}
+		// Before the round is judged: a round every one of whose streams the
+		// clock cut is a round that answered, not one that failed.
+		if at, live := clk.cut(); at > 0 && base <= len(live) {
+			// live is indexed run-wide (g = round*N + i); got is this round's.
+			marked += markCut(got, live[base:])
+		}
 		recs = append(recs, got...)
 		r.roundNames = append(r.roundNames, name)
-		if err != nil {
+		if err != nil && allFailed(got) {
 			failed++
 			if firstErr == nil {
 				firstErr = err
 			}
 		}
 	}
+	if clk != nil {
+		clk.stop()
+		if at, _ := clk.cut(); at > 0 && (marked > 0 || cutAfter > 0) {
+			r.cutAt = at
+		}
+	}
 	stopSampling()
+	if cutAfter > 0 {
+		r.warn("the run's budget ran out after round %d of %d", cutAfter, len(rounds))
+	}
 	if cancelledAfter > 0 {
 		r.warn("run cancelled after round %d of %d", cancelledAfter, len(rounds))
 	}

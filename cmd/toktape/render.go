@@ -42,7 +42,12 @@ Flags:
 
 Clip length
   A derived clip is 6s cold open (only with --open) + 1s intro + the run at
-  1:1 + 5s on the card. The run is the only part you aim, and
+  1:1 + 5s on the card. The run is the only part you aim, and the direct way
+  to aim it is to record with --for D: the run then ends at D seconds
+  whatever the token count, so the clip is D + 6s, or D + 12s with --open.
+
+  When you have already measured the machine, the token count says the same
+  thing in the other unit:
 
       run seconds ≈ TTFT + --n-predict ÷ per-stream tok/s
 
@@ -50,10 +55,9 @@ Clip length
   2 streams of 240 tokens at 13.5 tok/s with a 1.2s TTFT — a 19.1s run, so a
   25.1s clip, or 31.1s with --open.
 
-  To change the length, change --n-predict when you record. --duration does
-  not: it compresses or stretches the same run into the time you name, and a
-  viewer then cannot tell whether a stream stalled. Slow motion is a lie
-  about the machine.
+  Either flag is set when you record. --duration is not: it compresses or
+  stretches the same run into the time you name, and a viewer then cannot
+  tell whether a stream stalled. Slow motion is a lie about the machine.
 `
 
 // renderFlags is every flag the render verb declares. See recordFlags for why
@@ -211,7 +215,8 @@ func runRender(c *cli, args []string) int {
 // It reads the same schedule the renderer will build, so it cannot disagree
 // with the file that comes out; the breakdown names the phases because the
 // only one a caller can change is the run, and the way to change it is to
-// record with a different --n-predict, not to render with --duration.
+// record with a different --for (or --n-predict), not to render with
+// --duration.
 func clipLengthLine(tp *tape.Tape, opts render.Options) string {
 	runEnd := render.RunEnd(tp)
 	fps := opts.FPS
@@ -232,7 +237,7 @@ func clipLengthLine(tp *tape.Tape, opts render.Options) string {
 			rate = float64(runEnd) / float64(opts.Duration-render.MinDuration)
 		}
 		return fmt.Sprintf("→ Clip %s, the length you named\n"+
-			"→ The %s run is replayed at %.2fx to fit it. To change the clip's length honestly, record with a different --n-predict\n",
+			"→ The %s run is replayed at %.2fx to fit it. To change the clip's length honestly, record with --for (or a different --n-predict)\n",
 			secs(sched.Duration), secs(runEnd), rate)
 	}
 	var parts []string

@@ -84,10 +84,15 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		Spread:      spread,
 		Cache:       cache,
 		Contention:  contention,
-		Template:    r.template,
-		Sampling:    samplingOf(recs),
-		GPUsAtEnd:   gpusAtEnd,
-		Warnings:    r.warnings,
+		// What was allowed to end this generation and what did (TTP-76). CutAt
+		// is 0 unless the clock actually ended something, so a reader tells a
+		// cut run from a completed one by that field alone, and CutAt > For
+		// says the floor held the cut back past the budget.
+		Limit:     limitOf(r.limit, r.cutAt),
+		Template:  r.template,
+		Sampling:  samplingOf(recs),
+		GPUsAtEnd: gpusAtEnd,
+		Warnings:  r.warnings,
 	}
 	summary.Server.Build, summary.Server.Commit = r.build, r.commit
 	if st.perRound > 0 {

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -57,12 +58,34 @@ var (
 )
 
 // DefaultCandidates are the base URLs Discover probes when given none, in the
-// order llama-server users most often bind them.
+// order llama-server users most often bind them. It is the one list: the
+// failure a fruitless scan prints names these ports through DefaultPorts, so a
+// port added here is a port the message offers.
+//
+// 8001 is here because of TTP-75 (2026-09-14): the rig this project develops
+// against serves on it, and the first thing anyone there saw was "no server
+// answered /props" while a server ran one port away — which reads as "there is
+// no server", not as "pass --url".
 var DefaultCandidates = []string{
-	"http://127.0.0.1:8080",
-	"http://127.0.0.1:8081",
-	"http://127.0.0.1:8000",
-	"http://127.0.0.1:5000",
+	"http://127.0.0.1:8080", // llama-server's own default
+	"http://127.0.0.1:8081", // a second llama-server, numbered off 8080
+	"http://127.0.0.1:8001", // a second llama-server, numbered off 8000 (TTP-75)
+	"http://127.0.0.1:8000", // uvicorn/FastAPI-shaped wrappers
+	"http://127.0.0.1:5000", // the other wrapper convention
+}
+
+// DefaultPorts is the ports of DefaultCandidates as one human list, for the
+// sentence a failed discovery prints. It is derived rather than written out a
+// second time: a hint that names a stale set of ports sends the reader to look
+// in the wrong place, which is the whole complaint TTP-75 came from.
+func DefaultPorts() string {
+	ports := make([]string, 0, len(DefaultCandidates))
+	for _, c := range DefaultCandidates {
+		if u, err := url.Parse(NormalizeBaseURL(c)); err == nil && u.Port() != "" {
+			ports = append(ports, u.Port())
+		}
+	}
+	return strings.Join(ports, ", ")
 }
 
 // Client talks to one server. It is safe for concurrent use: RunConcurrent

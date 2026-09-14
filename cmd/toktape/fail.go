@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/midagedev/toktape/internal/recorder"
+	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -140,15 +141,27 @@ func (c *cli) usageTextf(text, format string, a ...any) int {
 // next about it.
 //
 // The recorder's own error already names the state, the URL and the cause, so
-// the hint adds only the sentence it cannot know: which of the two shapes of
+// the hint adds only the sentence it cannot know: which of the three shapes of
 // "nothing answered" this was. Discovery found nothing on any candidate port,
 // which means no server is running or it is somewhere else; an explicit --url
-// that did not answer is a port or a server that has not finished starting.
+// that did not answer is a port or a server that has not finished starting;
+// and a server that answered "loading" until the wait ran out was there all
+// along and needs more patience, not a different URL.
+//
+// The scan's hint names the ports (TTP-75, 2026-09-14). A run on the rig this
+// project develops against saw "no server answered /props" while a server was
+// serving one port away, and read it as "there is no server" rather than as
+// "pass --url" — so the sentence says what was looked at and what to do, and
+// takes the list from server.DefaultCandidates rather than repeating it.
 func (c *cli) reportRecordError(err error, urlGiven bool) int {
 	switch {
 	case errors.Is(err, recorder.ErrUnreachable):
-		hint := "start a llama-server, or name one with --url http://host:port"
-		if urlGiven {
+		hint := fmt.Sprintf("no server on the ports toktape probes (%s); start a llama-server, or name yours with --url http://host:port",
+			server.DefaultPorts())
+		switch {
+		case errors.Is(err, server.ErrLoading), errors.Is(err, server.ErrBusy):
+			hint = "the server is there and was not ready in time; give it longer with --wait 30m"
+		case urlGiven:
 			hint = "check the host and port, or add --wait 30s to wait for a server that is still starting"
 		}
 		return c.fail(failure{

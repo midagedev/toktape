@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -300,11 +301,16 @@ func TestHelpAgentsTopic(t *testing.T) {
 // It was 70 until the Examples section (2026-09-14), which an agent copies
 // from and which therefore has to be in the text everybody reads. Raising it
 // was the decision; the verbose halves of --wait, --prompts, --grid and the
-// --ram pair were trimmed in the same change to pay part of it. The next
-// thing that wants to grow should displace something rather than move the
-// line again.
+// --ram pair were trimmed in the same change to pay part of it.
+//
+// It was 82 until --for (TTP-76, 2026-09-14). That flag is how long a run is,
+// which is the question every first-time reader has, and it cost six lines:
+// the two-flag matrix in the flag list and a worked example that aims a clip.
+// Raising it a second time was a deliberate decision and not a measurement —
+// 96 leaves four lines of headroom on purpose, so the next thing to grow has
+// room to land while somebody decides what it displaces.
 func TestHelpStaysScannable(t *testing.T) {
-	const maxLines = 82
+	const maxLines = 96
 	if n := strings.Count(usageText, "\n"); n > maxLines {
 		t.Errorf("--help is %d lines, over the %d-line budget; move detail into a help topic", n, maxLines)
 	}
@@ -328,6 +334,9 @@ func TestHelpAgentsNamesRealFields(t *testing.T) {
 	}
 	s.Model.Name, s.Model.Quant, s.Model.Params = "Qwen3.5-35B-A3B", "Q4_K_M", 1
 	s.Aggregate.StreamsFailed = 1
+	// Both halves of the limit are omitempty, so a cut run is modelled here:
+	// a budget that was asked for and a clock that spent it.
+	s.Limit.For, s.Limit.CutAt = 20*time.Second, 21*time.Second
 	b, err := json.Marshal(&s)
 	if err != nil {
 		t.Fatalf("marshal a run summary: %v", err)
@@ -347,6 +356,10 @@ func TestHelpAgentsNamesRealFields(t *testing.T) {
 		"timings.predicted_per_second", "timings.prompt_per_second", "timings.ttft_ms",
 		"timings.client_predicted_per_second",
 		"aggregate.aggregate_predicted_per_second", "aggregate.streams", "aggregate.streams_failed",
+		// What was allowed to end the run, and what did (TTP-76): a reader
+		// that cannot see limit.cut_at cannot tell a run the clock stopped
+		// short from one that generated everything it was going to.
+		"limit.for", "limit.cut_at",
 		"placement", "sampling", "warnings",
 	}
 	for _, p := range paths {
