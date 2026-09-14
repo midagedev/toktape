@@ -49,6 +49,8 @@ var Columns = []string{
 	"cache_label", "cache_n",
 	"rss_gb", "vram_gb", "gpus", "load1", "throttled", "contended",
 	"warnings", "toktape_version",
+	// TTP-78 (2026-09-14): the wall-clock budget and when it actually cut.
+	"for_s", "cut_at_s",
 }
 
 // colIndex is Columns inverted, so a row can be addressed by column name
@@ -187,6 +189,12 @@ func FromTape(tp *tape.Tape) Row {
 	// observed.
 	set("warnings", strconv.Itoa(len(s.Warnings)))
 	set("toktape_version", s.ToktapeVersion)
+	// What ended the run (TTP-78). A default run ends on a wall clock, so a
+	// short row beside a long one is explained by these two cells and by
+	// nothing else in the row. cut_at_s larger than for_s is the 64-token
+	// floor holding the cut back on a slow box, not an error.
+	set("for_s", num1(s.Limit.For.Seconds()))
+	set("cut_at_s", num1(s.Limit.CutAt.Seconds()))
 	return r
 }
 

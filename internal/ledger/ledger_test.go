@@ -395,3 +395,34 @@ func TestReadMissingLedger(t *testing.T) {
 		t.Errorf("Read on a directory with no ledger = %v, want os.ErrNotExist", err)
 	}
 }
+
+// TestFromTapeSaysTheClockCutTheRun (TTP-78, 2026-09-14). A default run ends on
+// a wall clock, so a sweep row that does not say whether the clock cut it is
+// missing the one fact that explains a short row beside a long one. Two
+// numeric columns rather than one "20s cut" cell: a unit inside a cell breaks
+// the numeric import the ledger exists for. Both are empty when nothing was
+// in force or nothing was cut — a 0 there would import as a measurement.
+func TestFromTapeSaysTheClockCutTheRun(t *testing.T) {
+	cut := card.Example()
+	cut.Limit = tape.LimitSummary{For: 20 * time.Second, MaxTokens: 2048, MinTokens: 64,
+		CutAt: 22500 * time.Millisecond}
+	cutTape := tapeOf(cut)
+	for col, w := range map[string]string{"for_s": "20.0", "cut_at_s": "22.5"} {
+		if got := get(t, cutTape, col); got != w {
+			t.Errorf("on a cut run %s = %q, want %q", col, got, w)
+		}
+	}
+
+	uncut := card.Example()
+	uncut.Limit = tape.LimitSummary{For: 20 * time.Second, MaxTokens: 2048, MinTokens: 64}
+	if got := get(t, tapeOf(uncut), "cut_at_s"); got != "" {
+		t.Errorf("a run the clock did not cut has cut_at_s %q, want an empty cell", got)
+	}
+
+	// Append-only: the new columns sit after every column an existing export
+	// already has, so a query written against an older runs.tsv still lines up.
+	last := Columns[len(Columns)-2:]
+	if last[0] != "for_s" || last[1] != "cut_at_s" {
+		t.Errorf("the clock columns are %v at the end, want [for_s cut_at_s]", last)
+	}
+}
