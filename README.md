@@ -229,7 +229,7 @@ side by side. Each field is there because it settles an argument.
 
 | verb | what it does | example |
 | --- | --- | --- |
-| `record` | attach and record a run; the default verb | `toktape -n 4 --n-predict 512` |
+| `record` | attach and record a run; the default verb | `toktape -n 4 --for 30s` |
 | `card` | re-render a card from a tape | `toktape card <tape> --png` |
 | `play` | replay a run on the live screen | `toktape play <tape> --speed 4` |
 | `render` | render a run as GIF, mp4, asciicast or PNG frames | `toktape render <tape> --mp4 clip.mp4` |
@@ -238,11 +238,23 @@ side by side. Each field is there because it settles an argument.
 | `compare` | diff two runs, metrics and flags | `toktape compare a.tape b.tape` |
 | `version` | print the version | `toktape version` |
 
-**Record:** `--url` (default: discover), `-n`/`--concurrency`, `--prompt`
+**How long a run is.** A recording ends on the clock: twenty seconds by
+default, and `--for 30s` to aim it somewhere else. A token count is the wrong
+unit for this — the same 256 tokens is under two seconds on a 7B on a fast GPU
+and over two minutes on a large model with no GPU — so seconds are what you
+name and `--n-predict` is the cap that also applies. Naming `--n-predict`
+yourself is an answer on the same question, so it turns the clock off. Two
+honest caveats: nothing is cut under 64 tokens, so a slow machine runs longer
+than you asked rather than handing you a sample; and the model usually stops
+before the budget does, which is your prompt's doing and not the machine's.
+
+**Record:** `--for DURATION` (default `20s`; `--for 0` turns the clock off),
+`--url` (default: discover), `-n`/`--concurrency`, `--prompt`
 (repeatable, cycled to fill `-n`), `--prompts`
 (a JSONL file; each line is one round of `-n` streams, run in order into one
 tape), `--spec-n-max LIST` (e.g. `3,5`: the prompt set once per
-speculative `n_max`, all in one tape, with a card line per value), `--n-predict` (default 256), `--out`
+speculative `n_max`, all in one tape, with a card line per value),
+`--n-predict` (the token cap; naming it turns the clock off), `--out`
 (default `~/.toktape/runs`), `--tag`, `--note`, `--wait`, `--tui`,
 `--grid COLSxROWS` (default `2x4`, `0` fits the terminal), `--no-card`,
 `--json`, `--quiet`.
@@ -312,10 +324,15 @@ A clip opens on the screen at the run's start, plays the whole run at real
 speed, and holds on the result: the two rates drawn large enough to read at
 feed size, the rig, the engine and where the model sits, over the screen you
 were watching. `--open` puts the command being typed in front of it, the way
-the clip at the top of this page starts; `--duration` fits the run into a
-length you choose. Nothing is compressed unless you ask for it — a clip that
-sped a run up to fit a limit would be lying about the one number the page is
-about. The same tape always renders the same clip.
+the clip at the top of this page starts.
+
+Aim a clip's length when you **record** it, with `--for`: a clip is the run at
+1:1 plus six seconds of framing, twelve with `--open`, so `--for 18s` makes a
+thirty-second one. `render --duration` is a different flag and not a
+substitute — it squeezes a run you already have into the time you name.
+Nothing is compressed unless you ask for it that way: a clip that sped a run
+up to fit a limit would be lying about the one number the page is about. The
+same tape always renders the same clip.
 
 ## How it measures
 

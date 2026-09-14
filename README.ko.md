@@ -205,7 +205,7 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 
 | 동사 | 하는 일 | 예 |
 | --- | --- | --- |
-| `record` | 붙어서 실행을 녹화합니다. 기본 동사 | `toktape -n 4 --n-predict 512` |
+| `record` | 붙어서 실행을 녹화합니다. 기본 동사 | `toktape -n 4 --for 30s` |
 | `card` | 테이프에서 카드를 다시 그립니다 | `toktape card <tape> --png` |
 | `play` | 라이브 화면에서 실행을 재생합니다 | `toktape play <tape> --speed 4` |
 | `render` | GIF, mp4, asciicast, PNG 프레임으로 렌더합니다 | `toktape render <tape> --mp4 clip.mp4` |
@@ -214,11 +214,22 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 | `compare` | 두 실행의 지표와 플래그를 비교합니다 | `toktape compare a.tape b.tape` |
 | `version` | 버전 출력 | `toktape version` |
 
-**record:** `--url`(기본은 자동 탐색), `-n`/`--concurrency`, `--prompt`(반복
+**녹화는 몇 초짜리인가.** 실행은 시계로 끝납니다. 기본 20초이고,
+`--for 30s`처럼 원하는 길이를 직접 댈 수 있습니다. 이 질문에 토큰 수는
+맞는 단위가 아닙니다 — 같은 256토큰이 빠른 GPU에 올린 7B에서는 2초가
+안 되고, GPU 없이 도는 큰 모델에서는 2분이 넘습니다. 그래서 초를 대고,
+`--n-predict`는 함께 걸리는 상한으로 남습니다. `--n-predict`를 직접 대는
+것은 같은 질문에 대한 다른 답이라서, 대는 순간 시계는 꺼집니다. 정직하게
+덧붙일 두 가지: 64토큰 아래로는 자르지 않습니다. 느린 기계는 요청한 것보다
+오래 돌지언정 표본을 건네지 않습니다. 그리고 대개는 예산보다 모델이 먼저
+멈춥니다. 그건 기계가 아니라 프롬프트가 하는 일입니다.
+
+**record:** `--for DURATION`(기본 `20s`. `--for 0`이면 시계를 끕니다),
+`--url`(기본은 자동 탐색), `-n`/`--concurrency`, `--prompt`(반복
 가능, `-n`만큼 순환), `--prompts`(JSONL 파일. 한 줄이 `-n`개 스트림의
 한 라운드이고, 순서대로 돌려 테이프 하나에 담습니다), `--spec-n-max LIST`(예: `3,5`. 프롬프트
 묶음을 speculative `n_max` 값마다 한 번씩 돌려 한 테이프에 담고, 카드에는 값마다 한 줄이
-붙습니다), `--n-predict`(기본 256), `--out`(기본
+붙습니다), `--n-predict`(토큰 상한. 대면 시계가 꺼집니다), `--out`(기본
 `~/.toktape/runs`), `--tag`, `--note`, `--wait`, `--tui`,
 `--grid COLSxROWS`(기본 `2x4`, `0`이면 터미널에 맞춤), `--no-card`,
 `--json`, `--quiet`.
@@ -285,8 +296,14 @@ toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
 클립은 실행이 시작되는 화면에서 열리고, 실행 전체를 실제 속도로 재생한 뒤
 결과에서 멈춥니다. 보고 있던 화면 위에 두 속도와 장비, 모델이 놓인 자리가
 뜹니다. `--open`을 주면 이 페이지 맨 위의 클립처럼 명령을 치는 장면이 앞에
-붙고, `--duration`으로 원하는 길이에 맞출 수 있습니다. 같은 테이프는 늘 같은
-클립이 됩니다.
+붙습니다.
+
+클립 길이는 **녹화할 때** `--for`로 겨눕니다. 클립은 실행을 1:1로 재생한
+것에 앞뒤 프레임 6초가 붙은 것이고 `--open`이면 12초라서, `--for 18s`면
+30초짜리가 나옵니다. `render --duration`은 다른 플래그이고 대체재가 아닙니다.
+그건 이미 가진 실행을 댄 길이에 욱여넣습니다. 그렇게 해 달라고 하지 않는 한
+아무것도 압축하지 않습니다. 길이에 맞추려고 실행을 빨리 감은 클립은 이 페이지가
+말하려는 바로 그 숫자를 속이는 것이니까요. 같은 테이프는 늘 같은 클립이 됩니다.
 
 ## 어떻게 측정하나
 
