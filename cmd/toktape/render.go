@@ -61,7 +61,7 @@ Clip length
   it opens the clip that long before the first token rather than at the run's
   start, so the wait for prefill is left out while every frame that is in the
   clip is still 1:1. Nothing has to say so — the tile's clock is measured from
-  the run's start, so a windowed clip opens on 8/30s instead of 0/30s. It
+  the run's start, so a windowed clip opens on 7/30s instead of 0/30s. It
   replaces the intro, which is a screen for a run that has not started yet.
   The hero is rendered with --prefill-lead 3s: its first token is 10.8s in, so
   7.8s of waiting is cut and the clip is 33.1s rather than 41.9s.
@@ -255,13 +255,20 @@ func clipLengthLine(tp *tape.Tape, opts render.Options) string {
 		// the wrong speed, and the phases no longer add up to anything worth
 		// printing. A caller who wanted a shorter clip wanted a shorter run,
 		// and only a recording can give them one.
+		// What is replayed is the window, not the run: with --prefill-lead the
+		// clip already leaves the front out, and the holds it is squeezed
+		// against are the schedule's own — a windowed clip has no intro.
+		// It is the schedule's own streaming phase rather than the duration
+		// minus the holds, so the figure is the ratio the renderer will
+		// really replay at — holds shrink when the clip is short enough.
+		played := runEnd - runFrom
 		rate := 1.0
-		if opts.Duration > 0 && runEnd > 0 {
-			rate = float64(runEnd) / float64(opts.Duration-render.MinDuration)
+		if played > 0 && sched.Stream > 0 {
+			rate = float64(played) / float64(sched.Stream)
 		}
 		return fmt.Sprintf("→ Clip %s, the length you named\n"+
 			"→ The %s run is replayed at %.2fx to fit it. To change the clip's length honestly, record with --for (or a different --n-predict)\n",
-			secs(sched.Duration), secs(runEnd), rate)
+			secs(sched.Duration), secs(played), rate)
 	}
 	var parts []string
 	if opts.ColdOpen {

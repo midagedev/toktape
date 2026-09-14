@@ -79,6 +79,16 @@ func TestClipLengthNoteMatchesTheHero(t *testing.T) {
 		}
 	}
 
+	// The clock the windowed clip opens on, which is the note's whole argument
+	// for why the cut needs no label. It is the tile's own figure — integer
+	// seconds since the run's start, over the budget — so quoting it means
+	// reading it the way tui does rather than rounding runFrom to taste.
+	// FAIL-first: the note said 8/30s, because 7.8 rounds up and the screen
+	// truncates. The frame at the cut says 7/30s.
+	if clock := fmt.Sprintf("%d/%ds", int(runFrom.Seconds()), int(s.Limit.For.Seconds())); !strings.Contains(renderUsage, clock) {
+		t.Errorf("the note does not quote the clock a windowed hero opens on (%s); that figure is why the cut needs no caption", clock)
+	}
+
 	// The formula's own arithmetic, against the run it claims to predict.
 	// It is an estimate — it omits the last token's own interval — so the
 	// tolerance is a token's worth of time, not zero.
