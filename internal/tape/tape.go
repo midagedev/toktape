@@ -42,6 +42,21 @@ const (
 	// but labelled "sample", never "decode". (Lesson 2: a 19-token sample is
 	// not a decode rate.)
 	MinDecodeTokens = 32
+	// MinPrefillPromptTokens is the shortest prompt whose prefill rate the
+	// card will present as a prefill measurement (TTP-65, 2026-09-14).
+	//
+	// Below it the figure is dominated by everything that is not prefill: the
+	// batch the server was in the middle of, the slot it had to be given, the
+	// first-token latency of a template it had already cached. A four-stream
+	// recording printed "Prefill 5.6 tok/s · TTFT 11942 ms · 63 prompt tokens"
+	// for a box whose honest prefill on the same model is 60 to 130 tok/s —
+	// two orders of nothing, from four 63-token requests that arrived at once.
+	//
+	// 100 is the round number just above that 63 and an order of magnitude
+	// under the 512-token prompt the fixtures use. The rule it encodes is
+	// MinDecodeTokens' own, one step up the pipeline: a measurement too small
+	// to be dominated by the thing it is measuring is not that measurement.
+	MinPrefillPromptTokens = 100
 	// MinCutTokens is the floor a run's wall-clock budget will not cut under
 	// (TTP-76, 2026-09-14). A budget on a slow box can land a stream under
 	// MinDecodeTokens, and a first run that reports "sample" instead of a

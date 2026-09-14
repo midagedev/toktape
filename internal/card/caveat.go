@@ -129,21 +129,11 @@ var caveatRank = map[string]int{
 	CodeNoProcView:            10,
 }
 
-// MinPrefillPromptTokens is the shortest prompt whose prefill rate the card
-// will present as a prefill measurement (TTP-65, 2026-09-14).
-//
-// Below it the figure is dominated by everything that is not prefill: the
-// batch the server was in the middle of, the slot it had to be given, the
-// first-token latency of a template it had already cached. The four-stream ws
-// tape printed "Prefill 5.6 tok/s · TTFT 11942 ms · 63 prompt tokens" for a
-// box whose honest prefill on the same model is 60 to 130 tok/s — two orders
-// of nothing, from four 63-token requests that arrived at once.
-//
-// 100 is the round number just above that 63 and an order of magnitude under
-// the 512-token prompt the fixtures use; the rule it encodes is
-// tape.MinDecodeTokens', one step up the pipeline. It belongs beside
-// MinDecodeTokens in internal/tape, which is the lead's file — see the report.
-const MinPrefillPromptTokens = 100
+// MinPrefillPromptTokens is tape.MinPrefillPromptTokens, re-exported so this
+// package's callers need not import the schema for one number. The rule and
+// the reasoning live there, beside tape.MinDecodeTokens, because they are the
+// same rule one step apart in the pipeline (moved by the lead, 2026-09-14).
+const MinPrefillPromptTokens = tape.MinPrefillPromptTokens
 
 // isSample reports whether the run's generation was too short for its decode
 // figure to be a rate.
