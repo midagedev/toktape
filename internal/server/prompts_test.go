@@ -10,30 +10,53 @@ import (
 // The length a built-in prompt must have, in characters, because this package
 // has no tokenizer (TTP-84, 2026-09-14).
 //
-// The conversion is the pessimistic one on each side. English prose runs about
-// 4 characters to a token (0.75 words per token) on the Llama and Qwen
-// tokenizers, and code, logs and numbers run denser, nearer 3. So a floor
-// counted at 4 characters per token is a floor for every kind of prompt in the
-// set, and a ceiling counted at 3 is a ceiling for every kind.
+// Both the conversion and the band were re-derived from measurement on this
+// repo's hero rig (lead, 2026-09-14), replacing numbers that had been reasoned
+// from published tokenizer averages. Two concurrent streams sent 714 prompt
+// tokens for 2538 characters of the densest prompts in the set — code, a query
+// plan, a log excerpt — which is 3.55 characters to a token with the chat
+// template already counted in, against the 3 this file used to assume; the
+// prose-only prompts of the same run ran 4.9. Each is the pessimistic end of
+// one bound: a floor counted at 4.9 characters per token is a floor for every
+// prompt in the set, a ceiling counted at 3.5 a ceiling for every one.
 //
-// The floor is twice tape.MinPrefillPromptTokens before the chat template adds
-// a single token of its own: the template's share differs per model, so the
-// prompt must clear the threshold without counting on it. The ceiling is five
-// times the threshold, 500 tokens: at the 60 tok/s low end of honest prefill
-// on this repo's hero rig that is about 8 s before the first token of a run
-// whose default budget is 20 s, and a longer prompt starts spending the
-// decode's time on prefill.
+// The floor is 150 tokens, not the 2 x tape.MinPrefillPromptTokens this file
+// claimed before. That claim was wrong in fact — at the measured 4.9, the 800
+// characters it demanded are 163 tokens, never the 200 it named — and the
+// honest restatement is a margin: half again the threshold the card tests, so
+// a tokenizer that differs from this one still clears it without counting on
+// the template's share, which differs per model.
+//
+// The ceiling is 300 tokens, and it is the half that moved. It used to be 500,
+// justified at the 60 tok/s low end of ordinary prefill, where 500 tokens is
+// about 8 s of a 20 s budget. But the run that produced the conversion above
+// took 21 s to reach its first token: that rig pages a 445 GB model through
+// 251 GB of RAM and prefills at 16.8 tok/s per stream, so 500 tokens would be
+// half a minute before a single token of decode. A box whose prefill is bound
+// by its memory is exactly the box this tool exists for, so the ceiling is set
+// where such a box still gets a run: 300 tokens is about 5 s on the 60 tok/s
+// rig and about 12 s on the paging one.
 const (
-	proseCharsPerToken = 4
-	codeCharsPerToken  = 3
-	minPromptChars     = proseCharsPerToken * 2 * tape.MinPrefillPromptTokens
-	maxPromptChars     = codeCharsPerToken * 5 * tape.MinPrefillPromptTokens
+	proseCharsPerToken = 4.9
+	codeCharsPerToken  = 3.5
+	minPromptTokens    = 150
+	maxPromptTokens    = 300
+	minPromptChars     = int(minPromptTokens * proseCharsPerToken) // 735
+	maxPromptChars     = int(maxPromptTokens * codeCharsPerToken)  // 1050
 )
 
 // TestDefaultPromptsArePrefillMeasurements: every built-in prompt is long
 // enough that the card presents its prefill as a prefill measurement, and
 // short enough that a slow rig's prefill does not eat the run's budget.
 func TestDefaultPromptsArePrefillMeasurements(t *testing.T) {
+	// The floor is a margin over the threshold the card tests against, so the
+	// two are pinned to each other here rather than only in the prose above:
+	// raising tape.MinPrefillPromptTokens past the floor would leave this
+	// file's numbers reading as a margin while they had stopped being one.
+	if minPromptTokens <= tape.MinPrefillPromptTokens {
+		t.Fatalf("the floor is %d tokens and the card calls a prompt short under %d: the built-in set would carry the caveat it exists to avoid",
+			minPromptTokens, tape.MinPrefillPromptTokens)
+	}
 	if len(defaultPrompts) < 16 {
 		t.Errorf("%d built-in prompts, want at least 16: a concurrent run needs one distinct prompt per stream before the numbered repetition starts", len(defaultPrompts))
 	}
@@ -41,7 +64,7 @@ func TestDefaultPromptsArePrefillMeasurements(t *testing.T) {
 	for i, text := range defaultPrompts {
 		if n := len(text); n < minPromptChars || n > maxPromptChars {
 			t.Errorf("prompt %d is %d characters, want %d to %d (about %d to %d tokens): %.80q",
-				i, n, minPromptChars, maxPromptChars, minPromptChars/proseCharsPerToken, maxPromptChars/codeCharsPerToken, text)
+				i, n, minPromptChars, maxPromptChars, minPromptTokens, maxPromptTokens, text)
 		}
 		if len(text) < len(defaultPrompts[shortest]) {
 			shortest = i
