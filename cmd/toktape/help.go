@@ -84,12 +84,44 @@ Careful: one invocation can block for ten minutes
                                   cut back and the run ran long
     placement                     what sits on GPU and what sits in RAM
     sampling                      temperature, thinking, endpoint
-    warnings                      caveats the card prints verbatim
+    caveats                       everything that qualifies the figures above
+    warnings                      the recorder's own free text, already inside
+                                  caveats under the "recorded" code
 
   The names are llama.cpp's own, not renamed: predicted is decode, prompt is
   prefill. Server figures are the record and client figures are the check; a
   disagreement between them is a fact about the run, not a number to pick
   between.
+
+Is this number quotable: read caveats, not warnings
+  ` + "`caveats`" + ` is the derived, complete list — a stable ` + "`code`" + `, a ` + "`severity`" + ` and a
+  sentence per qualification, most serious first — and it is the one field
+  that answers whether the headline may be quoted: empty means yes.
+  ` + "`warnings`" + ` is the recorder's own free text ("cold run: 1.4 major faults
+  per token", "pid not found, no /proc view") and is a SUBSET of it, riding
+  through under the code "recorded", so a reader of warnings alone sees the
+  smaller list. The severities:
+
+    figure  the headline does not mean what it looks like. Quoting the
+            number without the sentence beside it is wrong
+    run     the figures are what they say, but the run was not one clean
+            measurement, so two cards are not comparable on it alone
+    view    a view of the machine is missing, so part of the card prints "?"
+
+  Branch on ` + "`code`" + ` and ` + "`severity`" + `; the sentence is for people. The codes today:
+  streams_failed, answer_cut, short_generation, cold_cache,
+  short_prompt_for_prefill, client_disagrees_with_server, recorded,
+  machine_contended, conditions_changed, run_cut_by_clock, no_proc_view. The
+  list is open — a newer toktape may add one, and a reader that branched on a
+  code it knows keeps working.
+
+Why a card does not say what you expected
+  ` + "`card <tape> --explain`" + ` prints, on stderr, every qualification check with
+  its verdict and the reading behind it — INCLUDING the checks that did not
+  fire — and then every figure the bandwidth clauses are built from, including
+  the ones that made a clause report nothing. It is an addition to whatever
+  rendering was asked for, so ` + "`--json --explain`" + ` still leaves exactly one
+  object on stdout.
 
   ` + "`log --json`" + ` is a different shape: one JSON array, one object per recorded
   run, every value a string.

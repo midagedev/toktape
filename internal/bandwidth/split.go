@@ -344,23 +344,41 @@ func RAM(s *tape.RunSummary) (RAMSide, bool) {
 	if peak := HostBytesPerSec(s.Host); peak > 0 {
 		out.OfPeak = float64(out.BytesPerSec) / float64(peak)
 	}
-	if cpu.ActiveBytesPerToken > 0 {
+	out.Exact = cpuActiveExact(s, cpu)
+	return out, true
+}
+
+// cpuActiveExact reports whether the CPU's active-bytes figure is PROVABLY the
+// whole of what the CPU reads, in the sense RAMSide.Exact documents — read
+// that comment before changing this one; it is the reasoning, and this is only
+// where the reasoning is executed.
+//
+// It is one function rather than one per caller because the question is about
+// the placement and the model, not about which figure a caller went on to
+// build out of them: RAMSide.BytesPerSec and Verify.RAMBytesPerStep are two
+// arithmetics over the same attribution, so an answer that differed between
+// them would be a bug by construction. Deciding it in each caller is how two
+// renderers of one tape come to disagree about whether a ratio may be printed.
+//
+// False means the figure MAY be an under-count, never that it is one.
+func cpuActiveExact(s *tape.RunSummary, cpu tape.DevicePlacement) bool {
+	switch {
+	case cpu.ActiveBytesPerToken > 0:
 		// TTP-68 (2026-09-14): the recorder read this device's own tensor
 		// names and wrote what they are read for, so there is no attribution
 		// left to have got wrong. This is the case the field was waiting for —
 		// "closing it means recording per-device active bytes at record time",
-		// as the doc above says.
-		out.Exact = true
-	} else if cpu.Classes[tape.ClassExperts] <= 0 {
+		// as RAMSide.Exact says.
+		return true
+	case cpu.Classes[tape.ClassExperts] <= 0:
 		// Nothing of the doubtful class is here at all.
-		out.Exact = true
-	} else if split, ok := ExpertsSplit(s); ok && split.Dense == 0 {
-		// The split solved and the model has no router or shared-expert bytes
-		// to have misattributed. A split that did NOT solve leaves Exact
-		// false: not knowing is not the same as knowing it is fine.
-		out.Exact = true
+		return true
 	}
-	return out, true
+	// The split solved and the model has no router or shared-expert bytes to
+	// have misattributed. A split that did NOT solve leaves this false: not
+	// knowing is not the same as knowing it is fine.
+	split, ok := ExpertsSplit(s)
+	return ok && split.Dense == 0
 }
 
 // decodeRate is the tokens per second the HOST BUS had to feed, and over how
@@ -423,6 +441,30 @@ type Verify struct {
 	// RAMBytesPerSec is RAMBytesPerStep × StepsPerSec: the rate the host bus
 	// really carried, as opposed to the per-accepted-token figure in RAMSide.
 	RAMBytesPerSec int64
+	// OfPeak is RAMBytesPerSec / HostBandwidth, or 0 when the host's RAM
+	// bandwidth was not observed, in which case the caller must print no
+	// percentage rather than a guessed one. It is the same quantity RAMSide
+	// carries under the same name, over the same host figure, and it is
+	// decided here rather than in a renderer because the numerator is one this
+	// package built out of its own per-device active bytes: a caller that
+	// divided it by a host figure of its own choosing would be deciding this
+	// package's provenance from outside it.
+	OfPeak float64
+	// Exact means what RAMSide.Exact means, decided by the same rule over the
+	// same inputs (cpuActiveExact): the CPU's active bytes are provably the
+	// whole of what the CPU reads, so the step this is built from is not an
+	// under-count. False means it may be one, never that it is.
+	//
+	// Unlike RAMSide.Exact this IS a branch in a renderer: the card gates the
+	// "of peak" clause on it, because a ratio over an under-count claims
+	// headroom the tape cannot support, and headroom is the one thing a reader
+	// acts on. The rate itself is printed either way, marked "≈" — what the
+	// approximation costs is a percentage, not the figure.
+	//
+	// It says nothing about the batch model. DistinctExpertsPerLayer is an
+	// upper bound on every run, exact or not (see Speculative), which is why
+	// the clause carries its "≈" even here.
+	Exact bool
 	// AcceptRate is DraftNAccepted / DraftN.
 	AcceptRate float64
 	// Streams is how many streams the figures cover: 1, or Concurrency on a
@@ -540,8 +582,18 @@ func Speculative(s *tape.RunSummary) (Verify, bool) {
 		DistinctExpertsPerLayer: distinct,
 		RAMBytesPerStep:         perStep,
 		RAMBytesPerSec:          int64(math.Round(float64(perStep) * stepsPerSec)),
+		Exact:                   cpuActiveExact(s, cpu),
 		AcceptRate:              float64(accepted) / float64(draftN),
 		Streams:                 streams,
+	}
+	// The ratio is decided here because both of its terms are: the numerator
+	// is the step this function just built, and HostBandwidth is this
+	// package's single owner of the host's bandwidth and its provenance. It is
+	// derivable on an all-CPU placement, where RAM() reports nothing because
+	// there is no second bus to separate out — the host bus is still the one
+	// this rate was carried on, and it is still the wall.
+	if peak := HostBytesPerSec(s.Host); peak > 0 {
+		out.OfPeak = float64(out.RAMBytesPerSec) / float64(peak)
 	}
 	return out, true
 }

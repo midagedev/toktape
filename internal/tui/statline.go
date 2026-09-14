@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -84,7 +85,7 @@ const minP50Intervals = 8
 // ones plain would make the hero figure dimmest on the seven tiles a reader
 // scans and brightest only on the one that happens to be talking; the
 // breathing cursor already says which that is.
-func tileStatLine(th Theme, s Stream, cw int) string {
+func tileStatLine(m Model, th Theme, t time.Duration, s Stream, cw int) string {
 	if cw <= 0 {
 		return ""
 	}
@@ -101,7 +102,7 @@ func tileStatLine(th Theme, s Stream, cw int) string {
 	}
 	l.addRaw(th.accentBold, rate)
 	l.space(tileRateW - width(rate))
-	for _, tail := range statTails(s, tileSparkW(cw)) {
+	for _, tail := range statTails(m, t, s, tileSparkW(cw)) {
 		if tail.reserve > l.left() {
 			continue
 		}
@@ -178,10 +179,10 @@ const (
 // no "count without the graph" rung — a tile that could not hold the count
 // beside the graph does not get the count back by dropping it, or the same
 // tile would print a different pair of figures at two adjacent widths.
-func statTails(s Stream, sw int) []statTail {
+func statTails(m Model, t time.Duration, s Stream, sw int) []statTail {
 	parts := []statTail{
 		reserved("ttft "+streamTTFTFigure(s), ttftNominalW),
-		reserved(streamCountFigure(s), countNominalW(s)),
+		reserved(streamCountFigure(m, t, s), countNominalW(m, s)),
 		reserved("p50 "+streamP50Figure(s), p50NominalW),
 	}
 	out := make([]statTail, 0, len(parts)+2)
@@ -207,10 +208,18 @@ func reserved(text string, nominal int) statTail {
 	return statTail{text: text, reserve: max(width(text), nominal)}
 }
 
-// countNominalW is the width "80/128" grows to when the count catches up with
-// the budget. A stream whose budget is unknown has nothing to grow towards, so
-// it is measured as it is.
-func countNominalW(s Stream) int {
+// countNominalW is the width the third figure grows to: "80/128" once the
+// count catches up with the cap, or "12/20s" once the clock catches up with
+// the budget. A stream with neither has nothing to grow towards, so it is
+// measured as it is.
+func countNominalW(m Model, s Stream) int {
+	if b := runBudget(m); b > 0 {
+		// One column more than the budget's own spelling. The floor can hold
+		// the cut past the budget (tape.LimitSummary.CutAt), and "102/20s"
+		// must not be the frame where the tile changes its layout.
+		secs := budgetSeconds(b)
+		return width(fmt.Sprintf("%d/%ds", secs, secs)) + 1
+	}
 	if s.MaxTokens <= 0 {
 		return 0
 	}
@@ -268,18 +277,95 @@ func streamTTFTFigure(s Stream) string {
 	return fmtMs(msOf(s.Tokens[0].T - s.StartedAt))
 }
 
-// streamCountFigure is how far through its budget the stream is: "80/128" when
-// the request named a cap, "80 tok" when it did not.
+// streamCountFigure is how far through what will end it the stream is:
+// "12/20s" when the run has a wall-clock budget, "80/128" when the request
+// named a cap and nothing else, "80 tok" when it named neither.
 //
-// Reasoning tokens count. The server counts them in predicted_n and they are
-// spent out of the same n_predict budget, so a thinking model that never
-// reaches an answer still shows the budget running out — which is exactly the
-// state the "cut" badge above it names.
-func streamCountFigure(s Stream) string {
+// The clock outranks the cap because on a clock run the cap is not a target
+// (TTP-76, 2026-09-14). A default run carries recorder.DefaultMaxTokens as a
+// runaway guard, so a 20-second run drew "116/2048" — six per cent, crawling —
+// while it was in fact twelve seconds into twenty and more than half done. The
+// fraction was arithmetically correct and said the opposite of the truth,
+// which is the one thing a figure on this screen may not do.
+//
+// It is deliberately ONE figure and not two. The tail this sits in is the
+// widest thing the stat line gives up as a tile narrows, and "116 tok ·
+// 12/20s" does not fit a half-width tile, so a pair would mean the ladder
+// dropping both and the tile reporting nothing but its TTFT. Between the two,
+// how far through the run the stream is beats how many tokens it has made: the
+// rate beside it is the token figure the tile exists to report, and the count
+// is on the card at the end.
+//
+// Reasoning tokens count toward the cap form. The server counts them in
+// predicted_n and they are spent out of the same n_predict budget, so a
+// thinking model that never reaches an answer still shows the budget running
+// out — which is exactly the state the "cut" badge above it names.
+func streamCountFigure(m Model, t time.Duration, s Stream) string {
+	if b := runBudget(m); b > 0 {
+		return fmt.Sprintf("%d/%ds", int(budgetElapsed(m, t, s).Seconds()), budgetSeconds(b))
+	}
 	if s.MaxTokens > 0 {
 		return fmt.Sprintf("%d/%d", len(s.Tokens), s.MaxTokens)
 	}
 	return fmt.Sprintf("%d tok", len(s.Tokens))
+}
+
+// minBudgetFigure is the shortest budget the tile will draw a clock against.
+//
+// Under a second the figure would be "0/0s" or would need a decimal the run
+// does not justify, and the cap form is then the more informative of the two.
+// It is a bound on the spelling, not a judgement about the run: `--for 500ms`
+// is a legal thing to record and this only declines to round it.
+const minBudgetFigure = time.Second
+
+// runBudget is the run's wall-clock budget when there is one worth drawing
+// against, and 0 when there is not — a tape recorded before the clock existed,
+// a `--n-predict` run, or `--for 0`. Every one of those falls back to the cap
+// form, which is what those runs really end on.
+func runBudget(m Model) time.Duration {
+	if m.Summary.Limit.For < minBudgetFigure {
+		return 0
+	}
+	return m.Summary.Limit.For
+}
+
+// budgetSeconds is the budget as the tile spells it.
+func budgetSeconds(b time.Duration) int {
+	return int(b.Round(time.Second) / time.Second)
+}
+
+// budgetElapsed is how much of the run's budget this stream has seen at clip
+// time t.
+//
+// It is measured from Model.RunStart, the run's first request, because that is
+// the origin tape.LimitSummary.For is defined against — not from t = 0, which
+// on the live screen is the program starting and can be a ten-minute --wait
+// earlier.
+//
+// A finished stream freezes at its last token. Its own clock has stopped, and
+// a tile that kept counting to 20 after ending on EOS at 14 s would be
+// reporting the run's remaining budget as this stream's progress. Why it
+// stopped early — EOS, or the cap it did not print — is the header's job: it
+// says "done" on the row above.
+//
+// Past the budget the figure keeps going, and that is the honest reading: the
+// floor holds the cut back until every live stream has tape.MinCutTokens, so
+// on a slow box "22/20s" is what happened (tape.LimitSummary.CutAt).
+func budgetElapsed(m Model, t time.Duration, s Stream) time.Duration {
+	// A finished stream is read off its own EndedAt and never off t, including
+	// one that failed before its first token (EndedAt 0, so it saw nothing of
+	// the budget). That also keeps the frozen live screen honest: after
+	// EventDone the model is rebuilt from the tape on the tape's timeline while
+	// the program's t keeps counting from its own start, and a figure that
+	// consulted t there would mix the two clocks.
+	at := t
+	if s.Done && s.EndedAt < at {
+		at = s.EndedAt
+	}
+	if d := at - m.RunStart; d > 0 {
+		return d
+	}
+	return 0
 }
 
 // streamP50Figure is the median gap between this stream's tokens, or "?" until

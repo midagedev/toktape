@@ -35,14 +35,16 @@ import (
 // be printed. Two separate things have to hold for a ratio: the host ceiling
 // has to have been observed at all (internal/procmon leaves it unreadable on
 // Linux, so an operator states it — tape.HostInfo.RAMSource), and the CPU's
-// active bytes have to be provably the whole of what it reads. The second is
-// bandwidth.RAMSide.Exact, and it is the right gate for this figure too
-// because Speculative builds its step from the same per-device active bytes:
-// if that count is an under-count, so is this one, and a ratio over an
-// under-count is a claim the tape cannot support.
+// active bytes have to be provably the whole of what it reads, because a ratio
+// over an under-count is a claim the tape cannot support.
 //
-// bandwidth.Verify carries neither of those two fields today, which is the
-// only reason this function exists rather than a field read — see the report.
+// Both are now bandwidth.Verify's own fields (OfPeak, Exact), decided where
+// their inputs live. This function divides nothing: it reads the two figures
+// and applies the one decision that is the card's, which is that the rate is
+// printed with an "≈" either way and the PERCENTAGE is withheld unless the
+// count behind it is exact. Until 2026-09-14 it did the division itself and
+// borrowed bandwidth.RAMSide.Exact as the gate — arithmetic and a provenance
+// judgement about another package's figure, made inside a renderer.
 //
 // ok is false when the run used no draft model, or the step arithmetic is not
 // derivable from what the tape recorded.
@@ -51,10 +53,8 @@ func VerifyRAM(s *tape.RunSummary) (bytesPerSec int64, ofPeak float64, ok bool) 
 	if !ok || v.RAMBytesPerSec <= 0 {
 		return 0, 0, false
 	}
-	r, haveRAM := bandwidth.RAM(s)
-	peak := bandwidth.HostBytesPerSec(s.Host)
-	if haveRAM && r.Exact && peak > 0 {
-		ofPeak = float64(v.RAMBytesPerSec) / float64(peak)
+	if v.Exact {
+		ofPeak = v.OfPeak
 	}
 	return v.RAMBytesPerSec, ofPeak, true
 }

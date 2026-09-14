@@ -114,6 +114,23 @@ type Model struct {
 	// row later than At is in the model. For the live program it is the
 	// arrival time of the newest event.
 	At time.Duration
+	// RunStart is the clip time of the run's FIRST request, which is the
+	// origin tape.LimitSummary.For is measured from (see its doc: "from the
+	// first request going out and not from the first token"). Anything drawn
+	// against the budget has to be measured from here and not from t = 0: on
+	// the live screen t starts when the program does, and discovery plus a
+	// --wait for a loading model can put minutes in front of the first
+	// request.
+	//
+	// It is the run's, never the round's. One clock covers every round of a
+	// `record --prompts` run — internal/recorder/rounds.go starts it once, at
+	// round 0 — so beginRound leaves this alone, and ModelAt takes the
+	// earliest request of the whole tape rather than of the round on screen.
+	RunStart time.Duration
+	// runStarted is how RunStart tells "not set yet" from "set to zero",
+	// which is the value a run whose first request went out at clip time 0
+	// legitimately has.
+	runStarted bool
 	// RunEnd is when the last token of the run arrived. 0 until the run ends.
 	RunEnd time.Duration
 	// Done is set when every stream has finished.
@@ -161,6 +178,7 @@ func ModelAt(tp *tape.Tape, at time.Duration) Model {
 	}
 	m.Summary = tp.Summary
 	m.PID = tp.Summary.Server.PID
+	m.RunStart, m.runStarted = firstRequestAt(tp)
 
 	// A rounds run is drawn one round at a time: the round active at `at`,
 	// and only its requests become tiles (TTP-38). A single-round tape takes
@@ -253,6 +271,21 @@ func ModelAt(tp *tape.Tape, at time.Duration) Model {
 	}
 	m.seen = seenIn(tp.Samples)
 	return m
+}
+
+// firstRequestAt is when the run's first request went out, over every request
+// of the tape and not only the round being drawn: the budget is the run's and
+// a later round must not restart it. A tape with no requests has no origin at
+// all, which is what the second return says.
+func firstRequestAt(tp *tape.Tape) (time.Duration, bool) {
+	var first time.Duration
+	found := false
+	for _, req := range tp.Requests {
+		if !found || req.StartedAt < first {
+			first, found = req.StartedAt, true
+		}
+	}
+	return first, found
 }
 
 // roundAt is the round of tp on screen at clip time at: the last round whose

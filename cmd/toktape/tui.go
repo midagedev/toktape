@@ -152,6 +152,11 @@ func bridgeEvent(ev recorder.Event, t time.Duration) (tui.Event, bool) {
 		out.Model = ev.Summary.Model
 		out.Host = ev.Summary.Host
 		out.Placement = ev.Summary.Placement
+		// What may end the run, which the recorder has decided before the
+		// first request goes out (recorder.emitAttached). Without it the live
+		// tiles draw a stream's progress against the token cap, which on a
+		// clock run is a runaway guard the run will never reach.
+		out.Limit = ev.Summary.Limit
 	case recorder.EventPIDFound:
 		pid, err := strconv.Atoi(ev.Message)
 		if err != nil {

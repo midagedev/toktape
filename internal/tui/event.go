@@ -60,6 +60,15 @@ type Event struct {
 	// not know.
 	MaxTokens int
 
+	// Limit is what may end this run, set on EventProps from the recorder's
+	// attached summary (internal/recorder/record.go, emitAttached). It is
+	// known before the first token, which is the whole reason it travels on
+	// that event: a screen that drew a stream's progress against MaxTokens on
+	// a clock run would draw it against a runaway guard the run will never
+	// reach. The zero value is a run with no budget, and the tile then falls
+	// back to the token count exactly as it did before the clock existed.
+	Limit tape.LimitSummary
+
 	// Round is the 0-based prompt round a stream belongs to, Rounds how many
 	// rounds the run sends (0 when it is not a rounds run) and RoundName the
 	// prompts file's name for the round, "" when the line had none. All three
@@ -102,6 +111,9 @@ func (m Model) Apply(e Event) Model {
 		if len(e.Placement.Devices) > 0 || e.Placement.Source != "" {
 			m.Summary.Placement = e.Placement
 		}
+		if e.Limit.For > 0 || e.Limit.MaxTokens > 0 {
+			m.Summary.Limit = e.Limit
+		}
 	case EventPID:
 		m.PID = e.PID
 		m.Summary.Server.PID = e.PID
@@ -115,6 +127,13 @@ func (m Model) Apply(e Event) Model {
 		m.ensureStream(e.Stream)
 		s := &m.Streams[m.streamPos(e.Stream)]
 		s.StartedAt = e.T
+		// The first request of the run is the origin the wall-clock budget is
+		// measured from, and it is set once: a later round shares round 0's
+		// clock, and t = 0 is the program starting, which on a live run is
+		// before discovery and before any --wait.
+		if !m.runStarted {
+			m.RunStart, m.runStarted = e.T, true
+		}
 		if e.MaxTokens > 0 {
 			s.MaxTokens = e.MaxTokens
 		}

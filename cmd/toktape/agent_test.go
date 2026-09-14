@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -324,6 +325,13 @@ func TestHelpStaysScannable(t *testing.T) {
 // warning — the exact class of error this whole track exists to close. The
 // summary is marshalled and the paths walked, so the check is against the
 // bytes a caller receives rather than against a struct tag read by eye.
+//
+// 2026-09-14: marshalled through card.JSON rather than encoding/json, because
+// that is what `--json` prints and the two are not the same object — card.JSON
+// adds "caveats", the derived list that answers whether the headline may be
+// quoted at all, which no struct tag in internal/tape carries. Checking the
+// topic against the schema struct was checking it against the wrong bytes;
+// this is the same assertion aimed at the ones a caller receives.
 func TestHelpAgentsNamesRealFields(t *testing.T) {
 	// A zero summary marshals every non-omitempty field; the ones that are
 	// omitempty are given a value so they appear.
@@ -337,7 +345,7 @@ func TestHelpAgentsNamesRealFields(t *testing.T) {
 	// Both halves of the limit are omitempty, so a cut run is modelled here:
 	// a budget that was asked for and a clock that spent it.
 	s.Limit.For, s.Limit.CutAt = 20*time.Second, 21*time.Second
-	b, err := json.Marshal(&s)
+	b, err := card.JSON(&s)
 	if err != nil {
 		t.Fatalf("marshal a run summary: %v", err)
 	}
@@ -360,7 +368,11 @@ func TestHelpAgentsNamesRealFields(t *testing.T) {
 		// that cannot see limit.cut_at cannot tell a run the clock stopped
 		// short from one that generated everything it was going to.
 		"limit.for", "limit.cut_at",
-		"placement", "sampling", "warnings",
+		"placement", "sampling",
+		// The two qualification fields, and the order they are named in is
+		// the order a reader should read them: caveats is the complete list
+		// and warnings is the recorder's own text inside it (TTP-74).
+		"caveats", "warnings",
 	}
 	for _, p := range paths {
 		if !strings.Contains(topic, p) {

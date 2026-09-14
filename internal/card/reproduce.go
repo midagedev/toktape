@@ -61,10 +61,10 @@ func serverArgvHeading(srv tape.ServerInfo) string {
 // recordCommand rebuilds the toktape invocation that would produce this run.
 //
 // Every option on it is a value the summary carries: the URL the recorder
-// attached to, the number of streams it opened, and the tokens it asked for.
-// An option whose value was not observed is left off rather than guessed, so
-// the worst case is a bare "toktape" — which is also the command that produced
-// a zero-config run, and so is never wrong.
+// attached to, the number of streams it opened, and what was allowed to end
+// the generation. An option whose value was not observed is left off rather
+// than guessed, so the worst case is a bare "toktape" — which is also the
+// command that produced a zero-config run, and so is never wrong.
 func recordCommand(s *tape.RunSummary) string {
 	parts := []string{"toktape"}
 	if u := strings.TrimSpace(s.Server.URL); u != "" {
@@ -75,12 +75,55 @@ func recordCommand(s *tape.RunSummary) string {
 	if s.Concurrency > 1 {
 		parts = append(parts, "-n", strconv.Itoa(s.Concurrency))
 	}
-	// The cap that was sent is not in the schema, so this is the count the
-	// server reported predicting. For a run that stopped on the cap the two
-	// are the same number; a run that hit an end-of-sequence token stopped
-	// early, and re-running with this value asks for what this run produced.
-	if n := s.Timings.PredictedN; n > 0 {
-		parts = append(parts, "--n-predict", strconv.Itoa(n))
+	return strings.Join(append(parts, limitArgs(s)...), " ")
+}
+
+// limitArgs is how the rebuilt command re-asks for what ended the generation.
+//
+// It mirrors the table internal/recorder.Options.limit resolves, because that
+// table is what the printed flag will be read against when somebody pastes it:
+//
+//   - a wall-clock budget was in force → "--for D". D is the budget, never
+//     Limit.CutAt. A cut run is one whose budget was SPENT, and re-asking for
+//     the same budget is the reproduction of the intent; re-asking for the
+//     22 s the floor actually took would aim the next run at this box's
+//     slowness. The same reasoning makes CutAt > For nothing to print here.
+//   - no clock → "--n-predict N", the cap the requests carried. Naming a token
+//     count is an answer on the same axis as --for, so it also turns the clock
+//     off, which is what this run had.
+//
+// The count the server predicted is deliberately NOT the source of either
+// figure. Timings.PredictedN is the representative single stream — Requests[0]
+// at Concurrency 1 and the per-stream MEAN above it (see tape.RunSummary) — so
+// on a run whose streams produced 200 and 300 tokens it is 250, a number no
+// stream produced and no flag ever set.
+//
+// A default run therefore prints "--for 20s" even though 20 s is the default,
+// where the same function omits "-n 1" for being one. The asymmetry is chosen:
+// a concurrency of 1 is what `toktape` means in every version, while
+// recorder.DefaultFor is a constant that may move, and a card outlives the
+// binary that printed it. The flag pins the run; the omission does not.
+//
+// The gap this cannot close is the matrix's "both" row. A run recorded with
+// `--for 10s --n-predict 300` ends at whichever comes first, and the command
+// below re-asks only for the clock, leaving the cap at whatever this version
+// defaults to — a different run on a fast box. Telling the two apart needs a
+// tape that says whether MaxTokens was named or defaulted, which the schema
+// does not record; see the report.
+func limitArgs(s *tape.RunSummary) []string {
+	switch {
+	case s.Limit.For > 0:
+		return []string{"--for", s.Limit.For.String()}
+	case s.Limit.MaxTokens > 0:
+		return []string{"--n-predict", strconv.Itoa(s.Limit.MaxTokens)}
+	case s.Timings.PredictedN > 0:
+		// A tape older than the limit field (TTP-76) carries no cap at all,
+		// so this is the count the server reported predicting — the honest
+		// best such a tape allows. For a run that stopped on the cap the two
+		// are the same number; a run that hit an end-of-sequence token
+		// stopped early, and re-running with this value asks for what this
+		// run produced.
+		return []string{"--n-predict", strconv.Itoa(s.Timings.PredictedN)}
 	}
-	return strings.Join(parts, " ")
+	return nil
 }

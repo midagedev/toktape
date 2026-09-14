@@ -29,7 +29,7 @@ func TestStatLineLeadsWithTheRate(t *testing.T) {
 	// token and no median, and every one of them says so rather than printing
 	// a figure the tape happens to carry from a later frame.
 	start := ModelAt(ExampleTapeN(4), 0).Streams[0]
-	line := tileStatLine(th, start, cw)
+	line := tileStatLine(Model{}, th, 0, start, cw)
 	for _, want := range []string{"? tok/s", "ttft ?", "p50 ?"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("the opening stat line %q does not read %q", line, want)
@@ -42,7 +42,7 @@ func TestStatLineLeadsWithTheRate(t *testing.T) {
 	if got := len(one.Tokens); got != 1 {
 		t.Fatalf("the fixture's first stream has %d tokens just after its TTFT, want 1", got)
 	}
-	if line := tileStatLine(th, one, cw); !strings.Contains(line, "? tok/s") {
+	if line := tileStatLine(Model{}, th, 0, one, cw); !strings.Contains(line, "? tok/s") {
 		t.Errorf("a stream with one token prints a rate: %q", line)
 	} else if !strings.Contains(line, "ttft 630 ms") {
 		t.Errorf("a stream with one token has a TTFT and does not print it: %q", line)
@@ -51,7 +51,7 @@ func TestStatLineLeadsWithTheRate(t *testing.T) {
 	// Mid-run: the client-side figure over the content window, and the
 	// stream's own median once there are enough gaps to take one.
 	mid := ModelAt(ExampleTapeN(4), 3*time.Second).Streams[0]
-	line = tileStatLine(th, mid, cw)
+	line = tileStatLine(Model{}, th, 0, mid, cw)
 	if want := fmtRate(streamRate(mid)) + " tok/s"; !strings.HasPrefix(line, want) {
 		t.Errorf("the mid-run stat line %q does not lead with %q", line, want)
 	}
@@ -76,7 +76,7 @@ func TestStatLineLeadsWithTheRate(t *testing.T) {
 	if got := fmtRate(streamRate(split)); got != "10.0" {
 		t.Fatalf("the fixture's client-side rate is %s, want 10.0", got)
 	}
-	if line := tileStatLine(th, split, cw); !strings.HasPrefix(line, "9.4 tok/s") {
+	if line := tileStatLine(Model{}, th, 0, split, cw); !strings.HasPrefix(line, "9.4 tok/s") {
 		t.Errorf("a finished stat line %q does not lead with the server's figure", line)
 	}
 
@@ -85,7 +85,7 @@ func TestStatLineLeadsWithTheRate(t *testing.T) {
 	// them beside a half-written answer would put the tile at odds with the
 	// live figure in the speed panel.
 	split.Done = false
-	if line := tileStatLine(th, split, cw); !strings.HasPrefix(line, "10.0 tok/s") {
+	if line := tileStatLine(Model{}, th, 0, split, cw); !strings.HasPrefix(line, "10.0 tok/s") {
 		t.Errorf("a running stat line %q does not lead with the measured figure", line)
 	}
 }
@@ -97,7 +97,7 @@ func TestStatLineLeadsWithTheRate(t *testing.T) {
 func TestStatLineIsAccented(t *testing.T) {
 	th := ColourTheme()
 	s := ModelAt(ExampleTapeN(4), 3*time.Second).Streams[0]
-	line := tileStatLine(th, s, 60)
+	line := tileStatLine(Model{}, th, 0, s, 60)
 
 	rate := fmtRate(streamRate(s)) + " tok/s"
 	if !strings.Contains(line, sgrPrefix(th, th.accentBold)+rate) {
@@ -106,7 +106,7 @@ func TestStatLineIsAccented(t *testing.T) {
 	if !strings.Contains(line, sgrPrefix(th, th.dim)+"ttft") {
 		t.Errorf("the qualifiers are not dim: %q", card.StripANSI(line))
 	}
-	if got := card.StripANSI(line); got != tileStatLine(PlainTheme(), s, 60) {
+	if got := card.StripANSI(line); got != tileStatLine(Model{}, PlainTheme(), 0, s, 60) {
 		t.Errorf("the coloured stat line strips to something else:\n%q", got)
 	}
 }
@@ -151,7 +151,7 @@ func TestStatLineDegradesInOrder(t *testing.T) {
 		{18, false, []string{"tok/s"}, []string{"p50", "/320", "ttft"}},
 	}
 	for _, tc := range tests {
-		got := tileStatLine(th, s, tc.cw)
+		got := tileStatLine(Model{}, th, 0, s, tc.cw)
 		if width(got) != tc.cw {
 			t.Fatalf("the stat line at %d columns is %d wide: %q", tc.cw, width(got), got)
 		}
@@ -196,7 +196,7 @@ func TestStatLineDegradesInOrder(t *testing.T) {
 	}
 	var dropped [5]int
 	for cw := 90; cw >= 1; cw-- {
-		got := tileStatLine(th, s, cw)
+		got := tileStatLine(Model{}, th, 0, s, cw)
 		present := [5]bool{
 			strings.Contains(got, "tok/s") || strings.Contains(got, fmtRate(streamRate(s))),
 			strings.Contains(got, "ttft"),
@@ -233,7 +233,7 @@ func TestStatLineDegradesInOrder(t *testing.T) {
 	for _, at := range []time.Duration{0, 500 * time.Millisecond, midRun, doneAt} {
 		for _, st := range ModelAt(ExampleTapeN(4), at).Streams {
 			for cw := 1; cw <= 90; cw++ {
-				got := tileStatLine(th, st, cw)
+				got := tileStatLine(Model{}, th, 0, st, cw)
 				if width(got) != cw {
 					t.Fatalf("at %v the stat line at %d columns is %d wide: %q", at, cw, width(got), got)
 				}
@@ -268,7 +268,7 @@ func TestStatLineDoesNotReflowAsFiguresGrow(t *testing.T) {
 		var shapes []string
 		for _, at := range []time.Duration{0, 500 * time.Millisecond, midRun, 3 * time.Second, doneAt} {
 			s := ModelAt(ExampleTapeN(4), at).Streams[0]
-			shapes = append(shapes, statShape(tileStatLine(th, s, cw)))
+			shapes = append(shapes, statShape(tileStatLine(Model{}, th, 0, s, cw)))
 		}
 		for i, shape := range shapes[1:] {
 			if shape != shapes[0] {
@@ -306,12 +306,12 @@ func TestStatLineCountsAgainstTheBudget(t *testing.T) {
 	if s.MaxTokens != exampleMaxTokens {
 		t.Fatalf("the fixture's max_tokens came through as %d, want %d", s.MaxTokens, exampleMaxTokens)
 	}
-	if want := fmt.Sprintf("%d/%d", len(s.Tokens), exampleMaxTokens); !strings.Contains(tileStatLine(PlainTheme(), s, 60), want) {
+	if want := fmt.Sprintf("%d/%d", len(s.Tokens), exampleMaxTokens); !strings.Contains(tileStatLine(Model{}, PlainTheme(), 0, s, 60), want) {
 		t.Errorf("the stat line does not count against the budget (%q)", want)
 	}
 
 	s.MaxTokens = 0
-	if want := fmt.Sprintf("%d tok", len(s.Tokens)); !strings.Contains(tileStatLine(PlainTheme(), s, 60), want) {
+	if want := fmt.Sprintf("%d tok", len(s.Tokens)); !strings.Contains(tileStatLine(Model{}, PlainTheme(), 0, s, 60), want) {
 		t.Errorf("a stream with no recorded budget does not print a bare count (%q)", want)
 	}
 
@@ -322,8 +322,90 @@ func TestStatLineCountsAgainstTheBudget(t *testing.T) {
 	if thinkingBadge(thinking) != "thinking" {
 		t.Fatalf("the fixture's fourth stream is not thinking at 3 s")
 	}
-	if n, ok := statCount(tileStatLine(PlainTheme(), thinking, 60)); !ok || n != len(thinking.Tokens) {
+	if n, ok := statCount(tileStatLine(Model{}, PlainTheme(), 0, thinking, 60)); !ok || n != len(thinking.Tokens) {
 		t.Errorf("a thinking stream counts %d of its %d tokens", n, len(thinking.Tokens))
+	}
+}
+
+// TestStatLineCountsAgainstTheClockWhenThereIsOne: a run with a wall-clock
+// budget shows its progress in TIME, not against a token cap it will never
+// reach (TTP-76, 2026-09-14).
+//
+// A default run's cap is recorder.DefaultMaxTokens, a runaway guard of 2048.
+// The stat line drew "116/2048" — six per cent and crawling — twelve seconds
+// into a twenty-second run that was more than half over. Each case below is a
+// frame of that run.
+func TestStatLineCountsAgainstTheClockWhenThereIsOne(t *testing.T) {
+	budgeted := func(for_ time.Duration) Model {
+		m := Model{}
+		m.Summary.Limit = tape.LimitSummary{For: for_, MaxTokens: 2048, MinTokens: 64}
+		return m
+	}
+	// 116 tokens at twelve seconds, the cap nowhere in sight.
+	running := Stream{MaxTokens: 2048, Tokens: make([]Token, 116)}
+
+	m := budgeted(20 * time.Second)
+	line := tileStatLine(m, PlainTheme(), 12*time.Second, running, 60)
+	if !strings.Contains(line, "12/20s") {
+		t.Errorf("the stat line does not say how far through the budget the run is: %q", line)
+	}
+	if strings.Contains(line, "2048") {
+		t.Errorf("the stat line draws progress against the runaway guard: %q", line)
+	}
+
+	// The floor can hold the cut past the budget, and the frame says so
+	// rather than stopping at the number that was asked for.
+	over := Stream{MaxTokens: 2048, Tokens: make([]Token, 64), Done: true, EndedAt: 22 * time.Second}
+	if line := tileStatLine(m, PlainTheme(), 22*time.Second, over, 60); !strings.Contains(line, "22/20s") {
+		t.Errorf("a run the floor held past its budget does not say so: %q", line)
+	}
+
+	// A stream that ended on EOS freezes at its own last token: the run's
+	// remaining budget is not this stream's progress.
+	done := Stream{MaxTokens: 2048, Tokens: make([]Token, 300), Done: true, EndedAt: 14 * time.Second}
+	if line := tileStatLine(m, PlainTheme(), 19*time.Second, done, 60); !strings.Contains(line, "14/20s") {
+		t.Errorf("a finished stream keeps counting the run's clock: %q", line)
+	}
+
+	// A stream that failed before its first token saw none of the budget, and
+	// must not borrow the run's clock (or, on the frozen live screen, the
+	// program's) to say otherwise.
+	failed := Stream{MaxTokens: 2048, Done: true, Err: "connection reset"}
+	if line := tileStatLine(m, PlainTheme(), 19*time.Second, failed, 60); !strings.Contains(line, "0/20s") {
+		t.Errorf("a stream that never produced a token reports progress through the budget: %q", line)
+	}
+
+	// No budget, or one too short to spell in whole seconds: the cap form is
+	// what those runs really end on.
+	for _, m := range []Model{{}, budgeted(500 * time.Millisecond)} {
+		if line := tileStatLine(m, PlainTheme(), 12*time.Second, running, 60); !strings.Contains(line, "116/2048") {
+			t.Errorf("a run with no clock lost its count against the cap: %q", line)
+		}
+	}
+}
+
+// TestBudgetElapsedIsMeasuredFromTheFirstRequest: the budget's origin is the
+// first request going out (tape.LimitSummary.For), which on the LIVE screen is
+// not clip time zero — t starts when the program does, and discovery plus a
+// --wait for a loading model can put minutes in front of it.
+func TestBudgetElapsedIsMeasuredFromTheFirstRequest(t *testing.T) {
+	limit := tape.LimitSummary{For: 20 * time.Second, MaxTokens: 2048, MinTokens: 64}
+	var m Model
+	// Ninety seconds of waiting for a model to load, then the run.
+	m = m.Apply(Event{Kind: EventProps, T: 89 * time.Second,
+		Server: tape.ServerInfo{URL: "http://127.0.0.1:8080"}, Limit: limit})
+	m = m.Apply(Event{Kind: EventStreamStart, T: 90 * time.Second, Stream: 0, MaxTokens: 2048})
+	if m.Summary.Limit.For != limit.For {
+		t.Fatalf("the attached summary's limit did not reach the model: %+v", m.Summary.Limit)
+	}
+	if m.RunStart != 90*time.Second {
+		t.Fatalf("RunStart = %v, want the first request at 90s", m.RunStart)
+	}
+	m = m.Apply(Event{Kind: EventToken, T: 102 * time.Second, Stream: 0, Token: tape.TokenEvent{Text: "x"}})
+
+	line := tileStatLine(m, PlainTheme(), 102*time.Second, m.Streams[0], 60)
+	if !strings.Contains(line, "12/20s") {
+		t.Errorf("the budget is being measured from the program's start, not the run's: %q", line)
 	}
 }
 

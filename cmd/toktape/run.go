@@ -85,6 +85,7 @@ Card flags:
   --json                the run summary as JSON
   --png [FILE]          write the 1200x675 share image (default: next to the tape)
   --copy                also copy the output to the clipboard (OSC 52)
+  --explain             why the card says what it says, on stderr as well
 
 Examples:
   # One stream against a server toktape finds itself, for 20s. No flags.

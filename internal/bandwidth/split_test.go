@@ -497,6 +497,73 @@ func TestSpeculativeWS(t *testing.T) {
 	}
 }
 
+// TestSpeculativeCarriesItsOwnRatio: Verify says what share of the host bus it
+// used and whether the count behind it is exact (2026-09-14).
+//
+// Both were the card's arithmetic before: internal/card divided
+// RAMBytesPerSec by HostBytesPerSec itself and borrowed RAMSide.Exact as the
+// gate — a renderer deciding the provenance of a figure this package built out
+// of its own per-device active bytes. They are decided here now, where the
+// inputs live, and the two sides of the package must agree: the step and the
+// per-token rate are two arithmetics over one attribution.
+func TestSpeculativeCarriesItsOwnRatio(t *testing.T) {
+	s := wsSummary()
+	// The operator's STREAM figure for this box; procmon cannot read it.
+	s.Host.RAMBytesPerSec = 115_800_000_000
+	s.Host.RAMSource = tape.RAMSourceMeasured
+
+	v, ok := Speculative(s)
+	if !ok {
+		t.Fatal("Speculative not ok on the ws recording")
+	}
+	want := float64(v.RAMBytesPerSec) / float64(s.Host.RAMBytesPerSec)
+	if v.OfPeak != want {
+		t.Errorf("OfPeak = %v, want %v", v.OfPeak, want)
+	}
+	if v.OfPeak < 0.93 || v.OfPeak > 0.97 {
+		t.Errorf("OfPeak = %v, want ≈ 95 %% — the run is at the RAM wall", v.OfPeak)
+	}
+	r, okRAM := RAM(s)
+	if !okRAM {
+		t.Fatal("RAM not ok")
+	}
+	if v.Exact != r.Exact {
+		t.Errorf("Verify.Exact = %v but RAMSide.Exact = %v; one attribution, one answer", v.Exact, r.Exact)
+	}
+
+	// Without a host figure there is no ratio, and 0 is how that is said —
+	// never a percentage of a ceiling nobody observed (CLAUDE.md).
+	bare := wsSummary()
+	if v, ok := Speculative(bare); !ok || v.OfPeak != 0 {
+		t.Errorf("OfPeak = %v with no host bandwidth observed", v.OfPeak)
+	}
+}
+
+// TestSpeculativeExactFollowsTheSameRuleAsRAM: the exactness of the verify
+// step is the exactness of the CPU's active bytes, decided by cpuActiveExact
+// for both. A pre-TTP-68 tape whose class split does not solve leaves both
+// false — "we could not check" is not "we checked and it is fine".
+func TestSpeculativeExactFollowsTheSameRuleAsRAM(t *testing.T) {
+	exact := wsSummary() // per-device active bytes recorded
+	v, ok := Speculative(exact)
+	if !ok || !v.Exact {
+		t.Errorf("a post-TTP-68 recording should be exact: ok=%v exact=%v", ok, v.Exact)
+	}
+
+	legacy := wsLegacySummary() // no per-device figure; the CPU holds experts
+	v, ok = Speculative(legacy)
+	if !ok {
+		t.Fatal("Speculative not ok on the legacy shape")
+	}
+	r, okRAM := RAM(legacy)
+	if !okRAM {
+		t.Fatal("RAM not ok on the legacy shape")
+	}
+	if v.Exact != r.Exact {
+		t.Errorf("Verify.Exact = %v but RAMSide.Exact = %v on one tape", v.Exact, r.Exact)
+	}
+}
+
 // TestSpeculativePerRequestShapes checks the step formula against the four
 // independent requests of the ws code recording, each configured with
 // --spec-draft-n-max 3. A formula that is right on one run is a coincidence;

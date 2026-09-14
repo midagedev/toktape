@@ -359,10 +359,10 @@ func TestTileRateIsAlive(t *testing.T) {
 
 	// A stream with no token yet has nothing to plot and prints no rate
 	// rather than a zero it never measured (CLAUDE.md).
-	if got := tileStatLine(PlainTheme(), Stream{}, 41); !strings.HasPrefix(got, unknown+" tok/s") {
+	if got := tileStatLine(Model{}, PlainTheme(), 0, Stream{}, 41); !strings.HasPrefix(got, unknown+" tok/s") {
 		t.Errorf("an unstarted stream's stat line = %q, want an unknown rate", got)
 	}
-	if got := tileStatLine(PlainTheme(), Stream{}, 41); strings.ContainsAny(got, string(sparkRunes)) {
+	if got := tileStatLine(Model{}, PlainTheme(), 0, Stream{}, 41); strings.ContainsAny(got, string(sparkRunes)) {
 		t.Errorf("an unstarted stream's stat line draws a graph of nothing: %q", got)
 	}
 }

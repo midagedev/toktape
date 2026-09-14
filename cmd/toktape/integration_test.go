@@ -205,6 +205,9 @@ func TestBridgeEvent(t *testing.T) {
 		Model:     tape.ModelInfo{FileName: "Qwen3.5-35B-A3B-UD-Q4_K_M.gguf"},
 		Host:      tape.HostInfo{OS: "Linux", CPU: "EPYC 9354"},
 		Placement: tape.PlacementSummary{Source: "gguf"},
+		// What may end the run (TTP-76). The live tiles draw progress against
+		// it, and it only reaches the screen on this one event.
+		Limit: tape.LimitSummary{For: 20 * time.Second, MaxTokens: 2048, MinTokens: 64},
 	}
 
 	t.Run("mapped kinds", func(t *testing.T) {
@@ -248,6 +251,12 @@ func TestBridgeEvent(t *testing.T) {
 		if got.Server.URL != summary.Server.URL || got.Model.FileName != summary.Model.FileName ||
 			got.Host.CPU != summary.Host.CPU || got.Placement.Source != summary.Placement.Source {
 			t.Errorf("attached lost part of the static picture: %+v", got)
+		}
+		// 2026-09-14: without the limit the live tiles fall back to drawing
+		// progress against the token cap, which on a clock run is the runaway
+		// guard and not what the run will end on.
+		if got.Limit != summary.Limit {
+			t.Errorf("attached lost the run's limit: %+v, want %+v", got.Limit, summary.Limit)
 		}
 
 		got, _ = bridgeEvent(recorder.Event{Kind: recorder.EventPIDFound, Message: "1234"}, at)

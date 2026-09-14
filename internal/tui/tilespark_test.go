@@ -151,7 +151,7 @@ func TestStatLineSparkIsTheStreamsOwnWindow(t *testing.T) {
 	}
 	for _, at := range []time.Duration{3 * time.Second, midRun, doneAt} {
 		for i, s := range ModelAt(ExampleTapeN(4), at).Streams {
-			line := tileStatLine(PlainTheme(), s, cw)
+			line := tileStatLine(Model{}, PlainTheme(), 0, s, cw)
 			var drawn []rune
 			for _, r := range line {
 				if sparkRuneAt(r) {
@@ -168,8 +168,8 @@ func TestStatLineSparkIsTheStreamsOwnWindow(t *testing.T) {
 		}
 	}
 	// And it scrolls: the same stream two seconds later is a different line.
-	early := tileStatLine(PlainTheme(), ModelAt(ExampleTapeN(4), 3*time.Second).Streams[0], cw)
-	later := tileStatLine(PlainTheme(), ModelAt(ExampleTapeN(4), 5*time.Second).Streams[0], cw)
+	early := tileStatLine(Model{}, PlainTheme(), 0, ModelAt(ExampleTapeN(4), 3*time.Second).Streams[0], cw)
+	later := tileStatLine(Model{}, PlainTheme(), 0, ModelAt(ExampleTapeN(4), 5*time.Second).Streams[0], cw)
 	if early == later {
 		t.Errorf("a tile's stat line is identical at 3 s and at 5 s; the sparkline does not scroll:\n%q", early)
 	}
@@ -200,7 +200,7 @@ func TestTileSparkWidth(t *testing.T) {
 		if got := tileSparkW(tc.cw); got != tc.want {
 			t.Errorf("tileSparkW(%d) = %d, want %d", tc.cw, got, tc.want)
 		}
-		line := tileStatLine(PlainTheme(), s, tc.cw)
+		line := tileStatLine(Model{}, PlainTheme(), 0, s, tc.cw)
 		drawn := 0
 		for _, r := range line {
 			if sparkRuneAt(r) {

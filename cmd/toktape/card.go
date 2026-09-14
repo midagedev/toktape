@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/midagedev/toktape/internal/bandwidth"
 	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/card/png"
 	"github.com/midagedev/toktape/internal/tape"
@@ -17,10 +18,11 @@ import (
 // reason recordFlags is: the examples printed in --help are parsed against the
 // real flag set, and a copy of the list in a test is what goes stale.
 type cardFlags struct {
-	md     *bool
-	asJSON *bool
-	asPNG  *bool
-	copyTo *bool
+	md      *bool
+	asJSON  *bool
+	asPNG   *bool
+	copyTo  *bool
+	explain *bool
 }
 
 // declareCardFlags registers the card verb's flags on fs.
@@ -30,6 +32,14 @@ func declareCardFlags(fs *flag.FlagSet) *cardFlags {
 		asJSON: fs.Bool("json", false, "render the run summary as JSON"),
 		asPNG:  fs.Bool("png", false, "write the share image instead of printing a card"),
 		copyTo: fs.Bool("copy", false, "copy the output to the clipboard (OSC 52)"),
+		// One flag for two packages (TTP-74/TTP-56, 2026-09-14). The question
+		// it answers is "why does this card not say X", and the reader asking
+		// it does not know whether the qualification was never raised
+		// (internal/card) or a bandwidth clause found nothing to divide
+		// (internal/bandwidth) — which is exactly what they are running this
+		// to find out. Two flags would ask them to guess the answer in order
+		// to choose the flag.
+		explain: fs.Bool("explain", false, "on stderr: every qualification check and every bandwidth figure, fired or not"),
 	}
 }
 
@@ -62,6 +72,10 @@ func runCard(c *cli, args []string) int {
 		return c.usagef("toktape: %v", err)
 	}
 
+	if *f.explain {
+		explainCard(c.stderr, &tp.Summary)
+	}
+
 	if *asPNG {
 		return writeCardPNG(c, files[0], outPath, &tp.Summary)
 	}
@@ -85,6 +99,26 @@ func runCard(c *cli, args []string) int {
 		copyOSC52(c.stderr, out)
 	}
 	return exitOK
+}
+
+// explainCard writes the two explainers for s: every qualification check the
+// card can make, fired or not, and every figure the bandwidth clauses are
+// built from, including the ones that made a clause report nothing.
+//
+// It goes to stderr, which is where this program's diagnostics go (see Run):
+// stdout carries the product, and with --json it carries exactly one JSON
+// object, which is a contract a diagnostic must not be able to break. That
+// also makes the flag an ADDITION to whatever rendering was asked for rather
+// than an alternative to it — `card --json --explain 2>why.txt` leaves a
+// parseable object on stdout and the workings in a file.
+//
+// Neither explainer can fail. A run they can say nothing about produces a
+// listing whose every verdict is "no" and whose every figure is "?", which is
+// itself the answer to "why is the card not printing it".
+func explainCard(w io.Writer, s *tape.RunSummary) {
+	fmt.Fprint(w, card.ExplainCaveats(s))
+	fmt.Fprintln(w)
+	fmt.Fprint(w, bandwidth.Explain(s).String())
 }
 
 // writeCardPNG renders the share image for a tape.

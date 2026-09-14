@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
@@ -101,6 +102,94 @@ func TestReproduceRecordedWithLine(t *testing.T) {
 			for _, bad := range c.not {
 				if strings.Contains(block, bad) {
 					t.Errorf("block contains %q, which was not observed:\n%s", bad, block)
+				}
+			}
+		})
+	}
+}
+
+// TestRecordCommandNamesWhatEndedTheRun: the rebuilt command re-asks for the
+// limit the run was recorded with, one row per row of the table
+// internal/recorder.Options.limit resolves (TTP-76, 2026-09-14).
+//
+// Before this, the block appended "--n-predict <Timings.PredictedN>" to every
+// run. Both halves of that were wrong once the clock existed: a clock-bound run
+// was reproduced by token count, which turns the clock off and is a different
+// run on a different box; and PredictedN is the per-stream MEAN above
+// Concurrency 1, so a concurrent run printed a number no stream produced and
+// no flag ever set. The last case below is that one, and it is the reason the
+// streams are deliberately unequal.
+func TestRecordCommandNamesWhatEndedTheRun(t *testing.T) {
+	cases := []struct {
+		name string
+		s    *tape.RunSummary
+		want string
+		not  []string
+	}{
+		{
+			name: "a clock run re-asks for the budget",
+			s: &tape.RunSummary{
+				Concurrency: 1,
+				Limit:       tape.LimitSummary{For: 20 * time.Second, MaxTokens: 2048, MinTokens: 64},
+				Timings:     tape.TimingsSummary{PredictedN: 271},
+			},
+			want: "toktape --for 20s",
+			// The runaway guard is not what the run was aimed at, and the
+			// count that came back is not a flag anybody set.
+			not: []string{"--n-predict", "271", "2048"},
+		},
+		{
+			name: "a cut run re-asks for the budget, not for how long the cut took",
+			s: &tape.RunSummary{
+				Concurrency: 1,
+				Limit: tape.LimitSummary{For: 20 * time.Second, MaxTokens: 2048,
+					MinTokens: 64, CutAt: 22 * time.Second},
+				Timings: tape.TimingsSummary{PredictedN: 64},
+			},
+			want: "toktape --for 20s",
+			not:  []string{"22s", "--n-predict"},
+		},
+		{
+			name: "a token-capped run names the cap that was sent",
+			s: &tape.RunSummary{
+				Concurrency: 1,
+				Limit:       tape.LimitSummary{MaxTokens: 256},
+				Timings:     tape.TimingsSummary{PredictedN: 187}, // EOS came first
+			},
+			want: "toktape --n-predict 256",
+			not:  []string{"--for", "187"},
+		},
+		{
+			name: "a concurrent run names the cap, never the per-stream mean",
+			s: &tape.RunSummary{
+				Concurrency: 2,
+				Limit:       tape.LimitSummary{MaxTokens: 512},
+				// 200 and 300 tokens: the mean is 250, which is what the old
+				// code printed and what no stream produced.
+				Timings: tape.TimingsSummary{PredictedN: 250},
+			},
+			want: "toktape -n 2 --n-predict 512",
+			not:  []string{"250", "--for"},
+		},
+		{
+			name: "a tape older than the limit field falls back to the count",
+			s: &tape.RunSummary{
+				Concurrency: 1,
+				Timings:     tape.TimingsSummary{PredictedN: 320},
+			},
+			want: "toktape --n-predict 320",
+			not:  []string{"--for"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := recordCommand(c.s)
+			if got != c.want {
+				t.Errorf("recordCommand = %q, want %q", got, c.want)
+			}
+			for _, bad := range c.not {
+				if strings.Contains(got, bad) {
+					t.Errorf("recordCommand = %q, which names %q; that is not what the run was aimed at", got, bad)
 				}
 			}
 		})

@@ -91,7 +91,7 @@ func leftPane(m Model, th Theme, t time.Duration, cw, rows int) paneLayout {
 func streamBlock(m Model, th Theme, t time.Duration, s Stream, cw, rows int, showIndex, active bool) []string {
 	out := make([]string, 0, rows+2)
 	out = append(out, streamHeader(m, th, s, cw, showIndex, active))
-	out = append(out, tileStatLine(th, s, cw))
+	out = append(out, tileStatLine(m, th, t, s, cw))
 	if rows > 0 {
 		out = append(out, streamBody(m, th, t, s, cw, rows, active)...)
 	}

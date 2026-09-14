@@ -197,6 +197,18 @@ func (e Explanation) String() string {
 			v.Steps, v.Streams, v.Batch, v.DistinctExpertsPerLayer)
 		p("        %s/step x %.3f steps/s = %s off host RAM, accept %.1f %%",
 			gb(v.RAMBytesPerStep), v.StepsPerSec, gbps(v.RAMBytesPerSec), v.AcceptRate*100)
+		// The two figures the card's "of peak" clause is gated on, so a card
+		// that prints the rate and no percentage says which of the two
+		// withheld it.
+		exact := "approximate"
+		if v.Exact {
+			exact = "exact"
+		}
+		if v.OfPeak > 0 {
+			p("        %.1f %% of the host bus, %s", v.OfPeak*100, exact)
+		} else {
+			p("        ? %% of the host bus — no host figure; %s", exact)
+		}
 	} else {
 		p("verify  ? — no draft figures, or a concurrent run with no aggregate token count")
 	}
