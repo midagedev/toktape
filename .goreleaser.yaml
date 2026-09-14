@@ -85,6 +85,44 @@ release:
   draft: false
   prerelease: auto
   name_template: "toktape {{ .Tag }}"
+  # The changelog below is every commit subject in one flat list, because this
+  # repo writes `pkg: summary` rather than Conventional Commits. That is a
+  # reasonable record and a poor introduction, so the header says what a reader
+  # has to know before reading it. Rewrite it per release; it is not a template.
+  header: |
+    **A run is aimed in seconds now.** `toktape` with no flags gives a 20 s
+    run, and `--for 45s` gives a 45 s one, whatever the tokens per second. No
+    stream is cut under 64 tokens, so a slow box runs longer rather than
+    reporting a rate from four tokens.
+
+    **`-n` means tokens per stream, as in llama-bench.** Concurrent streams are
+    `--sessions N`, capped at 8 unless `--max-sessions` raises it. This is a
+    breaking rename: `-n 4` used to mean four streams and now means four
+    tokens. Nothing is aliased — the old spelling is gone, on purpose, while
+    the tool is young enough to change it cleanly.
+
+    **One output flag.** `-o csv|json|jsonl|md|sql|tsv`, on every verb that has
+    something to print, in llama-bench's vocabulary. `toktape log -o sql |
+    sqlite3 runs.db` gives you every run you have recorded as a table, numbers
+    stored as numbers and unknowns as NULL.
+
+    **The card says when not to quote it.** Every card ends with its caveats —
+    a cold cache, a prompt too short to be a prefill measurement, a stream too
+    short to be a rate, a machine that changed under the run — and `-o json`
+    carries the same list as `caveats`, each with a severity. It is the field
+    to read before putting a number in a post.
+
+    **For agents.** Documented exit codes (0 ok, 1 usage, 2 unreachable,
+    3 streams, 4 unavailable), one JSON object on stdout whether the run
+    succeeds or fails, `toktape help agents`, and `docs/agents.md`.
+
+    New measurements: bytes per verify step for a speculative run, the engine's
+    own prefill split from the wait for a free slot, and per-round prefill and
+    prefix-cache figures.
+
+    The clip and the card below were recorded with this build on a 444 GiB
+    model served from a 251 GB box — [42 s](https://drive.google.com/file/d/1DcyQCgp0_Uo9B8lRyMvI3ZjpPOg-Xug4/view?usp=drivesdk).
+
   footer: |
     ## Install
 
