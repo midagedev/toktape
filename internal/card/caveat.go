@@ -233,7 +233,23 @@ func ShortPrompt(s *tape.RunSummary) bool {
 	if s == nil {
 		return false
 	}
-	n := promptTokens(s)
+	return shortPromptCount(promptTokens(s))
+}
+
+// shortPromptCount is the rule both of the card's prefill questions ask: is n
+// prompt tokens too few for a rate over them to be a prefill measurement. The
+// run's Prefill row asks it through ShortPrompt, and each round of the Prompts
+// row asks it through readRoundPrompt (TTP-64, 2026-09-14), so there is one
+// threshold and one comparison, not a second copy that can drift.
+//
+// The two callers pass different counts, and on purpose. The run passes its
+// whole prompt, cached prefix included, which is what the Prefill row has
+// always printed beside the rate. A round passes the tokens one stream
+// evaluated, because a round's rate is over exactly those: a round whose 16k
+// prompt came 97 % from the cache has a rate over a few hundred tokens, and
+// four streams of a 63-token prompt sum to 252 without any one of them being
+// a measurement. 0 is unknown and is never short.
+func shortPromptCount(n int) bool {
 	return n > 0 && n < MinPrefillPromptTokens
 }
 

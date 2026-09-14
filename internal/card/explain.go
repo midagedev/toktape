@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -85,10 +86,47 @@ func ExplainCaveats(s *tape.RunSummary) string {
 	if parts := draftParts(s); len(parts) > 0 {
 		fmt.Fprintf(&b, "  %-28s %s\n", "draft row", strings.Join(parts, " · "))
 	}
+	// Per round, which line of the Prompts row its prompt figures went to and
+	// why (TTP-64, TTP-66, 2026-09-14): "why does round 3 have no prefill
+	// figure" is answered by the same readRoundPrompt verdict the row used.
+	// Every round, not the row's first eight: this is where a reader goes for
+	// the rest.
+	if s.Rounds > 1 && roundsCarryPrompt(s.PerRound) {
+		pos := map[int]int{}
+		for _, p := range s.PerRound {
+			pos[p.SpecNMax]++
+			fmt.Fprintf(&b, "  %-28s %s\n", "round "+roundLabel(p, pos[p.SpecNMax]), explainRoundPrompt(p))
+		}
+	}
 	if len(fired) == 0 {
 		b.WriteString("  nothing qualifies this run's figures — every number on the card is quotable\n")
 	}
 	return b.String()
+}
+
+// explainRoundPrompt is one round's reading for ExplainCaveats: the line of the
+// Prompts row it went to, and the counts that decided it.
+func explainRoundPrompt(p tape.RoundSummary) string {
+	r := readRoundPrompt(p)
+	switch {
+	case r.cached:
+		text := fmt.Sprintf("cache line: %d of %d cached (%s, cached from %s), %d evaluated",
+			r.cachedN, r.prompt, formatPct(r.hitRatio), formatPct(server.CachedHitRatio), r.evaluated)
+		if r.rate > 0 {
+			text += " at " + formatRateUnit(r.rate)
+		}
+		return text + "; no prefill figure for a cached tail"
+	case r.rate <= 0 && r.prompt == 0:
+		return "no prompt figures recorded"
+	case r.rate <= 0:
+		return fmt.Sprintf("no prefill figure: the server reported no prompt timings (%d evaluated per stream)",
+			r.evaluated)
+	case r.short:
+		return fmt.Sprintf("no prefill figure: %d evaluated per stream, under the floor of %d",
+			r.evaluated, MinPrefillPromptTokens)
+	}
+	return fmt.Sprintf("prefill line: %d evaluated per stream at %s, floor %d",
+		r.evaluated, formatRateUnit(r.rate), MinPrefillPromptTokens)
 }
 
 // countOrEmpty is n, or "" when it was never recorded, for orUnknown.

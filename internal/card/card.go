@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/midagedev/toktape/internal/bandwidth"
+	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -543,6 +544,38 @@ const maxRoundsListed = 8
 //
 // It is the last row of the speed section so the Streams block above it keeps
 // its meaning: N × the per-stream mean over every round.
+//
+//	prefill 4k 129 · 16k 104 · 32k 71.0 tok/s
+//	cache 4 repo-again 97% hit of 16k, 516 evaluated
+//
+// The prefill and cache lines (TTP-64, TTP-66, 2026-09-14) are what a prompts
+// file of 4k, 16k and 32k prompts, with one of them sent twice, is run to
+// measure. Each is printed only when some listed round carries its figures, so
+// a tape recorded before the recorder kept them renders byte for byte as it
+// did. They are lines of their own rather than clauses of each entry because
+// the row has 54 columns: an entry that also said "pp 104 tok/s · 15875
+// cached" no longer fits two to a line, and eight rounds would become eight
+// lines. One line per measurement keeps the list at four lines, puts the
+// prefill rates a reader compares side by side, and says the unit once.
+//
+// A round goes on one of the two lines, never both, and readRoundPrompt
+// decides which. A prompt mostly served from the prefix cache, by the reading
+// that labels a whole run "cached" (server.CachedHitRatio), has a rate over the
+// few hundred tokens the server re-evaluated at the end of a long context. That
+// is not the prefill of a prompt that long, and next to the cold rounds it
+// would read as one, so the cache line gives such a round its hit and its
+// evaluated count and no rate. Every other round with prompt timings is a
+// prefill entry labelled by its own prompt length, cached prefix included — a
+// template's first tokens coming from the cache do not make a 16k prompt
+// anything but a 16k prefill, and the run's Prefill row counts its prompt the
+// same way. The prefill line names a round by length and not by its name,
+// although the reader chose the name: length is the axis those rates are
+// compared along, the list above already pairs each name with its number, and
+// "3 monorepo 32k 71.0" would put the line back at one round a line. The cache
+// line keeps the name, because which prompt came back is its whole point.
+// A round too short to be a prefill measurement is not given a
+// figure; the line counts it, so a missing round is explained rather than
+// silently dropped. A round with no prompt timings is on neither line.
 func roundsLines(s *tape.RunSummary) []string {
 	if s.Rounds <= 1 {
 		return nil
@@ -561,7 +594,8 @@ func roundsLines(s *tape.RunSummary) []string {
 	}
 	lines := wrapJoin(head, " · ", avail)
 
-	var parts []string
+	var parts, prefill, cached []string
+	short := 0
 	// pos is each round's 1-based place among the rounds sent with the same
 	// speculative n_max, which names an unnamed round in a sweep.
 	pos := map[int]int{}
@@ -572,11 +606,147 @@ func roundsLines(s *tape.RunSummary) []string {
 		}
 		pos[p.SpecNMax]++
 		parts = append(parts, roundPart(p, pos[p.SpecNMax]))
+		switch r := readRoundPrompt(p); {
+		case r.cached:
+			cached = append(cached, roundCachePart(p, pos[p.SpecNMax], r))
+		case r.rate <= 0:
+		case r.short:
+			short++
+		default:
+			prefill = append(prefill, promptLength(r.prompt)+" "+formatRate(r.rate))
+		}
 	}
 	if len(parts) > 0 {
 		lines = append(lines, wrapJoin(parts, "  ·  ", avail)...)
 	}
+	lines = append(lines, roundPrefillLines(prefill, short, avail)...)
+	if len(cached) > 0 {
+		cached[0] = "cache " + cached[0]
+		lines = append(lines, wrapJoin(cached, "  ·  ", avail)...)
+	}
 	return labelled("Prompts", speedLabelW, lines)
+}
+
+// roundPrompt is what the Prompts row may say about one round's prompt,
+// decided once by readRoundPrompt so the row and `card --explain` read the same
+// verdict rather than two derivations of it.
+//
+// The counts are per stream. A round's PromptN and CacheN are summed over its
+// streams, and every stream of a round sends the same prompt, so the sum over
+// four streams is four prompts' worth: labelling it, or holding it against the
+// floor, would call four 63-token requests one 252-token prefill.
+type roundPrompt struct {
+	prompt    int     // the whole prompt, cached prefix included
+	evaluated int     // the tokens the server evaluated
+	cachedN   int     // the tokens it took from the prefix cache
+	hitRatio  float64 // cachedN / prompt; 0 when no prompt was counted
+	rate      float64 // the server's own prompt tok/s; 0 = no prompt timings
+	// short: evaluated is under tape.MinPrefillPromptTokens, the same test the
+	// run's Prefill row makes (shortPromptCount), so the rate is not a prefill
+	// measurement.
+	short bool
+	// cached: the prompt was mostly served from the prefix cache, by the
+	// ratio that labels a whole run "cached".
+	cached bool
+}
+
+func readRoundPrompt(p tape.RoundSummary) roundPrompt {
+	streams := p.Streams
+	if streams < 1 {
+		streams = 1
+	}
+	perStream := func(n int) int {
+		if n <= 0 {
+			return 0
+		}
+		// Rounded, and never rounded down to 0, which is unknown: a count the
+		// server reported is at least one token.
+		return max(1, (n+streams/2)/streams)
+	}
+	r := roundPrompt{
+		prompt:    perStream(p.PromptN + p.CacheN),
+		evaluated: perStream(p.PromptN),
+		cachedN:   perStream(p.CacheN),
+		rate:      p.PromptPerSecond,
+	}
+	if total := p.PromptN + p.CacheN; total > 0 {
+		r.hitRatio = float64(p.CacheN) / float64(total)
+	}
+	r.short = shortPromptCount(r.evaluated)
+	r.cached = p.CacheN > 0 && r.hitRatio >= server.CachedHitRatio
+	return r
+}
+
+// roundsCarryPrompt reports whether any round recorded a prompt figure: the
+// condition for the Prompts row's prefill and cache lines to exist at all.
+func roundsCarryPrompt(per []tape.RoundSummary) bool {
+	for _, p := range per {
+		if p.PromptN > 0 || p.CacheN > 0 || p.PromptPerSecond > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// roundPrefillLines is the Prompts row's prefill line: "prefill 4k 129 · 16k
+// 104 tok/s", then how many rounds were too short to be given a figure. nil
+// when there is neither.
+//
+// The count carries no rate on purpose. TTP-65 is a rate from a 63-token
+// prompt that reached a reader as a prefill figure; a clause beside it would be
+// one wrapJoin break away from the figure it qualifies, which is why the run's
+// Prefill row joins its qualification to the count and why this line does not
+// print the rate at all.
+func roundPrefillLines(prefill []string, short, avail int) []string {
+	if len(prefill) == 0 && short == 0 {
+		return nil
+	}
+	parts := append([]string(nil), prefill...)
+	if len(parts) > 0 {
+		parts[len(parts)-1] += " tok/s"
+	}
+	if short > 0 {
+		noun := "prompts"
+		if short == 1 {
+			noun = "prompt"
+		}
+		parts = append(parts, fmt.Sprintf("%d %s under %d tokens, not measured",
+			short, noun, MinPrefillPromptTokens))
+	}
+	parts[0] = "prefill " + parts[0]
+	return wrapJoin(parts, " · ", avail)
+}
+
+// roundCachePart is one round of the cache line: "4 repo-again 97% hit of 16k,
+// 516 evaluated". The hit is the Prefix cache row's own "hit" percentage; the
+// evaluated count is left out when the server reported none, rather than
+// printed as "?".
+func roundCachePart(p tape.RoundSummary, pos int, r roundPrompt) string {
+	part := fmt.Sprintf("%s %s hit of %s", roundLabel(p, pos), formatPct(r.hitRatio), promptLength(r.prompt))
+	if r.evaluated > 0 {
+		part += ", " + formatInt(r.evaluated) + " evaluated"
+	}
+	return part
+}
+
+// promptLength is a prompt's token count the way a reader sizes one: 16391 is
+// "16k". k is 1024, as it is in "a 16k context" for -c 16384, because the
+// prompts a prefill sweep sends are cut to those sizes; one decimal under 10k
+// ("4.5k") and none above, with a trailing ".0" dropped. Under 1024 the count
+// is printed whole. It is derived from the round's own count and nothing else,
+// so a label never names a size the server did not see.
+func promptLength(n int) string {
+	switch {
+	case n <= 0:
+		return unknown
+	case n < 1024:
+		return strconv.Itoa(n)
+	}
+	k := float64(n) / 1024
+	if k < 10 {
+		return strings.TrimSuffix(strconv.FormatFloat(k, 'f', 1, 64), ".0") + "k"
+	}
+	return strconv.FormatFloat(k, 'f', 0, 64) + "k"
 }
 
 // roundPart is one round of the Prompts list: "1 sql-1 19.3 tok/s 87%". The
@@ -590,19 +760,7 @@ func roundsLines(s *tape.RunSummary) []string {
 // run-order number counts every value's copy of the prompt set, and "9" says
 // less than "5·sql-2".
 func roundPart(p tape.RoundSummary, pos int) string {
-	var fields []string
-	switch {
-	case p.SpecNMax > 0 && p.Name != "":
-		fields = []string{strconv.Itoa(p.SpecNMax) + "·" + p.Name}
-	case p.SpecNMax > 0:
-		fields = []string{strconv.Itoa(p.SpecNMax) + "·" + strconv.Itoa(pos)}
-	default:
-		fields = []string{strconv.Itoa(p.Index + 1)}
-		if p.Name != "" {
-			fields = append(fields, p.Name)
-		}
-	}
-	fields = append(fields, formatRateUnit(p.PerStreamPredictedPerSecond))
+	fields := []string{roundLabel(p, pos), formatRateUnit(p.PerStreamPredictedPerSecond)}
 	if p.DraftN != nil {
 		if *p.DraftN == 0 {
 			fields = append(fields, "0 drafted")
@@ -615,6 +773,22 @@ func roundPart(p tape.RoundSummary, pos int) string {
 		}
 	}
 	return strings.Join(fields, " ")
+}
+
+// roundLabel is how the Prompts row names a round — "1 sql-1", "3·sql-1",
+// "3·2" — shared by the list, the cache line and `card --explain` so a round is
+// called the same thing everywhere a reader looks for it.
+func roundLabel(p tape.RoundSummary, pos int) string {
+	switch {
+	case p.SpecNMax > 0 && p.Name != "":
+		return strconv.Itoa(p.SpecNMax) + "·" + p.Name
+	case p.SpecNMax > 0:
+		return strconv.Itoa(p.SpecNMax) + "·" + strconv.Itoa(pos)
+	case p.Name != "":
+		return strconv.Itoa(p.Index+1) + " " + p.Name
+	default:
+		return strconv.Itoa(p.Index + 1)
+	}
 }
 
 // sweepLines is the Draft sweep row of a speculative n_max sweep, or nil when

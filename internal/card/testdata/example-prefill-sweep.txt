@@ -1,0 +1,35 @@
+┌──────────────────────────────────────────────────────────────────────┐
+│ toktape v0.1.0              20260914-090241-deepseek-v4-1-flash-q4-k │
+├──────────────────────────────────────────────────────────────────────┤
+│ MODEL    DeepSeek-V4.1-Flash-Q4_K_M.gguf · Q4_K_M · 46.0 GiB         │
+│ ENGINE   ik_llama.cpp 7b79b229 · linux 6.8.0-45-generic              │
+│          workstation                                                 │
+│ RIG      2× RTX 3090 24G · AMD Ryzen Threadripper PRO 7975WX         │
+│          256 GB DDR5-5200                                            │
+├──────────────────────────────────────────────────────────────────────┤
+│ Decode        17.8 tok/s · ≈ 47 GB/s from RAM, 14% of peak           │
+│ Prefill       88.6 tok/s · 17416 prompt tokens · TTFT 165385 ms      │
+│ Context       65536 (17416 in / 256 out)                             │
+│ Prefix cache  23% hit (3969/17416) · warm                            │
+│ Sampling      greedy (temp 0) · thinking off · /completion           │
+│ Prompts       4 rounds · 17.9 tok/s median (15.8–19.6)               │
+│               1 diff 19.6 tok/s  ·  2 repo 17.9 tok/s                │
+│               3 monorepo 15.8 tok/s  ·  4 repo-again 17.9 tok/s      │
+│               prefill 4k 129 · 16k 104 · 32k 71.0 tok/s              │
+│               cache 4 repo-again 97% hit of 16k, 516 evaluated       │
+├──────────────────────────────────────────────────────────────────────┤
+│ MEMORY   GPU0 [██░░░░░░░░] 5.6/24.0 GiB                              │
+│          GPU1 [██░░░░░░░░] 5.3/24.0 GiB                              │
+│          weights 6.7 | kv 2.4 | compute 1.4 GiB                      │
+│          Host placed 39.3 GiB (all in RAM)                           │
+│          Host RSS 42.1 GiB (file 41.2 / anon 0.9)                    │
+│          Page faults 0.0 maj/token (0 during decode)                 │
+├──────────────────────────────────────────────────────────────────────┤
+│ HOST     GPU0 64°C 240 W · GPU1 61°C 225 W · throttled: no           │
+│          contended: no                                               │
+├──────────────────────────────────────────────────────────────────────┤
+│ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0          │
+│          -ncmoe 48 -t 16                                             │
+├──────────────────────────────────────────────────────────────────────┤
+│                toktape · github.com/midagedev/toktape                │
+└──────────────────────────────────────────────────────────────────────┘
