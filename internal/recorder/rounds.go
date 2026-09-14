@@ -66,6 +66,26 @@ func roundRequests(o Options, activeBytesPerToken int64) [][]server.StreamReques
 	return out
 }
 
+// roundPrefill is a round's engine prefill from the server's own figures: the
+// prompt tokens its streams evaluated over the prompt_ms the server took for
+// them (TTP-64, 2026-09-14). A stream with no prompt timings is unknown and is
+// left out of both sums rather than counted as a zero-time evaluation, which
+// would inflate the rate.
+func roundPrefill(rr []tape.RequestRecord) (promptN int, perSecond float64) {
+	var ms float64
+	for _, r := range rr {
+		if r.Timings.PromptN <= 0 || r.Timings.PromptMs <= 0 {
+			continue
+		}
+		promptN += r.Timings.PromptN
+		ms += r.Timings.PromptMs
+	}
+	if ms > 0 {
+		perSecond = float64(promptN) / (ms / 1000)
+	}
+	return promptN, perSecond
+}
+
 // recordRounds is Record from the first request on, for a multi-round run.
 func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 	rounds := roundRequests(r.opts, r.model.ActiveBytesPerToken)
@@ -341,6 +361,7 @@ func reduceRounds(recs []tape.RequestRecord, names []string, streams int) (tape.
 			// The n_max a sweep sent this round with (TTP-35); 0 otherwise.
 			SpecNMax: roundSpecNMax(rr),
 		}
+		per[k].PromptN, per[k].PromptPerSecond = roundPrefill(rr)
 		// representativeTimings returns a lone record's own Timings, whose
 		// draft pointers are that record's; the round gets new ints so writing
 		// one can never rewrite the other.

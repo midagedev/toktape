@@ -469,6 +469,19 @@ type RoundSummary struct {
 	AggregatePredictedPerSecond float64 `json:"aggregate_predicted_per_second"`
 	PredictedN                  int     `json:"predicted_n"` // sum over streams
 	TTFTp50Ms                   float64 `json:"ttft_p50_ms"`
+	// PromptN is the prompt tokens the server evaluated in this round, summed
+	// over its streams (timings.prompt_n; a cached prefix is not in it), and
+	// PromptPerSecond is those tokens over the server's own prompt_ms summed
+	// the same way (TTP-64, lead, 2026-09-14).
+	//
+	// Server figures only, never send-to-first-token: a round of long prompts
+	// is how prefill is measured at a given length, and the client's window
+	// includes queue wait, template rendering and the first decode step. On a
+	// round of several streams the sums pool the streams' own evaluations, so
+	// the rate is the mean engine prefill a stream got, not the server's
+	// throughput. 0 means the server reported no prompt timings.
+	PromptN         int     `json:"prompt_n,omitempty"`
+	PromptPerSecond float64 `json:"prompt_per_second,omitempty"`
 	// Speculative decoding totals over the round's streams; nil = not reported.
 	DraftN         *int `json:"draft_n,omitempty"`
 	DraftNAccepted *int `json:"draft_n_accepted,omitempty"`
