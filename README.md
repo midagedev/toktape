@@ -296,6 +296,29 @@ no tape named, the newest run is used.
 **Log:** `--sort`, `--model`, `--tag`, `-n`, `--tsv`, `--csv`, `--json`,
 `--md`, `--rebuild`, `--out`.
 
+## Running it from an agent
+
+Most people who run toktape will not type the command: Claude Code or Codex
+will, on their behalf. There is a page written for that reader —
+[`docs/agents.md`](docs/agents.md) — and `toktape help agents` is the same
+contract inside the binary, where an agent can find it without being told.
+The short version:
+
+- **Ask for a length in seconds, not in tokens.** `--for 20s` is the default.
+  A token count means a different amount of time on every machine, which is
+  the thing you are recording to find out.
+- **Read `caveats` before quoting a figure.** The card qualifies every number
+  it prints — a generation too short to be a rate, a prompt too short to be a
+  prefill measurement, a busy machine — and `--json` carries the same
+  qualifications as one array. An agent that reads it cannot quote a number
+  the card would have footnoted.
+- **Branch on the exit code, never on the message.** Every verb ends on one
+  of five documented codes, and `--json` prints one object on stdout whether
+  the run succeeded or failed, so there is one parse path and not two.
+- **Two flags decide whether it fits your timeout.** `--wait` defaults to ten
+  minutes, because a server loading a 450 GB model is worth waiting for;
+  `--for` decides how long the generation itself runs.
+
 ## Experiment log
 
 Every run appends a row to `runs.tsv` next to the tapes, so a sweep is one
