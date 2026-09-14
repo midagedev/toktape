@@ -121,7 +121,10 @@ release:
     prefix-cache figures.
 
     The clip and the card below were recorded with this build on a 444 GiB
-    model served from a 251 GB box — [42 s](https://drive.google.com/file/d/1DcyQCgp0_Uo9B8lRyMvI3ZjpPOg-Xug4/view?usp=drivesdk).
+    model served from a 251 GB box — [33 s](https://drive.google.com/file/d/1Z07G3-fiRBpMu_T9efOdb_vmCobCNaLD/view?usp=drivesdk).
+    It joins the run three seconds before its first token (`--prefill-lead 3s`,
+    new in this build); the clock it opens on says how much of the wait for
+    prefill is not in it, and everything that is in it plays at 1:1.
 
   footer: |
     ## Install
