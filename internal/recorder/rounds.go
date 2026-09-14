@@ -362,6 +362,13 @@ func reduceRounds(recs []tape.RequestRecord, names []string, streams int) (tape.
 			SpecNMax: roundSpecNMax(rr),
 		}
 		per[k].PromptN, per[k].PromptPerSecond = roundPrefill(rr)
+		// The prompt tokens the server took from its prefix cache instead of
+		// evaluating (TTP-66). Summed over every stream, including one with no
+		// prompt timing: cache_n is a count the server reported, and a stream
+		// whose prefix was cached is exactly one whose evaluation may be tiny.
+		for _, r := range rr {
+			per[k].CacheN += r.Timings.CacheN
+		}
 		// representativeTimings returns a lone record's own Timings, whose
 		// draft pointers are that record's; the round gets new ints so writing
 		// one can never rewrite the other.

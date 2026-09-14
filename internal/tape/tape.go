@@ -482,6 +482,14 @@ type RoundSummary struct {
 	// throughput. 0 means the server reported no prompt timings.
 	PromptN         int     `json:"prompt_n,omitempty"`
 	PromptPerSecond float64 `json:"prompt_per_second,omitempty"`
+	// CacheN is the prompt tokens the server took from its prefix cache in
+	// this round instead of evaluating, summed over the round's streams
+	// (timings.cache_n; TTP-66, lead, 2026-09-14). Beside PromptN it is the
+	// measurement a coding agent's workload is mostly made of: a prompts file
+	// whose second line repeats the first line's prefix shows the second round
+	// evaluating only its new tail. 0 is a cold prefix or a server that did
+	// not report it; PromptN beside it says which.
+	CacheN int `json:"cache_n,omitempty"`
 	// Speculative decoding totals over the round's streams; nil = not reported.
 	DraftN         *int `json:"draft_n,omitempty"`
 	DraftNAccepted *int `json:"draft_n_accepted,omitempty"`
