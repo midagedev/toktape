@@ -50,6 +50,22 @@ func LlamaBenchTable(s *tape.RunSummary) string {
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | %s |\n",
 			model, size, params, backend, ngl, fa, r.test, benchRate(r.rate))
 	}
+	// Above one stream both counts are per-stream means (TTP-83, 2026-09-14).
+	// In llama-bench tg<N> is the tokens a test generated, and a mean of 10
+	// and 300 is 155, a count no stream produced — so the table says it is a
+	// mean. It keeps the mean rather than trading it for another count because
+	// the t/s beside it is the mean of the per-stream rates: the count and the
+	// rate on one row are over the same population.
+	//
+	// The statement is a line under the table, not words in the test cell
+	// (lead, 2026-09-14). This table exists to be pasted into a thread that is
+	// already comparing llama-bench results, and "test" is the column those
+	// readers compare by eye and their scripts match as tg128; a cell reading
+	// "tg307 (per-stream mean)" stops lining up with theirs. A footnote leaves
+	// the column exactly llama-bench's and still travels with a pasted block.
+	if n := streamsSent(s); n > 1 {
+		fmt.Fprintf(&b, "\npp and tg are per-stream means over %d concurrent streams.\n", n)
+	}
 	return b.String()
 }
 

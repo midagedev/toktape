@@ -49,6 +49,10 @@ func ExplainCaveats(s *tape.RunSummary) string {
 			t.ReasoningN, t.PredictedN)},
 		{CodeShortGeneration, fmt.Sprintf("predicted_n %d, recorded label %q, floor %d",
 			t.PredictedN, t.DecodeLabel, tape.MinDecodeTokens)},
+		// The minimum it decides on beside the mean it does not, so a
+		// four-stream card that did not warn shows both numbers.
+		{CodeShortStream, fmt.Sprintf("min_predicted_n %s over %d streams (mean %d), floor %d",
+			orUnknown(countOrEmpty(s.Aggregate.MinPredictedN)), streamsSent(s), t.PredictedN, tape.MinDecodeTokens)},
 		{CodeColdCache, fmt.Sprintf("cache label %q, %s maj faults/token",
 			s.Cache.Label, formatFloat1(s.Memory.MajFaultsPerToken))},
 		{CodeShortPromptForPrefill, fmt.Sprintf("%d prompt tokens, floor %d",
@@ -85,6 +89,14 @@ func ExplainCaveats(s *tape.RunSummary) string {
 		b.WriteString("  nothing qualifies this run's figures — every number on the card is quotable\n")
 	}
 	return b.String()
+}
+
+// countOrEmpty is n, or "" when it was never recorded, for orUnknown.
+func countOrEmpty(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return fmt.Sprint(n)
 }
 
 // explainConditions is the conditions reading, or why there was none.

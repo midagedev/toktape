@@ -155,6 +155,12 @@ func heroFigures(s tape.RunSummary) (dec, pre heroFigure) {
 	if card.IsSample(&s) {
 		decode = "sample"
 	}
+	// A stream too short to be a rate inside a mean that is one (TTP-83,
+	// 2026-09-14): the label stays decode and says so beside it, the way the
+	// prefill caption carries "short prompt".
+	if card.ShortStream(&s) {
+		decode += " · short stream"
+	}
 	prefill := "prefill"
 	if card.ShortPrompt(&s) {
 		prefill += " · short prompt"

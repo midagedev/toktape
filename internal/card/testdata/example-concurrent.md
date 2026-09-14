@@ -39,6 +39,8 @@
 | llama Q4_K_M | 42.52 GiB | 70.55 B | ? | 99 | on | pp384 | 610.00 |
 | llama Q4_K_M | 42.52 GiB | 70.55 B | ? | 99 | on | tg307 | 9.10 |
 
+pp and tg are per-stream means over 8 concurrent streams.
+
 <details><summary>Reproduce</summary>
 
 Server (as seen from /proc/48213/cmdline):

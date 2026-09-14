@@ -41,4 +41,16 @@ func TestTheModalQualifiesTheSameFiguresTheCardDoes(t *testing.T) {
 			t.Errorf("decode caption = %q, want the sample label the count earns", dec.caption)
 		}
 	})
+
+	// TTP-83 (2026-09-14): a 10-token stream beside healthy ones keeps the
+	// decode label — the aggregate is a rate — and says so beside it, as the
+	// card's short_stream caveat and the image's eyebrow do.
+	t.Run("a short stream inside a healthy mean", func(t *testing.T) {
+		s := *base
+		s.Aggregate.MinPredictedN = 10
+		dec, _ := heroFigures(s)
+		if !strings.Contains(dec.caption, "decode · short stream") || strings.Contains(dec.caption, "sample") {
+			t.Errorf("decode caption = %q, want decode qualified by short stream", dec.caption)
+		}
+	})
 }

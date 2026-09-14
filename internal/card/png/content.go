@@ -165,9 +165,12 @@ func (c *content) buildHero(s *tape.RunSummary) {
 	concurrent := s.Concurrency > 1
 
 	// Left: decode. Lesson 2 — a short generation is a "sample", never a
-	// "decode" rate, and the eyebrow is the only place that says so.
+	// "decode" rate, and the eyebrow is the only place that says so. Asked
+	// through card.IsSample, the predicate the text card and the TUI ask
+	// (TTP-83, 2026-09-14): this read the recorder's stored DecodeLabel, so a
+	// tape whose label and count disagreed was Sample on one and DECODE here.
 	label := "decode"
-	if t.DecodeLabel == "sample" {
+	if card.IsSample(s) {
 		label = "sample"
 	}
 	if concurrent {
@@ -176,7 +179,7 @@ func (c *content) buildHero(s *tape.RunSummary) {
 			streams = s.Concurrency
 		}
 		c.left = heroCol{
-			eyebrow: "aggregate " + label,
+			eyebrow: decodeEyebrow(s, "aggregate "+label),
 			number:  formatRate(a.AggregatePredictedPerSecond),
 			unit:    "tok/s",
 			// The queue note rides on the per-stream line because that is
@@ -195,7 +198,7 @@ func (c *content) buildHero(s *tape.RunSummary) {
 		}
 	} else {
 		c.left = heroCol{
-			eyebrow: label,
+			eyebrow: decodeEyebrow(s, label),
 			number:  formatRate(t.PredictedPerSecond),
 			unit:    "tok/s",
 			sub1:    bandwidthString(s),
@@ -447,6 +450,19 @@ func verifyBandwidthString(s *tape.RunSummary) (full, withoutRatio string) {
 		full += " · " + formatPct(ofPeak) + " of peak"
 	}
 	return full, withoutRatio
+}
+
+// decodeEyebrow is prefillEyebrow for the decode column (TTP-83, 2026-09-14): a
+// run of several streams — concurrent, or sequential rounds at one connection,
+// which takes the single-stream branch — whose shortest stream was too short to be a rate
+// keeps "decode" — the aggregate is a rate — and says "short stream" in the
+// same slot, for the same reason. The count and the floor are in the
+// short_stream sentence on the text card and in --json.
+func decodeEyebrow(s *tape.RunSummary, label string) string {
+	if !card.ShortStream(s) {
+		return label
+	}
+	return label + " · short stream"
 }
 
 // prefillEyebrow qualifies the prefill column's figure in the slot the card

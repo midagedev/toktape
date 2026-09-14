@@ -79,6 +79,15 @@ func caveatCases() []caveatCase {
 		onCard:  "Sample ",
 		notCard: "Decode ",
 	}, {
+		code: CodeShortStream,
+		// Four streams, one of them 10 tokens long, and a mean well over the
+		// floor (TTP-83). The row keeps its Decode label — the aggregate is
+		// still a rate — so the qualification is the caveat and nothing else,
+		// and a card that relabels the whole run Sample fails here.
+		mutate:  func(s *tape.RunSummary) { s.Aggregate.Streams, s.Aggregate.MinPredictedN = 4, 10 },
+		onCard:  "Decode ",
+		notCard: "Sample ",
+	}, {
 		code: CodeColdCache,
 		mutate: func(s *tape.RunSummary) {
 			s.Cache.Label = tape.CacheCold

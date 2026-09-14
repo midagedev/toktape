@@ -82,6 +82,12 @@ const (
 	// CodeNoProcView: no /proc reading of the server process, so the memory
 	// figures are absent rather than zero.
 	CodeNoProcView = "no_proc_view"
+	// CodeShortStream: above one stream, the shortest answered stream
+	// generated fewer than tape.MinDecodeTokens tokens while the per-stream
+	// mean did not (TTP-83). The aggregate is still a rate; the "each" figure
+	// averages a sample in. Not short_generation: that code means the row is
+	// labelled Sample, and consumers already branch on it.
+	CodeShortStream = "short_stream"
 )
 
 // Severity levels, in the order the card ranks them.
@@ -102,7 +108,8 @@ const (
 // The ranking is by what the caveat costs, not by how loud it sounds. The top
 // group is every caveat that changes what the two hero figures MEAN: a failed
 // stream is a figure the run did not produce, a cut answer is a rate with
-// nothing behind it, a short generation is a sample, a cold run's decode rate
+// nothing behind it, a short generation is a sample, a short stream is a
+// sample inside the per-stream mean, a cold run's decode rate
 // is partly the disk's rate, and a short prompt makes the prefill figure not a
 // prefill measurement at all. cold_cache is up there deliberately: it is
 // tempting to file it with "the machine was busy", but the machine being busy
@@ -110,6 +117,18 @@ const (
 // arriving from disk during decode means the decode number is partly a
 // benchmark of the disk. It qualifies the headline, so it ranks with the
 // headline.
+//
+// short_stream sits directly under short_generation and above cold_cache
+// (TTP-83, 2026-09-14). It is short_generation's own question one stream
+// down: a stream too short to be a rate, averaged into a per-stream mean that
+// is not. It ranks under it because it costs less — the aggregate is still a
+// rate and only the "each" figure has a sample in it, where short_generation
+// means the row's own figure is not a rate at all. It ranks over cold_cache
+// although cold qualifies BOTH figures, because what it names is an exact,
+// token-counted fact about the figure beside it, while a cold run's decode
+// rate is still a reading, of a slower machine; and when both fire the
+// caveat line spells out one and names the other by code, so the cold run is
+// on the card either way — in the cache pill and the maj-faults row as well.
 //
 // The second group is a run that was not one measurement — a disagreement
 // between the two clocks, the recorder's own caveats, a contended or drifting
@@ -119,14 +138,15 @@ var caveatRank = map[string]int{
 	CodeStreamsFailed:         0,
 	CodeAnswerCut:             1,
 	CodeShortGeneration:       2,
-	CodeColdCache:             3,
-	CodeShortPromptForPrefill: 4,
-	CodeClientDisagrees:       5,
-	CodeRecorded:              6,
-	CodeMachineContended:      7,
-	CodeConditionsChanged:     8,
-	CodeRunCutByClock:         9,
-	CodeNoProcView:            10,
+	CodeShortStream:           3,
+	CodeColdCache:             4,
+	CodeShortPromptForPrefill: 5,
+	CodeClientDisagrees:       6,
+	CodeRecorded:              7,
+	CodeMachineContended:      8,
+	CodeConditionsChanged:     9,
+	CodeRunCutByClock:         10,
+	CodeNoProcView:            11,
 }
 
 // MinPrefillPromptTokens is tape.MinPrefillPromptTokens, re-exported so this
@@ -146,6 +166,14 @@ const MinPrefillPromptTokens = tape.MinPrefillPromptTokens
 // label says "decode" while its own count says sample is the disagreement this
 // file exists to prevent. Zero tokens is not a short generation; it is no
 // generation, and the row already prints "?".
+//
+// It keeps that single-stream meaning above one stream on purpose (TTP-83,
+// 2026-09-14). Timings.PredictedN is the per-stream mean there, and a mean
+// over the floor with one stream under it is NOT "the run was too short": the
+// aggregate is still a rate, and relabelling three healthy streams Sample
+// because a fourth stopped at 10 tokens would under-report the run as loudly
+// as the old card over-reported it. That case is shortStream below, a caveat
+// beside the Decode label. Do not fold Aggregate.MinPredictedN in here.
 func isSample(s *tape.RunSummary) bool { return IsSample(s) }
 
 // IsSample is isSample for the other two renderers of a run — the PNG card's
@@ -164,6 +192,29 @@ func IsSample(s *tape.RunSummary) bool {
 		return true
 	}
 	return t.PredictedN > 0 && t.PredictedN < tape.MinDecodeTokens
+}
+
+// shortStream reports whether a run of several streams had one too short to be
+// a rate while its per-stream mean was not (TTP-83, 2026-09-14).
+//
+// Aggregate.MinPredictedN is the fewest tokens any answered stream generated,
+// and the one reading of that question the summary carries: Timings.PredictedN
+// above one stream is a mean, and 10 and 300 average 155. 0 is unknown — a tape
+// older than the field, or no answered stream — and fires nothing. When the
+// mean itself is a sample, isSample has already relabelled the row and
+// short_generation says why, so this stands aside rather than warn twice about
+// the same tokens. At one stream the minimum is the count, so isSample covers
+// it and no stream-count guard is needed.
+func shortStream(s *tape.RunSummary) bool { return ShortStream(s) }
+
+// ShortStream is shortStream for internal/card/png, which qualifies the decode
+// eyebrow with it — the same predicate, so the image and the text card agree.
+func ShortStream(s *tape.RunSummary) bool {
+	if s == nil || IsSample(s) {
+		return false
+	}
+	n := s.Aggregate.MinPredictedN
+	return n > 0 && n < tape.MinDecodeTokens
 }
 
 // shortPrompt reports whether the prompt was too short for the run's prefill
@@ -254,6 +305,13 @@ func Caveats(s *tape.RunSummary) []Caveat {
 		add(CodeShortGeneration, SeverityFigure, fmt.Sprintf(
 			"short generation: %s tokens is a sample, not a decode rate (under %d)",
 			formatInt(s.Timings.PredictedN), tape.MinDecodeTokens))
+	}
+	if shortStream(s) {
+		// The shortest stream's count, never "one of N": the summary records
+		// the minimum, not how many streams were under the floor.
+		add(CodeShortStream, SeverityFigure, fmt.Sprintf(
+			"short stream: the shortest stream generated %s tokens, under %d, so the per-stream rate averages in a sample",
+			formatInt(s.Aggregate.MinPredictedN), tape.MinDecodeTokens))
 	}
 	if s.Cache.Label == tape.CacheCold {
 		add(CodeColdCache, SeverityFigure, fmt.Sprintf(

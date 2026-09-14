@@ -19,6 +19,10 @@ import (
 // 2026-09-13 TTP-28: re-baselined for the new example — R1 Distill Llama 70B dense,
 // eight streams at 320 tokens. The words the test exists for are unchanged;
 // what moved is the model, the flags and the figures quoted inside them.
+//
+// 2026-09-14 TTP-83: re-baselined because the llama-bench rows of a run of
+// several streams now say "(per-stream mean)" after pp<N> and tg<N>: the count
+// is a mean no stream produced. The Reproduce block is unchanged.
 func TestReproduceGolden(t *testing.T) {
 	golden(t, "example-concurrent.md", []byte(Markdown(ExampleConcurrent())))
 }

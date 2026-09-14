@@ -52,3 +52,26 @@ func TestLlamaBenchTableFallsBackToFileName(t *testing.T) {
 		t.Errorf("model column should fall back to the file name:\n%s", LlamaBenchTable(s))
 	}
 }
+
+// TestLlamaBenchTableSaysAConcurrentCountIsAMean (TTP-83, 2026-09-14). In
+// llama-bench tg<N> is the tokens a test generated. Above one stream
+// Timings.PredictedN is the per-stream mean, a count no stream produced, so
+// the table says so — under the table, leaving the test column exactly
+// llama-bench's so a pasted row still lines up with theirs (lead, same day).
+func TestLlamaBenchTableSaysAConcurrentCountIsAMean(t *testing.T) {
+	table := LlamaBenchTable(ExampleConcurrent())
+	for _, want := range []string{"| pp384 | 610.00 |", "| tg307 | 9.10 |"} {
+		if !strings.Contains(table, want) {
+			t.Errorf("the test column is not llama-bench's own: want a row ending %q\n%s", want, table)
+		}
+	}
+	if strings.Contains(table, "(per-stream mean)") {
+		t.Errorf("the qualification is inside a cell, where it breaks the column:\n%s", table)
+	}
+	if !strings.Contains(table, "\npp and tg are per-stream means over 8 concurrent streams.\n") {
+		t.Errorf("a concurrent run's table does not say its counts are means:\n%s", table)
+	}
+	if single := LlamaBenchTable(Example()); strings.Contains(single, "per-stream means") {
+		t.Errorf("a single-stream table carries the concurrent footnote:\n%s", single)
+	}
+}
