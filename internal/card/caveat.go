@@ -14,13 +14,13 @@ import (
 // The card has always carried the qualifications: "Sample" instead of "Decode"
 // under 32 generated tokens, "contended: yes", "conditions changed", "cold", a
 // prefix-cache hit of 0 %. A human reads them because they sit next to the
-// figure. An agent does not: it runs `--json`, pulls predicted_per_second, and
+// figure. An agent does not: it runs `-o json`, pulls predicted_per_second, and
 // reports it as the machine's speed. Every qualification on the card is then a
 // field it did not think to look at, and the number it quotes is one the card
 // was trying to argue with.
 //
 // So the qualifications are a list with stable codes, the same list the text
-// card prints and `--json` carries, derived in one place. Two properties make
+// card prints and `-o json` carries, derived in one place. Two properties make
 // it worth the file:
 //
 //  1. Derived, not stored. Every code below is computable from what the tape
@@ -236,6 +236,30 @@ func ShortPrompt(s *tape.RunSummary) bool {
 	return shortPromptCount(promptTokens(s))
 }
 
+// shortStreamText says how much of the per-stream rate is a sample.
+//
+// With AggregateTimings.ShortStreams recorded (2026-09-14) it names how many
+// streams were under the floor and how short the shortest was: "2 of 4
+// streams" tells a reader whether the mean is half sample or one stream out of
+// eight, which is the difference between a figure to throw away and one to
+// note. A tape carrying MinPredictedN but not the count — recorded in the
+// window between the two commits, and in the fixtures — keeps the older
+// sentence rather than inventing a count nobody recorded.
+//
+// The denominator is the answered streams, not Streams: a failed stream
+// produced no rate, so it is not one of the streams the mean is over.
+func shortStreamText(s *tape.RunSummary) string {
+	a := s.Aggregate
+	if answered := a.Streams - a.StreamsFailed; a.ShortStreams > 0 && answered > 0 {
+		return fmt.Sprintf(
+			"short stream: %s of %s streams generated under %d tokens, the shortest %s, so the per-stream rate averages in samples",
+			formatInt(a.ShortStreams), formatInt(answered), tape.MinDecodeTokens, formatInt(a.MinPredictedN))
+	}
+	return fmt.Sprintf(
+		"short stream: the shortest stream generated %s tokens, under %d, so the per-stream rate averages in a sample",
+		formatInt(a.MinPredictedN), tape.MinDecodeTokens)
+}
+
 // shortPromptCount is the rule both of the card's prefill questions ask: is n
 // prompt tokens too few for a rate over them to be a prefill measurement. The
 // run's Prefill row asks it through ShortPrompt, and each round of the Prompts
@@ -289,7 +313,7 @@ func clientDisagrees(s *tape.RunSummary) bool {
 
 // noProcView reports whether the server process was never read through /proc.
 // The same test internal/card/png/content.go's hasProcMem uses, so the text
-// card, the image and --json agree about whether the memory figures exist.
+// card, the image and -o json agree about whether the memory figures exist.
 func noProcView(s *tape.RunSummary) bool {
 	return s.Memory.AtEnd.RSSBytes <= 0
 }
@@ -298,7 +322,7 @@ func noProcView(s *tape.RunSummary) bool {
 //
 // An empty result is the claim the card is really making when it prints no
 // warning line: nothing about this run makes its figures mean something other
-// than what they say. That is the one field read `--json` needs to answer "is
+// than what they say. That is the one field read `-o json` needs to answer "is
 // this number quotable" — see the package doc on JSON.
 func Caveats(s *tape.RunSummary) []Caveat {
 	if s == nil {
@@ -323,11 +347,7 @@ func Caveats(s *tape.RunSummary) []Caveat {
 			formatInt(s.Timings.PredictedN), tape.MinDecodeTokens))
 	}
 	if shortStream(s) {
-		// The shortest stream's count, never "one of N": the summary records
-		// the minimum, not how many streams were under the floor.
-		add(CodeShortStream, SeverityFigure, fmt.Sprintf(
-			"short stream: the shortest stream generated %s tokens, under %d, so the per-stream rate averages in a sample",
-			formatInt(s.Aggregate.MinPredictedN), tape.MinDecodeTokens))
+		add(CodeShortStream, SeverityFigure, shortStreamText(s))
 	}
 	if s.Cache.Label == tape.CacheCold {
 		add(CodeColdCache, SeverityFigure, fmt.Sprintf(
@@ -357,7 +377,7 @@ func Caveats(s *tape.RunSummary) []Caveat {
 	}
 	if s.Contention.Contended {
 		// Without the reasons. They are printed whole under HOST on the text
-		// card and are contention.reasons in --json, so repeating them here
+		// card and are contention.reasons in -o json, so repeating them here
 		// would put the same two sentences on the card twice — which is the
 		// wall this block was reshaped to avoid.
 		add(CodeMachineContended, SeverityRun,
@@ -429,7 +449,7 @@ func runCutByClockText(s *tape.RunSummary) string {
 // maxCaveatCodesListed is how many codes the caveat line names before it says
 // how many more there were. Six is the same idea as maxRoundsListed: the block
 // is an index, not a table, and a reader who needs the seventh is already in
-// `--json`.
+// `-o json`.
 const maxCaveatCodesListed = 6
 
 // caveatLines is the card's warning block: one line, wrapped, or nothing.
@@ -437,7 +457,7 @@ const maxCaveatCodesListed = 6
 // The list can be several entries long and the card has a visual budget, so the
 // line says how many there are and spells out the most serious one; the rest
 // are named by code, which is the handle a reader uses to find the sentence in
-// `--json`. A single caveat is just its sentence — a count of one is noise.
+// `-o json`. A single caveat is just its sentence — a count of one is noise.
 func caveatLines(s *tape.RunSummary) []string {
 	cs := Caveats(s)
 	if len(cs) == 0 {

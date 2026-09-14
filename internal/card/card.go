@@ -74,7 +74,7 @@ func Markdown(s *tape.RunSummary) string {
 	return "```text\n" + Text(s) + "```\n\n" + LlamaBenchTable(s) + "\n" + Reproduce(s)
 }
 
-// jsonCard is what `--json` puts on stdout: the run summary, unchanged and in
+// jsonCard is what `-o json` puts on stdout: the run summary, unchanged and in
 // schema order, plus the card's derived caveats after it.
 //
 // The summary is embedded rather than nested, so every field a reader already
@@ -459,7 +459,7 @@ func decodeParts(s *tape.RunSummary) []string {
 // rate it disqualifies. The rate is still printed — it is what the server
 // reported and dropping an observation is not this card's habit — but a reader
 // who quotes it has been told, and an agent gets the same sentence under
-// short_prompt_for_prefill in --json.
+// short_prompt_for_prefill in -o json.
 func prefillParts(s *tape.RunSummary, promptTotal int) []string {
 	t := s.Timings
 	if s.Concurrency <= 1 {
@@ -983,7 +983,7 @@ func bandwidthString(s *tape.RunSummary) string {
 	// 2026-09-14). The verify-step figure replaces it rather than joining it:
 	// two RAM bandwidths on one card, differing by the acceptance rate and
 	// with nothing on the card to say why, is a worse answer than one figure
-	// that is true. The per-accepted-token figure stays in --json as
+	// that is true. The per-accepted-token figure stays in -o json as
 	// timings.effective_bw_bps, where it is labelled by its own field name.
 	if clause, ok := verifyRAM(s); ok {
 		return clause
@@ -1367,7 +1367,7 @@ func answerCutWarning(s *tape.RunSummary) string {
 // raises three, and a card that answers "how fast is this rig" with a block of
 // exclamation marks has spent its visual budget on the least interesting part
 // of itself. The sentence printed is the most serious; the rest are named by
-// the code that finds their sentence in `--json`.
+// the code that finds their sentence in `-o json`.
 func warningSection(s *tape.RunSummary) []string {
 	return caveatLines(s)
 }

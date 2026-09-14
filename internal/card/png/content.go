@@ -419,7 +419,7 @@ func draftString(s *tape.RunSummary) (clause string, fallbacks []string) {
 			// Then the share of the host's memory ceiling, keeping the rate
 			// itself: the rate is the figure another rig can be compared
 			// against, while the ratio is only meaningful beside this box's
-			// own peak. Both are on the text card's Decode row and in --json.
+			// own peak. Both are on the text card's Decode row and in -o json.
 			joinParts(" · ", "draft "+figures, bwNoRatio),
 			// Then the bandwidth altogether. The block size and the
 			// acceptance rate are the last things standing, which is the
@@ -457,7 +457,7 @@ func verifyBandwidthString(s *tape.RunSummary) (full, withoutRatio string) {
 // which takes the single-stream branch — whose shortest stream was too short to be a rate
 // keeps "decode" — the aggregate is a rate — and says "short stream" in the
 // same slot, for the same reason. The count and the floor are in the
-// short_stream sentence on the text card and in --json.
+// short_stream sentence on the text card and in -o json.
 func decodeEyebrow(s *tape.RunSummary, label string) string {
 	if !card.ShortStream(s) {
 		return label
@@ -478,7 +478,7 @@ func decodeEyebrow(s *tape.RunSummary, label string) string {
 // The word is short because the eyebrow is small caps at 12.5 px and this card
 // is read at half its pixel width in a timeline. The full sentence, with the
 // count and the threshold, is on the text card and under
-// short_prompt_for_prefill in --json.
+// short_prompt_for_prefill in -o json.
 func prefillEyebrow(s *tape.RunSummary, label string) string {
 	if !card.ShortPrompt(s) {
 		return label

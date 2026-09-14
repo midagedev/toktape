@@ -123,3 +123,37 @@ func TestExplainShowsTheShortStreamReading(t *testing.T) {
 		}
 	}
 }
+
+// TestTheShortStreamCaveatCountsThem (TTP-85, lead, 2026-09-14). With
+// AggregateTimings.ShortStreams recorded (f92f4e5) the caveat says how many
+// streams were under the floor, not only how short the shortest was. A tape
+// that has the minimum but not the count keeps the older sentence.
+func TestTheShortStreamCaveatCountsThem(t *testing.T) {
+	s := ExampleConcurrent()
+	s.Aggregate.Streams, s.Aggregate.StreamsFailed = 4, 0
+	s.Aggregate.MinPredictedN, s.Aggregate.ShortStreams = 10, 2
+	got := caveatText(Caveats(s), CodeShortStream)
+	for _, want := range []string{"2 of 4 streams", "10"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the caveat is %q, want it to name %q", got, want)
+		}
+	}
+
+	// A tape recorded before the count: the minimum is all there is.
+	old := ExampleConcurrent()
+	old.Aggregate.Streams, old.Aggregate.StreamsFailed = 4, 0
+	old.Aggregate.MinPredictedN, old.Aggregate.ShortStreams = 10, 0
+	if got := caveatText(Caveats(old), CodeShortStream); !strings.Contains(got, "the shortest stream") {
+		t.Errorf("without the count the caveat is %q, want the shortest-stream sentence", got)
+	}
+}
+
+// caveatText is one code's sentence, or "" when it did not fire.
+func caveatText(cs []Caveat, code string) string {
+	for _, c := range cs {
+		if c.Code == code {
+			return c.Text
+		}
+	}
+	return ""
+}
