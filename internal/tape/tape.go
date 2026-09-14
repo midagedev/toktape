@@ -438,7 +438,15 @@ type AggregateTimings struct {
 	// MinDecodeTokens while one of them is a sample. A reader asking "was any
 	// stream too short to be a rate" needs the minimum, and the summary is
 	// all a renderer reads. 0 on a tape older than the field: unknown.
-	MinPredictedN               int     `json:"min_predicted_n,omitempty"`
+	MinPredictedN int `json:"min_predicted_n,omitempty"`
+	// ShortStreams is how many answered streams generated fewer than
+	// MinDecodeTokens (TTP-85, lead, 2026-09-14). MinPredictedN says the
+	// shortest stream was too short to be a rate; this says how many were, so
+	// a reader is told "2 of 4 streams" rather than only "the shortest". It is
+	// only meaningful beside MinPredictedN: on a tape older than both it is 0
+	// and so is MinPredictedN, which reads as unknown; with MinPredictedN
+	// recorded, 0 here is an observed zero.
+	ShortStreams                int     `json:"short_streams,omitempty"`
 	AggregatePredictedPerSecond float64 `json:"aggregate_predicted_per_second"` // TotalPredictedN / decode window
 	AggregatePromptPerSecond    float64 `json:"aggregate_prompt_per_second"`
 	PerStreamPredictedPerSecond float64 `json:"per_stream_predicted_per_second"` // mean of streams

@@ -169,6 +169,11 @@ func Aggregate(recs []tape.RequestRecord) tape.AggregateTimings {
 		if out.MinPredictedN == 0 || n < out.MinPredictedN {
 			out.MinPredictedN = n
 		}
+		// And how many answered streams were that short, so the card can say
+		// "2 of 4" rather than only "the shortest" (tape.AggregateTimings).
+		if n < tape.MinDecodeTokens {
+			out.ShortStreams++
+		}
 		out.TotalPromptN += r.Timings.PromptN
 		rate := r.Timings.PredictedPerSecond
 		if rate == 0 {
