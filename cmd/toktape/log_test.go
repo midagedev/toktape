@@ -131,13 +131,13 @@ func TestLogVerbSortDecode(t *testing.T) {
 	}
 }
 
-// TestLogVerbFilterAndLimit: --model, --tag and -n narrow the table.
+// TestLogVerbFilterAndLimit: --model, --tag and --limit narrow the table.
 func TestLogVerbFilterAndLimit(t *testing.T) {
 	dir := seedRuns(t)
 
-	_, stdout, _ := exec(t, "log", "--out", dir, "-n", "2")
+	_, stdout, _ := exec(t, "log", "--out", dir, "--limit", "2")
 	if rows := rowsOf(stdout); len(rows) != 2 {
-		t.Errorf("-n 2 printed %d rows", len(rows))
+		t.Errorf("--limit 2 printed %d rows", len(rows))
 	}
 
 	// Matched without case, so a tag typed in either case finds the run.
@@ -182,13 +182,13 @@ func TestLogVerbExportsLeaveUnknownsEmpty(t *testing.T) {
 	s.Cache = tape.CacheSummary{PromptTotal: 512, Label: tape.CacheCold}
 	writeTape(t, dir, s)
 
-	code, stdout, stderr := exec(t, "log", "--out", dir, "--tsv")
+	code, stdout, stderr := exec(t, "log", "--out", dir, "-o", "tsv")
 	if code != exitOK {
 		t.Fatalf("exit %d\n%s", code, stderr)
 	}
 	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
 	if len(lines) != 2 {
-		t.Fatalf("--tsv printed %d lines, want a header and one row:\n%s", len(lines), stdout)
+		t.Fatalf("-o tsv printed %d lines, want a header and one row:\n%s", len(lines), stdout)
 	}
 	if lines[0] != ledger.Header() {
 		t.Errorf("the TSV header is not the ledger header:\n%s", lines[0])
@@ -228,25 +228,25 @@ func TestLogVerbCSVAndJSON(t *testing.T) {
 	s.Server.Flags.OverrideTens = []string{`blk\.(3[6-9]|4[0-7])\.ffn_.*_exps=CPU`}
 	writeTape(t, dir, s)
 
-	_, out, stderr := exec(t, "log", "--out", dir, "--csv")
+	_, out, stderr := exec(t, "log", "--out", dir, "-o", "csv")
 	recs, err := csv.NewReader(strings.NewReader(out)).ReadAll()
 	if err != nil {
-		t.Fatalf("--csv is not valid CSV: %v\n%s\n%s", err, out, stderr)
+		t.Fatalf("-o csv is not valid CSV: %v\n%s\n%s", err, out, stderr)
 	}
 	if len(recs) != 2 {
-		t.Fatalf("--csv wrote %d records, want a header and one row", len(recs))
+		t.Fatalf("-o csv wrote %d records, want a header and one row", len(recs))
 	}
 	if recs[1][ledger.Index("note")] != s.Note {
 		t.Errorf("the note survived as %q, want %q", recs[1][ledger.Index("note")], s.Note)
 	}
 
-	_, out, _ = exec(t, "log", "--out", dir, "--json")
+	_, out, _ = exec(t, "log", "--out", dir, "-o", "json")
 	var objs []map[string]string
 	if err := json.Unmarshal([]byte(out), &objs); err != nil {
-		t.Fatalf("--json is not valid JSON: %v\n%s", err, out)
+		t.Fatalf("-o json is not valid JSON: %v\n%s", err, out)
 	}
 	if len(objs) != 1 {
-		t.Fatalf("--json wrote %d objects, want 1", len(objs))
+		t.Fatalf("-o json wrote %d objects, want 1", len(objs))
 	}
 	if objs[0]["note"] != s.Note {
 		t.Errorf("json note = %q, want %q", objs[0]["note"], s.Note)
@@ -256,10 +256,10 @@ func TestLogVerbCSVAndJSON(t *testing.T) {
 		t.Errorf("json carries per_stream_tok_s for a single-stream run: %v", objs[0])
 	}
 
-	_, out, _ = exec(t, "log", "--out", dir, "--md")
+	_, out, _ = exec(t, "log", "--out", dir, "-o", "md")
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) != 3 || !strings.HasPrefix(lines[0], "| id |") || !strings.HasPrefix(lines[1], "| --- |") {
-		t.Fatalf("--md is not a GitHub table:\n%s", out)
+		t.Fatalf("-o md is not a GitHub table:\n%s", out)
 	}
 	// The -ot pattern in this fixture contains a pipe, which would end its
 	// cell early and shift every column after it; the escaped copies do not
@@ -278,17 +278,17 @@ func TestLogVerbCSVAndJSON(t *testing.T) {
 // than a sentence in the middle of a TSV.
 func TestLogVerbEmptyExportKeepsItsHeader(t *testing.T) {
 	dir := t.TempDir()
-	code, stdout, stderr := exec(t, "log", "--out", dir, "--tsv")
+	code, stdout, stderr := exec(t, "log", "--out", dir, "-o", "tsv")
 	if code != exitOK {
 		t.Fatalf("exit %d\n%s", code, stderr)
 	}
 	if stdout != ledger.Header()+"\n" {
-		t.Errorf("an empty --tsv printed %q, want just the header", stdout)
+		t.Errorf("an empty -o tsv printed %q, want just the header", stdout)
 	}
 
-	code, stdout, _ = exec(t, "log", "--out", dir, "--json")
+	code, stdout, _ = exec(t, "log", "--out", dir, "-o", "json")
 	if code != exitOK || strings.TrimSpace(stdout) != "[]" {
-		t.Errorf("an empty --json printed %q", stdout)
+		t.Errorf("an empty -o json printed %q", stdout)
 	}
 }
 
@@ -360,10 +360,10 @@ func TestLogVerbRebuildNamesUnreadableTapes(t *testing.T) {
 	}
 }
 
-// TestLogVerbUsageErrors: the flags that cannot be combined, and the sort key
-// that does not exist, fail with the usage code instead of guessing.
+// TestLogVerbUsageErrors: a format log does not take, and the sort key that
+// does not exist, fail with the usage code instead of guessing.
 //
-// stdout stays empty — a failed table is not a table — except under --json,
+// stdout stays empty — a failed table is not a table — except under -o json,
 // where it carries the error object instead (TTP-71, 2026-09-14). The
 // assertion was "stdout is empty" until then; a caller that asked to be
 // answered in JSON and got an empty stdout has two parse paths and no way to
@@ -375,7 +375,8 @@ func TestLogVerbUsageErrors(t *testing.T) {
 		json bool
 	}{
 		{[]string{"log", "--out", dir, "--sort", "vram"}, false},
-		{[]string{"log", "--out", dir, "--tsv", "--json"}, true},
+		{[]string{"log", "--out", dir, "-o", "png"}, false},
+		{[]string{"log", "--out", dir, "--sort", "vram", "-o", "json"}, true},
 		{[]string{"log", "--out", dir, "stray-argument"}, false},
 	}
 	for _, tc := range cases {
@@ -396,7 +397,7 @@ func TestLogVerbUsageErrors(t *testing.T) {
 			} `json:"error"`
 		}
 		if err := json.Unmarshal([]byte(stdout), &got); err != nil {
-			t.Errorf("%v: --json failure is not a JSON object on stdout: %v\nstdout: %q", tc.args, err, stdout)
+			t.Errorf("%v: -o json failure is not a JSON object on stdout: %v\nstdout: %q", tc.args, err, stdout)
 			continue
 		}
 		if got.Error.Code != "usage" || got.Error.Exit != exitUsage {
@@ -442,7 +443,7 @@ func TestRecordVerbTagNoteAndLedger(t *testing.T) {
 			t.Errorf("%v: the tag is not in the table:\n%s", args, stdout)
 		}
 	}
-	_, tsv, _ := exec(t, "log", "--out", dir, "--tsv")
+	_, tsv, _ := exec(t, "log", "--out", dir, "-o", "tsv")
 	if !strings.Contains(tsv, "fa on, cold cache") {
 		t.Errorf("the note is not in the export:\n%s", tsv)
 	}
@@ -462,9 +463,9 @@ func TestLogVerbOutputForTheRecord(t *testing.T) {
 	}
 	t.Logf("$ toktape log --out <dir>\n%s", table)
 
-	code, md, stderr := exec(t, "log", "--out", dir, "--md")
+	code, md, stderr := exec(t, "log", "--out", dir, "-o", "md")
 	if code != exitOK || md == "" {
-		t.Fatalf("log --md: exit %d\n%s", code, stderr)
+		t.Fatalf("log -o md: exit %d\n%s", code, stderr)
 	}
-	t.Logf("$ toktape log --out <dir> --md\n%s", md)
+	t.Logf("$ toktape log --out <dir> -o md\n%s", md)
 }

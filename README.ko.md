@@ -168,8 +168,8 @@ toktape --sessions 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
 **공유하기:**
 
 ```sh
-toktape card ~/.toktape/runs/<id>.tape --png           # 1200×675 image next to the tape
-toktape card ~/.toktape/runs/<id>.tape --md --copy     # card + llama-bench table, on the clipboard
+toktape card ~/.toktape/runs/<id>.tape -o png          # 1200×675 image next to the tape
+toktape card ~/.toktape/runs/<id>.tape -o md --copy    # card + llama-bench table, on the clipboard
 toktape render                                          # the newest run as a GIF
 ```
 
@@ -213,7 +213,7 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 | 동사 | 하는 일 | 예 |
 | --- | --- | --- |
 | `record` | 붙어서 실행을 녹화합니다. 기본 동사 | `toktape --sessions 4 --for 30s` |
-| `card` | 테이프에서 카드를 다시 그립니다 | `toktape card <tape> --png` |
+| `card` | 테이프에서 카드를 다시 그립니다 | `toktape card <tape> -o png` |
 | `play` | 라이브 화면에서 실행을 재생합니다 | `toktape play <tape> --speed 4` |
 | `render` | GIF, mp4, asciicast, PNG 프레임으로 렌더합니다 | `toktape render <tape> --mp4 clip.mp4` |
 | `ls` | 녹화된 실행 목록 | `toktape ls` |
@@ -242,7 +242,7 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 대면 시계가 꺼집니다), `--out`(기본
 `~/.toktape/runs`), `--tag`, `--note`, `--wait`, `--tui`,
 `--grid COLSxROWS`(기본 `2x4`, `0`이면 터미널에 맞춤), `--no-card`,
-`--json`, `--quiet`.
+`-o FORMAT`, `--quiet`.
 
 **샘플링과 엔드포인트.** 요청을 어떤 모양으로 보내느냐는 서버를 어떤 플래그로
 띄웠느냐만큼 수치를 움직입니다. 같은 추론 모델, 같은 프롬프트 20개, 같은 머신에서
@@ -259,9 +259,18 @@ raw 엔드포인트에 greedy로 보낸 쪽이 25.6 tok/s, 같은 엔드포인�
 프롬프트에는 템플릿이 없습니다. 보낸 것은 테이프에 그대로 남고 카드에 이름이 찍히니,
 두 카드는 비교되거나 왜 비교할 수 없는지를 말합니다.
 
-**card:** `--md`(펜스 안의 카드와 llama-bench 호환 표), `--json`(실행 요약),
-`--png [FILE]`(1200×675 공유 이미지), `--copy`(OSC 52로 클립보드에도 복사).
-`--md`와 `--json`은 둘 중 하나만 씁니다.
+**출력 형식.** `-o FORMAT`(또는 `--output FORMAT`)은 llama-bench의 `-o`이고,
+형식 이름도 llama-bench가 쓰는 말 그대로입니다. `record`와 `card`는 `json`(실행
+요약), `jsonl`(같은 객체를 한 줄로. 여러 실행을 한 파일에 이어 붙일 수 있습니다),
+`md`, 그리고 `csv`·`tsv`·`sql`(실행 하나를 장부의 한 행으로)을 찍고, `log`는 모든
+실행을 같은 여섯 형식으로 찍습니다. `md`만은 llama-bench와 뜻이 다릅니다. 카드에서는
+펜스 안의 카드, llama-bench 호환 표, Reproduce 블록이고, `log`에서는 장부를 옮긴
+Markdown 표입니다. `sql`은 `runs` 테이블이 없으면 만들고 실행마다 한 행씩 넣으므로,
+`toktape log -o sql | sqlite3 runs.db` 한 줄이면 데이터베이스가 됩니다. 동사가 받지
+않는 형식을 주면 거절하고, 받는 형식을 알려 줍니다.
+
+**card:** 위 형식에 더해 `-o png [FILE]`(1200×675 공유 이미지. 파일을 지정하지
+않으면 테이프 옆에 씁니다), `--copy`(OSC 52로 클립보드에도 복사).
 
 **render:** `--gif FILE`, `--mp4 FILE`(`PATH`에 ffmpeg 필요), `--cast FILE`
 (asciicast v2), `--frames DIR`(PNG 시퀀스), `--duration`, `--fps`,
@@ -269,8 +278,8 @@ raw 엔드포인트에 greedy로 보낸 쪽이 25.6 tok/s, 같은 엔드포인�
 여러 출력을 한 번에 지정하면 같은 프레임에서 함께 나옵니다. 테이프를 지정하지
 않으면 가장 최근 실행을 씁니다.
 
-**log:** `--sort`, `--model`, `--tag`, `-n`, `--tsv`, `--csv`, `--json`,
-`--md`, `--rebuild`, `--out`.
+**log:** `--sort`, `--model`, `--tag`, `--limit N`, `-o FORMAT`, `--rebuild`,
+`--out`.
 
 ## 에이전트로 돌리기
 
@@ -283,11 +292,11 @@ toktape를 실제로 돌리는 쪽은 대개 사람이 아니라 Claude Code나 
   토큰 수가 기계마다 다른 시간을 뜻하고, 그 시간이야말로 지금 재려던 것이니까요.
 - **숫자를 인용하기 전에 `caveats`를 읽으세요.** 카드는 찍는 숫자마다 단서를
   답니다. 속도라고 부르기엔 너무 짧은 생성, prefill 측정이라기엔 너무 짧은
-  프롬프트, 바쁜 기계 같은 것들입니다. `--json`은 그 단서들을 배열 하나로
+  프롬프트, 바쁜 기계 같은 것들입니다. `-o json`은 그 단서들을 배열 하나로
   같이 실어 보냅니다. 그걸 읽는 에이전트는 카드가 각주를 달았을 숫자를 그냥
   인용할 수 없습니다.
 - **종료 코드로 분기하고, 메시지로 분기하지 마세요.** 모든 동사는 문서화된
-  다섯 코드 중 하나로 끝나고, `--json`은 성공이든 실패든 stdout에 객체 하나를
+  다섯 코드 중 하나로 끝나고, `-o json`은 성공이든 실패든 stdout에 객체 하나를
   찍습니다. 파싱 경로가 둘이 아니라 하나입니다.
 - **타임아웃 안에 들어오는지는 플래그 두 개가 정합니다.** `--wait`의 기본은
   10분입니다. 450 GB 모델을 올리는 중인 서버는 기다릴 값어치가 있으니까요.
@@ -302,15 +311,15 @@ toktape를 실제로 돌리는 쪽은 대개 사람이 아니라 Claude Code나 
 ```sh
 toktape --tag ngl=40 --note "fa on"     # record, labelled
 toktape log --sort decode                # which setting won
-toktape log --tag ngl --md               # paste into an issue
+toktape log --tag ngl -o md              # paste into an issue
 toktape log --rebuild                    # regenerate from the tapes
 ```
 
-모르는 값은 터미널에서 `?`, 내보내기에서는 빈 칸입니다. 숫자 열이 숫자로
-들어옵니다.
+모르는 값은 터미널에서 `?`, 내보내기에서는 빈 칸, `-o sql`에서는 `NULL`입니다.
+그래서 숫자 열이 숫자로 들어옵니다.
 
 ```sh
-sqlite3 runs.db ".import --tsv ~/.toktape/runs/runs.tsv runs"
+toktape log -o sql | sqlite3 runs.db
 duckdb -c "select tag, decode_tok_s from read_csv('~/.toktape/runs/runs.tsv')"
 ```
 

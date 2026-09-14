@@ -31,10 +31,11 @@ quoting — `toktape log` lists every run recorded on that machine.
 toktape                                  # discover a server, record 20s, print a card
 toktape --url http://host:8001 --sessions 4   # a server elsewhere, four streams at once
 toktape --for 60s --tag ngl=40           # a longer run, labelled for the ledger
-toktape --json --quiet > run.json        # the summary on stdout and nothing else
+toktape -o json --quiet > run.json       # the summary on stdout and nothing else
 toktape --wait 0                         # fail fast instead of waiting for a load
-toktape card <tape> --json               # re-read a recording; touches no server
-toktape log --json                       # every run recorded here, as one array
+toktape card <tape> -o json              # re-read a recording; touches no server
+toktape log -o jsonl                     # every run recorded here, one object per line
+toktape log -o sql | sqlite3 runs.db     # the same runs as a SQLite table
 ```
 
 Two flags decide whether an invocation fits inside your own timeout.
@@ -95,7 +96,7 @@ Branch on the **exit code**, never on the message text:
 | 3 | streams | the server answered and every stream failed |
 | 4 | unavailable | this machine lacks something the output needs (ffmpeg) |
 
-With `--json`, stdout carries exactly one JSON object whether the run
+With `-o json` or `-o jsonl`, stdout carries exactly one JSON object whether the run
 succeeded or failed, so there is one parse path and not two. A failure
 object has an `error` key; a success object does not. `error.hint` is a
 sentence saying what to do next, and it is worth surfacing to the user

@@ -116,7 +116,7 @@ func TestRecordVerbEndToEnd(t *testing.T) {
 		t.Errorf("no attach line on stderr:\n%s", stderr)
 	}
 	// The run ends with the share block: what exists, and what to do with it.
-	for _, want := range []string{"✓ Tape   ", "✓ Card   ", ".card.png", "→ Post it:  toktape card ", "--md --copy"} {
+	for _, want := range []string{"✓ Tape   ", "✓ Card   ", ".card.png", "→ Post it:  toktape card ", "-o md --copy"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr is missing %q:\n%s", want, stderr)
 		}
@@ -180,19 +180,19 @@ func TestRecordVerbEndToEnd(t *testing.T) {
 	if code, _, _ := exec(t, "ls", "--out", dir); code != exitOK {
 		t.Errorf("ls on the fresh run directory: exit %d", code)
 	}
-	if code, out, _ := exec(t, "card", tapes[0], "--md"); code != exitOK || !strings.Contains(out, "```") {
-		t.Errorf("card --md on the fresh tape: exit %d", code)
+	if code, out, _ := exec(t, "card", tapes[0], "-o", "md"); code != exitOK || !strings.Contains(out, "```") {
+		t.Errorf("card -o md on the fresh tape: exit %d", code)
 	}
 }
 
-// TestRecordVerbQuietAndJSON: --quiet silences stderr and --json replaces the
+// TestRecordVerbQuietAndJSON: --quiet silences stderr and -o json replaces the
 // card with the summary the compare tooling reads.
 func TestRecordVerbQuietAndJSON(t *testing.T) {
 	hermetic(t)
 	srv := cliServer(t)
 	dir := t.TempDir()
 
-	code, stdout, stderr := exec(t, "record", "--url", srv.URL, "--out", dir, "--json", "--quiet")
+	code, stdout, stderr := exec(t, "record", "--url", srv.URL, "--out", dir, "-o", "json", "--quiet")
 	if code != exitOK {
 		t.Fatalf("exit %d\n%s", code, stderr)
 	}
@@ -201,7 +201,7 @@ func TestRecordVerbQuietAndJSON(t *testing.T) {
 	}
 	var s tape.RunSummary
 	if err := json.Unmarshal([]byte(stdout), &s); err != nil {
-		t.Fatalf("--json is not valid JSON: %v", err)
+		t.Fatalf("-o json is not valid JSON: %v", err)
 	}
 	if s.Concurrency != 1 {
 		t.Errorf("default concurrency = %d, want 1", s.Concurrency)

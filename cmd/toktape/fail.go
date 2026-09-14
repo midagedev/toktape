@@ -19,9 +19,9 @@ import (
 // Most people who run toktape drive it from a coding agent, and an agent has
 // no source to read: it has the exit code, whatever is on stdout and --help.
 // A failure therefore owes three things at once — the exit code a wrapper
-// branches on, a sentence a person reads, and, when --json was asked for, one
-// parseable object on stdout so the caller has a single parse path instead of
-// two. Before this, a failed run under --json left stdout empty.
+// branches on, a sentence a person reads, and, when -o json or -o jsonl was
+// asked for, one parseable object on stdout so the caller has a single parse
+// path instead of two. Before this, a failed run under JSON left stdout empty.
 //
 // Three obligations discharged in three places is three places to forget one,
 // so they are discharged here and nowhere else: every verb returns through
@@ -66,7 +66,8 @@ var exitCodeNames = map[int]string{
 	exitUnavailable: "unavailable",
 }
 
-// errorReport is the JSON object a failed invocation prints under --json.
+// errorReport is the JSON object a failed invocation prints under -o json or
+// -o jsonl.
 //
 // It is deliberately not the success payload with a field added: success is
 // tape.RunSummary exactly as it always was, and a reader tells the two apart
@@ -207,7 +208,7 @@ func (c *cli) badFlags(verb, usage string, args []string, err error) int {
 		fmt.Fprint(c.stdout, usage)
 		return exitOK
 	}
-	// The flags did not parse, so the parsed --json is not to be trusted;
+	// The flags did not parse, so the parsed -o is not to be trusted;
 	// the raw arguments are all there is.
 	c.json = jsonRequested(args)
 	return c.fail(failure{
@@ -218,45 +219,71 @@ func (c *cli) badFlags(verb, usage string, args []string, err error) int {
 	})
 }
 
-// retiredFlagHint names the flag to use instead of one record no longer
-// declares, or one borrowed from a neighbouring tool (retiredFlags), or "".
+// retiredFlagHint names the flag to use instead of one the verb no longer
+// declares, or one borrowed from a neighbouring tool (retiredFlags), or one
+// spelled like an output format (formatHintFor), or "".
 //
 // The flag package says only "flag provided but not defined: -concurrency",
 // and the reader who typed that is exactly the one who needs the new spelling;
 // the usage block below it lists every flag but does not say which one this
 // was.
 func retiredFlagHint(verb string, err error) string {
-	if verb != "record" {
-		return ""
-	}
 	name, ok := strings.CutPrefix(err.Error(), "flag provided but not defined: ")
 	if !ok {
 		return ""
 	}
-	return retiredFlags[strings.TrimLeft(name, "-")]
+	name = strings.TrimLeft(name, "-")
+	if hint := retiredFlags[verb][name]; hint != "" {
+		return hint
+	}
+	return formatHintFor(verb, name)
 }
 
-// jsonRequested reads --json out of the raw arguments.
+// jsonRequested reads -o json or -o jsonl out of the raw arguments.
 //
 // It is the fallback for the one moment the parsed flag is not available: a
-// flag set that failed to parse. Everywhere else the parsed bool is used, so
+// flag set that failed to parse. Everywhere else the parsed format is used, so
 // the only way to reach this is an invocation that was already being rejected,
 // and the worst a false positive can do is add a JSON object to a failure that
 // was going to fail anyway. Scanning stops at "--", which ends the flags.
+//
+// It reads every spelling the flag package accepts — -o json, -o=json,
+// --output json, --output=json — and, as the flag package does, the last one
+// given wins. Two spellings that never parse also count as asking: the
+// retired --json (TTP-81, 2026-09-14) and -ojson, which the flag package reads
+// as a flag named "ojson". The caller who types either one parses stdout, so
+// the hint naming the right spelling reaches it inside the object it parses.
 func jsonRequested(args []string) bool {
-	for _, a := range args {
+	want := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		if a == "--" {
-			return false
+			break
 		}
-		name, value, hasValue := strings.Cut(strings.TrimLeft(a, "-"), "=")
-		if !strings.HasPrefix(a, "-") || name != "json" {
+		if !strings.HasPrefix(a, "-") {
 			continue
 		}
-		if !hasValue {
-			return true
+		name, value, hasValue := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		switch name {
+		case "o", "output":
+			if !hasValue {
+				if i+1 == len(args) {
+					continue
+				}
+				i++
+				value = args[i]
+			}
+			want = outputFormat(value).isJSON()
+		case "o" + string(outputJSON), "o" + string(outputJSONL):
+			want = true
+		case "json":
+			if !hasValue {
+				want = true
+				continue
+			}
+			v, err := strconv.ParseBool(value)
+			want = err == nil && v
 		}
-		v, err := strconv.ParseBool(value)
-		return err == nil && v
 	}
-	return false
+	return want
 }

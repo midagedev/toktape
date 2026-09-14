@@ -3,8 +3,10 @@
 //
 // A user sweeping -ngl, cache types or concurrency records ten runs and wants
 // one table that settles which setting won — pasteable into a spreadsheet,
-// greppable, and importable with `sqlite3 runs.db ".import --tsv runs.tsv
-// runs"` or duckdb's read_csv.
+// greppable, and importable with `toktape log -o sql | sqlite3 runs.db`
+// (WriteSQL) or duckdb's read_csv. Not sqlite's own `.import`: it declares
+// every column TEXT, so max(decode_tok_s) over 9.1 and 68.4 is "9.1"
+// (measured on sqlite 3.51, 2026-09-14).
 //
 // Design rules:
 //

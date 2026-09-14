@@ -26,7 +26,7 @@ import (
 // Most people who run toktape drive it from a coding agent, which has no
 // source to read: it has the exit code, stdout and --help. These tests pin the
 // three things that makes usable — every terminal outcome carries a documented
-// exit code, --json puts one parseable object on stdout whether the run
+// exit code, -o json puts one parseable object on stdout whether the run
 // succeeded or failed, and the codes are written down where a reader looks.
 
 // wantExitCodes is the closed set. It is declared here, not imported from the
@@ -77,11 +77,11 @@ func TestExitCodesAreNamedInHelp(t *testing.T) {
 }
 
 // TestEveryExitCodeIsReachable drives one invocation per code and asserts both
-// halves of the contract at once: the code itself, and that --json answered on
+// halves of the contract at once: the code itself, and that -o json answered on
 // stdout with the matching name.
 //
 // A code nobody can reach is a documented lie, and a failure that prints
-// nothing on stdout under --json leaves an agent with two parse paths.
+// nothing on stdout under -o json leaves an agent with two parse paths.
 func TestEveryExitCodeIsReachable(t *testing.T) {
 	hermetic(t)
 	dead := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
@@ -105,7 +105,7 @@ func TestEveryExitCodeIsReachable(t *testing.T) {
 		name string
 		code int
 		args []string
-		// json says the verb takes --json, so the failure must also be one
+		// json says the verb takes -o json, so the failure must also be one
 		// JSON object on stdout. `render` does not take it (there is no JSON
 		// product to print on success), so exit 4 is pinned by its code and
 		// its sentence alone.
@@ -126,7 +126,7 @@ func TestEveryExitCodeIsReachable(t *testing.T) {
 			}
 			args := tc.args
 			if tc.json {
-				args = append(append([]string(nil), args...), "--json")
+				args = append(append([]string(nil), args...), "-o", "json")
 			}
 			code, stdout, stderr := exec(t, args...)
 			if code != tc.code {
@@ -152,7 +152,7 @@ func TestEveryExitCodeIsReachable(t *testing.T) {
 				} `json:"error"`
 			}
 			if err := json.Unmarshal([]byte(stdout), &got); err != nil {
-				t.Fatalf("--json failure is not one JSON object on stdout: %v\nstdout:\n%q", err, stdout)
+				t.Fatalf("-o json failure is not one JSON object on stdout: %v\nstdout:\n%q", err, stdout)
 			}
 			if got.Error.Code != wantExitCodes[tc.code] {
 				t.Errorf("error.code = %q, want %q", got.Error.Code, wantExitCodes[tc.code])
@@ -179,13 +179,13 @@ func TestEveryExitCodeIsReachable(t *testing.T) {
 func TestJSONSuccessIsTheRunSummary(t *testing.T) {
 	hermetic(t)
 	srv := cliServer(t)
-	code, stdout, stderr := exec(t, "--url", srv.URL, "--out", t.TempDir(), "--n-predict", "16", "--json")
+	code, stdout, stderr := exec(t, "--url", srv.URL, "--out", t.TempDir(), "--n-predict", "16", "-o", "json")
 	if code != exitOK {
 		t.Fatalf("exit %d\nstderr:\n%s", code, stderr)
 	}
 	var got map[string]any
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
-		t.Fatalf("--json success is not one JSON object on stdout: %v\n%s", err, stdout)
+		t.Fatalf("-o json success is not one JSON object on stdout: %v\n%s", err, stdout)
 	}
 	if _, ok := got["error"]; ok {
 		t.Error("a successful run carried an \"error\" key")
@@ -231,7 +231,7 @@ func TestFailuresLeaveThroughOneDoor(t *testing.T) {
 				if !ok || !failureExits[id.Name] {
 					return true
 				}
-				t.Errorf("%s: returns %s directly; a failure must go through %s so it also gets a stderr sentence and a --json object",
+				t.Errorf("%s: returns %s directly; a failure must go through %s so it also gets a stderr sentence and a -o json object",
 					fset.Position(ret.Pos()), id.Name, failOwner)
 				return true
 			})
@@ -310,8 +310,15 @@ func TestHelpAgentsTopic(t *testing.T) {
 // Raising it a second time was a deliberate decision and not a measurement —
 // 96 leaves four lines of headroom on purpose, so the next thing to grow has
 // room to land while somebody decides what it displaces.
+//
+// It was 96 until -o FORMAT (TTP-81, 2026-09-14), and the text was 94. The
+// three card booleans became one flag whose md is not llama-bench's md, which
+// has to be said where the flag is read (+1), and `log -o sql | sqlite3` got a
+// worked example (+3) because it is how a sweep becomes a table an agent can
+// query — the ledger's reason to exist. At 98 lines the old budget fails
+// (checked before raising it); 100 keeps two lines of headroom.
 func TestHelpStaysScannable(t *testing.T) {
-	const maxLines = 96
+	const maxLines = 100
 	if n := strings.Count(usageText, "\n"); n > maxLines {
 		t.Errorf("--help is %d lines, over the %d-line budget; move detail into a help topic", n, maxLines)
 	}
@@ -327,7 +334,7 @@ func TestHelpStaysScannable(t *testing.T) {
 // bytes a caller receives rather than against a struct tag read by eye.
 //
 // 2026-09-14: marshalled through card.JSON rather than encoding/json, because
-// that is what `--json` prints and the two are not the same object — card.JSON
+// that is what `-o json` prints and the two are not the same object — card.JSON
 // adds "caveats", the derived list that answers whether the headline may be
 // quoted at all, which no struct tag in internal/tape carries. Checking the
 // topic against the schema struct was checking it against the wrong bytes;
@@ -499,9 +506,11 @@ func TestExamplesInHelpParse(t *testing.T) {
 				t.Fatalf("not an invocation: %q", line)
 			}
 			args = args[1:]
-			// A shell redirection is the shell's, not the CLI's.
-			if i := indexOf(args, ">"); i >= 0 {
-				args = args[:i]
+			// A shell redirection or pipe is the shell's, not the CLI's.
+			for _, op := range []string{">", "|"} {
+				if i := indexOf(args, op); i >= 0 {
+					args = args[:i]
+				}
 			}
 			verb, rest := splitVerb(args)
 			fs, err := exampleFlagSet(verb)
@@ -536,6 +545,8 @@ func exampleFlagSet(verb string) (*flag.FlagSet, error) {
 		declareRecordFlags(fs)
 	case "card":
 		declareCardFlags(fs)
+	case "log":
+		declareLogFlags(fs)
 	case "render":
 		declareRenderFlags(fs)
 	case "ls":

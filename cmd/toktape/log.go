@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -21,35 +22,31 @@ import (
 // by a build with different columns it is regenerated here rather than
 // patched, so the answer to "which setting won" is always derived from the
 // runs themselves.
+//
+// The row cap is --limit, not -n (TTP-81, 2026-09-14): -n is record's tokens
+// per stream, as in llama-bench, and one letter meaning two things inside one
+// tool is the confusion 7960905 removed from record.
 func runLog(c *cli, args []string) int {
 	fs := newFlagSet("log")
-	outDir := fs.String("out", defaultRunsDir(), "directory holding the runs")
-	model := fs.String("model", "", "only runs whose model contains this text")
-	tag := fs.String("tag", "", "only runs whose tag contains this text")
-	sortBy := fs.String("sort", sortDate, "date | decode | prefill | ttft")
-	limit := fs.Int("n", 0, "show at most N runs (0 = all)")
-	asTSV := fs.Bool("tsv", false, "write every column as TSV")
-	asCSV := fs.Bool("csv", false, "write every column as CSV")
-	asJSON := fs.Bool("json", false, "write every column as JSON")
-	asMD := fs.Bool("md", false, "write every column as a Markdown table")
-	rebuild := fs.Bool("rebuild", false, "regenerate the ledger from the tapes first")
+	f := declareLogFlags(fs)
 	extra, err := parseArgs(fs, args)
 	if err != nil {
 		return c.badFlags("log", usageText, args, err)
 	}
-	c.json = *asJSON
+	format, refused := outputFor("log", *f.output)
+	c.json = format.isJSON()
+	if refused != nil {
+		return c.fail(*refused)
+	}
 	if len(extra) > 0 {
 		return c.usagef("toktape log: unexpected argument %q", extra[0])
 	}
-	if !validSort(*sortBy) {
-		return c.usagef("toktape log: --sort %q is not one of date, decode, prefill, ttft", *sortBy)
+	if !validSort(*f.sortBy) {
+		return c.usagef("toktape log: --sort %q is not one of date, decode, prefill, ttft", *f.sortBy)
 	}
-	format, err := exportFormat(*asTSV, *asCSV, *asJSON, *asMD)
-	if err != nil {
-		return c.usagef("toktape log: %v", err)
-	}
+	outDir, model, tag, limit := f.outDir, f.model, f.tag, f.limit
 
-	rows, err := loadLedger(c.stderr, *outDir, *rebuild)
+	rows, err := loadLedger(c.stderr, *outDir, *f.rebuild)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			fmt.Fprint(c.stderr, noRunsMessage(*outDir))
@@ -60,16 +57,16 @@ func runLog(c *cli, args []string) int {
 
 	recorded := len(rows)
 	rows = filterRows(rows, *model, *tag)
-	sortRows(rows, *sortBy)
+	sortRows(rows, *f.sortBy)
 	if *limit > 0 && len(rows) > *limit {
 		rows = rows[:*limit]
 	}
 
-	if format != "" {
+	if format != outputDefault {
 		// An export is a file someone pipes somewhere, so an empty ledger
 		// still writes its header: an importable table with no rows is a
 		// usable answer, a friendly sentence in the middle of a TSV is not.
-		if err := writeExport(c.stdout, format, rows); err != nil {
+		if err := writeRows(c.stdout, format, rows); err != nil {
 			return c.usagef("toktape: %v", err)
 		}
 		return exitOK
@@ -80,6 +77,27 @@ func runLog(c *cli, args []string) int {
 	}
 	fmt.Fprint(c.stdout, logTable(rows))
 	return exitOK
+}
+
+// logFlags is every flag the log verb declares, for the reason recordFlags
+// is a struct: the examples in --help are parsed against the real set.
+type logFlags struct {
+	outDir, model, tag, sortBy, output *string
+	limit                              *int
+	rebuild                            *bool
+}
+
+// declareLogFlags registers the log verb's flags on fs.
+func declareLogFlags(fs *flag.FlagSet) *logFlags {
+	return &logFlags{
+		outDir:  fs.String("out", defaultRunsDir(), "directory holding the runs"),
+		model:   fs.String("model", "", "only runs whose model contains this text"),
+		tag:     fs.String("tag", "", "only runs whose tag contains this text"),
+		sortBy:  fs.String("sort", sortDate, "date | decode | prefill | ttft"),
+		limit:   fs.Int("limit", 0, "show at most N runs (0 = all)"),
+		output:  declareOutputFlag(fs),
+		rebuild: fs.Bool("rebuild", false, "regenerate the ledger from the tapes first"),
+	}
 }
 
 // emptyLine says why the table is empty. A directory with no runs in it and a
@@ -116,42 +134,6 @@ func validSort(s string) bool {
 		return true
 	}
 	return false
-}
-
-// exportFormat resolves the four output flags. They are alternatives, not a
-// set: two of them would have to write two tables to one stream.
-func exportFormat(tsv, csv, asJSON, md bool) (string, error) {
-	chosen := []string{}
-	for _, f := range []struct {
-		on   bool
-		name string
-	}{{tsv, "tsv"}, {csv, "csv"}, {asJSON, "json"}, {md, "md"}} {
-		if f.on {
-			chosen = append(chosen, f.name)
-		}
-	}
-	switch len(chosen) {
-	case 0:
-		return "", nil
-	case 1:
-		return chosen[0], nil
-	default:
-		return "", fmt.Errorf("--%s and --%s are alternatives, not a pair", chosen[0], chosen[1])
-	}
-}
-
-func writeExport(w io.Writer, format string, rows []ledger.Row) error {
-	switch format {
-	case "tsv":
-		return ledger.WriteTSV(w, rows)
-	case "csv":
-		return ledger.WriteCSV(w, rows)
-	case "json":
-		return ledger.WriteJSON(w, rows)
-	case "md":
-		return ledger.WriteMarkdown(w, rows)
-	}
-	return fmt.Errorf("unknown output format %q", format)
 }
 
 // loadLedger reads the ledger, rebuilding it from the tapes when it is
@@ -294,7 +276,7 @@ func parseTime(s string) (time.Time, bool) {
 }
 
 // logColumns are the ledger columns the human table shows, in order: the ones
-// a sweep is actually read on. Everything else is one `--tsv` away.
+// a sweep is actually read on. Everything else is one `-o tsv` away.
 var logColumns = []struct {
 	head  string
 	col   string

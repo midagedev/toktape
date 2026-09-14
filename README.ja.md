@@ -173,8 +173,8 @@ toktape --sessions 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
 **共有する:**
 
 ```sh
-toktape card ~/.toktape/runs/<id>.tape --png           # 1200×675 image next to the tape
-toktape card ~/.toktape/runs/<id>.tape --md --copy     # card + llama-bench table, on the clipboard
+toktape card ~/.toktape/runs/<id>.tape -o png          # 1200×675 image next to the tape
+toktape card ~/.toktape/runs/<id>.tape -o md --copy    # card + llama-bench table, on the clipboard
 toktape render                                          # the newest run as a GIF
 ```
 
@@ -239,7 +239,7 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 | 動詞 | 役割 | 例 |
 | --- | --- | --- |
 | `record` | アタッチして実行を記録する。既定の動詞 | `toktape --sessions 4 --for 30s` |
-| `card` | テープからカードを描き直す | `toktape card <tape> --png` |
+| `card` | テープからカードを描き直す | `toktape card <tape> -o png` |
 | `play` | ライブ画面で実行をリプレイする | `toktape play <tape> --speed 4` |
 | `render` | GIF、mp4、asciicast、PNG フレームとして書き出す | `toktape render <tape> --mp4 clip.mp4` |
 | `ls` | 記録した実行の一覧 | `toktape ls` |
@@ -269,7 +269,7 @@ speculative `n_max` の値ごとに 1 回ずつ流して同じテープに記録
 同じ意味で、指定すると時計が切れる）、`--out`（既定
 `~/.toktape/runs`）、`--tag`、`--note`、`--wait`、`--tui`、
 `--grid COLSxROWS`（既定 `2x4`、`0` で端末に合わせる）、`--no-card`、
-`--json`、`--quiet`。
+`-o FORMAT`、`--quiet`。
 
 **サンプリングとエンドポイント。** リクエストの形は、サーバーを起動したときの
 フラグと同じくらい数値を動かします。同じ推論モデル、同じ 20 個のプロンプト、同じ
@@ -287,9 +287,19 @@ speculative `n_max` の値ごとに 1 回ずつ流して同じテープに記録
 テープにそのまま残り、カードに名前が出るので、二枚のカードは比較できるか、なぜ
 比較できないかを語ります。
 
-**card:** `--md`（フェンス内のカードと llama-bench 互換の表）、`--json`（実行
-サマリー）、`--png [FILE]`（1200×675 の共有画像）、`--copy`（OSC 52 で
-クリップボードにもコピー）。`--md` と `--json` はどちらか一方です。
+**出力形式。** `-o FORMAT`（または `--output FORMAT`）は llama-bench の `-o` で、
+形式の名前も llama-bench の言葉そのままです。`record` と `card` は `json`（実行
+サマリー）、`jsonl`（同じオブジェクトを 1 行で。複数の実行を 1 つのファイルに
+追記できます）、`md`、そして `csv`・`tsv`・`sql`（1 回の実行を台帳の 1 行として）を
+出し、`log` はすべての実行を同じ 6 形式で出します。`md` だけは llama-bench と意味が
+違います。カードではフェンス内のカード、llama-bench 互換の表、Reproduce ブロックで、
+`log` では台帳をそのまま移した Markdown の表です。`sql` は `runs` テーブルがなければ
+作り、実行ごとに 1 行ずつ入れるので、`toktape log -o sql | sqlite3 runs.db` の
+1 行でデータベースになります。動詞が受け付けない形式を渡すと断り、受け付ける形式を
+示します。
+
+**card:** 上の形式に加えて `-o png [FILE]`（1200×675 の共有画像。ファイルを指定
+しなければテープの隣に書きます）、`--copy`（OSC 52 でクリップボードにもコピー）。
 
 **render:** `--gif FILE`、`--mp4 FILE`（`PATH` に ffmpeg が必要）、`--cast FILE`
 （asciicast v2）、`--frames DIR`（PNG シーケンス）、`--duration`、`--fps`、
@@ -297,8 +307,8 @@ speculative `n_max` の値ごとに 1 回ずつ流して同じテープに記録
 付けます）。複数の出力を一度に指定すると、同じフレームから一緒に生成されます。
 テープを指定しなければ最新の実行が使われます。
 
-**log:** `--sort`、`--model`、`--tag`、`-n`、`--tsv`、`--csv`、`--json`、
-`--md`、`--rebuild`、`--out`。
+**log:** `--sort`、`--model`、`--tag`、`--limit N`、`-o FORMAT`、`--rebuild`、
+`--out`。
 
 ## エージェントから動かす
 
@@ -311,11 +321,11 @@ toktape を実際に叩くのは、多くの場合、人ではなく Claude Code
   はマシンごとに違う時間を意味し、その時間こそ今から測ろうとしているものです。
 - **数字を引く前に `caveats` を読む。** カードは出す数字ごとに但し書きを付け
   ます。速度と呼ぶには短すぎる生成、prefill の測定と呼ぶには短すぎるプロンプト、
-  忙しいマシン。`--json` は同じ但し書きを一つの配列で一緒に返します。それを
+  忙しいマシン。`-o json` は同じ但し書きを一つの配列で一緒に返します。それを
   読むエージェントは、カードなら脚注を付けたはずの数字をそのまま引くことが
   できません。
 - **終了コードで分岐する。メッセージでは分岐しない。** どの動詞も文書化された
-  五つのコードのどれかで終わり、`--json` は成功でも失敗でも stdout にオブジェクト
+  五つのコードのどれかで終わり、`-o json` は成功でも失敗でも stdout にオブジェクト
   を一つだけ出します。パース経路は二つではなく一つです。
 - **タイムアウトに収まるかは二つのフラグが決める。** `--wait` の既定は 10 分。
   450 GB のモデルを読み込み中のサーバーは待つ価値があるからです。生成そのものの
@@ -330,15 +340,15 @@ toktape を実際に叩くのは、多くの場合、人ではなく Claude Code
 ```sh
 toktape --tag ngl=40 --note "fa on"     # record, labelled
 toktape log --sort decode                # which setting won
-toktape log --tag ngl --md               # paste into an issue
+toktape log --tag ngl -o md              # paste into an issue
 toktape log --rebuild                    # regenerate from the tapes
 ```
 
-不明な値は端末では `?`、エクスポートでは空セルです。数値列は数値として
-インポートされます。
+不明な値は端末では `?`、エクスポートでは空セル、`-o sql` では `NULL` です。
+だから数値列が数値としてインポートされます。
 
 ```sh
-sqlite3 runs.db ".import --tsv ~/.toktape/runs/runs.tsv runs"
+toktape log -o sql | sqlite3 runs.db
 duckdb -c "select tag, decode_tok_s from read_csv('~/.toktape/runs/runs.tsv')"
 ```
 

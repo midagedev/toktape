@@ -65,7 +65,7 @@ While iterating, run the package you touched (`go test ./internal/tui
 | `internal/procmon` | `/proc` collector: RSS, page faults, cmdline (Linux; stubs elsewhere) |
 | `internal/gpu` | `nvidia-smi` collector |
 | `internal/placement` | where the model sits: weights / KV / compute per device, never-loaded bytes from GGUF headers |
-| `internal/card` | the 72-column text card, `--md`, `--json`; `card/png` is the 1200×675 image |
+| `internal/card` | the 72-column text card, `-o md`, `-o json`; `card/png` is the 1200×675 image |
 | `internal/tui` | the live screen: tiles, right pane, sparklines, replay (`play`) |
 | `internal/render` | headless clip pipeline: schedule, rasteriser, GIF, mp4, asciicast; `cmd/hero` regenerates `assets/hero.gif` |
 | `internal/ledger` | `runs.tsv` and `toktape log` |

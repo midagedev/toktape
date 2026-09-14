@@ -62,11 +62,11 @@ func TestExplainGoesToStderr(t *testing.T) {
 	}
 }
 
-// TestExplainDoesNotContaminateJSON: --json's contract is exactly one object on
+// TestExplainDoesNotContaminateJSON: -o json's contract is exactly one object on
 // stdout, and a diagnostic must not be able to break it.
 func TestExplainDoesNotContaminateJSON(t *testing.T) {
 	path := explainTape(t)
-	code, stdout, stderr := exec(t, "card", path, "--json", "--explain")
+	code, stdout, stderr := exec(t, "card", path, "-o", "json", "--explain")
 	if code != exitOK {
 		t.Fatalf("exit %d\nstderr:\n%s", code, stderr)
 	}

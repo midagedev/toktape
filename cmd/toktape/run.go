@@ -15,7 +15,7 @@ import (
 // Exit codes. They are part of the CLI contract: a wrapper script branches on
 // them without parsing the message. Their names are in exitCodeNames, they are
 // listed in usageText, and every one of them is reached through cli.fail, so
-// the code, the sentence and the --json object cannot disagree.
+// the code, the sentence and the -o json object cannot disagree.
 const (
 	exitOK    = 0
 	exitUsage = 1
@@ -78,13 +78,14 @@ Record flags:
   --grid COLSxROWS      tiles per page on the live screen (default 2x4; 0
                         fits it to the terminal). ←/→ change page
   --no-card             do not render or save the card
-  --json                print the run summary as JSON instead of the card
+  -o, --output FORMAT   json, jsonl, md, csv, tsv or sql instead of the card
   --quiet               no progress lines on stderr
 
 Card flags:
-  --md                  Markdown: the card in a fence plus a llama-bench table
-  --json                the run summary as JSON
-  --png [FILE]          write the 1200x675 share image (default: next to the tape)
+  -o, --output FORMAT   any record takes, or png [FILE]: the 1200x675 share image
+                        (default: next to the tape). md is the card in a fence,
+                        a llama-bench table and a Reproduce block — more than
+                        llama-bench's own -o md, which is the table alone
   --copy                also copy the output to the clipboard (OSC 52)
   --explain             why the card says what it says, on stderr as well
 
@@ -102,7 +103,10 @@ Examples:
   toktape --url http://127.0.0.1:9000 --sessions 4 -n 256
 
   # Machine-readable: the run summary on stdout and nothing else.
-  toktape --json --quiet > run.json
+  toktape -o json --quiet > run.json
+
+  # Every run recorded here as a SQLite table, its numbers stored as numbers.
+  toktape log -o sql | sqlite3 runs.db
 
   # Re-render the card of a run you already have. Costs nothing and touches
   # no server.
@@ -121,9 +125,9 @@ Exit codes:
   3  streams      the server answered and every stream failed
   4  unavailable  this machine lacks something the output needs (ffmpeg)
 
-With --json every outcome is one JSON object on stdout: the run summary on
-success, {"error":{"code":...}} on failure, code being the name above. The
-fields worth reading: toktape help agents
+With -o json or -o jsonl every outcome is one JSON object on stdout: the run
+summary on success, {"error":{"code":...}} on failure, code being the name
+above. The fields worth reading: toktape help agents
 `
 
 // Run executes one invocation and returns the process exit code. It writes
@@ -205,7 +209,7 @@ func splitVerb(args []string) (verb string, rest []string) {
 // returns the positional ones.
 //
 // Go's flag package stops at the first non-flag, so `toktape card run.tape
-// --md` would otherwise leave --md unparsed and silently print the plain
+// -o md` would otherwise leave -o unparsed and silently print the plain
 // card. Every verb here takes its file arguments before its flags, because
 // that is the order a person types them.
 func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
@@ -226,7 +230,7 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 // testable, and that says nothing of its own.
 //
 // Its output is discarded because a rejected invocation owes three things at
-// once — an exit code, a sentence and, under --json, an object on stdout — and
+// once — an exit code, a sentence and, under -o json, an object on stdout — and
 // the flag package can only provide one of them. cli.badFlags writes all three
 // from the error it returns instead (TTP-71).
 func newFlagSet(name string) *flag.FlagSet {

@@ -59,13 +59,20 @@ import (
 const defaultMaxSessions = 8
 
 // retiredFlags answers a flag that is not declared any more, or that belongs to
-// a neighbouring tool, with the one this tool uses instead. cli.badFlags reads
-// it, so the answer arrives with the rejection rather than after a trip to
-// --help.
-var retiredFlags = map[string]string{
-	"concurrency": "streams at once is --sessions N; -n is tokens per stream, as in llama-bench",
-	"parallel":    "--parallel is llama-server's slot count; the streams toktape sends at once are --sessions N",
-	"np":          "-np is llama-server's slot count; the streams toktape sends at once are --sessions N",
+// a neighbouring tool, with the one this tool uses instead, per verb.
+// cli.badFlags reads it, so the answer arrives with the rejection rather than
+// after a trip to --help. The per-format booleans -o replaced are answered by
+// formatHintFor instead, from the matrix, so the hint cannot name a format the
+// verb refuses.
+var retiredFlags = map[string]map[string]string{
+	"record": {
+		"concurrency": "streams at once is --sessions N; -n is tokens per stream, as in llama-bench",
+		"parallel":    "--parallel is llama-server's slot count; the streams toktape sends at once are --sessions N",
+		"np":          "-np is llama-server's slot count; the streams toktape sends at once are --sessions N",
+	},
+	"log": {
+		"n": "at most N rows is --limit N; -n is record's tokens per stream, as in llama-bench",
+	},
 }
 
 // pinCollectors is the seam the tests use to keep the record verb off this
@@ -96,8 +103,8 @@ type recordConfig struct {
 	outDir string
 	// card is false under --no-card: no card is rendered, saved or printed.
 	card bool
-	// asJSON prints the summary instead of the card.
-	asJSON bool
+	// format is -o: what is printed instead of the text card.
+	format outputFormat
 	quiet  bool
 }
 
@@ -116,7 +123,7 @@ type recordFlags struct {
 	nPredict       *int
 	outDir         *string
 	noCard         *bool
-	asJSON         *bool
+	output         *string
 	quiet          *bool
 	useTUI         *bool
 	grid           *string
@@ -157,7 +164,7 @@ func declareRecordFlags(fs *flag.FlagSet) *recordFlags {
 	fs.IntVar(f.nPredict, "n", 0, "max tokens per stream (short for --n-predict)")
 	f.outDir = fs.String("out", defaultRunsDir(), "directory for run files")
 	f.noCard = fs.Bool("no-card", false, "do not render or save the card")
-	f.asJSON = fs.Bool("json", false, "print the run summary as JSON")
+	f.output = declareOutputFlag(fs)
 	f.quiet = fs.Bool("quiet", false, "no progress lines on stderr")
 	f.useTUI = fs.Bool("tui", false, "watch the run on the live two-pane screen")
 	f.grid = fs.String("grid", tui.DefaultGrid.String(), "tile grid per page as COLSxROWS (0 = fit to the terminal)")
@@ -209,7 +216,11 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 	if err != nil {
 		return c.badFlags("record", usageText, args, err)
 	}
-	c.json = *f.asJSON
+	format, refused := outputFor("record", *f.output)
+	c.json = format.isJSON()
+	if refused != nil {
+		return c.fail(*refused)
+	}
 	if len(extra) > 0 {
 		return c.usagef("toktape record: unexpected argument %q", extra[0])
 	}
@@ -306,7 +317,7 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 	}
 	recordGrid = parsedGrid
 	recordLabels = runLabels{tag: *f.tag, note: *f.note}
-	cfg := recordConfig{outDir: *f.outDir, card: !*f.noCard, asJSON: *f.asJSON, quiet: *f.quiet}
+	cfg := recordConfig{outDir: *f.outDir, card: !*f.noCard, format: format, quiet: *f.quiet}
 
 	if *f.useTUI {
 		if isTTY(c.stdout) {
@@ -411,19 +422,18 @@ func recordPlain(ctx context.Context, c *cli, opts recorder.Options, cfg recordC
 	return exitOK
 }
 
-// printCard writes the run's product to stdout: the card, or the summary under
-// --json, or nothing under --no-card.
+// printCard writes the run's product to stdout: the -o format when one was
+// named, else the card, or nothing under --no-card. --no-card is about the
+// card, so a named format is printed either way.
 func printCard(c *cli, tp *tape.Tape, cfg recordConfig) int {
-	switch {
-	case cfg.asJSON:
-		b, err := card.JSON(&tp.Summary)
-		if err != nil {
-			return c.usagef("toktape: %v", err)
-		}
-		fmt.Fprintf(c.stdout, "%s\n", b)
-	case cfg.card:
-		fmt.Fprint(c.stdout, card.Text(&tp.Summary))
+	if cfg.format == outputDefault && !cfg.card {
+		return exitOK
 	}
+	out, err := renderRun(tp, cfg.format)
+	if err != nil {
+		return c.usagef("toktape: %v", err)
+	}
+	fmt.Fprint(c.stdout, out)
 	return exitOK
 }
 
@@ -496,7 +506,7 @@ func shareHint(outDir string, tp *tape.Tape, a artifacts) string {
 	if a.tape == "" {
 		return b.String()
 	}
-	fmt.Fprintf(&b, "→ Post it:  toktape card %s --md --copy    (Reddit-ready, copied to clipboard)\n",
+	fmt.Fprintf(&b, "→ Post it:  toktape card %s -o md --copy    (Reddit-ready, copied to clipboard)\n",
 		tildePath(a.tape))
 	// The tape is what separates a posted card from a screenshot: a reader who
 	// has the file can replay the run instead of taking the numbers on trust.

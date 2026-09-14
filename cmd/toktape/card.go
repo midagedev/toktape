@@ -18,9 +18,7 @@ import (
 // reason recordFlags is: the examples printed in --help are parsed against the
 // real flag set, and a copy of the list in a test is what goes stale.
 type cardFlags struct {
-	md      *bool
-	asJSON  *bool
-	asPNG   *bool
+	output  *string
 	copyTo  *bool
 	explain *bool
 }
@@ -28,9 +26,7 @@ type cardFlags struct {
 // declareCardFlags registers the card verb's flags on fs.
 func declareCardFlags(fs *flag.FlagSet) *cardFlags {
 	return &cardFlags{
-		md:     fs.Bool("md", false, "render Markdown with a llama-bench table"),
-		asJSON: fs.Bool("json", false, "render the run summary as JSON"),
-		asPNG:  fs.Bool("png", false, "write the share image instead of printing a card"),
+		output: declareOutputFlag(fs),
 		copyTo: fs.Bool("copy", false, "copy the output to the clipboard (OSC 52)"),
 		// One flag for two packages (TTP-74/TTP-56, 2026-09-14). The question
 		// it answers is "why does this card not say X", and the reader asking
@@ -48,23 +44,23 @@ func declareCardFlags(fs *flag.FlagSet) *cardFlags {
 func runCard(c *cli, args []string) int {
 	fs := newFlagSet("card")
 	f := declareCardFlags(fs)
-	md, asJSON, asPNG, copyTo := f.md, f.asJSON, f.asPNG, f.copyTo
 	var outPath string
 	files, err := parseArgs(fs, args)
 	if err != nil {
 		return c.badFlags("card", usageText, args, err)
 	}
-	c.json = *asJSON
-	// With --png a second positional argument is where the image goes. Without
-	// it, a second file is a mistake worth naming rather than ignoring.
-	if *asPNG && len(files) == 2 {
+	format, refused := outputFor("card", *f.output)
+	c.json = format.isJSON()
+	if refused != nil {
+		return c.fail(*refused)
+	}
+	// With -o png a second positional argument is where the image goes.
+	// Without it, a second file is a mistake worth naming rather than ignoring.
+	if format == outputPNG && len(files) == 2 {
 		outPath, files = files[1], files[:1]
 	}
 	if len(files) != 1 {
 		return c.usageTextf(usageText, "toktape card: expected one tape file")
-	}
-	if *md && *asJSON {
-		return c.usagef("toktape card: --md and --json are alternatives, not a pair")
 	}
 
 	tp, err := tape.Read(files[0])
@@ -76,26 +72,17 @@ func runCard(c *cli, args []string) int {
 		explainCard(c.stderr, &tp.Summary)
 	}
 
-	if *asPNG {
+	if format == outputPNG {
 		return writeCardPNG(c, files[0], outPath, &tp.Summary)
 	}
 
-	var out string
-	switch {
-	case *asJSON:
-		b, err := card.JSON(&tp.Summary)
-		if err != nil {
-			return c.usagef("toktape: %v", err)
-		}
-		out = string(b) + "\n"
-	case *md:
-		out = card.Markdown(&tp.Summary)
-	default:
-		out = card.Text(&tp.Summary)
+	out, err := renderRun(tp, format)
+	if err != nil {
+		return c.usagef("toktape: %v", err)
 	}
 	fmt.Fprint(c.stdout, out)
 
-	if *copyTo {
+	if *f.copyTo {
 		copyOSC52(c.stderr, out)
 	}
 	return exitOK
@@ -106,10 +93,10 @@ func runCard(c *cli, args []string) int {
 // built from, including the ones that made a clause report nothing.
 //
 // It goes to stderr, which is where this program's diagnostics go (see Run):
-// stdout carries the product, and with --json it carries exactly one JSON
+// stdout carries the product, and with -o json it carries exactly one JSON
 // object, which is a contract a diagnostic must not be able to break. That
 // also makes the flag an ADDITION to whatever rendering was asked for rather
-// than an alternative to it — `card --json --explain 2>why.txt` leaves a
+// than an alternative to it — `card -o json --explain 2>why.txt` leaves a
 // parseable object on stdout and the workings in a file.
 //
 // Neither explainer can fail. A run they can say nothing about produces a

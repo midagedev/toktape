@@ -70,7 +70,7 @@ func TestHelpBeatsRecord(t *testing.T) {
 	if verb, rest := splitVerb(nil); verb != "record" || len(rest) != 0 {
 		t.Errorf("bare toktape is %q / %v, want record", verb, rest)
 	}
-	if verb, rest := splitVerb([]string{"card", "a.tape", "--md"}); verb != "card" || len(rest) != 2 {
+	if verb, rest := splitVerb([]string{"card", "a.tape", "-o=md"}); verb != "card" || len(rest) != 2 {
 		t.Errorf("splitVerb = %q / %v, want card", verb, rest)
 	}
 }
@@ -102,24 +102,24 @@ func TestCardVerb(t *testing.T) {
 		}
 	}
 
-	code, mdOut, _ := exec(t, "card", path, "--md")
+	code, mdOut, _ := exec(t, "card", path, "-o", "md")
 	if code != exitOK {
-		t.Fatalf("--md exit %d", code)
+		t.Fatalf("-o md exit %d", code)
 	}
 	if !strings.Contains(mdOut, "```") || !strings.Contains(mdOut, "| model") {
-		t.Error("--md did not produce a fence and a llama-bench table")
+		t.Error("-o md did not produce a fence and a llama-bench table")
 	}
 
-	code, jsonOut, _ := exec(t, "card", path, "--json")
+	code, jsonOut, _ := exec(t, "card", path, "-o", "json")
 	if code != exitOK {
-		t.Fatalf("--json exit %d", code)
+		t.Fatalf("-o json exit %d", code)
 	}
 	var s tape.RunSummary
 	if err := json.Unmarshal([]byte(jsonOut), &s); err != nil {
-		t.Fatalf("--json is not valid JSON: %v", err)
+		t.Fatalf("-o json is not valid JSON: %v", err)
 	}
 	if s.ID != card.Example().ID {
-		t.Errorf("--json summary ID = %q", s.ID)
+		t.Errorf("-o json summary ID = %q", s.ID)
 	}
 }
 
@@ -133,8 +133,8 @@ func TestCardVerbUsageErrors(t *testing.T) {
 	if code, _, _ := exec(t, "card", filepath.Join(dir, "missing.tape")); code != exitUsage {
 		t.Errorf("missing file: exit %d, want %d", code, exitUsage)
 	}
-	if code, _, _ := exec(t, "card", path, "--md", "--json"); code != exitUsage {
-		t.Errorf("--md --json together: exit %d, want %d", code, exitUsage)
+	if code, _, _ := exec(t, "card", path, "-o", "xml"); code != exitUsage {
+		t.Errorf("-o xml: exit %d, want %d", code, exitUsage)
 	}
 }
 

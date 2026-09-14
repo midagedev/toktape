@@ -27,7 +27,7 @@ func countingServer(t *testing.T) (string, *atomic.Int32) {
 	return srv.URL, &hits
 }
 
-// errorHint is the hint of the one JSON error object a failed --json run
+// errorHint is the hint of the one JSON error object a failed -o json run
 // prints.
 func errorHint(t *testing.T, stdout string) string {
 	t.Helper()
@@ -38,7 +38,7 @@ func errorHint(t *testing.T, stdout string) string {
 		} `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
-		t.Fatalf("--json failure is not one JSON object: %v\n%s", err, stdout)
+		t.Fatalf("-o json failure is not one JSON object: %v\n%s", err, stdout)
 	}
 	if got.Error.Code != "usage" {
 		t.Errorf("error.code = %q, want usage", got.Error.Code)
@@ -104,7 +104,7 @@ func TestSessionCeilingRefuses(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			url, hits := countingServer(t)
-			args := append([]string{"--url", url, "--wait", "0", "--out", t.TempDir(), "--json"}, tc.args...)
+			args := append([]string{"--url", url, "--wait", "0", "--out", t.TempDir(), "-o", "json"}, tc.args...)
 			code, stdout, stderr := exec(t, args...)
 			if code != exitUsage {
 				t.Fatalf("exit %d, want %d\nstderr:\n%s", code, exitUsage, stderr)
@@ -154,7 +154,7 @@ func TestSessionCeilingLetsThrough(t *testing.T) {
 func TestSlotRefusalReachesTheDoor(t *testing.T) {
 	hermetic(t)
 	srv := cliServer(t)
-	code, stdout, stderr := exec(t, "--url", srv.URL, "--out", t.TempDir(), "--sessions", "5", "-n", "8", "--json")
+	code, stdout, stderr := exec(t, "--url", srv.URL, "--out", t.TempDir(), "--sessions", "5", "-n", "8", "-o", "json")
 	if code != exitUsage {
 		t.Fatalf("exit %d, want %d\n%s", code, exitUsage, stderr)
 	}
@@ -183,7 +183,7 @@ func TestRetiredFlagsNameTheirReplacement(t *testing.T) {
 		{"-np", []string{"llama-server's slot count", "--sessions N"}},
 	} {
 		t.Run(tc.flag, func(t *testing.T) {
-			code, stdout, stderr := exec(t, tc.flag, "4", "--json")
+			code, stdout, stderr := exec(t, tc.flag, "4", "-o", "json")
 			if code != exitUsage {
 				t.Fatalf("exit %d, want %d: %s must not parse\n%s", code, exitUsage, tc.flag, stderr)
 			}
@@ -199,7 +199,7 @@ func TestRetiredFlagsNameTheirReplacement(t *testing.T) {
 		})
 	}
 	// A flag this verb never had is not given somebody else's advice.
-	if _, stdout, _ := exec(t, "--nope", "--json"); errorHint(t, stdout) != "" {
+	if _, stdout, _ := exec(t, "--nope", "-o", "json"); errorHint(t, stdout) != "" {
 		t.Errorf("an unknown flag got a retired-flag hint: %s", stdout)
 	}
 }

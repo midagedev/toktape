@@ -171,8 +171,8 @@ toktape --sessions 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
 **Share it:**
 
 ```sh
-toktape card ~/.toktape/runs/<id>.tape --png           # 1200×675 image next to the tape
-toktape card ~/.toktape/runs/<id>.tape --md --copy     # card + llama-bench table, on the clipboard
+toktape card ~/.toktape/runs/<id>.tape -o png          # 1200×675 image next to the tape
+toktape card ~/.toktape/runs/<id>.tape -o md --copy    # card + llama-bench table, on the clipboard
 toktape render                                          # the newest run as a GIF
 ```
 
@@ -237,7 +237,7 @@ side by side. Each field is there because it settles an argument.
 | verb | what it does | example |
 | --- | --- | --- |
 | `record` | attach and record a run; the default verb | `toktape --sessions 4 --for 30s` |
-| `card` | re-render a card from a tape | `toktape card <tape> --png` |
+| `card` | re-render a card from a tape | `toktape card <tape> -o png` |
 | `play` | replay a run on the live screen | `toktape play <tape> --speed 4` |
 | `render` | render a run as GIF, mp4, asciicast or PNG frames | `toktape render <tape> --mp4 clip.mp4` |
 | `ls` | list recorded runs | `toktape ls` |
@@ -267,7 +267,7 @@ speculative `n_max`, all in one tape, with a card line per value),
 turns the clock off), `--out`
 (default `~/.toktape/runs`), `--tag`, `--note`, `--wait`, `--tui`,
 `--grid COLSxROWS` (default `2x4`, `0` fits the terminal), `--no-card`,
-`--json`, `--quiet`.
+`-o FORMAT` (below), `--quiet`.
 
 **Sampling and the endpoint.** How the request is shaped moves the number as
 much as the flags the server was started with. On one reasoning model, twenty
@@ -286,9 +286,19 @@ belongs to the template, and a raw prompt has none. Whatever is sent is
 recorded in the tape and named on the card, so two cards are comparable or
 they say why they are not.
 
-**Card:** `--md` (the card in a fence plus a llama-bench compatible table),
-`--json` (the run summary), `--png [FILE]` (1200×675 share image), `--copy`
-(also to the clipboard over OSC 52). `--md` and `--json` are alternatives.
+**Output formats.** `-o FORMAT`, or `--output FORMAT`, is llama-bench's `-o`
+with llama-bench's words. `record` and `card` print `json` (the run summary),
+`jsonl` (the same object on one line, so runs append to one file), `md`, and
+`csv`, `tsv` or `sql` (the run as one ledger row); `log` prints every run in
+the same six. `md` is not llama-bench's: on a card it is the card in a fence, a
+llama-bench compatible table and a Reproduce block, and on `log` it is the
+ledger as a Markdown table. `sql` creates the `runs` table when it is missing
+and inserts one row per run, so `toktape log -o sql | sqlite3 runs.db` is a
+database. A verb refuses a format it does not take and names the ones it does.
+
+**Card:** `-o png [FILE]` (the 1200×675 share image, next to the tape unless a
+file is named) besides the formats above, and `--copy` (also to the clipboard
+over OSC 52).
 
 **Render:** `--gif FILE`, `--mp4 FILE` (needs ffmpeg on `PATH`), `--cast FILE`
 (asciicast v2), `--frames DIR` (PNG sequence), `--duration`, `--fps`,
@@ -296,8 +306,8 @@ they say why they are not.
 run). Name several outputs at once and they come out of the same frames. With
 no tape named, the newest run is used.
 
-**Log:** `--sort`, `--model`, `--tag`, `-n`, `--tsv`, `--csv`, `--json`,
-`--md`, `--rebuild`, `--out`.
+**Log:** `--sort`, `--model`, `--tag`, `--limit N`, `-o FORMAT`, `--rebuild`,
+`--out`.
 
 ## Running it from an agent
 
@@ -312,11 +322,11 @@ The short version:
   the thing you are recording to find out.
 - **Read `caveats` before quoting a figure.** The card qualifies every number
   it prints — a generation too short to be a rate, a prompt too short to be a
-  prefill measurement, a busy machine — and `--json` carries the same
+  prefill measurement, a busy machine — and `-o json` carries the same
   qualifications as one array. An agent that reads it cannot quote a number
   the card would have footnoted.
 - **Branch on the exit code, never on the message.** Every verb ends on one
-  of five documented codes, and `--json` prints one object on stdout whether
+  of five documented codes, and `-o json` prints one object on stdout whether
   the run succeeded or failed, so there is one parse path and not two.
 - **Two flags decide whether it fits your timeout.** `--wait` defaults to ten
   minutes, because a server loading a 450 GB model is worth waiting for;
@@ -331,15 +341,15 @@ table instead of a folder of cards. Label runs as you go with `--tag` and
 ```sh
 toktape --tag ngl=40 --note "fa on"     # record, labelled
 toktape log --sort decode                # which setting won
-toktape log --tag ngl --md               # paste into an issue
+toktape log --tag ngl -o md              # paste into an issue
 toktape log --rebuild                    # regenerate from the tapes
 ```
 
-Unknown is `?` on the terminal and an empty cell in every export, so the
-numeric columns import as numbers:
+Unknown is `?` on the terminal, an empty cell in every export and `NULL` in
+`-o sql`, so the numeric columns import as numbers:
 
 ```sh
-sqlite3 runs.db ".import --tsv ~/.toktape/runs/runs.tsv runs"
+toktape log -o sql | sqlite3 runs.db
 duckdb -c "select tag, decode_tok_s from read_csv('~/.toktape/runs/runs.tsv')"
 ```
 

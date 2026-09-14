@@ -29,8 +29,8 @@ func agentsTopic() string {
 The contract
   Every invocation ends in one of five exit codes, listed in ` + "`toktape --help`" + `.
   Branch on the code, never on the message; the messages are for people.
-  With --json, stdout carries exactly one JSON object either way, so there is
-  one parse path and not two.
+  With -o json (or -o jsonl), stdout carries exactly one JSON object either
+  way, so there is one parse path and not two.
 
 Careful: the default verb generates load
   ` + "`toktape`" + ` with no verb is ` + "`toktape record`" + `: it attaches to a running
@@ -58,11 +58,13 @@ Careful: one invocation can block for ten minutes
   caller with a timeout of its own should pass --wait 0 (fail fast if the
   server is not ready) or a short budget such as --wait 30s.
 
---json on success
-  ` + "`record --json`" + ` and ` + "`card <tape> --json`" + ` print the run summary — the same
-  object the .tape file stores under "summary". It has no "error" key; that
-  is how a reader tells success from failure. Pin the shape with
-  "toktape_version". The fields most callers want:
+-o json on success
+  ` + "`record -o json`" + ` and ` + "`card <tape> -o json`" + ` print the run summary — the
+  same object the .tape file stores under "summary". ` + "`-o jsonl`" + ` prints the
+  same object on one line and nothing else on it, so runs appended to one
+  file stay one object per line. It has no "error" key; that is how a reader
+  tells success from failure. Pin the shape with "toktape_version". The
+  fields most callers want:
 
     id                            the run id, and the .tape file's basename
     toktape_version               the build that recorded it
@@ -129,13 +131,19 @@ Why a card does not say what you expected
   its verdict and the reading behind it — INCLUDING the checks that did not
   fire — and then every figure the bandwidth clauses are built from, including
   the ones that made a clause report nothing. It is an addition to whatever
-  rendering was asked for, so ` + "`--json --explain`" + ` still leaves exactly one
+  rendering was asked for, so ` + "`-o json --explain`" + ` still leaves exactly one
   object on stdout.
 
-  ` + "`log --json`" + ` is a different shape: one JSON array, one object per recorded
-  run, every value a string.
+The ledger formats
+  ` + "`log -o json`" + ` is a different shape: one JSON array of ledger rows, one
+  object per recorded run, every value a string. ` + "`log -o jsonl`" + ` is the same
+  objects one per line. ` + "`-o csv`" + `, ` + "`-o tsv`" + ` and ` + "`-o sql`" + ` are the same columns;
+  sql creates the "runs" table if it is missing and inserts one row per run,
+  with unknown as NULL, so ` + "`toktape log -o sql | sqlite3 runs.db`" + ` is a
+  database. On record and card, csv, tsv and sql are that run's one row.
+  Each verb refuses a format it does not take and names the ones it does.
 
---json on failure
+-o json on failure
   {"toktape_version":"` + version + `","schema_version":` + strconv.Itoa(tape.SchemaVersion) + `,
    "error":{"code":"unreachable","exit":2,"message":"toktape: ...",
             "hint":"..."}}

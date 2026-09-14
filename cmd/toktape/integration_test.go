@@ -48,7 +48,7 @@ func TestCardVerbWritesPNG(t *testing.T) {
 	tapePath := writeTape(t, dir, &tape.RunSummary{ID: "20260913-101500-qwen3", Concurrency: 1})
 
 	t.Run("default destination", func(t *testing.T) {
-		code, stdout, stderr := exec(t, "card", tapePath, "--png")
+		code, stdout, stderr := exec(t, "card", tapePath, "-o", "png")
 		if code != exitOK {
 			t.Fatalf("exit %d: %s", code, stderr)
 		}
@@ -61,7 +61,7 @@ func TestCardVerbWritesPNG(t *testing.T) {
 
 	t.Run("explicit destination", func(t *testing.T) {
 		out := filepath.Join(t.TempDir(), "post.png")
-		code, _, stderr := exec(t, "card", tapePath, "--png", out)
+		code, _, stderr := exec(t, "card", tapePath, "-o", "png", out)
 		if code != exitOK {
 			t.Fatalf("exit %d: %s", code, stderr)
 		}
@@ -626,7 +626,7 @@ func TestShareHintNamesTheTape(t *testing.T) {
 }
 
 // TestCardMarkdownCarriesReproduce walks the real path a poster takes: a tape
-// written to disk, read back, and rendered with --md. The Reproduce block is
+// written to disk, read back, and rendered with -o md. The Reproduce block is
 // built from fields that survive the gzip'd JSON round trip, so the argv a
 // reader pastes is the one the recorder read off /proc, not a re-derivation.
 func TestCardMarkdownCarriesReproduce(t *testing.T) {
@@ -634,7 +634,7 @@ func TestCardMarkdownCarriesReproduce(t *testing.T) {
 	s := card.ExampleConcurrent()
 	path := writeTape(t, dir, s)
 
-	code, out, stderr := exec(t, "card", path, "--md")
+	code, out, stderr := exec(t, "card", path, "-o", "md")
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -647,7 +647,7 @@ func TestCardMarkdownCarriesReproduce(t *testing.T) {
 		"</details>",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("--md output is missing %q:\n%s", want, out)
+			t.Errorf("-o md output is missing %q:\n%s", want, out)
 		}
 	}
 }
