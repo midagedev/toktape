@@ -90,41 +90,23 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **A run is aimed in seconds now.** `toktape` with no flags gives a 20 s
-    run, and `--for 45s` gives a 45 s one, whatever the tokens per second. No
-    stream is cut under 64 tokens, so a slow box runs longer rather than
-    reporting a rate from four tokens.
+    **A clip can skip the wait for prefill without speeding anything up.**
+    `toktape render <tape> --prefill-lead 3s` opens the clip three seconds
+    before the first token instead of at the run's start. Nothing is
+    compressed: every frame that is in the clip plays at 1:1, and the tile's
+    clock is still measured from the run's start, so the clip opens on the
+    true elapsed time and says for itself how much of the wait is not shown.
+    On a box whose prefill takes ten seconds, that is the difference between a
+    clip that opens on a spinner and one that opens on tokens.
 
-    **`-n` means tokens per stream, as in llama-bench.** Concurrent streams are
-    `--sessions N`, capped at 8 unless `--max-sessions` raises it. This is a
-    breaking rename: `-n 4` used to mean four streams and now means four
-    tokens. Nothing is aliased — the old spelling is gone, on purpose, while
-    the tool is young enough to change it cleanly.
+    This repo's own hero is rendered that way —
+    [33 s](https://drive.google.com/file/d/1Z07G3-fiRBpMu_T9efOdb_vmCobCNaLD/view?usp=drivesdk),
+    where the same run from its start is 42 s. The recording is unchanged from
+    v0.2.0; only the window onto it moved.
 
-    **One output flag.** `-o csv|json|jsonl|md|sql|tsv`, on every verb that has
-    something to print, in llama-bench's vocabulary. `toktape log -o sql |
-    sqlite3 runs.db` gives you every run you have recorded as a table, numbers
-    stored as numbers and unknowns as NULL.
-
-    **The card says when not to quote it.** Every card ends with its caveats —
-    a cold cache, a prompt too short to be a prefill measurement, a stream too
-    short to be a rate, a machine that changed under the run — and `-o json`
-    carries the same list as `caveats`, each with a severity. It is the field
-    to read before putting a number in a post.
-
-    **For agents.** Documented exit codes (0 ok, 1 usage, 2 unreachable,
-    3 streams, 4 unavailable), one JSON object on stdout whether the run
-    succeeds or fails, `toktape help agents`, and `docs/agents.md`.
-
-    New measurements: bytes per verify step for a speculative run, the engine's
-    own prefill split from the wait for a free slot, and per-round prefill and
-    prefix-cache figures.
-
-    The clip and the card below were recorded with this build on a 444 GiB
-    model served from a 251 GB box — [33 s](https://drive.google.com/file/d/1Z07G3-fiRBpMu_T9efOdb_vmCobCNaLD/view?usp=drivesdk).
-    It joins the run three seconds before its first token (`--prefill-lead 3s`,
-    new in this build); the clock it opens on says how much of the wait for
-    prefill is not in it, and everything that is in it plays at 1:1.
+    Coming from v0.1.0? Read the
+    [v0.2.0 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.0)
+    first: `-n` changed meaning in that release.
 
   footer: |
     ## Install
