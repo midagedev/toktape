@@ -132,10 +132,10 @@ func TestSweepBaseDefaultPrompts(t *testing.T) {
 		if p.Messages[0].Content != defaults[i].Messages[0].Content {
 			t.Errorf("prompt %d = %q, want the default %q", i, p.Messages[0].Content, defaults[i].Messages[0].Content)
 		}
-		// The default prompts carry 320; the rounds path would keep it, so
-		// the base has to carry --n-predict already.
+		// The rounds path lets a request's own cap win, so the base has to
+		// carry --n-predict already rather than rely on it being applied later.
 		if p.MaxTokens != 256 {
-			t.Errorf("prompt %d MaxTokens = %d, want --n-predict's 256, not the default prompt's %d", i, p.MaxTokens, defaults[i].MaxTokens)
+			t.Errorf("prompt %d MaxTokens = %d, want --n-predict's 256", i, p.MaxTokens)
 		}
 	}
 	rounds := expandSweep(base, []int{3, 5})
@@ -143,10 +143,21 @@ func TestSweepBaseDefaultPrompts(t *testing.T) {
 		t.Errorf("expanded = %+v, want two rounds, the second at n_max 5", rounds)
 	}
 
-	// Without --n-predict the default prompts keep their own cap, as a plain
-	// run's do.
-	if got := sweepBase(Options{}.normalize())[0].Prompts[0].MaxTokens; got != server.DefaultPrompts(1)[0].MaxTokens {
-		t.Errorf("MaxTokens without --n-predict = %d, want the default prompt's own", got)
+	// Without --n-predict a default prompt carries no cap of its own, so the
+	// rounds path hands it the run's resolved cap (lead, 2026-09-14). This
+	// assertion used to compare the base to DefaultPrompts' own cap; once
+	// TTP-84 removed that cap it compared 0 to 0 and checked nothing. Both
+	// halves below fail against the old prompt set, which carried 320 and so
+	// sent 320 on a default sweep instead of the run's cap.
+	defaultBase := sweepBase(Options{}.normalize())
+	if got := defaultBase[0].Prompts[0].MaxTokens; got != 0 {
+		t.Errorf("a default sweep prompt carries MaxTokens %d of its own, want none", got)
+	}
+	resolved := Options{Rounds: defaultBase, MaxTokens: DefaultMaxTokens}.normalize()
+	for i, req := range roundRequests(resolved, 0)[0] {
+		if req.MaxTokens != DefaultMaxTokens {
+			t.Errorf("default sweep request %d carries MaxTokens %d, want the run's cap %d", i, req.MaxTokens, DefaultMaxTokens)
+		}
 	}
 
 	// A prompts file's rounds are kept as they are, and a round with no

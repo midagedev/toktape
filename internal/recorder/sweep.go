@@ -87,10 +87,11 @@ func expandSweep(rounds []Round, nmax []int) []Round {
 //
 // A run without a prompts file is one round of exactly the requests a plain
 // run would send — buildRequests, so the default prompts and --n-predict come
-// out the same. It matters for the cap: the rounds path lets a request's own
-// max_tokens win, and the default prompts carry 320, so handing it the bare
-// defaults would silently move a sweep's cap off --n-predict. A prompts-file
-// round with no prompt keeps the default set it gets today.
+// out the same. The rounds path lets a request's own max_tokens win, so what
+// matters for the cap is that a default prompt carries none: since TTP-84
+// (2026-09-14) none does, and roundRequests hands each one the run's cap. A
+// prompts-file round with no prompt gets the default set, and the run's cap
+// with it.
 func sweepBase(o Options) []Round {
 	if len(o.Rounds) == 0 {
 		return []Round{{Prompts: buildRequests(o, 0)}}
