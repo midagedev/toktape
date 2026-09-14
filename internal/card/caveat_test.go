@@ -356,6 +356,37 @@ func TestRunCutByClockTellsTheTwoCasesApart(t *testing.T) {
 	}
 }
 
+// TestAnOvershootTooSmallToPrintIsNotTheFloor (lead, 2026-09-14): the clock
+// waits out its timer, polls for the floor, then cancels and drains, so a cut
+// always lands a shade past the budget. The v0.2.0 hero take was cut 257 us
+// past a 30 s budget and the card said "the clock cut at 30s, not the 30s
+// asked for" — two identical numbers and a claim that they differ, plus a
+// cause, the token floor, that nothing had held anything back.
+func TestAnOvershootTooSmallToPrintIsNotTheFloor(t *testing.T) {
+	s := clean(t)
+	s.Limit = tape.LimitSummary{
+		For:       30 * time.Second,
+		CutAt:     30*time.Second + 257819*time.Nanosecond,
+		MinTokens: tape.MinCutTokens,
+	}
+	got := runCutByClockText(s)
+	if strings.Contains(got, "not the") || strings.Contains(got, "floor") {
+		t.Errorf("an overshoot of %v reads as the floor holding the run back: %q",
+			s.Limit.CutAt-s.Limit.For, got)
+	}
+	if got == "" {
+		t.Error("the run was still cut by its clock and says nothing")
+	}
+	// And the sentence it does get is the one a run cut at its budget gets,
+	// because that is what happened.
+	atBudget := clean(t)
+	atBudget.Limit = tape.LimitSummary{For: 30 * time.Second, CutAt: 30 * time.Second, MinTokens: tape.MinCutTokens}
+	if want := runCutByClockText(atBudget); got != want {
+		t.Errorf("cut %v past the budget reads as\n  %q\nbut cut exactly at it reads as\n  %q",
+			s.Limit.CutAt-s.Limit.For, got, want)
+	}
+}
+
 // TestIsSampleIsTheOnlyOwnerOfTheSampleVerdict: the row label and the caveat
 // ask one predicate. A tape whose recorder wrote "decode" over a generation
 // that is in fact a sample is labelled by its own count, not by the stale

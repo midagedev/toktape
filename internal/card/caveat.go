@@ -431,10 +431,21 @@ func runCutByClockText(s *tape.RunSummary) string {
 	if l.CutAt <= 0 {
 		return ""
 	}
-	if l.For > 0 && l.CutAt > l.For {
+	// The cut always lands a shade past the budget: the clock waits out its
+	// timer, then polls for the floor, then the streams have to be cancelled
+	// and drained. So an overshoot on its own is not the floor holding a run
+	// back, and the two figures decide it, not their order — a run cut 0.2 ms
+	// past a 30 s budget printed "the clock cut at 30s, not the 30s asked for",
+	// a sentence that names two identical numbers and says they differ (lead,
+	// 2026-09-14, on the v0.2.0 hero take). The same reasoning is in
+	// formatGHzPair: a line that shows two identical numbers reads as a bug in
+	// the card rather than a fact about the run. Here it settles the claim as
+	// well as the wording, because a difference the card cannot print is a
+	// difference no reader can act on.
+	if cut, asked := formatDuration(l.CutAt), formatDuration(l.For); l.For > 0 && cut != asked {
 		return fmt.Sprintf(
 			"the clock cut at %s, not the %s asked for: the %d-token floor held it back on this box",
-			formatDuration(l.CutAt), formatDuration(l.For), l.MinTokens)
+			cut, asked, l.MinTokens)
 	}
 	if l.For > 0 {
 		return fmt.Sprintf(
