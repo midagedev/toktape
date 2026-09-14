@@ -43,6 +43,15 @@ Careful: a run generates for twenty seconds by default
   is the only limit, and the run takes as long as that many tokens take on
   that machine. --for 0 turns the clock off without naming a cap.
 
+Careful: -n is tokens, not streams
+  -n is --n-predict: tokens per stream, which is what llama-bench's -n means.
+  The number of streams sent at once is --sessions N, and it has no short
+  form; --concurrency no longer exists. --sessions stops at 8 unless
+  --max-sessions names the same number (--sessions 16 --max-sessions 16), and
+  a run asking for more sessions than the server has slots is refused,
+  because the streams past the slots measure queue wait, not concurrency.
+  Both refusals are exit 1 with a hint that names the flag to use.
+
 Careful: one invocation can block for ten minutes
   --wait defaults to 10m, because a server loading a 450 GB model is the case
   worth waiting for. That is longer than most harnesses' command timeout. A
@@ -57,7 +66,7 @@ Careful: one invocation can block for ten minutes
 
     id                            the run id, and the .tape file's basename
     toktape_version               the build that recorded it
-    concurrency                   streams sent at once
+    concurrency                   streams sent at once (--sessions)
     model.name                    the model's own name, when it declared one
     model.file_name               the GGUF that was loaded
     model.quant                   the exact sub-type: Q4_K_M, UD-Q4_K_M
@@ -144,9 +153,9 @@ A prompts file (--prompts FILE), one JSON object per line
   {"name":"sql","prompt":"Write a SQL query that ..."}
   {"name":"chat","messages":[{"role":"user","content":"hi"}],"max_tokens":512}
 
-  Each line is one round of -n streams, run in order into one tape. "name" is
-  optional and labels the round. Exactly one of "prompt" and "messages" is
-  required. An unknown key is an error, not ignored.
+  Each line is one round of --sessions streams, run in order into one tape.
+  "name" is optional and labels the round. Exactly one of "prompt" and
+  "messages" is required. An unknown key is an error, not ignored.
 
 Asking a reasoning model for less thinking
   --no-think sends the template switch that turns thinking off;

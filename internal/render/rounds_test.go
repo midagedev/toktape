@@ -49,8 +49,8 @@ func TestClipDrawsOneRoundAtATime(t *testing.T) {
 	if n := openStreams(tp); n != 4 {
 		t.Errorf("openStreams = %d, want 4", n)
 	}
-	if got := openCommand(tp); got != "toktape -n 4" {
-		t.Errorf("openCommand = %q, want toktape -n 4", got)
+	if got := openCommand(tp); got != "toktape --sessions 4" {
+		t.Errorf("openCommand = %q, want toktape --sessions 4", got)
 	}
 	// Without a summary figure the count is still one round's streams.
 	bare := *tp

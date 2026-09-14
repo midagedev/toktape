@@ -90,9 +90,12 @@ type Options struct {
 	// round of Prompts, are repeated per value in order, and a server whose
 	// argv was read and names no draft model runs only the first value.
 	SpecNMax []int
-	// Concurrency is the number of streams sent at once. 0 or less means 1,
+	// Concurrency is the number of streams sent at once — the CLI's
+	// --sessions, recorded as tape.RunSummary.Concurrency. 0 or less means 1,
 	// or len(Prompts) when prompts were supplied, or the longest round's
-	// prompt count when Rounds were.
+	// prompt count when Rounds were. Sessions is that resolution; a server
+	// whose /props names fewer slots refuses the run
+	// (ErrMoreSessionsThanSlots).
 	Concurrency int
 	// For is the run's wall-clock budget, measured from the first request
 	// going out (TTP-76). 0 means "the user named none", which is what
@@ -316,6 +319,14 @@ func (o Options) normalize() Options {
 		}
 	}
 	return o
+}
+
+// Sessions is the number of streams the run will send at once, resolved
+// exactly as Record resolves it. A caller that guards the count — the CLI's
+// ceiling — reads it here rather than repeating the rules, because a guard on
+// the flag alone is walked around by a list of prompts.
+func (o Options) Sessions() int {
+	return o.normalize().Concurrency
 }
 
 // buildRequests returns exactly Concurrency requests. Supplied prompts are

@@ -153,7 +153,7 @@ toktape
 まさにこれです。
 
 ```sh
-toktape -n 8
+toktape --sessions 8
 ```
 
 N が増えるとストリームあたりの tok/s が下がるのは正常です。「このマシンは
@@ -166,8 +166,8 @@ N が増えるとストリームあたりの tok/s が下がるのは正常で�
 コードとして読めます。
 
 ```sh
-toktape -n 4 --tui
-toktape -n 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
+toktape --sessions 4 --tui
+toktape --sessions 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
 ```
 
 **共有する:**
@@ -238,7 +238,7 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 
 | 動詞 | 役割 | 例 |
 | --- | --- | --- |
-| `record` | アタッチして実行を記録する。既定の動詞 | `toktape -n 4 --for 30s` |
+| `record` | アタッチして実行を記録する。既定の動詞 | `toktape --sessions 4 --for 30s` |
 | `card` | テープからカードを描き直す | `toktape card <tape> --png` |
 | `play` | ライブ画面で実行をリプレイする | `toktape play <tape> --speed 4` |
 | `render` | GIF、mp4、asciicast、PNG フレームとして書き出す | `toktape render <tape> --mp4 clip.mp4` |
@@ -259,11 +259,14 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 マシンではなくプロンプトの仕事です。
 
 **record:** `--for DURATION`（既定 `20s`。`--for 0` で時計を切る）、
-`--url`（既定は自動探索）、`-n`/`--concurrency`、`--prompt`（複数
-指定可、`-n` 分まで循環）、`--prompts`（JSONL ファイル。1 行が `-n` 本の
+`--url`（既定は自動探索）、`--sessions N`（同時に送るストリーム数、既定 1。
+8 を超えるには `--max-sessions` に同じ数をもう一度書く必要があり、サーバーの
+スロット数より多いと断る）、`--prompt`（複数指定可、`--sessions` 分まで循環）、
+`--prompts`（JSONL ファイル。1 行が `--sessions` 本の
 ストリームからなる 1 ラウンドで、順番に 1 本のテープへ記録）、`--spec-n-max LIST`（例: `3,5`。プロンプト一式を
 speculative `n_max` の値ごとに 1 回ずつ流して同じテープに記録し、カードには値ごとの行が
-付く）、`--n-predict`（トークン上限。指定すると時計が切れる）、`--out`（既定
+付く）、`-n`/`--n-predict`（ストリームごとのトークン上限。llama-bench の `-n` と
+同じ意味で、指定すると時計が切れる）、`--out`（既定
 `~/.toktape/runs`）、`--tag`、`--note`、`--wait`、`--tui`、
 `--grid COLSxROWS`（既定 `2x4`、`0` で端末に合わせる）、`--no-card`、
 `--json`、`--quiet`。

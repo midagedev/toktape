@@ -148,7 +148,7 @@ toktape
 **동시 여덟 스트림.** 에이전트 워크로드가 서버에 하는 일이 바로 이것입니다.
 
 ```sh
-toktape -n 8
+toktape --sessions 8
 ```
 
 N이 늘면 스트림당 tok/s는 떨어지는 게 정상입니다. "이 장비가 에이전트 여덟을
@@ -161,8 +161,8 @@ N이 늘면 스트림당 tok/s는 떨어지는 게 정상입니다. "이 장비�
 읽힙니다.
 
 ```sh
-toktape -n 4 --tui
-toktape -n 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
+toktape --sessions 4 --tui
+toktape --sessions 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
 ```
 
 **공유하기:**
@@ -212,7 +212,7 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 
 | 동사 | 하는 일 | 예 |
 | --- | --- | --- |
-| `record` | 붙어서 실행을 녹화합니다. 기본 동사 | `toktape -n 4 --for 30s` |
+| `record` | 붙어서 실행을 녹화합니다. 기본 동사 | `toktape --sessions 4 --for 30s` |
 | `card` | 테이프에서 카드를 다시 그립니다 | `toktape card <tape> --png` |
 | `play` | 라이브 화면에서 실행을 재생합니다 | `toktape play <tape> --speed 4` |
 | `render` | GIF, mp4, asciicast, PNG 프레임으로 렌더합니다 | `toktape render <tape> --mp4 clip.mp4` |
@@ -232,11 +232,14 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 멈춥니다. 그건 기계가 아니라 프롬프트가 하는 일입니다.
 
 **record:** `--for DURATION`(기본 `20s`. `--for 0`이면 시계를 끕니다),
-`--url`(기본은 자동 탐색), `-n`/`--concurrency`, `--prompt`(반복
-가능, `-n`만큼 순환), `--prompts`(JSONL 파일. 한 줄이 `-n`개 스트림의
-한 라운드이고, 순서대로 돌려 테이프 하나에 담습니다), `--spec-n-max LIST`(예: `3,5`. 프롬프트
+`--url`(기본은 자동 탐색), `--sessions N`(한 번에 보내는 스트림 수, 기본 1.
+8을 넘기려면 `--max-sessions`에 같은 숫자를 한 번 더 적어야 하고, 서버 슬롯보다
+많으면 거절합니다), `--prompt`(반복 가능, `--sessions`만큼 순환), `--prompts`(JSONL
+파일. 한 줄이 `--sessions`개 스트림의 한 라운드이고, 순서대로 돌려 테이프 하나에
+담습니다), `--spec-n-max LIST`(예: `3,5`. 프롬프트
 묶음을 speculative `n_max` 값마다 한 번씩 돌려 한 테이프에 담고, 카드에는 값마다 한 줄이
-붙습니다), `--n-predict`(토큰 상한. 대면 시계가 꺼집니다), `--out`(기본
+붙습니다), `-n`/`--n-predict`(스트림당 토큰 상한. llama-bench의 `-n`과 같은 뜻이고,
+대면 시계가 꺼집니다), `--out`(기본
 `~/.toktape/runs`), `--tag`, `--note`, `--wait`, `--tui`,
 `--grid COLSxROWS`(기본 `2x4`, `0`이면 터미널에 맞춤), `--no-card`,
 `--json`, `--quiet`.

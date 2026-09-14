@@ -48,13 +48,14 @@ Record flags:
   --for DURATION        end the run after this much wall clock, from the first
                         request (default 20s, --for 0 = none). No stream is
                         cut under 64 tokens, so a slow box runs longer
-  --n-predict N         max tokens per stream. An answer on the same axis, so
-                        naming it turns the clock off; name both and the run
-                        ends at whichever comes first
+  -n, --n-predict N     max tokens per stream, as llama-bench's -n. An answer on
+                        the same axis, so naming it turns the clock off; name
+                        both and the run ends at whichever comes first
   --url URL             server to attach to (default: discover)
-  -n, --concurrency N   concurrent streams (default 1)
-  --prompt TEXT         prompt to send; repeatable, cycled to fill -n
-  --prompts FILE        a JSONL file, one round of -n streams per line, e.g.
+  --sessions N          streams sent at once (default 1, at most 8)
+  --max-sessions N      raise that ceiling; give it the same N as --sessions
+  --prompt TEXT         prompt to send; repeatable, cycled to fill --sessions
+  --prompts FILE        a JSONL file, one round of streams per line, e.g.
                         {"name":"sql","prompt":"Write a query that ..."}
   --spec-n-max LIST     run the prompt set once per speculative.n_max (e.g. 3,5)
   --temp N              sampling temperature (0 = greedy; unset = server default)
@@ -96,9 +97,9 @@ Examples:
   # and the run is then shorter — the prompt's doing, not the machine's.
   toktape --for 18s
 
-  # A server on a port discovery does not probe, four streams at once, and a
-  # generation aimed by token count instead — which turns the clock off.
-  toktape --url http://127.0.0.1:9000 -n 4 --n-predict 256
+  # A server on a port discovery does not probe, four streams at once, and 256
+  # tokens each instead of a clock. -n is tokens, as in llama-bench.
+  toktape --url http://127.0.0.1:9000 --sessions 4 -n 256
 
   # Machine-readable: the run summary on stdout and nothing else.
   toktape --json --quiet > run.json

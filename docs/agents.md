@@ -29,7 +29,7 @@ quoting — `toktape log` lists every run recorded on that machine.
 
 ```sh
 toktape                                  # discover a server, record 20s, print a card
-toktape --url http://host:8001 -n 4      # a server elsewhere, four streams at once
+toktape --url http://host:8001 --sessions 4   # a server elsewhere, four streams at once
 toktape --for 60s --tag ngl=40           # a longer run, labelled for the ledger
 toktape --json --quiet > run.json        # the summary on stdout and nothing else
 toktape --wait 0                         # fail fast instead of waiting for a load
@@ -42,6 +42,16 @@ Two flags decide whether an invocation fits inside your own timeout.
 case worth waiting for — which is longer than most harnesses allow a command
 to run. Pass `--wait 0` to fail fast, or a budget like `--wait 30s`. And
 `--for` decides how long the generation itself lasts; see the next section.
+
+**`-n` is tokens, not streams.** `-n` is `--n-predict`, the token cap per
+stream, which is what llama-bench's `-n` means — so `-n 128` from a
+llama-bench command line asks for 128 tokens here too. The number of streams
+sent at once is `--sessions N`, with no short form; `--concurrency` no longer
+exists. `--sessions` stops at 8 unless `--max-sessions` names the same
+number, and a run that asks for more sessions than the server has slots is
+refused before a request goes out, because the streams past the slots would
+measure queue wait rather than concurrency. Both refusals exit 1 with a hint
+that names the flag to use.
 
 ## Asking for a run of a given length
 

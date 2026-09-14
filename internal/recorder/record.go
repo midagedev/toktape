@@ -71,6 +71,9 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	if err := r.attach(ctx); err != nil {
 		return nil, err
 	}
+	if err := r.checkSlots(); err != nil {
+		return nil, err
+	}
 	r.collectModel()
 	r.collectProcess()
 	r.collectHost(ctx)
@@ -215,6 +218,51 @@ func (r *run) attach(ctx context.Context) error {
 		case <-timer.C:
 		}
 	}
+}
+
+// ErrMoreSessionsThanSlots is returned when the run asks for more streams at
+// once than the server's /props says it has slots (2026-09-14). The error is a
+// *SlotsError carrying both numbers. The CLI maps it to exit code 1: the
+// invocation asked for something the server cannot be measured doing.
+//
+// Streams past the slot count do not measure more concurrency. They wait in
+// the server's queue, and that wait lands in TTFT and in the aggregate as if
+// the box were slow — a figure the card cannot tell apart from slowness. So
+// the run is refused before a request is sent, rather than recorded and
+// qualified afterwards.
+var ErrMoreSessionsThanSlots = errors.New("recorder: more sessions than server slots")
+
+// SlotsError is ErrMoreSessionsThanSlots with the numbers in it.
+type SlotsError struct {
+	// Sessions is the streams the run would have sent at once.
+	Sessions int
+	// Slots is the server's total_slots, always > 0: a server that did not
+	// say is never refused.
+	Slots int
+	// URL is the server that said it.
+	URL string
+}
+
+func (e *SlotsError) Error() string {
+	return fmt.Sprintf("%d sessions asked of %s, which offers %d slots; the %d past its slots would wait in its queue, and the card cannot tell queue wait from slowness",
+		e.Sessions, e.URL, e.Slots, e.Sessions-e.Slots)
+}
+
+// Is makes errors.Is(err, ErrMoreSessionsThanSlots) true for a *SlotsError.
+func (e *SlotsError) Is(target error) bool { return target == ErrMoreSessionsThanSlots }
+
+// checkSlots refuses a run that would send more streams than the server has
+// slots.
+//
+// A server whose /props carried no total_slots has TotalSlots 0, which is
+// unknown and not zero: there is no limit to enforce, so nothing is refused
+// (the repo's first rule — never act on a figure that was not observed).
+func (r *run) checkSlots() error {
+	slots := r.props.TotalSlots
+	if slots <= 0 || r.opts.Concurrency <= slots {
+		return nil
+	}
+	return &SlotsError{Sessions: r.opts.Concurrency, Slots: slots, URL: r.client.BaseURL()}
 }
 
 // probe is one attach attempt: discovery when no URL was given, then /props.

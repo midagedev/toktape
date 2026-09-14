@@ -70,10 +70,19 @@ func recordCommand(s *tape.RunSummary) string {
 	if u := strings.TrimSpace(s.Server.URL); u != "" {
 		parts = append(parts, "--url", u)
 	}
-	// Concurrency 1 is the default; printing "-n 1" would suggest the run was
-	// configured when it was not.
+	// Concurrency 1 is the default; printing "--sessions 1" would suggest the
+	// run was configured when it was not.
+	//
+	// The block is a command to paste into the CURRENT binary, so the stream
+	// count is spelled --sessions for every tape, including one recorded when
+	// the flag was -n (2026-09-14). Printing the old spelling for an old tape
+	// would ask today's binary for that many TOKENS per stream: a different
+	// run, and precisely the accident the rename exists to prevent. The run
+	// reproduced is the same one — Concurrency's meaning never changed, only
+	// the flag's name. The cap stays spelled --n-predict, never -n, because
+	// the long form reads the same in every version.
 	if s.Concurrency > 1 {
-		parts = append(parts, "-n", strconv.Itoa(s.Concurrency))
+		parts = append(parts, "--sessions", strconv.Itoa(s.Concurrency))
 	}
 	return strings.Join(append(parts, limitArgs(s)...), " ")
 }
@@ -99,7 +108,7 @@ func recordCommand(s *tape.RunSummary) string {
 // stream produced and no flag ever set.
 //
 // A default run therefore prints "--for 20s" even though 20 s is the default,
-// where the same function omits "-n 1" for being one. The asymmetry is chosen:
+// where the same function omits "--sessions 1" for being one. The asymmetry is chosen:
 // a concurrency of 1 is what `toktape` means in every version, while
 // recorder.DefaultFor is a constant that may move, and a card outlives the
 // binary that printed it. The flag pins the run; the omission does not.

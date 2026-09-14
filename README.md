@@ -151,7 +151,7 @@ loading, toktape waits for it (`--wait`, default ten minutes).
 **Eight streams at once**, which is what an agent workload does to a server:
 
 ```sh
-toktape -n 8
+toktape --sessions 8
 ```
 
 Per-stream tok/s falls as N rises and that is expected; the aggregate is the
@@ -164,8 +164,8 @@ punctuation step back — so a code answer reads as code without a second
 colour on the screen:
 
 ```sh
-toktape -n 4 --tui
-toktape -n 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
+toktape --sessions 4 --tui
+toktape --sessions 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
 ```
 
 **Share it:**
@@ -236,7 +236,7 @@ side by side. Each field is there because it settles an argument.
 
 | verb | what it does | example |
 | --- | --- | --- |
-| `record` | attach and record a run; the default verb | `toktape -n 4 --for 30s` |
+| `record` | attach and record a run; the default verb | `toktape --sessions 4 --for 30s` |
 | `card` | re-render a card from a tape | `toktape card <tape> --png` |
 | `play` | replay a run on the live screen | `toktape play <tape> --speed 4` |
 | `render` | render a run as GIF, mp4, asciicast or PNG frames | `toktape render <tape> --mp4 clip.mp4` |
@@ -256,12 +256,15 @@ than you asked rather than handing you a sample; and the model usually stops
 before the budget does, which is your prompt's doing and not the machine's.
 
 **Record:** `--for DURATION` (default `20s`; `--for 0` turns the clock off),
-`--url` (default: discover), `-n`/`--concurrency`, `--prompt`
-(repeatable, cycled to fill `-n`), `--prompts`
-(a JSONL file; each line is one round of `-n` streams, run in order into one
+`--url` (default: discover), `--sessions N` (streams sent at once, default 1;
+more than 8 needs `--max-sessions` naming the same number, and more than the
+server has slots is refused), `--prompt`
+(repeatable, cycled to fill `--sessions`), `--prompts`
+(a JSONL file; each line is one round of `--sessions` streams, run in order into one
 tape), `--spec-n-max LIST` (e.g. `3,5`: the prompt set once per
 speculative `n_max`, all in one tape, with a card line per value),
-`--n-predict` (the token cap; naming it turns the clock off), `--out`
+`-n`/`--n-predict` (the token cap per stream, as llama-bench's `-n`; naming it
+turns the clock off), `--out`
 (default `~/.toktape/runs`), `--tag`, `--note`, `--wait`, `--tui`,
 `--grid COLSxROWS` (default `2x4`, `0` fits the terminal), `--no-card`,
 `--json`, `--quiet`.

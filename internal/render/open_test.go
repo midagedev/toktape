@@ -55,18 +55,18 @@ func TestOpenScreenBeats(t *testing.T) {
 			name:    "the command half typed",
 			at:      1800 * time.Millisecond,
 			want:    []string{"~ ❯ tokt"},
-			notWant: []string{"toktape -n 4", "looking for"},
+			notWant: []string{"toktape --sessions 4", "looking for"},
 		},
 		{
 			name:    "the whole command, before the tool says anything",
 			at:      2800 * time.Millisecond,
-			want:    []string{"~ ❯ toktape -n 4"},
+			want:    []string{"~ ❯ toktape --sessions 4"},
 			notWant: []string{"looking for", "stream 1/4"},
 		},
 		{
 			name:    "looking for a server",
 			at:      3500 * time.Millisecond,
-			want:    []string{"~ ❯ toktape -n 4", "looking for llama-server …"},
+			want:    []string{"~ ❯ toktape --sessions 4", "looking for llama-server …"},
 			notWant: []string{"llama-server at", "stream 1/4"},
 		},
 		{
@@ -126,7 +126,7 @@ func TestOpenScreenOfNoTape(t *testing.T) {
 	if !strings.Contains(screen, "~ ❯ toktape") {
 		t.Errorf("no prompt on the nil-tape open:\n%s", trimScreen(screen))
 	}
-	if strings.Contains(screen, "-n ") {
+	if strings.Contains(screen, "--sessions") || strings.Contains(screen, "-n ") {
 		t.Errorf("the command claims a stream count the tape does not have:\n%s", trimScreen(screen))
 	}
 	if strings.Contains(screen, "stream 1/") {

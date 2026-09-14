@@ -116,7 +116,7 @@ func TestRecordVerbPrompts(t *testing.T) {
 	dir := t.TempDir()
 	path := writePrompts(t, `{"name":"sql-1","prompt":"select"}`+"\n"+`{"prompt":"tell me a story","max_tokens":32}`+"\n")
 
-	code, stdout, stderr := exec(t, "--url", srv.URL, "--out", dir, "--prompts", path, "-n", "2")
+	code, stdout, stderr := exec(t, "--url", srv.URL, "--out", dir, "--prompts", path, "--sessions", "2")
 	if code != exitOK {
 		t.Fatalf("exit %d\nstderr:\n%s", code, stderr)
 	}

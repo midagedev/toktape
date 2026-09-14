@@ -169,6 +169,21 @@ func (c *cli) reportRecordError(err error, urlGiven bool) int {
 			msg:  fmt.Sprintf("toktape: %v", err),
 			hint: hint,
 		})
+	case errors.Is(err, recorder.ErrMoreSessionsThanSlots):
+		// The recorder refused before a request went out, so the hint names
+		// both ways to make the two numbers agree: ask for fewer streams, or
+		// give the server more slots with llama-server's own flag.
+		hint := "ask for no more --sessions than the server has slots, or restart llama-server with more (-np N)"
+		var se *recorder.SlotsError
+		if errors.As(err, &se) {
+			hint = fmt.Sprintf("ask for --sessions %d, or restart llama-server with -np %d to offer %d slots",
+				se.Slots, se.Sessions, se.Sessions)
+		}
+		return c.fail(failure{
+			code: exitUsage,
+			msg:  fmt.Sprintf("toktape: %v", err),
+			hint: hint,
+		})
 	case errors.Is(err, recorder.ErrAllStreamsFailed):
 		return c.fail(failure{
 			code: exitStreams,
@@ -198,8 +213,27 @@ func (c *cli) badFlags(verb, usage string, args []string, err error) int {
 	return c.fail(failure{
 		code:    exitUsage,
 		msg:     fmt.Sprintf("toktape %s: %v", verb, err),
+		hint:    retiredFlagHint(verb, err),
 		trailer: usage,
 	})
+}
+
+// retiredFlagHint names the flag to use instead of one record no longer
+// declares, or one borrowed from a neighbouring tool (retiredFlags), or "".
+//
+// The flag package says only "flag provided but not defined: -concurrency",
+// and the reader who typed that is exactly the one who needs the new spelling;
+// the usage block below it lists every flag but does not say which one this
+// was.
+func retiredFlagHint(verb string, err error) string {
+	if verb != "record" {
+		return ""
+	}
+	name, ok := strings.CutPrefix(err.Error(), "flag provided but not defined: ")
+	if !ok {
+		return ""
+	}
+	return retiredFlags[strings.TrimLeft(name, "-")]
 }
 
 // jsonRequested reads --json out of the raw arguments.

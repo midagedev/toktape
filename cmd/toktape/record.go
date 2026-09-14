@@ -31,6 +31,43 @@ import (
 // actually named. Naming --n-predict is still an answer on the "how long" axis
 // and still silences the clock.
 
+// -n is tokens, and streams are --sessions (2026-09-14).
+//
+// llama-bench's `-n, --n-gen` is tokens to generate, and everyone who has
+// benchmarked llama.cpp has `-n 128` in their fingers — so does a coding agent,
+// in its training data. toktape used to spell concurrency `-n`, which turned
+// that muscle memory into 128 concurrent streams against a server with four
+// slots. The user overruled a guard in favour of a rename, because a guard
+// polices an ambiguity and a rename removes it: `-n` is now the short form of
+// --n-predict, the stream count is --sessions with no short form, and
+// --concurrency is gone rather than deprecated — two spellings for one concept
+// is the shape of the problem.
+//
+// Not -np / --parallel either: llama-server uses those for the slots a server
+// OFFERS, and toktape's number is the streams a client SENDS. Borrowing the
+// name would recreate the same near-miss one layer down.
+//
+// The stream count has a ceiling (defaultMaxSessions) that only a second flag
+// carrying the number lifts, so a large count cannot come from a typo or from a
+// remembered command line. More streams than the server has slots is refused
+// separately, by the recorder, once /props has said how many there are.
+
+// defaultMaxSessions is the most streams one invocation sends without
+// --max-sessions. It is a guard against a number nobody meant, not a statement
+// about what a server can take: eight is the agent workload the card is built
+// around, and every larger run is one somebody should have to say twice.
+const defaultMaxSessions = 8
+
+// retiredFlags answers a flag that is not declared any more, or that belongs to
+// a neighbouring tool, with the one this tool uses instead. cli.badFlags reads
+// it, so the answer arrives with the rejection rather than after a trip to
+// --help.
+var retiredFlags = map[string]string{
+	"concurrency": "streams at once is --sessions N; -n is tokens per stream, as in llama-bench",
+	"parallel":    "--parallel is llama-server's slot count; the streams toktape sends at once are --sessions N",
+	"np":          "-np is llama-server's slot count; the streams toktape sends at once are --sessions N",
+}
+
 // pinCollectors is the seam the tests use to keep the record verb off this
 // machine. In production it is the identity: the recorder then reads the live
 // /proc and opens whatever GPU backend is present. A test replaces it so a
@@ -73,7 +110,8 @@ type recordConfig struct {
 // example is a command the tool taught the reader and then rejects.
 type recordFlags struct {
 	url            *string
-	concurrency    *int
+	sessions       *int
+	maxSessions    *int
 	forD           *time.Duration
 	nPredict       *int
 	outDir         *string
@@ -103,14 +141,20 @@ type recordFlags struct {
 func declareRecordFlags(fs *flag.FlagSet) *recordFlags {
 	f := &recordFlags{prompts: new(repeatedFlag), params: new(repeatedFlag)}
 	f.url = fs.String("url", "", "server base URL (default: discover)")
-	f.concurrency = fs.Int("concurrency", 0, "concurrent streams")
-	fs.IntVar(f.concurrency, "n", 0, "concurrent streams (shorthand)")
+	// The stream count has one name and no short form; see the note above
+	// defaultMaxSessions for why.
+	f.sessions = fs.Int("sessions", 0, "streams sent at once")
+	f.maxSessions = fs.Int("max-sessions", 0, "raise the stream ceiling; name the same number as --sessions")
 	// The "how long" axis, clock first (TTP-76). Both default to 0, which is
 	// "the user named none": recorder.Options.limit turns that into the
 	// default budget and the runaway cap, and reads a named --n-predict as the
 	// choice that silences the clock.
 	f.forD = fs.Duration("for", 0, "stop the run after this much wall clock (0 = no clock)")
 	f.nPredict = fs.Int("n-predict", 0, "max tokens per stream; naming it turns the clock off")
+	// -n is llama-bench's -n: tokens to generate. Both names fill one int, and
+	// nothing reads flagSet(fs, "n-predict"): the recorder learns the cap was
+	// named from the value alone (Options.limit).
+	fs.IntVar(f.nPredict, "n", 0, "max tokens per stream (short for --n-predict)")
 	f.outDir = fs.String("out", defaultRunsDir(), "directory for run files")
 	f.noCard = fs.Bool("no-card", false, "do not render or save the card")
 	f.asJSON = fs.Bool("json", false, "print the run summary as JSON")
@@ -238,7 +282,7 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 		Prompts:      promptRequests(*f.prompts),
 		Rounds:       rounds,
 		SpecNMax:     sweep,
-		Concurrency:  *f.concurrency,
+		Concurrency:  *f.sessions,
 		For:          clockBudget(fs, *f.forD),
 		MaxTokens:    *f.nPredict,
 		Params:       sampling.params,
@@ -251,6 +295,9 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 		// still fail in a second rather than in ten minutes.
 		WaitForStart: flagSet(fs, "wait") && *f.wait > 0,
 		HostRAM:      hostRAM,
+	}
+	if code := checkSessions(c, fs, f, opts); code != exitOK {
+		return code
 	}
 	opts = pinCollectors(opts)
 	parsedGrid, err := tui.ParseGrid(*f.grid)
@@ -268,6 +315,71 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 		fmt.Fprintln(c.stderr, "toktape: --tui needs a terminal on stdout; using progress lines instead")
 	}
 	return recordPlain(ctx, c, opts, cfg)
+}
+
+// checkSessions refuses a stream count nobody should get by accident, before
+// anything contacts a server.
+//
+// The count checked is the one the recorder will actually send
+// (Options.Sessions), not the flag: nine --prompt flags open nine streams with
+// no --sessions at all, and a ceiling the prompt list walks around is not one.
+// The slot check is not here — it needs the server's answer and lives in the
+// recorder (recorder.ErrMoreSessionsThanSlots).
+func checkSessions(c *cli, fs *flag.FlagSet, f *recordFlags, opts recorder.Options) int {
+	if flagSet(fs, "sessions") && *f.sessions < 1 {
+		return c.fail(failure{
+			code: exitUsage,
+			msg:  fmt.Sprintf("toktape record: --sessions %d: a run sends at least one stream", *f.sessions),
+			hint: "leave --sessions off for one stream, or give a count such as --sessions 4",
+		})
+	}
+	ceiling := defaultMaxSessions
+	named := flagSet(fs, "max-sessions")
+	if named && *f.maxSessions < 1 {
+		return c.fail(failure{
+			code: exitUsage,
+			msg:  fmt.Sprintf("toktape record: --max-sessions %d: a ceiling must allow at least one stream", *f.maxSessions),
+			hint: "--max-sessions only raises the ceiling; give it the same number as --sessions",
+		})
+	}
+	if named {
+		ceiling = *f.maxSessions
+	}
+	n := opts.Sessions()
+	if n <= ceiling {
+		return exitOK
+	}
+	if named {
+		return c.fail(failure{
+			code: exitUsage,
+			msg: fmt.Sprintf("toktape record: --max-sessions %d is below the %d streams this run sends; it is a ceiling, not a second count",
+				*f.maxSessions, n),
+			hint: fmt.Sprintf("give the ceiling the same number: --sessions %d --max-sessions %d", n, n),
+		})
+	}
+	if flagSet(fs, "sessions") {
+		hint := fmt.Sprintf("if %d streams is what you mean, say it twice: --sessions %d --max-sessions %d", n, n, n)
+		if n >= 32 {
+			// A count this large is far likelier a generation length than a
+			// stream count, and the reader who typed it learned -n from
+			// llama-bench. Under 32 tokens is not a decode rate at all, so the
+			// clause would only confuse a small number.
+			hint += fmt.Sprintf(". If %d was a token count, as llama-bench's -n is, that is -n %d here", n, n)
+		}
+		return c.fail(failure{
+			code: exitUsage,
+			msg: fmt.Sprintf("toktape record: --sessions %d is over the ceiling of %d streams at once",
+				n, defaultMaxSessions),
+			hint: hint,
+		})
+	}
+	// No --sessions: the count came from the prompts, one stream each.
+	return c.fail(failure{
+		code: exitUsage,
+		msg: fmt.Sprintf("toktape record: the prompts given would be sent as %d streams at once, over the ceiling of %d",
+			n, defaultMaxSessions),
+		hint: fmt.Sprintf("to send them all at once, say so: --max-sessions %d; or name fewer with --sessions N", n),
+	})
 }
 
 // recordPlain is the non-interactive run: progress lines on stderr, the card

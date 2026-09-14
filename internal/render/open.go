@@ -209,11 +209,13 @@ func openSpinFrame(d time.Duration) rune {
 
 // openCommand is the command line the clip types. The stream count comes from
 // the run itself, so the command a viewer copies is the one that produced the
-// screen they are about to watch — a hard-coded "-n 4" would go on claiming
-// four streams after the fixture changed.
+// screen they are about to watch — a hard-coded "--sessions 4" would go on
+// claiming four streams after the fixture changed. It is spelled --sessions,
+// never -n: a viewer who copies the clip's command into today's binary must
+// get streams, and -n is tokens per stream (2026-09-14).
 func openCommand(tp *tape.Tape) string {
 	if n := openStreams(tp); n > 1 {
-		return fmt.Sprintf("toktape -n %d", n)
+		return fmt.Sprintf("toktape --sessions %d", n)
 	}
 	return "toktape"
 }

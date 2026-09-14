@@ -96,7 +96,7 @@ func TestRecordVerbEndToEnd(t *testing.T) {
 	srv := cliServer(t)
 	dir := t.TempDir()
 
-	code, stdout, stderr := exec(t, "--url", srv.URL, "--out", dir, "-n", "2", "--n-predict", "64")
+	code, stdout, stderr := exec(t, "--url", srv.URL, "--out", dir, "--sessions", "2", "--n-predict", "64")
 	if code != exitOK {
 		t.Fatalf("exit %d\nstderr:\n%s", code, stderr)
 	}
@@ -158,7 +158,7 @@ func TestRecordVerbEndToEnd(t *testing.T) {
 		t.Fatalf("the saved tape does not reload: %v", err)
 	}
 	if tp.Summary.Concurrency != 2 || len(tp.Requests) != 2 {
-		t.Errorf("-n 2 recorded %d streams", len(tp.Requests))
+		t.Errorf("--sessions 2 recorded %d streams", len(tp.Requests))
 	}
 	if tp.Summary.ToktapeVersion != version {
 		t.Errorf("ToktapeVersion = %q, want %q", tp.Summary.ToktapeVersion, version)

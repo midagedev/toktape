@@ -78,19 +78,19 @@ func TestReproduceRecordedWithLine(t *testing.T) {
 		{
 			name: "concurrent run names every option",
 			s:    ExampleConcurrent(),
-			want: "toktape --url http://127.0.0.1:8080 -n 8 --n-predict 307",
+			want: "toktape --url http://127.0.0.1:8080 --sessions 8 --n-predict 307",
 		},
 		{
-			name: "a single stream does not print -n",
+			name: "a single stream does not print --sessions",
 			s:    Example(),
 			want: "toktape --url http://127.0.0.1:8080 --n-predict 320",
-			not:  []string{"-n 1"},
+			not:  []string{"--sessions", "-n "},
 		},
 		{
 			name: "nothing observed is a bare command",
 			s:    &tape.RunSummary{Concurrency: 1},
 			want: "toktape\n",
-			not:  []string{"--url", "--n-predict", "-n "},
+			not:  []string{"--url", "--n-predict", "-n ", "--sessions"},
 		},
 	}
 	for _, c := range cases {
@@ -168,8 +168,22 @@ func TestRecordCommandNamesWhatEndedTheRun(t *testing.T) {
 				// code printed and what no stream produced.
 				Timings: tape.TimingsSummary{PredictedN: 250},
 			},
-			want: "toktape -n 2 --n-predict 512",
-			not:  []string{"250", "--for"},
+			want: "toktape --sessions 2 --n-predict 512",
+			not:  []string{"250", "--for", "-n "},
+		},
+		{
+			// A tape recorded before the Limit field, when the stream count
+			// was spelled -n (assets/hero.tape is one). The block is pasted
+			// into today's binary, where -n 2 asks for two TOKENS per stream,
+			// so the old spelling would reproduce a different run
+			// (lead, 2026-09-14).
+			name: "an old two-stream tape is re-asked with today's spelling",
+			s: &tape.RunSummary{
+				Concurrency: 2,
+				Timings:     tape.TimingsSummary{PredictedN: 240},
+			},
+			want: "toktape --sessions 2 --n-predict 240",
+			not:  []string{"-n 2", "--for"},
 		},
 		{
 			// The matrix's "both" row (lead, 2026-09-14). With only --for the

@@ -66,6 +66,9 @@ func TestForFlagReachesTheRecorder(t *testing.T) {
 		{"neither", nil, 0, 0},
 		{"--for only", []string{"--for", "45s"}, 45 * time.Second, 0},
 		{"--n-predict only", []string{"--n-predict", "240"}, 0, 240},
+		// -n is the same flag, as llama-bench's -n is tokens (2026-09-14).
+		{"-n only", []string{"-n", "240"}, 0, 240},
+		{"--for and -n", []string{"--for", "8s", "-n", "240"}, 8 * time.Second, 240},
 		{"both", []string{"--for", "8s", "--n-predict", "240"}, 8 * time.Second, 240},
 		{"--for 0", []string{"--for", "0"}, recorder.NoClock, 0},
 		{"--for 0s", []string{"--for", "0s"}, recorder.NoClock, 0},
