@@ -775,14 +775,19 @@ func TestWSPrintsARatio(t *testing.T) {
 	}
 }
 
-// heroSummary is assets/hero.tape — the README's own two-stream run of
-// DeepSeek V4.1 Flash Q3_K_M on the ws box — reduced to what this package
-// reads. The placement is the same as the prose recording's; what differs is
-// that it ran two streams, which is why TTP-67 exists: the card anyone sees is
-// this run, so a verify-step figure that refuses N > 1 is a figure nobody sees.
+// heroSummary is the v0.1.0 hero — a two-stream run of DeepSeek V4.1 Flash
+// Q3_K_M on the ws box — reduced to what this package reads. The placement is
+// the same as the prose recording's; what differs is that it ran two streams,
+// which is why TTP-67 exists: the card anyone sees is a concurrent run, so a
+// verify-step figure that refuses N > 1 is a figure nobody sees.
 //
-// TestSpeculativeHeroTape below reads the real file and checks these against
-// it, so the fixture cannot drift away from the recording.
+// It was assets/hero.tape until 2026-09-14, when that asset was re-recorded
+// for v0.2.0 on a box serving a different quantisation with a different offload
+// split. So this is now a fixture and nothing else, and it is worth keeping as
+// one: it is the run the mean-versus-sum bug was found on, with the sign of
+// PredictedN - DraftNAccepted still negative, which the new recording does not
+// reproduce. TestExplainHeroTape reads the shipped asset directly and asserts
+// what is true of it today.
 func heroSummary() *tape.RunSummary {
 	s := wsSummary()
 	draftN, accepted := 459, 324

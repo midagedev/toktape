@@ -52,27 +52,39 @@ func TestExplainHeroTape(t *testing.T) {
 		t.Fatalf("hero tape Concurrency = %d, want the two-stream run", s.Concurrency)
 	}
 
-	// The recording predates TTP-68, so every device falls back — which is
-	// exactly why it prints no ratio, and Explain says so in one line.
+	// What this test asserted until the v0.2.0 hero was recorded (lead,
+	// 2026-09-14): that every device fell back to the class-proportion
+	// estimate, that the fallback left a 10.71 % gap, and that the card
+	// therefore printed "of peak ?". All three were true of a tape recorded
+	// before TTP-68 and TTP-45 landed, and the point of those tickets was that
+	// they should stop being true of anything this tool records. The shipped
+	// asset was re-recorded on a build that has both, so the assertions are
+	// turned over rather than relaxed: the same file now has to show the fixes.
+	//
+	// The fallback did not lose its coverage. wsLegacySummary() in
+	// split_test.go is that shape, its doc comment says so, and eight tests in
+	// this package read it — which is the arrangement the comment on it always
+	// described: the fixture keeps the fallback exercised after the recorder
+	// stops producing it. This is the release where the recorder stopped.
 	for _, d := range e.Devices {
-		if d.Recorded {
-			t.Errorf("%s claims a recorded active-bytes figure; this tape predates the field", d.Device)
+		if !d.Recorded {
+			t.Errorf("%s has no recorded active-bytes figure; a tape recorded on this build carries one per device (TTP-68)", d.Device)
 		}
 	}
-	if want := int64(818_173_440); e.Gap != want {
-		t.Errorf("gap = %d, want %d — the router and shared expert scaled as if sparse", e.Gap, want)
+	if e.Gap != 0 {
+		t.Errorf("gap = %d, want 0: the per-device figures are the recorder's own, so they sum to the model's", e.Gap)
 	}
-	if e.WithinTolerance {
-		t.Error("the gap should be over SplitTolerance, which is why this tape has no ceiling")
+	if !e.WithinTolerance {
+		t.Error("a zero gap is inside SplitTolerance by construction")
 	}
-	if e.CeilingKnown || e.OfPeakKnown {
-		t.Error("a tape with no host bandwidth and a 10.7 % gap must report no ceiling and no ratio")
+	if !e.HostKnown {
+		t.Error("the hero is recorded with --ram-gbs-measured, so the host bus is known")
 	}
-	if e.HostKnown {
-		t.Error("procmon cannot read the DMI tables, so this recording has no host bandwidth")
+	if !e.CeilingKnown || !e.OfPeakKnown {
+		t.Error("a known host bus and a gap inside tolerance are exactly the two conditions for a ceiling and a ratio (TTP-45)")
 	}
-	if !strings.Contains(e.String(), "of peak ?") {
-		t.Error("String() should say the ratio is unknown rather than print a figure")
+	if strings.Contains(e.String(), "of peak ?") {
+		t.Errorf("String() still reports the ratio as unknown:\n%s", e)
 	}
 
 	// TTP-67: the verify-step view must work on this run, because this run is
@@ -81,27 +93,16 @@ func TestExplainHeroTape(t *testing.T) {
 	if !ok {
 		t.Fatal("Speculative not ok on the real two-stream hero tape")
 	}
-	if v.Steps != 156 || v.Streams != 2 {
-		t.Errorf("Steps/Streams = %d/%d, want 156/2", v.Steps, v.Streams)
+	if v.Streams != 2 {
+		t.Errorf("Streams = %d, want 2", v.Streams)
 	}
-
-	// And the transcription check: the fixture must reproduce the recording's
-	// own figures, on the fallback path the recording is in.
-	fx := wsLegacySummary()
-	fx.Concurrency = s.Concurrency
-	fx.Timings = s.Timings
-	fx.Aggregate = s.Aggregate
-	fxv, ok := Speculative(fx)
-	if !ok {
-		t.Fatal("Speculative not ok on the fixture")
+	if v.Steps != 170 {
+		t.Errorf("Steps = %d, want 170 (total_predicted_n 430 - accepted 260)", v.Steps)
 	}
-	if fxv != v {
-		t.Errorf("fixture placement disagrees with the recording:\n got %+v\nwant %+v", fxv, v)
-	}
-	for i, d := range s.Placement.Devices {
-		if got, want := d.Classes, fx.Placement.Devices[i].Classes; !sameClasses(got, want) {
-			t.Errorf("device %s classes drifted from the fixture:\n got %v\nwant %v", d.Device, got, want)
-		}
+	// The step is a batch of more than one token or the draft did nothing, and
+	// a batch over n_max + 1 would mean the two sums were mixed again.
+	if v.Batch <= 1 || v.Batch > 4 {
+		t.Errorf("batch = %v, want more than one token and no more than n_max + 1 = 4", v.Batch)
 	}
 }
 

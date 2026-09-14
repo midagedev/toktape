@@ -14,45 +14,44 @@ into a `.tape` file, and prints a card that says where the model sits, what the
 process actually touched, and how fast the request really was — for one
 stream or for eight at once.
 
-<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording two concurrent streams of a 440 GiB model, from the command being typed to the result"></p>
+<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording two concurrent streams of a 444 GiB model, from the command being typed to the result"></p>
 
-<p align="center"><em>A real run, not a mock-up: DeepSeek V4.1 Flash Q3_K_M, 440 GiB, most of its experts in host RAM on a two-card workstation. The command typed at a prompt, the server found and attached, two streams writing code at once, then the result. It is <code>assets/hero.tape</code> replayed through the same renderer <code>toktape render</code> uses — no terminal recorder involved, and <code>toktape card assets/hero.tape</code> prints the card below from the same file.</em></p>
+<p align="center"><em>A real run, not a mock-up: DeepSeek V4.1 Flash Q3_K_M, 444 GiB, most of its experts in host RAM on a two-card workstation. The command typed at a prompt, the server found and attached, two streams writing code at once, then the result. It is <code>assets/hero.tape</code> replayed through the same renderer <code>toktape render</code> uses — no terminal recorder involved, and <code>toktape card assets/hero.tape</code> prints the card below from the same file.</em></p>
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ toktape v0.1.0              20260914-070458-deepseek-v4-1-flash-q3-k │
+│ toktape v0.2.0              20260914-115114-deepseek-v4-1-flash-q3-k │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MODEL    DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16 · 9 shards  │
-│          Q3_K_M · 440.5 GiB                                          │
+│ MODEL    DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16-attnQ8      │
+│          9 shards · Q3_K_M · 444.2 GiB                               │
 │ ENGINE   llama-server b96 (e42d711e5) · linux 6.8.0-139-generic · ws │
 │ RIG      RTX A6000 48G · RTX 3090 24G                                │
 │          AMD Ryzen Threadripper PRO 5975WX 32-Cores · 252 GB         │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        26.9 tok/s aggregate · 13.5 tok/s each                 │
-│               ≈ 108 GB/s from RAM per verify step                    │
-│ Prefill       49.5 tok/s aggregate · 26.0 tok/s each                 │
-│               30 prompt tokens — not a prefill measurement           │
-│               engine prefill 1155 ms · queue 57 ms                   │
-│               TTFT p50 1212 ms                                       │
+│ Decode        22.5 tok/s aggregate · 11.2 tok/s each                 │
+│               ≈ 115 GB/s from RAM per verify step, 99% of peak       │
+│ Prefill       51.8 tok/s aggregate · 25.9 tok/s each                 │
+│               279 prompt tokens · engine prefill 10732 ms            │
+│               queue 22 ms · TTFT p50 10754 ms                        │
 │ Draft         DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf   │
-│               n_max 3 · 71% accepted (324/459)                       │
-│               156 verify steps of 3.9 tokens                         │
-│ Context       16384 (30 in / 240 out · 64 thinking)                  │
-│ Prefix cache  0% hit (0/30) · cold                                   │
+│               n_max 3 · 52% accepted (260/504)                       │
+│               170 verify steps of 4.0 tokens                         │
+│ Context       16384 (279 in / 215 out · 64 thinking)                 │
+│ Prefix cache  0% hit (0/279) · cold                                  │
 │ Sampling      temp default · chat                                    │
-│ Streams       2 × 13.5 tok/s = 26.9 tok/s aggregate                  │
-│               TTFT p50 1212 ms p95 1212 ms · slots busy max 2        │
+│ Streams       2 × 11.2 tok/s = 22.5 tok/s aggregate                  │
+│               TTFT p50 10754 ms p95 10754 ms · slots busy max 2      │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MEMORY   GPU0 [██████████] 46.0/48.0 GiB                             │
-│          GPU1 [█████████░] 22.6/24.0 GiB                             │
-│          weights 52.4 | kv ? | compute ? GiB                         │
-│          Host placed 388.1 GiB (186.8 in RAM / 201.3 on disk)        │
-│          Host RSS 188.2 GiB (file 186.8 / anon 0.9)                  │
-│          Page faults 5.8 maj/token (2775 during decode)              │
+│ MEMORY   GPU0 [█████████░] 45.0/48.0 GiB                             │
+│          GPU1 [█████████░] 21.4/24.0 GiB                             │
+│          weights 50.2 | kv ? | compute ? GiB                         │
+│          Host placed 394.1 GiB (200.8 in RAM / 193.3 on disk)        │
+│          Host RSS 202.2 GiB (file 200.8 / anon 1.0)                  │
+│          Page faults 4.4 maj/token (1869 during decode)              │
 ├──────────────────────────────────────────────────────────────────────┤
-│ HOST     GPU0 68°C 122 W · GPU1 48°C 144 W · throttled: no           │
+│ HOST     GPU0 64°C 116 W · GPU1 54°C 144 W · throttled: no           │
 │          contended: no                                               │
-│          conditions changed: k10temp Tctl 69 → 84 °C                 │
+│          conditions changed: k10temp Tctl 66 → 79 °C                 │
 ├──────────────────────────────────────────────────────────────────────┤
 │ FLAGS    -ngl 99 -fa default -b 2048 -ub 512 -ctk default            │
 │          -ctv default -t 32                                          │
@@ -65,8 +64,7 @@ stream or for eight at once.
 │          -ot blk\.[0-3]\.ffn_.*_exps=CUDA0 -ot blk\.6\.ffn_down_exp… │
 ├──────────────────────────────────────────────────────────────────────┤
 │ ! 3 caveats — cold run: weights arrived from disk while it decoded,  │
-│   5.8 maj faults/token · short_prompt_for_prefill ·                  │
-│   conditions_changed                                                 │
+│   4.4 maj faults/token · conditions_changed · run_cut_by_clock       │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │
 └──────────────────────────────────────────────────────────────────────┘
@@ -187,9 +185,22 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 The same fields in the same places on every card, so two cards can be read
 side by side. Each field is there because it settles an argument.
 
+- **Whether the number is quotable.** Every card ends with the reasons it
+  might not be: `! 3 caveats — cold run: weights arrived from disk while it
+  decoded, 4.4 maj faults/token · conditions_changed · run_cut_by_clock`. The
+  most serious one is spelled out and the rest are named by their code, because
+  a code is the thing you look up. `-o json` carries the same list as
+  `caveats`, each with a severity: `figure` means one number is affected, `run`
+  means the whole run is, `view` means the card could not see something it
+  wanted. Read that field before quoting a rate anywhere.
 - **Decode and prefill, never mixed.** Prefill is compute-bound, decode is
   memory-bandwidth bound; one "45 tok/s" says nothing. The card prints TTFT,
-  prompt tok/s and decode tok/s separately, with both token counts.
+  prompt tok/s and decode tok/s separately, with both token counts. A prompt
+  too short to be a prefill measurement is said to be one rather than averaged
+  in — `30 prompt tokens — not a prefill measurement`. And on a concurrent run
+  the wait for a free slot is split out of the engine's own work,
+  `engine prefill 10732 ms · queue 22 ms`, so a queue is never read as a slow
+  model.
 - **Prefix cache hit.** `0% hit (0/512)` or `78% hit (400/512)`. A system
   prompt that differs by one character misses the cache, and prefill then
   looks ten times slower or faster for no visible reason.
@@ -203,22 +214,27 @@ side by side. Each field is there because it settles an argument.
   weights, KV cache and compute buffers, and computes never-loaded bytes from
   the GGUF tensor headers rather than from file size minus RSS.
 - **Placed on the CPU is not the same as in RAM.** `-ot ... exps=CPU` is a
-  backend assignment, not a residency: the card above places 388 GiB on the
-  host and only 187 of it is resident, so 201 GiB is read back off the disk as
-  the model decodes. `Host placed 388.1 GiB (186.8 in RAM / 201.3 on disk)`
+  backend assignment, not a residency: the card above places 394 GiB on the
+  host and only 201 of it is resident, so 193 GiB is read back off the disk as
+  the model decodes. `Host placed 394.1 GiB (200.8 in RAM / 193.3 on disk)`
   says which, and on the live screen the part that is not there is drawn in
   the warning colour beside the fault count that explains it.
 - **Bandwidth against the bus the bytes crossed.** A model split between VRAM
   and host RAM has no single bandwidth: adding the three buses' traffic
   together produced `≈ 155 GB/s` on a machine whose host bus tops out at 116.
-  The card names the side that is the wall — `≈ 87 GB/s from RAM` — and prints
-  a percentage only when the placement proves what the host reads.
+  The card names the side that is the wall —
+  `≈ 115 GB/s from RAM per verify step, 99% of peak` — and prints a percentage
+  only when the placement proves what the host reads. With a draft model the
+  step is not a token: the target verifies a batch at a time, so the bytes are
+  counted per verify step, which is what the bus actually saw.
 - **What the request asked for.** Greedy against the server's default sampling
   against a thinking model left to think is an eleven per cent spread on one
   engine. `Sampling  temp default · chat` says which of them the rates belong
   to, and never invents a temperature nobody sent.
 - **The draft, when there was one.** The model, the block size and how often
-  the target agreed, with the counts: `n_max 3 · 71% accepted (324/459)`.
+  the target agreed, with the counts: `n_max 3 · 52% accepted (260/504)`, and
+  the shape of the work that acceptance rate produced,
+  `170 verify steps of 4.0 tokens`.
 - **Conditions changed.** The clock cap and a CPU temperature are read at the
   start and the end of every round. When a thermal watchdog moves the cap
   mid-run, the card says so instead of leaving a slow number unexplained.

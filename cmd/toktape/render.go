@@ -52,8 +52,9 @@ Clip length
       run seconds ≈ TTFT + --n-predict ÷ per-stream tok/s
 
   -n does not lengthen it: the streams run at once. This repo's own hero is
-  2 streams of 240 tokens at 13.5 tok/s with a 1.2s TTFT — a 19.1s run, so a
-  25.1s clip, or 31.1s with --open.
+  2 streams of 215 tokens at 11.2 tok/s with a 10.8s TTFT — a 29.8s run, so a
+  35.9s clip, or 41.9s with --open. It was recorded with --for 30s, which is
+  the rule above: the clock ended it at 30s and the clip came out 30 + 6.
 
   Either flag is set when you record. --duration is not: it compresses or
   stretches the same run into the time you name, and a viewer then cannot

@@ -14,45 +14,44 @@ toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.ta
 실제로 무엇을 건드렸는지, 요청이 정말 얼마나 빨랐는지가 그 한 장에 담깁니다.
 스트림 하나든 동시에 여덟이든 같은 방식으로 기록합니다.
 
-<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording 4 concurrent streams, from the command being typed to the result card"></p>
+<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording two concurrent streams of a 444 GiB model, from the command being typed to the result"></p>
 
-<p align="center"><em>세션 전체입니다. 프롬프트에 명령을 치고, 서버를 찾아 붙고, 네 스트림이 동시에 돌고, 카드가 뜹니다. 화면 녹화가 아니라 테이프를 <code>toktape render</code>와 같은 렌더러로 다시 그린 것입니다.</em></p>
+<p align="center"><em>연출이 아니라 실제 실행입니다. DeepSeek V4.1 Flash Q3_K_M, 444 GiB, expert 대부분을 호스트 RAM에 둔 2카드 워크스테이션. 프롬프트에 명령을 치고, 서버를 찾아 붙고, 두 스트림이 동시에 코드를 쓰고, 결과가 나옵니다. 화면 녹화가 아니라 <code>assets/hero.tape</code>를 <code>toktape render</code>와 같은 렌더러로 다시 그린 것이고, 아래 카드는 같은 파일에서 <code>toktape card assets/hero.tape</code>로 나옵니다.</em></p>
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ toktape v0.1.0              20260914-070458-deepseek-v4-1-flash-q3-k │
+│ toktape v0.2.0              20260914-115114-deepseek-v4-1-flash-q3-k │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MODEL    DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16 · 9 shards  │
-│          Q3_K_M · 440.5 GiB                                          │
+│ MODEL    DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16-attnQ8      │
+│          9 shards · Q3_K_M · 444.2 GiB                               │
 │ ENGINE   llama-server b96 (e42d711e5) · linux 6.8.0-139-generic · ws │
 │ RIG      RTX A6000 48G · RTX 3090 24G                                │
 │          AMD Ryzen Threadripper PRO 5975WX 32-Cores · 252 GB         │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        26.9 tok/s aggregate · 13.5 tok/s each                 │
-│               ≈ 108 GB/s from RAM per verify step                    │
-│ Prefill       49.5 tok/s aggregate · 26.0 tok/s each                 │
-│               30 prompt tokens — not a prefill measurement           │
-│               engine prefill 1155 ms · queue 57 ms                   │
-│               TTFT p50 1212 ms                                       │
+│ Decode        22.5 tok/s aggregate · 11.2 tok/s each                 │
+│               ≈ 115 GB/s from RAM per verify step, 99% of peak       │
+│ Prefill       51.8 tok/s aggregate · 25.9 tok/s each                 │
+│               279 prompt tokens · engine prefill 10732 ms            │
+│               queue 22 ms · TTFT p50 10754 ms                        │
 │ Draft         DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf   │
-│               n_max 3 · 71% accepted (324/459)                       │
-│               156 verify steps of 3.9 tokens                         │
-│ Context       16384 (30 in / 240 out · 64 thinking)                  │
-│ Prefix cache  0% hit (0/30) · cold                                   │
+│               n_max 3 · 52% accepted (260/504)                       │
+│               170 verify steps of 4.0 tokens                         │
+│ Context       16384 (279 in / 215 out · 64 thinking)                 │
+│ Prefix cache  0% hit (0/279) · cold                                  │
 │ Sampling      temp default · chat                                    │
-│ Streams       2 × 13.5 tok/s = 26.9 tok/s aggregate                  │
-│               TTFT p50 1212 ms p95 1212 ms · slots busy max 2        │
+│ Streams       2 × 11.2 tok/s = 22.5 tok/s aggregate                  │
+│               TTFT p50 10754 ms p95 10754 ms · slots busy max 2      │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MEMORY   GPU0 [██████████] 46.0/48.0 GiB                             │
-│          GPU1 [█████████░] 22.6/24.0 GiB                             │
-│          weights 52.4 | kv ? | compute ? GiB                         │
-│          Host placed 388.1 GiB (186.8 in RAM / 201.3 on disk)        │
-│          Host RSS 188.2 GiB (file 186.8 / anon 0.9)                  │
-│          Page faults 5.8 maj/token (2775 during decode)              │
+│ MEMORY   GPU0 [█████████░] 45.0/48.0 GiB                             │
+│          GPU1 [█████████░] 21.4/24.0 GiB                             │
+│          weights 50.2 | kv ? | compute ? GiB                         │
+│          Host placed 394.1 GiB (200.8 in RAM / 193.3 on disk)        │
+│          Host RSS 202.2 GiB (file 200.8 / anon 1.0)                  │
+│          Page faults 4.4 maj/token (1869 during decode)              │
 ├──────────────────────────────────────────────────────────────────────┤
-│ HOST     GPU0 68°C 122 W · GPU1 48°C 144 W · throttled: no           │
+│ HOST     GPU0 64°C 116 W · GPU1 54°C 144 W · throttled: no           │
 │          contended: no                                               │
-│          conditions changed: k10temp Tctl 69 → 84 °C                 │
+│          conditions changed: k10temp Tctl 66 → 79 °C                 │
 ├──────────────────────────────────────────────────────────────────────┤
 │ FLAGS    -ngl 99 -fa default -b 2048 -ub 512 -ctk default            │
 │          -ctv default -t 32                                          │
@@ -65,8 +64,7 @@ toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.ta
 │          -ot blk\.[0-3]\.ffn_.*_exps=CUDA0 -ot blk\.6\.ffn_down_exp… │
 ├──────────────────────────────────────────────────────────────────────┤
 │ ! 3 caveats — cold run: weights arrived from disk while it decoded,  │
-│   5.8 maj faults/token · short_prompt_for_prefill ·                  │
-│   conditions_changed                                                 │
+│   4.4 maj faults/token · conditions_changed · run_cut_by_clock       │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │
 └──────────────────────────────────────────────────────────────────────┘
@@ -184,9 +182,21 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 모든 카드가 같은 자리에 같은 항목을 놓습니다. 두 장을 나란히 두고 읽을 수
 있어야 하기 때문입니다. 각 항목은 논쟁 하나를 끝내기 위해 들어 있습니다.
 
+- **이 숫자를 인용해도 되는지.** 모든 카드는 인용하면 안 될 이유들로 끝납니다.
+  `! 3 caveats — cold run: weights arrived from disk while it decoded,
+  4.4 maj faults/token · conditions_changed · run_cut_by_clock`. 가장 무거운
+  하나만 문장으로 풀고 나머지는 코드로 적습니다. 찾아볼 때 손에 쥐는 것이
+  코드이기 때문입니다. `-o json`에는 같은 목록이 `caveats`로 들어가고 항목마다
+  심각도가 붙습니다. `figure`는 숫자 하나가 영향을 받았다는 뜻, `run`은 실행
+  전체가, `view`는 카드가 봐야 할 것을 보지 못했다는 뜻입니다. 어딘가에 속도를
+  옮겨 적기 전에 읽을 필드는 이것 하나입니다.
 - **디코드와 프리필을 섞지 않습니다.** 프리필은 연산 바운드, 디코드는 메모리
   대역폭 바운드라서 "45 tok/s" 하나로는 아무것도 알 수 없습니다. TTFT, 프롬프트
-  tok/s, 디코드 tok/s를 각각 토큰 수와 함께 찍습니다.
+  tok/s, 디코드 tok/s를 각각 토큰 수와 함께 찍습니다. 프리필 측정이라 하기엔
+  너무 짧은 프롬프트는 평균에 섞지 않고 짧다고 말합니다 —
+  `30 prompt tokens — not a prefill measurement`. 동시 실행에서는 빈 슬롯을
+  기다린 시간을 엔진이 실제로 한 일에서 떼어 `engine prefill 10732 ms ·
+  queue 22 ms`로 적습니다. 줄을 선 시간이 느린 모델로 읽히지 않도록.
 - **프리픽스 캐시 히트.** `0% hit (0/512)` 또는 `78% hit (400/512)`. 시스템
   프롬프트가 한 글자만 달라도 캐시를 놓치고, 프리필이 이유 없이 열 배 느려지거나
   빨라져 보입니다.
@@ -199,6 +209,29 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
   건드린 만큼입니다. 카드는 호스트 RSS를 file/anon으로, VRAM을 weights/KV/
   compute로 나누고, 아직 로드되지 않은 바이트를 파일 크기에서 RSS를 빼는 대신
   GGUF 텐서 헤더에서 계산합니다.
+- **CPU에 놓였다는 것과 RAM에 있다는 것은 다릅니다.** `-ot ... exps=CPU`는
+  백엔드 배정이지 상주 여부가 아닙니다. 위 카드는 호스트에 394 GiB를 놓았지만
+  그중 RAM에 있는 것은 201 GiB뿐이고, 남은 193 GiB는 모델이 디코드하는 동안
+  디스크에서 다시 읽힙니다. `Host placed 394.1 GiB (200.8 in RAM / 193.3 on
+  disk)`가 그 경계를 말하고, 라이브 화면에서는 없는 쪽을 경고색으로 그려 그
+  이유인 폴트 수 옆에 둡니다.
+- **바이트가 실제로 건넌 버스에 대고 재는 대역폭.** VRAM과 호스트 RAM에 걸쳐
+  놓인 모델에는 단일 대역폭이라는 것이 없습니다. 세 버스의 트래픽을 더하면
+  호스트 버스가 116에서 끝나는 장비에서 `≈ 155 GB/s`가 나옵니다. 카드는 벽인
+  쪽을 지목해 `≈ 115 GB/s from RAM per verify step, 99% of peak`라고 적고,
+  배치가 호스트의 읽기량을 증명할 때만 비율을 붙입니다. 드래프트 모델이 있으면
+  한 스텝은 토큰 하나가 아닙니다. 타깃이 한 번에 배치를 검증하므로 바이트는
+  verify step 단위로 세고, 그것이 버스가 실제로 본 단위입니다.
+- **요청이 무엇을 물었는지.** 그리디로 돌린 것과 서버 기본 샘플링으로 돌린 것,
+  그리고 생각하도록 내버려 둔 추론 모델은 같은 엔진에서 11 %까지 벌어집니다.
+  `Sampling  temp default · chat`이 이 속도가 그중 무엇에 속하는지 말하고,
+  아무도 보내지 않은 temperature를 지어내지 않습니다.
+- **드래프트가 있었다면.** 모델, 블록 크기, 타깃이 얼마나 동의했는지를 분모와
+  함께 적습니다: `n_max 3 · 52% accepted (260/504)`. 그리고 그 수락률이 만든
+  작업의 모양도: `170 verify steps of 4.0 tokens`.
+- **조건이 바뀜.** 클럭 상한과 CPU 온도를 라운드마다 시작과 끝에 읽습니다. 열
+  워치독이 실행 도중 상한을 내리면, 느린 숫자를 설명 없이 남기는 대신 카드가
+  그렇게 말합니다.
 - **플래그 전부.** `-ngl -fa -b -ub -ctk -ctv --load-mode -ot`. 플래시 어텐션
   여부와 배치 크기, 이 둘이 빠지면 결과 글이 댓글 오십 개짜리 스레드가 됩니다.
 - **정확한 양자화.** `UD-Q4_K_M`을 "Q4"로 줄이지 않습니다.
