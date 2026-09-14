@@ -100,7 +100,7 @@ func TestFrameImageMatchesTheCellGrid(t *testing.T) {
 	}
 	defer rs.Close()
 
-	sched := NewSchedule(RunEnd(tui.ExampleTape()), DefaultFPS, 0, false)
+	sched := NewSchedule(0, RunEnd(tui.ExampleTape()), DefaultFPS, 0, false)
 	img, err := FrameImage(tui.ExampleTape(), Options{}, sched.Frame(sched.Count/2))
 	if err != nil {
 		t.Fatalf("FrameImage: %v", err)
@@ -160,7 +160,7 @@ func TestRasteriserCoversEveryRuneTheTUIDraws(t *testing.T) {
 	defer rs.Close()
 
 	tp := tui.ExampleTape()
-	sched := NewSchedule(RunEnd(tp), DefaultFPS, 0, false)
+	sched := NewSchedule(0, RunEnd(tp), DefaultFPS, 0, false)
 	seen := map[rune]bool{}
 	for _, i := range sampleIndices(sched.Count, 40) {
 		sc := parseScreen(FrameText(tp, Options{}.withDefaults(), sched.Frame(i)), DefaultWidth, DefaultHeight)

@@ -89,6 +89,17 @@ type Frame struct {
 // the thing the clip exists to show. A short run gives a short clip; it is not
 // stretched to fill a floor, because slow motion is a lie about the machine.
 //
+// A window, never a fast-forward. RunFrom cuts the front of the run out of the
+// clip rather than speeding it up (user, 2026-09-14, on a hero whose first ten
+// seconds are a spinner: "나는 빨리감기보다 차라리 프리필 마지막 3초 정도만
+// 보여주는게 맞다고 생각해"). Every frame that survives is still the frame the
+// operator saw at that instant, at 1:1; what changes is where the clip opens.
+// Nothing has to label the cut either, because the screen carries it: the
+// tile's own clock is measured from the run's start, so a clip that opens at
+// RunFrom opens on "7/30s" rather than "0/30s", and the seconds that are not
+// in the clip are on screen from its first frame. That is the honest form of
+// the thing --duration does dishonestly.
+//
 // Two clocks, on purpose. tui.View's t is both an animation phase and a data
 // cut: sampleAt(t) and decodeRateAt(t) read it, and ease(prev, cur, since, t)
 // measures against sample timestamps that are in *run* time. So during the
@@ -101,6 +112,14 @@ type Frame struct {
 // that offset, so the handover from the intro's clock to the run's clock is
 // continuous rather than a visible jump.
 //
+// A windowed clip has no intro at all, and that is not a saving: the intro is
+// a frozen screen standing in for a run that has not started, and at RunFrom
+// the run has started. Its screen already shows the rig, the model and a
+// turning spinner, on the one clock that can ease samples. Keeping a second
+// frozen second in front of it would either stop the spinner dead or run two
+// clocks against each other, so NewSchedule drops it: Intro > 0 and
+// RunFrom > 0 never hold together.
+//
 // The cold open is outside all of that: it never touches the TUI, so it runs
 // on a third clock of its own (Frame.Open) and hands over with a hard cut —
 // which is what a program taking the screen looks like.
@@ -111,8 +130,11 @@ type Schedule struct {
 	FPS int
 	// Count is the number of frames, both endpoints included.
 	Count int
-	// RunEnd is the instant the run's last token arrived.
-	RunEnd time.Duration
+	// RunFrom and RunEnd are the part of the run the clip plays: RunFrom is
+	// the instant the streaming phase opens at, RunEnd the instant the run's
+	// last token arrived. RunFrom is 0 for a whole-run clip, which is the
+	// default and every clip until one asks for a window.
+	RunFrom, RunEnd time.Duration
 	// Open, Intro, Stream and Card are the four phases, summing to Duration.
 	Open, Intro, Stream, Card time.Duration
 
@@ -130,8 +152,14 @@ type Schedule struct {
 	oneToOne bool
 }
 
-// NewSchedule plans a clip of a run that ends at runEnd. open puts the cold
-// open in front of it; without it the clip starts on the live screen.
+// NewSchedule plans a clip of the run between runFrom and runEnd. open puts
+// the cold open in front of it; without it the clip starts on the live screen.
+//
+// runFrom of zero is the whole run and is what almost every clip passes. A
+// non-zero one is a window: the clip opens with the run already that far in,
+// at 1:1 like every other frame, and the intro is dropped (see the type
+// comment). It is clamped into [0, runEnd], so a window past the run's end is
+// the whole run rather than an empty clip.
 //
 // dur of zero derives the length, which is the default and the interesting
 // case: the cold open if asked for, the intro, the run at 1:1, and the card
@@ -143,9 +171,12 @@ type Schedule struct {
 // too short to hold them the holds shrink in proportion too. That is the path
 // a test renders a two-second clip on; it is not how a clip anyone watches is
 // built.
-func NewSchedule(runEnd time.Duration, fps int, dur time.Duration, open bool) Schedule {
+func NewSchedule(runFrom, runEnd time.Duration, fps int, dur time.Duration, open bool) Schedule {
 	if runEnd < 0 {
 		runEnd = 0
+	}
+	if runFrom < 0 || runFrom > runEnd {
+		runFrom = 0
 	}
 	if fps <= 0 {
 		fps = DefaultFPS
@@ -154,10 +185,16 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration, open bool) Sc
 	if open {
 		openHold = OpenHold
 	}
+	// The intro is the screen before the run starts, and a windowed clip opens
+	// with it already started — see the type comment.
+	introHold := IntroHold
+	if runFrom > 0 {
+		introHold = 0
+	}
 	derived := dur <= 0
 	oneToOne := derived
 	if derived {
-		dur = openHold + IntroHold + runEnd + CardHold
+		dur = openHold + introHold + (runEnd - runFrom) + CardHold
 	}
 
 	// Snap the clip up to a whole number of frames. A derived length almost
@@ -185,7 +222,7 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration, open bool) Sc
 	// The arithmetic goes through float64 because the exact form
 	// (room × OpenHold / holds) overflows int64 at these magnitudes: six
 	// seconds is 6e9 nanoseconds and the product is past 9.2e18.
-	open_, intro, card := openHold, IntroHold, CardHold
+	open_, intro, card := openHold, introHold, CardHold
 	if holds, room := open_+intro+card, dur-dur/holdShare; !derived && holds > room {
 		share := func(d time.Duration) time.Duration {
 			return time.Duration(float64(room) * float64(d) / float64(holds))
@@ -195,6 +232,7 @@ func NewSchedule(runEnd time.Duration, fps int, dur time.Duration, open bool) Sc
 	s := Schedule{
 		Duration: dur,
 		FPS:      fps,
+		RunFrom:  runFrom,
 		RunEnd:   runEnd,
 		Open:     open_,
 		Intro:    intro,
@@ -282,24 +320,29 @@ func (s Schedule) Frame(i int) Frame {
 	case at < s.Open && s.Open > 0:
 		f.InOpen = true
 		f.Open = time.Duration(float64(at) * float64(OpenHold) / float64(s.Open))
-		f.At = 0
+		f.At = s.RunFrom
 		f.Anim = f.Open
 	case at < s.Open+s.Intro:
-		f.At = 0
+		// Only ever reached by a whole-run clip, where RunFrom is 0 and the
+		// pre-run screen is the run's own zero — NewSchedule drops the intro
+		// from a windowed one, which is why this can read its clock off clip
+		// time without the two disagreeing.
+		f.At = s.RunFrom
 		f.Anim = at - s.Open + s.introLead
 	case at < s.Open+s.Intro+s.Stream && s.Stream > 0:
 		if s.oneToOne {
-			// Exactly clip − start: integer subtraction, not a ratio, so the
-			// run clock and the clip clock stay locked to the nanosecond and
-			// the sparklines scroll at the speed the operator saw. The clamp
-			// covers the part-frame the snapping added past the run's end.
-			f.At = at - s.Open - s.Intro
+			// Exactly clip − start, offset to the window: integer subtraction,
+			// not a ratio, so the run clock and the clip clock stay locked to
+			// the nanosecond and the sparklines scroll at the speed the
+			// operator saw. The clamp covers the part-frame the snapping added
+			// past the run's end.
+			f.At = s.RunFrom + at - s.Open - s.Intro
 			if f.At > s.RunEnd {
 				f.At = s.RunEnd
 			}
 		} else {
 			p := float64(at-s.Open-s.Intro) / float64(s.Stream)
-			f.At = time.Duration(float64(s.RunEnd) * p)
+			f.At = s.RunFrom + time.Duration(float64(s.RunEnd-s.RunFrom)*p)
 		}
 		f.Anim = f.At
 	default:

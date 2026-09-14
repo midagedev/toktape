@@ -35,6 +35,25 @@ import (
 // import package main — and checks the published GIF's own timing against it.
 const HeroFPS = 15
 
+// HeroPrefillLead is how much of the wait for the first token the hero keeps.
+//
+// The hero's run spends its first ten seconds on prefill, and on this box that
+// is not a rate anyone can read — it is a fixed PCIe cost, ~166 GB of expert
+// weights crossing to the card once per prefill whatever the prompt is (ws
+// session, measured 2026-09-14). A reader who has to watch it to reach the
+// tokens does not (user: "히어로에 실제 토큰출력까지 기다리는 시간이 너무 길다").
+//
+// Three seconds is what those ten show: a spinner turning, the prefill bar
+// standing where it is, the rig and the model readable. The alternative was to
+// play the wait faster, which the user rejected for the right reason ("나는
+// 빨리감기보다 차라리 프리필 마지막 3초 정도만 보여주는게 맞다고 생각해") — a
+// window keeps every frame at 1:1, and the tile's clock opening at 7/30s says
+// on screen that the front was cut.
+//
+// cmd/toktape/cliplen_test.go mirrors this constant — a test binary cannot
+// import package main — and checks the clip length the help quotes against it.
+const HeroPrefillLead = 3 * time.Second
+
 func main() {
 	out := flag.String("out", filepath.Join("assets", "hero.gif"), "where to write the GIF")
 	tapePath := flag.String("tape", filepath.Join("assets", "hero.tape"), "the run to render")
@@ -58,7 +77,12 @@ func main() {
 	// run has no file on disk, so the path is derived from its own ID rather
 	// than typed in: a hard-coded string would keep showing the old ID after
 	// the fixture changed.
-	opts := render.Options{FPS: HeroFPS, ColdOpen: true, TapePath: "~/.toktape/runs/" + tp.Summary.ID + tape.Ext}
+	opts := render.Options{
+		FPS:         HeroFPS,
+		ColdOpen:    true,
+		PrefillLead: HeroPrefillLead,
+		TapePath:    "~/.toktape/runs/" + tp.Summary.ID + tape.Ext,
+	}
 
 	if dir := filepath.Dir(*out); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -75,7 +99,7 @@ func main() {
 	}
 	// The same schedule the renderer built, poster frame included, so the
 	// line this prints is the file it just wrote.
-	sched := render.NewSchedule(render.RunEnd(tp), HeroFPS, 0, true).WithPoster()
+	sched := render.NewSchedule(render.RunFrom(tp, HeroPrefillLead), render.RunEnd(tp), HeroFPS, 0, true).WithPoster()
 	fmt.Printf("hero %s — %d bytes, %d frames, %v at %d fps (%v)\n",
 		*out, fi.Size(), sched.Count, sched.Duration.Round(time.Millisecond), sched.FPS,
 		time.Since(start).Round(time.Millisecond))

@@ -15,7 +15,7 @@ const holds = OpenHold + IntroHold + CardHold
 // screen (user, 2026-09-14). FAIL-first: on the source that always drew the
 // open, Frame(0) was in the open and the clip was OpenHold longer.
 func TestScheduleWithoutTheColdOpen(t *testing.T) {
-	s := NewSchedule(7*time.Second, 30, 0, false)
+	s := NewSchedule(0, 7*time.Second, 30, 0, false)
 	if s.Open != 0 || s.Duration != MinDuration+7*time.Second {
 		t.Errorf("open %v, duration %v; want no open and %v", s.Open, s.Duration, MinDuration+7*time.Second)
 	}
@@ -55,7 +55,7 @@ func TestNewScheduleDerivesDuration(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			s := NewSchedule(tc.runEnd, DefaultFPS, 0, true)
+			s := NewSchedule(0, tc.runEnd, DefaultFPS, 0, true)
 			if s.Duration != tc.wantDur {
 				t.Errorf("duration = %v, want %v", s.Duration, tc.wantDur)
 			}
@@ -80,7 +80,7 @@ func TestScheduleStreamsAtRealSpeed(t *testing.T) {
 	// scrolls the sparklines and breathes the cursor at the wrong speed, and
 	// the error grows across a twenty-five-second stream.
 	for _, runEnd := range []time.Duration{6600 * time.Millisecond, 25 * time.Second, 2 * time.Minute} {
-		s := NewSchedule(runEnd, DefaultFPS, 0, true)
+		s := NewSchedule(0, runEnd, DefaultFPS, 0, true)
 		start := s.Open + s.Intro
 		var checked int
 		for i := 0; i < s.Count; i++ {
@@ -117,7 +117,7 @@ func TestScheduleNeverCompressesADerivedClip(t *testing.T) {
 	// 2026-09-14). The old thirty-second cap squeezed a two-minute run into
 	// thirty seconds; FAIL-first on that source: stream 30 s, not 2 min.
 	const runEnd = 2 * time.Minute
-	s := NewSchedule(runEnd, DefaultFPS, 0, true)
+	s := NewSchedule(0, runEnd, DefaultFPS, 0, true)
 	if s.Stream < runEnd || s.Duration < holds+runEnd {
 		t.Fatalf("a %v run gives stream %v of a %v clip, want the whole run", runEnd, s.Stream, s.Duration)
 	}
@@ -136,7 +136,7 @@ func TestScheduleExplicitDurationIsExact(t *testing.T) {
 	// All three are long enough to hold the holds; the squeeze below that is
 	// TestNewScheduleShortExplicitDuration's subject.
 	for _, want := range []time.Duration{15 * time.Second, 30 * time.Second, time.Minute} {
-		s := NewSchedule(7*time.Second, DefaultFPS, want, true)
+		s := NewSchedule(0, 7*time.Second, DefaultFPS, want, true)
 		if s.Duration != want {
 			t.Errorf("asked for %v, got %v", want, s.Duration)
 		}
@@ -159,7 +159,7 @@ func TestNewScheduleShortExplicitDuration(t *testing.T) {
 	// clip too short to hold them still has a streaming phase, and they keep
 	// their ratio so a squeezed clip is the same clip played fast rather than
 	// one with its cold open cut off.
-	s := NewSchedule(7*time.Second, 30, 2*time.Second, true)
+	s := NewSchedule(0, 7*time.Second, 30, 2*time.Second, true)
 	if s.Duration != 2*time.Second {
 		t.Fatalf("duration = %v, want 2s", s.Duration)
 	}
@@ -188,7 +188,7 @@ func TestScheduleOpensOnTheColdOpen(t *testing.T) {
 	// The clip starts in a terminal, not in the TUI (user, 2026-09-13). The
 	// open runs on a clock of its own that covers the whole nominal OpenHold
 	// however long the phase itself ended up.
-	s := NewSchedule(7*time.Second, 30, 0, true)
+	s := NewSchedule(0, 7*time.Second, 30, 0, true)
 	first := s.Frame(0)
 	if !first.InOpen || first.Open != 0 {
 		t.Errorf("first frame = {InOpen %v, open %v}, want the open at its start", first.InOpen, first.Open)
@@ -213,7 +213,7 @@ func TestScheduleOpensOnTheColdOpen(t *testing.T) {
 
 	// A clip too short for a six-second open plays the whole script faster
 	// rather than cutting it off part way through the typing.
-	short := NewSchedule(7*time.Second, 30, 2*time.Second, true)
+	short := NewSchedule(0, 7*time.Second, 30, 2*time.Second, true)
 	if short.Open >= OpenHold {
 		t.Fatalf("a two-second clip kept a %v open", short.Open)
 	}
@@ -230,7 +230,7 @@ func TestScheduleFrameCount(t *testing.T) {
 	for _, fps := range []int{12, 24, 30, 60} {
 		// 7.4 s, so the derived clip is not a whole number of seconds and a
 		// truncating expectation would be off by a fifth of a second's frames.
-		s := NewSchedule(7400*time.Millisecond, fps, 0, true)
+		s := NewSchedule(0, 7400*time.Millisecond, fps, 0, true)
 		// Rounded, not truncated: a duration of n frames is n×(1s/fps) with the
 		// division floored, so it is a few nanoseconds under the exact value.
 		want := int((s.Duration*time.Duration(fps) + time.Second/2) / time.Second)
@@ -245,7 +245,7 @@ func TestScheduleFrameCount(t *testing.T) {
 }
 
 func TestScheduleFramePhases(t *testing.T) {
-	s := NewSchedule(7*time.Second, 30, 0, true)
+	s := NewSchedule(0, 7*time.Second, 30, 0, true)
 
 	first := s.Frame(0)
 	if first.At != 0 || first.Mode != tui.ModeLive {
@@ -280,7 +280,7 @@ func TestScheduleIntroHandsOverOnACycleBoundary(t *testing.T) {
 	// sides of the seam. Without this the highlight jumps a quarter of the
 	// title bar at the one-second mark.
 	for _, runEnd := range []time.Duration{0, 2 * time.Second, 7 * time.Second, time.Minute} {
-		s := NewSchedule(runEnd, 30, 0, true)
+		s := NewSchedule(0, runEnd, 30, 0, true)
 		if got := (s.introLead + s.Intro) % shimmerPeriod; got != 0 {
 			t.Errorf("runEnd %v: hand-over at %v into a shimmer cycle, want 0", runEnd, got)
 		}
@@ -291,7 +291,7 @@ func TestScheduleIntroHandsOverOnACycleBoundary(t *testing.T) {
 }
 
 func TestScheduleFrameIndexIsClamped(t *testing.T) {
-	s := NewSchedule(7*time.Second, 30, 0, true)
+	s := NewSchedule(0, 7*time.Second, 30, 0, true)
 	if got := s.Frame(-5); got.Index != 0 {
 		t.Errorf("Frame(-5).Index = %d, want 0", got.Index)
 	}
@@ -301,7 +301,7 @@ func TestScheduleFrameIndexIsClamped(t *testing.T) {
 }
 
 func TestScheduleFramesAreMonotonic(t *testing.T) {
-	s := NewSchedule(7*time.Second, 30, 0, true)
+	s := NewSchedule(0, 7*time.Second, 30, 0, true)
 	frames := s.Frames()
 	if len(frames) != s.Count {
 		t.Fatalf("Frames() returned %d, want %d", len(frames), s.Count)
@@ -324,7 +324,7 @@ func TestScheduleFramesAreMonotonic(t *testing.T) {
 // frame keeps the phase and the run instant it had, one frame later.
 func TestPosterIsTheResultInFrontOfTheClip(t *testing.T) {
 	const fps = 30
-	plain := NewSchedule(7*time.Second, fps, 0, true)
+	plain := NewSchedule(0, 7*time.Second, fps, 0, true)
 	with := plain.WithPoster()
 
 	if with.Count != plain.Count+1 {
@@ -410,5 +410,120 @@ func TestNoPosterOptOut(t *testing.T) {
 	}
 	if on.Frame(0).Mode != tui.ModeCard {
 		t.Error("the default clip does not open on the result")
+	}
+}
+
+// TestWindowedClipIsStillOneToOne is the whole contract of RunFrom (TTP-90,
+// user 2026-09-14: "나는 빨리감기보다 차라리 프리필 마지막 3초 정도만 보여주는게
+// 맞다고 생각해"). A window moves where the clip opens and changes nothing
+// else: the frames that survive are the frames they were, one frame apart in
+// the run exactly as they are in the clip.
+//
+// FAIL-first: on the source before RunFrom existed the constructor did not
+// compile with a window, and adding the field without the Frame arithmetic
+// gave a clip that opened at the run's start anyway.
+func TestWindowedClipIsStillOneToOne(t *testing.T) {
+	const (
+		runEnd = 30 * time.Second
+		from   = 8 * time.Second
+	)
+	s := NewSchedule(from, runEnd, DefaultFPS, 0, false)
+
+	// The clip is shorter by exactly what was cut, and by nothing else: the
+	// intro is gone because the run has already started (see Schedule).
+	if want := (runEnd - from) + CardHold; s.Duration != want {
+		t.Errorf("duration = %v, want %v (the window plus the card)", s.Duration, want)
+	}
+	if s.Intro != 0 {
+		t.Errorf("a windowed clip holds a %v intro on a run that has already started", s.Intro)
+	}
+
+	first := s.Frame(0)
+	if first.At != from || first.Anim != from {
+		t.Errorf("the clip opens at run %v/%v, want %v", first.At, first.Anim, from)
+	}
+	if first.Mode != tui.ModeLive || first.InOpen {
+		t.Errorf("the first frame is not the live screen: %+v", first)
+	}
+
+	// 1:1 through the stream: a frame of clip time is a frame of run time.
+	// clipTimeAt is the schedule's own arithmetic, so this compares against
+	// the clip's frame times rather than against a second rounding.
+	for i := 1; i < s.Count; i++ {
+		f := s.Frame(i)
+		if f.Mode == tui.ModeCard {
+			break
+		}
+		if want := from + clipTimeAt(s, i); f.At != want {
+			t.Fatalf("frame %d is cut at run %v, want %v", i, f.At, want)
+		}
+		if f.Anim != f.At {
+			t.Fatalf("frame %d animates at %v and is cut at %v", i, f.Anim, f.At)
+		}
+	}
+	if last := s.Frame(s.Count - 1); last.Mode != tui.ModeCard || last.At != runEnd {
+		t.Errorf("the clip does not end on the result at %v: %+v", runEnd, last)
+	}
+}
+
+// TestWindowBeyondTheRunIsTheWholeRun: a lead longer than the wait, a window
+// past the run's end, and a negative one all mean "there is nothing to cut".
+// The alternative to clamping is a clip that opens after it ends.
+func TestWindowBeyondTheRunIsTheWholeRun(t *testing.T) {
+	whole := NewSchedule(0, 7*time.Second, DefaultFPS, 0, true)
+	for _, from := range []time.Duration{-time.Second, 8 * time.Second} {
+		s := NewSchedule(from, 7*time.Second, DefaultFPS, 0, true)
+		if s.RunFrom != 0 || s.Duration != whole.Duration || s.Intro != whole.Intro {
+			t.Errorf("a window from %v gives {RunFrom %v, %v, intro %v}, want the whole run",
+				from, s.RunFrom, s.Duration, s.Intro)
+		}
+	}
+}
+
+// TestRunFromReadsTheFirstToken: the lead is measured from the first token any
+// stream produced, not from the first request or the fastest stream's own
+// tile, because that is the instant the screen stops waiting.
+func TestRunFromReadsTheFirstToken(t *testing.T) {
+	tp := tui.ExampleTape()
+	first := FirstToken(tp)
+	if first <= 0 || first >= RunEnd(tp) {
+		t.Fatalf("the example run's first token is at %v, inside a run ending at %v — the fixture changed", first, RunEnd(tp))
+	}
+	lead := first / 2
+	if got := RunFrom(tp, lead); got != first-lead {
+		t.Errorf("a %v lead opens at %v, want %v", lead, got, first-lead)
+	}
+	// No lead asked for is the whole run, and so is a lead nobody waited.
+	if got := RunFrom(tp, 0); got != 0 {
+		t.Errorf("no lead opens at %v, want the run's start", got)
+	}
+	if got := RunFrom(tp, first+time.Second); got != 0 {
+		t.Errorf("a lead longer than the wait opens at %v, want the run's start", got)
+	}
+	if got := RunFrom(nil, time.Second); got != 0 {
+		t.Errorf("a nil tape opens at %v", got)
+	}
+}
+
+// TestWindowedExplicitDurationStaysInTheWindow: --duration and a window are
+// both allowed and compose the only way they can — the ratio path replays the
+// window, not the run. A clip that named ten seconds and replayed the cut
+// prefill inside them would be the worst of both.
+func TestWindowedExplicitDurationStaysInTheWindow(t *testing.T) {
+	const (
+		runEnd = 30 * time.Second
+		from   = 8 * time.Second
+	)
+	s := NewSchedule(from, runEnd, DefaultFPS, 20*time.Second, false)
+	if s.Frame(0).At != from {
+		t.Errorf("the clip opens at %v, want %v", s.Frame(0).At, from)
+	}
+	// Halfway through the streaming phase is halfway through the window.
+	mid := s.Frame(int(float64(s.Count) * float64(s.Intro+s.Stream/2) / float64(s.Duration)))
+	if want, tol := from+(runEnd-from)/2, 300*time.Millisecond; mid.At < want-tol || mid.At > want+tol {
+		t.Errorf("the middle of the clip is cut at %v, want about %v", mid.At, want)
+	}
+	if last := s.Frame(s.Count - 1); last.At != runEnd {
+		t.Errorf("the clip ends cut at %v, want %v", last.At, runEnd)
 	}
 }

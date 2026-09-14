@@ -328,7 +328,12 @@ func TestHeroGIFIsPostable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the hero's recording is missing: %v", err)
 	}
-	sched := render.NewSchedule(render.RunEnd(tp), heroFPS, 0, true).WithPoster()
+	// The window the hero is published with, not the whole run: the command
+	// renders it with --prefill-lead, and a schedule built without one would
+	// hold this gate to a clip nobody publishes (2026-09-14, TTP-90). The
+	// lead is read through render.RunFrom rather than written out, so the
+	// only thing mirrored from package main is the three seconds themselves.
+	sched := render.NewSchedule(render.RunFrom(tp, heroPrefillLead), render.RunEnd(tp), heroFPS, 0, true).WithPoster()
 	if len(g.Image) > sched.Count {
 		t.Errorf("the hero has %d frames, more than the schedule's %d", len(g.Image), sched.Count)
 	}

@@ -55,7 +55,7 @@ func main() {
 		TapePath: "~/.toktape/runs/" + tp.Summary.ID + tape.Ext,
 		ColdOpen: true,
 	}
-	sched := render.NewSchedule(render.RunEnd(tp), *fps, 0, true)
+	sched := render.NewSchedule(0, render.RunEnd(tp), *fps, 0, true)
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fail(err)

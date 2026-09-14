@@ -96,6 +96,14 @@ type Options struct {
 	// at the run's start: a clip of a run is shared for its numbers, and the
 	// hero is the one clip that has to teach the command.
 	ColdOpen bool
+	// PrefillLead opens the clip this long before the first token instead of
+	// at the run's start, cutting the rest of the prefill wait out of it.
+	//
+	// Zero, the default, plays the whole run. It is opt-in because the wait is
+	// part of what a run cost and a clip of someone's own run should show what
+	// it cost; it is offered because a clip that sells the tool has to reach
+	// the tokens. What it never does is speed anything up — see Schedule.
+	PrefillLead time.Duration
 	// NoPoster drops the result frame from the front of the clip.
 	//
 	// The poster is on by default (Schedule.WithPoster): the first frame is
@@ -159,7 +167,7 @@ func prepare(tp *tape.Tape, o Options) (Options, Schedule, error) {
 	if err := o.validate(); err != nil {
 		return o, Schedule{}, err
 	}
-	sched := NewSchedule(RunEnd(tp), o.FPS, o.Duration, o.ColdOpen)
+	sched := NewSchedule(RunFrom(tp, o.PrefillLead), RunEnd(tp), o.FPS, o.Duration, o.ColdOpen)
 	if !o.NoPoster {
 		sched = sched.WithPoster()
 	}
@@ -185,6 +193,52 @@ func RunEnd(tp *tape.Tape) time.Duration {
 		}
 	}
 	return end
+}
+
+// FirstToken is when the first token of the run arrived — the earliest over
+// every stream, so it is the instant the screen stopped waiting rather than
+// the instant any one tile did.
+//
+// It is RunEnd's mirror and is read the same way: tokens and nothing else. A
+// run that produced none has no first token and this is 0, which reads as "no
+// wait to skip" at every call site.
+func FirstToken(tp *tape.Tape) time.Duration {
+	if tp == nil {
+		return 0
+	}
+	first := time.Duration(0)
+	for _, req := range tp.Requests {
+		if len(req.Tokens) == 0 {
+			continue
+		}
+		if at := req.StartedAt + req.Tokens[0].T; first == 0 || at < first {
+			first = at
+		}
+	}
+	return first
+}
+
+// RunFrom is the instant a clip should open at to show lead of the prefill
+// wait before the first token, and 0 for a clip that shows all of it.
+//
+// The wait is the one part of a run that is worth less than the time it takes
+// to watch. On this repo's own hero the first token is ten seconds in — a
+// fixed PCIe cost the box pays per prefill, not a rate anything can be read
+// off — and a reader who has to sit through it to reach the tokens usually
+// does not (user, 2026-09-14: "히어로에 실제 토큰출력까지 기다리는 시간이 너무
+// 길다"). lead keeps enough of it to see the spinner turn and the prefill bar
+// stand where it is, which is the whole of what those seconds show.
+//
+// A lead at least as long as the wait is a no-op rather than a negative
+// offset: there is nothing to cut, and the clip is the ordinary whole-run one.
+func RunFrom(tp *tape.Tape, lead time.Duration) time.Duration {
+	if lead <= 0 {
+		return 0
+	}
+	if first := FirstToken(tp); first > lead {
+		return first - lead
+	}
+	return 0
 }
 
 // FrameText renders one frame of tp as a block of ANSI-coloured text, exactly

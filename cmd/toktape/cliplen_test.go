@@ -23,6 +23,12 @@ import (
 // heroTape is the recording the README's clip plays and the help quotes.
 const heroTape = "../../assets/hero.tape"
 
+// heroPrefillLead mirrors internal/render/cmd/hero's HeroPrefillLead: how much
+// of the wait for the first token the published clip keeps. A test binary
+// cannot import package main, which is why it is written twice; the two
+// lengths the note quotes are what would catch them drifting apart.
+const heroPrefillLead = 3 * time.Second
+
 func TestClipLengthNoteMatchesTheHero(t *testing.T) {
 	tp, err := tape.Read(filepath.Join(heroTape))
 	if err != nil {
@@ -48,10 +54,15 @@ func TestClipLengthNoteMatchesTheHero(t *testing.T) {
 		}
 	}
 
-	// The three durations, from the schedule the renderer really builds.
+	// The durations, from the schedules the renderer really builds. The last
+	// two are the windowed clip the hero is actually published as: the note
+	// teaches --prefill-lead with the hero's own figures, so those rot the
+	// same way the rest do.
 	runEnd := render.RunEnd(tp)
-	plain := render.NewSchedule(runEnd, render.DefaultFPS, 0, false)
-	open := render.NewSchedule(runEnd, render.DefaultFPS, 0, true)
+	runFrom := render.RunFrom(tp, heroPrefillLead)
+	plain := render.NewSchedule(0, runEnd, render.DefaultFPS, 0, false)
+	open := render.NewSchedule(0, runEnd, render.DefaultFPS, 0, true)
+	windowed := render.NewSchedule(runFrom, runEnd, render.DefaultFPS, 0, true)
 	for _, q := range []struct {
 		what string
 		d    time.Duration
@@ -59,6 +70,8 @@ func TestClipLengthNoteMatchesTheHero(t *testing.T) {
 		{"run", runEnd},
 		{"clip without --open", plain.Duration},
 		{"clip with --open", open.Duration},
+		{"wait cut by --prefill-lead", runFrom},
+		{"windowed clip with --open", windowed.Duration},
 	} {
 		text := fmt.Sprintf("%.1fs", q.d.Seconds())
 		if !strings.Contains(renderUsage, text) {
@@ -97,7 +110,7 @@ func TestClipLengthLineAgreesWithTheRenderer(t *testing.T) {
 
 	for _, open := range []bool{false, true} {
 		opts := render.Options{FPS: render.DefaultFPS, ColdOpen: open}
-		want := render.NewSchedule(runEnd, render.DefaultFPS, 0, open).WithPoster()
+		want := render.NewSchedule(0, runEnd, render.DefaultFPS, 0, open).WithPoster()
 		line := clipLengthLine(tp, opts)
 		if !strings.Contains(line, fmt.Sprintf("%.1fs", want.Duration.Seconds())) {
 			t.Errorf("--open=%v: %q does not name the schedule's %v", open, line, want.Duration)
@@ -105,6 +118,21 @@ func TestClipLengthLineAgreesWithTheRenderer(t *testing.T) {
 		if open != strings.Contains(line, "open") {
 			t.Errorf("--open=%v: the breakdown is wrong: %q", open, line)
 		}
+	}
+
+	// A window prints the shorter clip it really renders, and says what is not
+	// in it. A reader who is told "27.1s" and nothing else would read the run
+	// as eight seconds shorter than it was.
+	windowed := clipLengthLine(tp, render.Options{FPS: render.DefaultFPS, PrefillLead: heroPrefillLead})
+	want := render.NewSchedule(render.RunFrom(tp, heroPrefillLead), runEnd, render.DefaultFPS, 0, false).WithPoster()
+	if !strings.Contains(windowed, fmt.Sprintf("%.1fs", want.Duration.Seconds())) {
+		t.Errorf("--prefill-lead: %q does not name the schedule's %v", windowed, want.Duration)
+	}
+	if !strings.Contains(windowed, "--prefill-lead") {
+		t.Errorf("--prefill-lead: %q does not say why the clip is shorter than the run", windowed)
+	}
+	if strings.Contains(windowed, "intro") {
+		t.Errorf("--prefill-lead: %q counts an intro the windowed clip does not have", windowed)
 	}
 
 	// A named --duration prints the length asked for and says what it costs,

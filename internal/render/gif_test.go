@@ -314,7 +314,7 @@ func TestGIFOfTheWholeClipStaysPostable(t *testing.T) {
 	// 1.5 MB the README hero is capped at in cmd/toktape. Reducing it is a
 	// cell-size or frame-rate decision, not a density one.
 	const perStreamSecond = 250_000
-	s := NewSchedule(RunEnd(tp), DefaultFPS, 0, false)
+	s := NewSchedule(0, RunEnd(tp), DefaultFPS, 0, false)
 	budget := int64(perStreamSecond * s.Stream.Seconds())
 	if got := fileSize(t, out); got > budget {
 		t.Errorf("the clip is %d bytes over a %v stream, %.1f kB per streaming second; want at most %d (%d kB/s)",

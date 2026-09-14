@@ -35,6 +35,7 @@ Flags:
   --frames DIR     write the PNG frame sequence into DIR
   --open           open on a shell prompt with the command being typed, before the screen
   --no-poster      do not put the result on the clip's first frame
+  --prefill-lead D open this long before the first token instead of at the run's start
   --duration D     length of the clip (default: derived from the run)
   --fps N          frame rate (default 30)
   --size WxH       terminal size in cells (default 156x38 for --mp4 and --frames, 120x36 for --gif and --cast)
@@ -56,9 +57,18 @@ Clip length
   35.9s clip, or 41.9s with --open. It was recorded with --for 30s, which is
   the rule above: the clock ended it at 30s and the clip came out 30 + 6.
 
-  Either flag is set when you record. --duration is not: it compresses or
-  stretches the same run into the time you name, and a viewer then cannot
-  tell whether a stream stalled. Slow motion is a lie about the machine.
+  Either flag is set when you record. --prefill-lead is the one that is not:
+  it opens the clip that long before the first token rather than at the run's
+  start, so the wait for prefill is left out while every frame that is in the
+  clip is still 1:1. Nothing has to say so — the tile's clock is measured from
+  the run's start, so a windowed clip opens on 8/30s instead of 0/30s. It
+  replaces the intro, which is a screen for a run that has not started yet.
+  The hero is rendered with --prefill-lead 3s: its first token is 10.8s in, so
+  7.8s of waiting is cut and the clip is 33.1s rather than 41.9s.
+
+  --duration is the dishonest one: it compresses or stretches the same run
+  into the time you name, and a viewer then cannot tell whether a stream
+  stalled. Slow motion is a lie about the machine.
 `
 
 // renderFlags is every flag the render verb declares. See recordFlags for why
@@ -71,6 +81,7 @@ type renderFlags struct {
 	duration *time.Duration
 	coldOpen *bool
 	noPoster *bool
+	lead     *time.Duration
 	fps      *int
 	size     *string
 	outDir   *string
@@ -86,6 +97,7 @@ func declareRenderFlags(fs *flag.FlagSet) *renderFlags {
 		duration: fs.Duration("duration", 0, "length of the clip (default: derived from the run)"),
 		coldOpen: fs.Bool("open", false, "open on a shell prompt with the command being typed"),
 		noPoster: fs.Bool("no-poster", false, "do not put the result on the clip's first frame"),
+		lead:     fs.Duration("prefill-lead", 0, "open this long before the first token instead of at the run's start"),
 		fps:      fs.Int("fps", render.DefaultFPS, "frame rate"),
 		size:     fs.String("size", "", "terminal size in cells, e.g. 120x36"),
 		outDir:   fs.String("out", defaultRunsDir(), "directory to take the newest run from"),
@@ -104,7 +116,7 @@ func runRender(c *cli, args []string) int {
 	fs := newFlagSet("render")
 	f := declareRenderFlags(fs)
 	gifOut, mp4Out, castOut, framesTo := f.gifOut, f.mp4Out, f.castOut, f.framesTo
-	duration, coldOpen, noPoster := f.duration, f.coldOpen, f.noPoster
+	duration, coldOpen, noPoster, lead := f.duration, f.coldOpen, f.noPoster, f.lead
 	fps, size, outDir := f.fps, f.size, f.outDir
 	files, err := parseArgs(fs, args)
 	if err != nil {
@@ -119,8 +131,17 @@ func runRender(c *cli, args []string) int {
 	if *duration < 0 {
 		return c.usagef("toktape render: --duration must not be negative, got %v", *duration)
 	}
+	if *lead < 0 {
+		return c.usagef("toktape render: --prefill-lead must not be negative, got %v", *lead)
+	}
 
-	opts := render.Options{FPS: *fps, Duration: *duration, ColdOpen: *coldOpen, NoPoster: *noPoster}
+	opts := render.Options{
+		FPS:         *fps,
+		Duration:    *duration,
+		ColdOpen:    *coldOpen,
+		NoPoster:    *noPoster,
+		PrefillLead: *lead,
+	}
 	if *size != "" {
 		w, h, err := parseSize(*size)
 		if err != nil {
@@ -224,7 +245,8 @@ func clipLengthLine(tp *tape.Tape, opts render.Options) string {
 	if fps <= 0 {
 		fps = render.DefaultFPS
 	}
-	sched := render.NewSchedule(runEnd, fps, opts.Duration, opts.ColdOpen)
+	runFrom := render.RunFrom(tp, opts.PrefillLead)
+	sched := render.NewSchedule(runFrom, runEnd, fps, opts.Duration, opts.ColdOpen)
 	if !opts.NoPoster {
 		sched = sched.WithPoster()
 	}
@@ -245,11 +267,21 @@ func clipLengthLine(tp *tape.Tape, opts render.Options) string {
 	if opts.ColdOpen {
 		parts = append(parts, fmt.Sprintf("%s open", secs(render.OpenHold)))
 	}
+	if sched.Intro > 0 {
+		parts = append(parts, fmt.Sprintf("%s intro", secs(render.IntroHold)))
+	}
 	parts = append(parts,
-		fmt.Sprintf("%s intro", secs(render.IntroHold)),
-		fmt.Sprintf("%s run", secs(runEnd)),
+		fmt.Sprintf("%s run", secs(runEnd-runFrom)),
 		fmt.Sprintf("%s card", secs(render.CardHold)))
-	return fmt.Sprintf("→ Clip %s (%s)\n", secs(sched.Duration), strings.Join(parts, " + "))
+	line := fmt.Sprintf("→ Clip %s (%s)\n", secs(sched.Duration), strings.Join(parts, " + "))
+	if runFrom > 0 {
+		// The cut is named here because it is the one thing in the breakdown a
+		// reader could otherwise mistake for a shorter run. On screen it needs
+		// no label: the clip opens on a clock that already reads runFrom.
+		line += fmt.Sprintf("→ The first %s of the run are not in it: --prefill-lead opens the clip %s before the first token. Everything in it is still 1:1\n",
+			secs(runFrom), secs(opts.PrefillLead))
+	}
+	return line
 }
 
 // secs renders a duration the way the help text quotes one: one decimal.
