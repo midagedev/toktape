@@ -75,7 +75,10 @@ const (
 // a budget that lands a stream under tape.MinDecodeTokens produces the "sample"
 // first run the budget exists to prevent.
 func (o Options) limit() tape.LimitSummary {
-	out := tape.LimitSummary{For: o.For, MaxTokens: o.MaxTokens}
+	// Named is decided before the defaults are applied: afterwards a cap the
+	// user gave and the runaway guard are indistinguishable, and the tape has
+	// to be able to tell them apart to reproduce the "both" row.
+	out := tape.LimitSummary{For: o.For, MaxTokens: o.MaxTokens, MaxTokensNamed: o.MaxTokens > 0}
 	switch {
 	case out.For < 0: // NoClock: the user said no clock, and that is a choice
 		out.For = 0

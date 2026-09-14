@@ -133,3 +133,24 @@ func TestMarkCutLeavesTheServersWordAlone(t *testing.T) {
 		t.Error("a stream that was not live had its error cleared")
 	}
 }
+
+// TestLimitRecordsWhetherTheCapWasNamed: the table's "both" row cannot be
+// reproduced from a tape that does not say whether its cap was the user's or
+// the runaway guard (lead, 2026-09-14). Only a cap the user gave is named.
+func TestLimitRecordsWhetherTheCapWasNamed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts Options
+		want bool
+	}{
+		{"neither", Options{}, false},
+		{"--for only", Options{For: 45 * time.Second}, false},
+		{"--n-predict only", Options{MaxTokens: 240}, true},
+		{"both", Options{For: 8 * time.Second, MaxTokens: 240}, true},
+		{"--for 0", Options{For: NoClock}, false},
+	} {
+		if got := tc.opts.limit().MaxTokensNamed; got != tc.want {
+			t.Errorf("%s: MaxTokensNamed = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

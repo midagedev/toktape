@@ -104,16 +104,21 @@ func recordCommand(s *tape.RunSummary) string {
 // recorder.DefaultFor is a constant that may move, and a card outlives the
 // binary that printed it. The flag pins the run; the omission does not.
 //
-// The gap this cannot close is the matrix's "both" row. A run recorded with
-// `--for 10s --n-predict 300` ends at whichever comes first, and the command
-// below re-asks only for the clock, leaving the cap at whatever this version
-// defaults to — a different run on a fast box. Telling the two apart needs a
-// tape that says whether MaxTokens was named or defaulted, which the schema
-// does not record; see the report.
+// The matrix's "both" row is the one that needs the tape's help. A run recorded
+// with `--for 10s --n-predict 300` ends at whichever comes first, and a command
+// rebuilt from the clock alone would leave the cap at whatever the reading
+// version defaults to — a different run on a fast box. Limit.MaxTokensNamed
+// says whether the cap was the user's, so it is re-asked for exactly then and
+// never for the runaway guard (lead, 2026-09-14). A tape recorded before that
+// field reads as not named and prints the clock alone, as it did.
 func limitArgs(s *tape.RunSummary) []string {
 	switch {
 	case s.Limit.For > 0:
-		return []string{"--for", s.Limit.For.String()}
+		args := []string{"--for", s.Limit.For.String()}
+		if s.Limit.MaxTokensNamed && s.Limit.MaxTokens > 0 {
+			args = append(args, "--n-predict", strconv.Itoa(s.Limit.MaxTokens))
+		}
+		return args
 	case s.Limit.MaxTokens > 0:
 		return []string{"--n-predict", strconv.Itoa(s.Limit.MaxTokens)}
 	case s.Timings.PredictedN > 0:

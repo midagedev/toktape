@@ -427,11 +427,18 @@ type TimingsSummary struct {
 // Concurrency == 1 it repeats Timings. The card prints
 // "N × <per-stream> tok/s = <aggregate> tok/s" when N > 1.
 type AggregateTimings struct {
-	Streams                     int     `json:"streams"`
-	StreamsFailed               int     `json:"streams_failed,omitempty"`
-	WallMs                      float64 `json:"wall_ms"` // first request sent → last token received
-	TotalPromptN                int     `json:"total_prompt_n"`
-	TotalPredictedN             int     `json:"total_predicted_n"`
+	Streams         int     `json:"streams"`
+	StreamsFailed   int     `json:"streams_failed,omitempty"`
+	WallMs          float64 `json:"wall_ms"` // first request sent → last token received
+	TotalPromptN    int     `json:"total_prompt_n"`
+	TotalPredictedN int     `json:"total_predicted_n"`
+	// MinPredictedN is the fewest tokens any answered stream generated
+	// (lead, 2026-09-14). Timings.PredictedN is the per-stream MEAN above one
+	// stream, so two streams of 10 and 300 tokens average 155 and clear
+	// MinDecodeTokens while one of them is a sample. A reader asking "was any
+	// stream too short to be a rate" needs the minimum, and the summary is
+	// all a renderer reads. 0 on a tape older than the field: unknown.
+	MinPredictedN               int     `json:"min_predicted_n,omitempty"`
 	AggregatePredictedPerSecond float64 `json:"aggregate_predicted_per_second"` // TotalPredictedN / decode window
 	AggregatePromptPerSecond    float64 `json:"aggregate_prompt_per_second"`
 	PerStreamPredictedPerSecond float64 `json:"per_stream_predicted_per_second"` // mean of streams
@@ -610,6 +617,14 @@ type LimitSummary struct {
 	// is always sent — a request with no cap generates unbounded, and a clock
 	// that fails then has nothing behind it.
 	MaxTokens int `json:"max_tokens,omitempty"`
+	// MaxTokensNamed says the cap was the user's own (`--n-predict`) rather
+	// than the recorder's runaway guard. It is what lets a reader reproduce
+	// the table's "both" row: `--for 10s --n-predict 300` ends at whichever
+	// comes first, and a command rebuilt from For alone would leave the cap
+	// at whatever the reading version defaults to — a different run on a
+	// fast box. False on a tape older than the field, which is read as
+	// "not known to be named" (lead, 2026-09-14).
+	MaxTokensNamed bool `json:"max_tokens_named,omitempty"`
 	// MinTokens is the floor that was in force (MinCutTokens); 0 with no clock.
 	MinTokens int `json:"min_tokens,omitempty"`
 	// CutAt is when the clock actually cut, from the same origin as For. 0

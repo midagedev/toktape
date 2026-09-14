@@ -172,6 +172,19 @@ func TestRecordCommandNamesWhatEndedTheRun(t *testing.T) {
 			not:  []string{"250", "--for"},
 		},
 		{
+			// The matrix's "both" row (lead, 2026-09-14). With only --for the
+			// cap would fall back to whatever the reading version defaults to,
+			// which on a fast box is a different run.
+			name: "a run with a budget and a named cap re-asks for both",
+			s: &tape.RunSummary{
+				Concurrency: 1,
+				Limit: tape.LimitSummary{For: 10 * time.Second, MaxTokens: 300,
+					MaxTokensNamed: true, MinTokens: 64},
+				Timings: tape.TimingsSummary{PredictedN: 300},
+			},
+			want: "toktape --for 10s --n-predict 300",
+		},
+		{
 			name: "a tape older than the limit field falls back to the count",
 			s: &tape.RunSummary{
 				Concurrency: 1,

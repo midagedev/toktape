@@ -163,6 +163,12 @@ func Aggregate(recs []tape.RequestRecord) tape.AggregateTimings {
 			n = len(r.Tokens) // build without timings: what we saw is all we have
 		}
 		out.TotalPredictedN += n
+		// The shortest answered stream, because the per-stream figures above
+		// one stream are means and a mean hides a stream too short to be a
+		// rate (tape.AggregateTimings.MinPredictedN).
+		if out.MinPredictedN == 0 || n < out.MinPredictedN {
+			out.MinPredictedN = n
+		}
 		out.TotalPromptN += r.Timings.PromptN
 		rate := r.Timings.PredictedPerSecond
 		if rate == 0 {
