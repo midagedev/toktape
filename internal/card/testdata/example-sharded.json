@@ -217,5 +217,6 @@
       "power_w": 166,
       "clock_mhz": 1710
     }
-  ]
+  ],
+  "caveats": []
 }

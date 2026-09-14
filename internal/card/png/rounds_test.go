@@ -35,9 +35,18 @@ func TestRoundsClauseReplacesThePerStreamLine(t *testing.T) {
 			if m.Rect.Max.X > heroSplitX-heroGutter {
 				t.Errorf("the rounds clause ends at x=%d, past the decode column (%d)", m.Rect.Max.X, heroSplitX-heroGutter)
 			}
-			// The draft clause on the second line is untouched.
-			if m2, _ := c.markByID("hero.left.sub2"); m2.Text != "draft DSpark-0.6B-Q8_0.gguf · n_max 3 · 38% accepted" {
-				t.Errorf("hero.left.sub2 = %q", m2.Text)
+			// The draft clause on the second line is untouched — except that
+			// on the concurrent run it now carries the verify-step bandwidth
+			// and has dropped the model name to fit it (2026-09-14, TTP-67
+			// and TTP-69; see TestDraftClauseReplacesTheSecondDecodeLine).
+			// The single-stream copy of this fixture derives no verify-step
+			// figure, so its clause is the string it always was.
+			want2 := "draft n_max 3 · 38% accepted · ≈ 226 GB/s RAM/step"
+			if s.Concurrency <= 1 {
+				want2 = "draft DSpark-0.6B-Q8_0.gguf · n_max 3 · 38% accepted"
+			}
+			if m2, _ := c.markByID("hero.left.sub2"); m2.Text != want2 {
+				t.Errorf("hero.left.sub2 = %q, want %q", m2.Text, want2)
 			}
 		})
 	}

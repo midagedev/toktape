@@ -8,7 +8,7 @@
 │          64 GB DDR5-6000                                             │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Decode        17.4 tok/s · ≈ 785 GB/s, 84% of peak                   │
-│ Prefill       610 tok/s · TTFT 630 ms · 512 prompt tokens            │
+│ Prefill       610 tok/s · 512 prompt tokens · TTFT 630 ms            │
 │ Context       16384 (512 in / 320 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
 │ Sampling      temp default · chat                                    │
@@ -28,7 +28,8 @@
 ├──────────────────────────────────────────────────────────────────────┤
 │ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0 -t 16    │
 ├──────────────────────────────────────────────────────────────────────┤
-│ ! 한글 경고 메시지: nvml 을 찾지 못해 nvidia-smi 로 VRAM 을 읽었다   │
+│ ! 2 caveats — 한글 경고 메시지: nvml 을 찾지 못해 nvidia-smi 로 VRAM │
+│   을 읽었다 · machine_contended                                      │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │
 └──────────────────────────────────────────────────────────────────────┘

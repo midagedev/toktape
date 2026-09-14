@@ -320,6 +320,12 @@ func TestJSONIsSchemaOrdered(t *testing.T) {
 		// honour for structs, so it is emitted as {} on a run that named no
 		// limits, exactly as "sampling" beside it is.
 		"cache", "contention", "template", "sampling", "limit", "gpus_at_end",
+		// "caveats" joined on 2026-09-14 (TTP-74). It is the card's own
+		// derived list and not part of tape.RunSummary, so it is last: every
+		// key above it keeps the position and the type a consumer already
+		// parses, and a tape.RunSummary still unmarshals from this document
+		// (TestJSONStillUnmarshalsIntoARunSummary).
+		"caveats",
 	}
 	if !slices.Equal(keys, want) {
 		t.Errorf("top-level key order =\n%v\nwant\n%v", keys, want)
@@ -543,9 +549,17 @@ func TestAnswerCutWarning(t *testing.T) {
 		})
 	}
 
-	// The whole card prints it, wrapped by the warning section, inside the box.
+	// The whole card prints it, in the caveat block, inside the box.
+	//
+	// 2026-09-14 (TTP-74): the block used to be one line per warning and the
+	// line began "! answer cut:". It is now one line for the whole caveat
+	// list, which leads with a count when there is more than one — and this
+	// bare summary has a second, since a RunSummary with no Memory has no
+	// /proc view. The sentence itself is unchanged and is still printed
+	// whole, which is what this assertion is for; the count is checked in
+	// caveat_test.go.
 	text := Text(cut(128, 128))
-	if !strings.Contains(text, "! answer cut: all 128 predicted tokens were reasoning") {
+	if !hasWrapped(text, "answer cut: all 128 predicted tokens were reasoning") {
 		t.Errorf("Text() does not print the warning:\n%s", text)
 	}
 	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {

@@ -30,11 +30,14 @@ toktape は、すでに起動している llama-server にアタッチし、1 �
 │          AMD Ryzen Threadripper PRO 5975WX 32-Cores · 252 GB         │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Decode        26.9 tok/s aggregate · 13.5 tok/s each                 │
-│               ≈ 87 GB/s from RAM                                     │
+│               ≈ 108 GB/s from RAM per verify step                    │
 │ Prefill       49.5 tok/s aggregate · 26.0 tok/s each                 │
-│               TTFT p50 1212 ms · 30 prompt tokens                    │
+│               30 prompt tokens — not a prefill measurement           │
+│               engine prefill 1155 ms · queue 57 ms                   │
+│               TTFT p50 1212 ms                                       │
 │ Draft         DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf   │
 │               n_max 3 · 71% accepted (324/459)                       │
+│               156 verify steps of 3.9 tokens                         │
 │ Context       16384 (30 in / 240 out · 64 thinking)                  │
 │ Prefix cache  0% hit (0/30) · cold                                   │
 │ Sampling      temp default · chat                                    │
@@ -61,6 +64,10 @@ toktape は、すでに起動している llama-server にアタッチし、1 �
 │          --spec-type draft-dspark -otd output_norm=CUDA0 --jinja     │
 │          --reasoning-budget 64 --host 127.0.0.1 --port 8001          │
 │          -ot blk\.[0-3]\.ffn_.*_exps=CUDA0 -ot blk\.6\.ffn_down_exp… │
+├──────────────────────────────────────────────────────────────────────┤
+│ ! 3 caveats — cold run: weights arrived from disk while it decoded,  │
+│   5.8 maj faults/token · short_prompt_for_prefill ·                  │
+│   conditions_changed                                                 │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │
 └──────────────────────────────────────────────────────────────────────┘

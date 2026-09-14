@@ -11,7 +11,8 @@
 │ Decode        27.6 tok/s aggregate · 6.9 tok/s each                  │
 │               ≈ 331 GB/s from RAM, 72% of peak                       │
 │ Prefill       496 tok/s aggregate · 172 tok/s each                   │
-│               TTFT p50 2650 ms · 512 prompt tokens                   │
+│               512 prompt tokens · engine prefill 2233 ms             │
+│               queue 417 ms · TTFT p50 2650 ms                        │
 │ Context       16384 (512 in / 248 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
 │ Streams       4 × 6.9 tok/s = 27.6 tok/s aggregate                   │

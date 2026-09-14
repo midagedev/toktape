@@ -227,5 +227,6 @@
       "power_w": 225,
       "clock_mhz": 1815
     }
-  ]
+  ],
+  "caveats": []
 }

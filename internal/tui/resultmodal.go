@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -142,17 +143,33 @@ type heroFigure struct {
 // single stream leads with its own server-reported rate. Both come from the
 // summary, never re-derived from tokens: the summary is the record.
 func heroFigures(s tape.RunSummary) (dec, pre heroFigure) {
+	// The decode figure's own label says "sample" when the generation was too
+	// short to be a rate, and the prefill figure's says "short prompt" when
+	// the prompt was too short to be a prefill measurement (TTP-65/74,
+	// 2026-09-14). Both go through the predicates in internal/card, which the
+	// text card and the share image also ask: this modal is the third
+	// rendering of one run, and three renderers deciding for themselves
+	// whether a figure needs qualifying is how a figure ends up quoted
+	// without one.
+	decode := "decode"
+	if card.IsSample(&s) {
+		decode = "sample"
+	}
+	prefill := "prefill"
+	if card.ShortPrompt(&s) {
+		prefill += " · short prompt"
+	}
 	if n := s.Concurrency; n > 1 {
 		a := s.Aggregate
 		dec = heroFigure{fmtRate(a.AggregatePredictedPerSecond),
-			fmt.Sprintf("decode · %d streams · %s tok/s each", n, fmtRate(a.PerStreamPredictedPerSecond))}
+			fmt.Sprintf("%s · %d streams · %s tok/s each", decode, n, fmtRate(a.PerStreamPredictedPerSecond))}
 		pre = heroFigure{fmtRate(a.AggregatePromptPerSecond),
-			"prefill · ttft p50 " + fmtMs(a.TTFTp50Ms)}
+			prefill + " · ttft p50 " + fmtMs(a.TTFTp50Ms)}
 		return dec, pre
 	}
 	t := s.Timings
-	dec = heroFigure{fmtRate(t.PredictedPerSecond), fmt.Sprintf("decode · %d tokens", t.PredictedN)}
-	pre = heroFigure{fmtRate(t.PromptPerSecond), "prefill · ttft " + fmtMs(t.TTFTMs)}
+	dec = heroFigure{fmtRate(t.PredictedPerSecond), fmt.Sprintf("%s · %d tokens", decode, t.PredictedN)}
+	pre = heroFigure{fmtRate(t.PromptPerSecond), prefill + " · ttft " + fmtMs(t.TTFTMs)}
 	return dec, pre
 }
 

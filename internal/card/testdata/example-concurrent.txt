@@ -10,7 +10,8 @@
 │ Decode        72.9 tok/s aggregate · 9.1 tok/s each                  │
 │               ≈ 410 GB/s, 44% of peak                                │
 │ Prefill       2927 tok/s aggregate · 610 tok/s each                  │
-│               TTFT p50 810 ms · 512 prompt tokens                    │
+│               512 prompt tokens · engine prefill 630 ms              │
+│               queue 180 ms · TTFT p50 810 ms                         │
 │ Context       16384 (512 in / 307 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
 │ Sampling      temp default · chat                                    │

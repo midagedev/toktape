@@ -100,13 +100,36 @@ func (c *canvas) drawHeroCol(id string, h heroCol, x0, x1 int, src func(int, int
 	})
 
 	c.text(textOpts{
-		id: id + ".sub1", s: h.sub1, x: x0, baseline: heroSub1Base,
+		id: id + ".sub1", s: pickWidest(c, h.sub1, h.sub1Fallbacks, maxW), x: x0, baseline: heroSub1Base,
 		style: stBody, src: solid(colDim), maxW: maxW,
 	})
 	c.text(textOpts{
-		id: id + ".sub2", s: h.sub2, x: x0, baseline: heroSub2Base,
+		id: id + ".sub2", s: pickWidest(c, h.sub2, h.sub2Fallbacks, maxW), x: x0, baseline: heroSub2Base,
 		style: stBody, src: solid(colFaint), maxW: maxW,
 	})
+}
+
+// pickWidest returns the first of want and its fallbacks that measures inside maxW,
+// or the last one when none does — which textOpts then truncates, as it did
+// before there were fallbacks.
+//
+// The measurement is the canvas's, not a character count: the card is set in a
+// proportional face, so "fits" is a question only the rasteriser can answer
+// and a rule of thumb here would be wrong on exactly the long names it exists
+// for.
+func pickWidest(c *canvas, want string, fallbacks []string, maxW int) string {
+	if c.measure(want, stBody) <= maxW {
+		return want
+	}
+	for _, alt := range fallbacks {
+		if alt != "" && c.measure(alt, stBody) <= maxW {
+			return alt
+		}
+	}
+	if n := len(fallbacks); n > 0 && fallbacks[n-1] != "" {
+		return fallbacks[n-1]
+	}
+	return want
 }
 
 // ---------------------------------------------------------------- memory ---

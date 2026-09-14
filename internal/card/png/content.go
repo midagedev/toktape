@@ -48,6 +48,19 @@ type heroCol struct {
 	unit    string
 	sub1    string
 	sub2    string
+	// sub1Fallbacks are to sub1 what sub2Fallbacks are to sub2.
+	sub1Fallbacks []string
+	// sub2Fallbacks are progressively shorter spellings of sub2, tried in
+	// order when sub2 does not fit the column (TTP-69, 2026-09-14).
+	//
+	// The frame is a fixed 1200×675 and the hero columns are 504 px, so a
+	// clause that does not fit is cut with an ellipsis wherever the glyphs run
+	// out — which on the ws card fell inside the draft model's file name and
+	// took the block size and the acceptance rate with it. A clause that knows
+	// what it can give up loses the least important element instead of the
+	// last one. Deciding WHICH element that is stays in build(); this is only
+	// the list, and the canvas is what measures.
+	sub2Fallbacks []string
 }
 
 type segment struct {
@@ -219,12 +232,16 @@ func (c *content) buildHero(s *tape.RunSummary) {
 	// and appended to the token count it would be cut through "accepted".
 	// Token count, ms and ITL stay on the text card. A failed-streams note is
 	// a warning, not a figure, so it is kept.
-	if d := draftString(s); d != "" {
+	if d, fallbacks := draftString(s); d != "" {
 		if concurrent {
 			c.left.sub2 = joinParts(" · ", d, failedStreams(a))
+			for i, alt := range fallbacks {
+				fallbacks[i] = joinParts(" · ", alt, failedStreams(a))
+			}
 		} else {
 			c.left.sub2 = d
 		}
+		c.left.sub2Fallbacks = fallbacks
 	}
 
 	// Right: prefill and TTFT.
@@ -239,13 +256,34 @@ func (c *content) buildHero(s *tape.RunSummary) {
 			streams = s.Concurrency
 		}
 		c.right = heroCol{
-			eyebrow: "aggregate prefill",
+			eyebrow: prefillEyebrow(s, "aggregate prefill"),
 			number:  formatRate(a.AggregatePromptPerSecond),
 			unit:    "tok/s",
 			// No "N ×" here, unlike decode: prefill is batched server-wide, so
 			// N × the per-request prompt rate is not the aggregate, and printing
 			// it as a product was false arithmetic on the card (lead, 2026-09-13).
-			sub1: fmt.Sprintf("%s per stream", formatRateUnit(t.PromptPerSecond)),
+			//
+			// TTP-65 (2026-09-14) put the two halves of TTFT on this row. Four
+			// requests that arrive together are prefilled one after another,
+			// so the time to a first token is the wait for a slot PLUS the
+			// engine's work, and a card that shows only the total invites the
+			// reader to read the whole of it as prefill — which is how the ws
+			// four-stream tape came to claim 5.6 tok/s. The engine's half is
+			// the server's own prompt_ms, never send-to-first-token.
+			//
+			// No total is printed beside them on purpose: these two are means
+			// over the streams and the TTFT on the line below is a median, so
+			// a total here would be a third TTFT figure that does not equal
+			// either. The text card, which has room to label them, prints the
+			// median and the two means side by side.
+			sub1: joinParts(" · ",
+				fmt.Sprintf("%s per stream", formatRateUnit(t.PromptPerSecond)),
+				enginePrefillString(s), queueWaitString(s)),
+			sub1Fallbacks: []string{
+				joinParts(" · ", fmt.Sprintf("%s per stream", formatRateUnit(t.PromptPerSecond)),
+					queueWaitString(s)),
+				fmt.Sprintf("%s per stream", formatRateUnit(t.PromptPerSecond)),
+			},
 			sub2: joinParts(" · ",
 				"TTFT p50 "+formatMs(a.TTFTp50Ms),
 				"p95 "+formatMs(a.TTFTp95Ms),
@@ -254,7 +292,7 @@ func (c *content) buildHero(s *tape.RunSummary) {
 		}
 	} else {
 		c.right = heroCol{
-			eyebrow: "prefill",
+			eyebrow: prefillEyebrow(s, "prefill"),
 			number:  formatRate(t.PromptPerSecond),
 			unit:    "tok/s",
 			sub1:    "TTFT " + formatMs(t.TTFTMs),
@@ -342,10 +380,10 @@ func reasoningTokens(s *tape.RunSummary) int { return s.Timings.ReasoningN }
 // server reported no draft figure. The counts stay on the text card, and the
 // rules are its rules: an unread model is "?", and zero drafted is "0 drafted"
 // rather than a rate over nothing.
-func draftString(s *tape.RunSummary) string {
+func draftString(s *tape.RunSummary) (clause string, fallbacks []string) {
 	t := s.Timings
 	if t.DraftN == nil {
-		return ""
+		return "", nil
 	}
 	rate := "0 drafted"
 	if *t.DraftN > 0 {
@@ -355,7 +393,104 @@ func draftString(s *tape.RunSummary) string {
 		}
 		rate = formatPct(float64(accepted)/float64(*t.DraftN)) + " accepted"
 	}
-	return joinParts(" · ", "draft "+orUnknown(s.Server.Flags.DraftModel), "n_max "+card.DraftNMax(s), rate)
+	name := "draft " + orUnknown(s.Server.Flags.DraftModel)
+	figures := joinParts(" · ", "n_max "+card.DraftNMax(s), rate)
+	// The bandwidth the verify steps really sustained (TTP-67). It rides this
+	// clause rather than the line above because the line above is already
+	// spoken for on a concurrent run — the stream arithmetic, a multi-prompt
+	// median, a sweep's verdict — and because "per step" is a statement about
+	// the draft, which is what this clause is.
+	bw, bwNoRatio := verifyBandwidthString(s)
+	return joinParts(" · ", name, figures, bw),
+		[]string{
+			// First to go is the model's name. A draft model's file name runs
+			// to 46 characters on the rig this was written for and no size
+			// that fits the column holds it (TTP-54 kept sizeBody at 15 for
+			// exactly this clause and it still did not), so keeping it means
+			// cutting the clause through "accepted" and losing the block size
+			// and the acceptance rate — the two figures a reader needs to
+			// reproduce the run. The name is printed whole on the FLAGS strip
+			// at the foot of the card either way, and on the text card, so
+			// dropping it here costs nothing but the glance.
+			joinParts(" · ", "draft "+figures, bw),
+			// Then the share of the host's memory ceiling, keeping the rate
+			// itself: the rate is the figure another rig can be compared
+			// against, while the ratio is only meaningful beside this box's
+			// own peak. Both are on the text card's Decode row and in --json.
+			joinParts(" · ", "draft "+figures, bwNoRatio),
+			// Then the bandwidth altogether. The block size and the
+			// acceptance rate are the last things standing, which is the
+			// order TTP-30 put them in.
+			"draft " + figures,
+		}
+}
+
+// verifyBandwidthString is the hero's spelling of the verify-step host
+// bandwidth: "≈ 108 GB/s RAM/step". Empty when the run used no draft or the
+// arithmetic is not derivable.
+//
+// It is terser than the text card's "≈ 108 GB/s from RAM per verify step"
+// because it shares a 504 px row with the figures that give it its
+// denominator, and because the clause it sits in has already said "draft".
+// The two renderings ask internal/card for the same numbers (card.VerifyRAM),
+// so they can differ in wording and never in value.
+// It returns the clause twice: once whole, and once without the "of peak"
+// ratio, which is the first thing the clause gives up when the column is full.
+func verifyBandwidthString(s *tape.RunSummary) (full, withoutRatio string) {
+	bps, ofPeak, ok := card.VerifyRAM(s)
+	if !ok {
+		return "", ""
+	}
+	withoutRatio = "≈ " + formatGBs(bps) + " RAM/step"
+	full = withoutRatio
+	if ofPeak > 0 {
+		full += " · " + formatPct(ofPeak) + " of peak"
+	}
+	return full, withoutRatio
+}
+
+// prefillEyebrow qualifies the prefill column's figure in the slot the card
+// already uses for this exact job (TTP-65, 2026-09-14).
+//
+// The decode column's eyebrow flips from "decode" to "sample" when the
+// generation was too short to be a rate, and it is the only place on the image
+// that says so. A prompt too short to be a prefill measurement is the same
+// defect one column over — the ws four-stream tape printed 5.6 tok/s for a box
+// whose honest prefill is 60 to 130 — so it is answered in the same slot
+// rather than in a sentence squeezed under the number.
+//
+// The word is short because the eyebrow is small caps at 12.5 px and this card
+// is read at half its pixel width in a timeline. The full sentence, with the
+// count and the threshold, is on the text card and under
+// short_prompt_for_prefill in --json.
+func prefillEyebrow(s *tape.RunSummary, label string) string {
+	if !card.ShortPrompt(s) {
+		return label
+	}
+	return label + " · short prompt"
+}
+
+// enginePrefillString is the time the engine itself spent on the prompt: the
+// server's prompt_ms, mean over the streams. "" when the server reported none.
+func enginePrefillString(s *tape.RunSummary) string {
+	if s.Timings.PromptMs <= 0 {
+		return ""
+	}
+	return "prefill " + formatMs(s.Timings.PromptMs)
+}
+
+// queueWaitString is what is left of TTFT once the engine's prefill is taken
+// out: how long the request sat before the engine started on it. "" unless
+// both figures were observed and the difference is not negative — a negative
+// one means the client's stopwatch and the server's disagree about the same
+// window, and clamping it to zero would print "queue 0 ms" for a run that was
+// in fact not decomposed. Zero itself is a reading: nothing queued.
+func queueWaitString(s *tape.RunSummary) string {
+	t := s.Timings
+	if t.TTFTMs <= 0 || t.PromptMs <= 0 || t.TTFTMs < t.PromptMs {
+		return ""
+	}
+	return "queue " + strconv.FormatFloat(t.TTFTMs-t.PromptMs, 'f', 0, 64) + " ms"
 }
 
 func itlString(t tape.TimingsSummary) string {
@@ -380,6 +515,17 @@ func promptTokens(s *tape.RunSummary) int {
 // internal/bandwidth, which owns the arithmetic for both renderers (TTP-34,
 // 2026-09-13).
 func bandwidthString(s *tape.RunSummary) string {
+	// TTP-67, 2026-09-14; the reasoning is in internal/card/verify.go. With a
+	// draft model the weights were read once per verify step and not once per
+	// accepted token, so the verify-step figure replaces the other rather than
+	// joining it.
+	if bps, ofPeak, ok := card.VerifyRAM(s); ok {
+		out := "≈ " + formatGBs(bps) + " from RAM per verify step"
+		if ofPeak > 0 {
+			out += " · " + formatPct(ofPeak) + " of peak"
+		}
+		return out
+	}
 	// TTP-56, 2026-09-14; the reasoning is in internal/card/card.go's twin.
 	if r, ok := bandwidth.RAM(s); ok {
 		out := "≈ " + formatGBs(r.BytesPerSec) + " from RAM"

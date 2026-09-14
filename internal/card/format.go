@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -79,6 +80,20 @@ func formatMs(v float64) string {
 		return unknown
 	}
 	return strconv.FormatFloat(v, 'f', 0, 64) + " ms"
+}
+
+// formatDuration renders a wall-clock budget the way the operator typed it:
+// "20s", "1m30s". The value is rounded to a tenth of a second first, because
+// the only durations the card prints are a `--for` budget and the moment the
+// clock actually cut (tape.LimitSummary), and the second of those is a
+// measured nanosecond count that would otherwise print as "21.412345678s".
+// Zero is unknown and prints "?" — a run with no clock has no budget, not a
+// zero-length one.
+func formatDuration(d time.Duration) string {
+	if d <= 0 {
+		return unknown
+	}
+	return d.Round(100 * time.Millisecond).String()
 }
 
 // formatPct renders a 0..1 ratio as an integer percentage.

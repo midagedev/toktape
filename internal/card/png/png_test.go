@@ -505,11 +505,17 @@ func TestConcurrentHeroShowsBothFigures(t *testing.T) {
 		t.Fatalf("renderCanvas: %v", err)
 	}
 	checks := map[string]string{
-		"hero.left.number":   "72.9",
-		"hero.left.sub1":     "8 × 9.1 tok/s per stream",
-		"hero.left.eyebrow":  "AGGREGATE DECODE",
-		"hero.right.number":  "2927",
-		"hero.right.sub1":    "610 tok/s per stream", // 2026-09-13: no "N ×" for prefill, it is not a product
+		"hero.left.number":  "72.9",
+		"hero.left.sub1":    "8 × 9.1 tok/s per stream",
+		"hero.left.eyebrow": "AGGREGATE DECODE",
+		"hero.right.number": "2927",
+		// 2026-09-13: no "N ×" for prefill, it is not a product.
+		// 2026-09-14 (TTP-65): the two halves of TTFT joined the row. Four
+		// requests that arrive together are prefilled one after another, so
+		// the time to a first token is the wait for a slot plus the engine's
+		// work, and a card that prints only the total invites the whole of it
+		// to be read as prefill. The engine's half is the server's prompt_ms.
+		"hero.right.sub1":    "610 tok/s per stream · prefill 630 ms · queue 180 ms",
 		"hero.right.eyebrow": "AGGREGATE PREFILL",
 	}
 	for id, want := range checks {
@@ -1004,14 +1010,26 @@ func TestEngineStringIKLlamaHasNoBuildNumber(t *testing.T) {
 // On a speculative run the decode column's second sub-line is the draft
 // clause, whole and uncut, inside the column. On any other run it is what it
 // was.
+//
+// 2026-09-14: the clause now carries the verify-step bandwidth (TTP-67) and
+// gives up the draft model's NAME to fit it (TTP-69). The name was already the
+// element being cut on the ws card — "…MXFP4_MOE.tl37.g…", taking the block
+// size and the acceptance rate off the row with it — and it is printed whole
+// on the FLAGS strip at the foot of every card and on the text card. What the
+// clause keeps is what a reader needs to reproduce the run: the block size,
+// how often the target agreed, and the rate the host bus really carried. The
+// single-stream case keeps the name because its shorter clause still fits.
 func TestDraftClauseReplacesTheSecondDecodeLine(t *testing.T) {
-	const want = "draft DSpark-0.6B-Q8_0.gguf · n_max 3 · 60% accepted"
 	single := card.ExampleSpeculative()
 	single.Concurrency = 1
-	for name, s := range map[string]*tape.RunSummary{
-		"concurrent": card.ExampleSpeculative(),
-		"single":     single,
+	for name, tc := range map[string]struct {
+		s    *tape.RunSummary
+		want string
+	}{
+		"concurrent": {card.ExampleSpeculative(), "draft n_max 3 · 60% accepted · ≈ 261 GB/s RAM/step"},
+		"single":     {single, "draft DSpark-0.6B-Q8_0.gguf · n_max 3 · 60% accepted"},
 	} {
+		s, want := tc.s, tc.want
 		t.Run(name, func(t *testing.T) {
 			c, err := renderCanvas(s)
 			if err != nil {

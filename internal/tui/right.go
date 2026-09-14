@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -425,8 +426,13 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 			agg = r
 		}
 	}
+	// Lesson 2, through the one predicate that owns it (TTP-74, 2026-09-14).
+	// This read Timings.DecodeLabel directly, which is the recorder's stored
+	// verdict; the card asks card.IsSample, which also checks the count. A
+	// tape where the two disagree would have been labelled "decode" here and
+	// "Sample" on the card it is rendered into.
 	label := "decode"
-	if m.Summary.Timings.DecodeLabel == "sample" {
+	if card.IsSample(&m.Summary) {
 		label = "sample"
 	}
 	lead := perStreamRate

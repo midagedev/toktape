@@ -73,14 +73,45 @@ func Markdown(s *tape.RunSummary) string {
 	return "```text\n" + Text(s) + "```\n\n" + LlamaBenchTable(s) + "\n" + Reproduce(s)
 }
 
+// jsonCard is what `--json` puts on stdout: the run summary, unchanged and in
+// schema order, plus the card's derived caveats after it.
+//
+// The summary is embedded rather than nested, so every field a reader already
+// parses stays at the top level with the same name and the same type and a
+// tape.RunSummary still unmarshals from this document. The one new key is
+// added at the end, where encoding/json puts the outer struct's own fields.
+//
+// It is "caveats" and not "warnings" because "warnings" is taken, by
+// RunSummary.Warnings — the free text the recorder wrote — and the two are not
+// the same list: the caveats are a superset, they carry codes, and a consumer
+// that switched on an array of strings must not silently start receiving
+// objects. That collision is worth removing at the schema end rather than
+// here; see the report's note on renaming the recorder's field.
+type jsonCard struct {
+	tape.RunSummary
+	// Caveats is every reason a figure above it might not mean what it looks
+	// like, most serious first. Empty is the useful case: it is the card
+	// saying, in the one field an agent has to read, that nothing about this
+	// run disqualifies the number it came for.
+	Caveats []Caveat `json:"caveats"`
+}
+
 // JSON renders the summary as indented JSON. Key order is the struct order of
-// tape.RunSummary, which is the schema order; map keys are sorted by
-// encoding/json, so the output is stable across runs.
+// tape.RunSummary, which is the schema order, with the card's own derived
+// caveats last; map keys are sorted by encoding/json, so the output is stable
+// across runs.
 func JSON(s *tape.RunSummary) ([]byte, error) {
 	if s == nil {
 		s = &tape.RunSummary{}
 	}
-	b, err := json.MarshalIndent(s, "", "  ")
+	doc := jsonCard{RunSummary: *s, Caveats: Caveats(s)}
+	if doc.Caveats == nil {
+		// An empty array, never null: "this run has no caveats" is the answer
+		// the field exists to give, and a consumer should not have to tell
+		// null from [] to read it.
+		doc.Caveats = []Caveat{}
+	}
+	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("card: marshal run summary: %w", err)
 	}
@@ -322,9 +353,11 @@ func speedSection(s *tape.RunSummary) []string {
 	t := s.Timings
 	var out []string
 
-	// Lesson 2: a short generation is a "sample", never a "decode" rate.
+	// Lesson 2: a short generation is a "sample", never a "decode" rate. The
+	// predicate is isSample and nothing else, so the row label and the
+	// short_generation caveat can never disagree (TTP-74).
 	decodeLabel := "Decode"
-	if t.DecodeLabel == "sample" {
+	if isSample(s) {
 		decodeLabel = "Sample"
 	}
 	out = append(out, field(decodeLabel, speedLabelW, " · ", decodeParts(s)...)...)
@@ -402,22 +435,90 @@ func decodeParts(s *tape.RunSummary) []string {
 //
 // The prompt-token count is the per-request total either way, unchanged: it
 // says how long the prompt was, not how many the run sent.
+// TTP-65 (2026-09-14) put two more things on the row, both of them the same
+// defect: a prefill figure printed without the condition that decides what it
+// measures.
+//
+// The four-stream ws tape printed "Prefill 5.6 tok/s · TTFT 11942 ms · 63
+// prompt tokens". Four 63-token requests arrived at once, so the TTFT on that
+// row is the time the request spent waiting for a slot PLUS the time the
+// engine spent on the prompt, and the rate beside it is neither of those
+// things. The honest prefill on that box is 60 to 130 tok/s.
+//
+// So on a concurrent run TTFT is split. The queue wait is the part of it the
+// engine was not working, and the engine's own prefill time is prompt_ms out
+// of the server's timings object — never send-to-first-token, which is what
+// made 5.6 look like a prefill rate. Both are per-stream means over the same
+// streams (internal/recorder/reduce.go), so the subtraction is between two
+// figures of the same kind; the p50 stays beside them as its own clause rather
+// than as the left side of an equation, because a median and a mean do not
+// subtract.
+//
+// And a prompt under MinPrefillPromptTokens gets said so outright, next to the
+// rate it disqualifies. The rate is still printed — it is what the server
+// reported and dropping an observation is not this card's habit — but a reader
+// who quotes it has been told, and an agent gets the same sentence under
+// short_prompt_for_prefill in --json.
 func prefillParts(s *tape.RunSummary, promptTotal int) []string {
 	t := s.Timings
 	if s.Concurrency <= 1 {
-		return []string{
+		return dropEmpty(
 			formatRateUnit(t.PromptPerSecond),
-			"TTFT " + formatMs(t.TTFTMs),
-			formatInt(promptTotal) + " prompt tokens",
-		}
+			promptTokensPart(s),
+			"TTFT "+formatMs(t.TTFTMs),
+		)
 	}
 	a := s.Aggregate
-	return []string{
-		formatRateUnit(a.AggregatePromptPerSecond) + " aggregate",
-		formatRateUnit(t.PromptPerSecond) + " each",
-		"TTFT p50 " + formatMs(a.TTFTp50Ms),
-		formatInt(promptTotal) + " prompt tokens",
+	return dropEmpty(
+		formatRateUnit(a.AggregatePromptPerSecond)+" aggregate",
+		formatRateUnit(t.PromptPerSecond)+" each",
+		promptTokensPart(s),
+		enginePrefillPart(s),
+		queueWaitPart(s),
+		"TTFT p50 "+formatMs(a.TTFTp50Ms),
+	)
+}
+
+// enginePrefillPart is the engine's own prompt-evaluation time: the server's
+// prompt_ms, mean over the streams. "" when the server reported none.
+func enginePrefillPart(s *tape.RunSummary) string {
+	if s.Timings.PromptMs <= 0 {
+		return ""
 	}
+	return "engine prefill " + formatMs(s.Timings.PromptMs)
+}
+
+// queueWaitPart is what is left of TTFT once the engine's prefill is taken
+// out: how long the request sat before the engine started on it.
+//
+// "" unless both figures were observed and the subtraction is positive. A
+// negative difference means the client's stopwatch and the server's disagree
+// about the same window, and the repo's rule is to report nothing rather than
+// clamp it to zero and call that a queue wait — the card would then print
+// "queue 0 ms" for a run it had in fact failed to decompose.
+func queueWaitPart(s *tape.RunSummary) string {
+	t := s.Timings
+	if t.TTFTMs <= 0 || t.PromptMs <= 0 {
+		return ""
+	}
+	wait := t.TTFTMs - t.PromptMs
+	if wait < 0 {
+		return ""
+	}
+	// Zero is a reading here, not an absence: it says nothing queued.
+	return "queue " + strconv.FormatFloat(wait, 'f', 0, 64) + " ms"
+}
+
+// dropEmpty is wrapJoin's rule applied before the parts are handed over, for
+// rows built from clauses that are present only on some runs.
+func dropEmpty(parts ...string) []string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // maxRoundsListed is how many rounds the Prompts row names before it says how
@@ -634,8 +735,14 @@ func draftParts(s *tape.RunSummary) []string {
 	if t.DraftNAccepted != nil {
 		accepted = *t.DraftNAccepted
 	}
-	return append(parts, fmt.Sprintf("%s accepted (%d/%d)",
+	parts = append(parts, fmt.Sprintf("%s accepted (%d/%d)",
 		formatPct(float64(accepted)/float64(*t.DraftN)), accepted, *t.DraftN))
+	// The verify-step count and the batch (TTP-67). They live on this row and
+	// not on the Decode row because they are properties of the draft, and
+	// because the Decode row's bandwidth clause is already the figure they
+	// explain: "≈ 108 GB/s from RAM per verify step" above, "156 verify steps
+	// · 3.9 tokens a step" here.
+	return append(parts, verifyParts(s)...)
 }
 
 // DraftNMax is the block size the Draft row names: the speculative.n_max
@@ -697,6 +804,16 @@ func promptTokens(s *tape.RunSummary) int {
 // most of a token off the host bus. internal/bandwidth owns that arithmetic
 // and omits the clause entirely when it is not derivable.
 func bandwidthString(s *tape.RunSummary) string {
+	// With a draft model the hardware never read weights once per token, so
+	// bytes per accepted token is not a rate anything experienced (TTP-67,
+	// 2026-09-14). The verify-step figure replaces it rather than joining it:
+	// two RAM bandwidths on one card, differing by the acceptance rate and
+	// with nothing on the card to say why, is a worse answer than one figure
+	// that is true. The per-accepted-token figure stays in --json as
+	// timings.effective_bw_bps, where it is labelled by its own field name.
+	if clause, ok := verifyRAM(s); ok {
+		return clause
+	}
 	// On a placement split between host RAM and VRAM, one figure over all of
 	// them is not a bandwidth against any ceiling that exists (TTP-56,
 	// 2026-09-14). The ws run printed "≈ 155 GB/s" for a box whose host bus
@@ -1066,25 +1183,17 @@ func answerCutWarning(s *tape.RunSummary) string {
 		formatInt(t.PredictedN))
 }
 
+// warningSection is the card's last block before the footer: the caveats that
+// apply to this run.
+//
+// It was a line per recorded warning until TTP-74 (2026-09-14). The list is now
+// derived — every qualification the card makes, the recorder's own free text
+// among them, in one place with one predicate each (caveat.go) — and it is
+// printed as one line rather than as one line per entry. The hero tape alone
+// raises three, and a card that answers "how fast is this rig" with a block of
+// exclamation marks has spent its visual budget on the least interesting part
+// of itself. The sentence printed is the most serious; the rest are named by
+// the code that finds their sentence in `--json`.
 func warningSection(s *tape.RunSummary) []string {
-	var out []string
-	warnings := s.Warnings
-	if w := answerCutWarning(s); w != "" {
-		// First: it explains an empty answer, which is the thing a reader is
-		// looking at the card to understand.
-		warnings = append([]string{w}, warnings...)
-	}
-	for _, w := range warnings {
-		if strings.TrimSpace(w) == "" {
-			continue
-		}
-		for i, l := range wrapJoin(strings.Fields(w), " ", innerWidth-2) {
-			if i == 0 {
-				out = append(out, "! "+l)
-			} else {
-				out = append(out, "  "+l)
-			}
-		}
-	}
-	return out
+	return caveatLines(s)
 }

@@ -3,6 +3,7 @@ package png
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/midagedev/toktape/internal/card"
@@ -74,12 +75,17 @@ func TestSweepClauseNamesTheBestNMax(t *testing.T) {
 // draft clause names the n_max values a sweep's requests carried, as the text
 // card's Draft row does, never the server flag they overrode.
 func TestDraftClauseNamesTheSweptNMax(t *testing.T) {
-	if got := draftString(card.ExampleSweep()); got != "draft DSpark-0.6B-Q8_0.gguf · n_max 3,5 · 30% accepted" {
-		t.Errorf("sweep draft clause = %q", got)
+	// 2026-09-14: the clause gained the verify-step bandwidth (TTP-67). What
+	// this test is about is the n_max, so it reads the clause's n_max element
+	// rather than pinning the whole string twice over — the whole string,
+	// including which element is given up when the column is full, is pinned
+	// by TestDraftClauseReplacesTheSecondDecodeLine.
+	if got, _ := draftString(card.ExampleSweep()); !strings.Contains(got, "n_max 3,5 · 30% accepted") {
+		t.Errorf("sweep draft clause = %q, want the swept values", got)
 	}
 	s := card.ExampleSweep()
 	s.SpecNMax = nil
-	if got := draftString(s); got != "draft DSpark-0.6B-Q8_0.gguf · n_max 3 · 30% accepted" {
-		t.Errorf("draft clause without a sweep = %q", got)
+	if got, _ := draftString(s); !strings.Contains(got, "n_max 3 · 30% accepted") {
+		t.Errorf("draft clause without a sweep = %q, want the server flag", got)
 	}
 }

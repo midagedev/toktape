@@ -8,11 +8,13 @@
 │          256 GB DDR5-5200                                            │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Decode        50.6 tok/s aggregate · 14.4 tok/s each                 │
-│               ≈ 134 GB/s from RAM, 40% of peak                       │
+│               ≈ 226 GB/s from RAM per verify step, 68% of peak       │
 │ Prefill       2130 tok/s aggregate · 817 tok/s each                  │
-│               TTFT p50 640 ms · 512 prompt tokens                    │
+│               512 prompt tokens · engine prefill 470 ms              │
+│               queue 170 ms · TTFT p50 640 ms                         │
 │ Draft         DSpark-0.6B-Q8_0.gguf · n_max 3                        │
 │               38% accepted (1108/2895)                               │
+│               965 verify steps of 4.0 tokens                         │
 │ Context       16384 (512 in / 86 out)                                │
 │ Prefix cache  25% hit (128/512) · warm                               │
 │ Sampling      greedy (temp 0) · thinking off · /completion           │

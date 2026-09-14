@@ -54,9 +54,18 @@ func TestWitnessReasonsReachTheTextCard(t *testing.T) {
 					t.Errorf("card does not print the witness reason %q whole:\n%s", r, out)
 				}
 			}
-			if strings.Count(out, "\n") != strings.Count(quiet, "\n")+2 {
-				t.Errorf("card grew by %d lines, want the 2 reason lines under HOST:\n%s",
+			// 2026-09-14 (TTP-74): +4, not +2. The two reason lines under HOST
+			// are unchanged; the other two are the caveat block a contended
+			// run now carries — its rule and its separator — which is one
+			// line naming machine_contended and not a second copy of the
+			// reasons above it (caveat.go says why the reasons are left out
+			// of that sentence).
+			if strings.Count(out, "\n") != strings.Count(quiet, "\n")+4 {
+				t.Errorf("card grew by %d lines, want the 2 reason lines under HOST and the 2-line caveat block:\n%s",
 					strings.Count(out, "\n")-strings.Count(quiet, "\n"), out)
+			}
+			if !strings.Contains(out, "! the machine was contended") {
+				t.Errorf("a contended card carries no caveat line:\n%s", out)
 			}
 		})
 	}
