@@ -1032,6 +1032,25 @@ func cacheString(c tape.CacheSummary) string {
 	return fmt.Sprintf("%s hit (%d/%d) · %s", formatPct(ratio), c.HitTokens, c.PromptTotal, label)
 }
 
+// streamsMultiply reports whether "n × per-stream" really is the aggregate,
+// within the tolerance the card's own rounding needs: the figures are printed
+// to one decimal, so a tenth either way is the printing and not the run. Above
+// that the streams did not share a window — one finished while the others kept
+// decoding — and the row says the three figures instead of an equation.
+func streamsMultiply(a tape.AggregateTimings, n int) bool {
+	product := float64(n) * a.PerStreamPredictedPerSecond
+	if product <= 0 || a.AggregatePredictedPerSecond <= 0 {
+		return true // nothing to contradict: the row prints what it has
+	}
+	return math.Abs(a.AggregatePredictedPerSecond-product)/product <= streamsIdentityTolerance
+}
+
+// streamsIdentityTolerance is how far the aggregate may sit from n × per-stream
+// before the row stops multiplying. 2 % is tape.RateTolerance's reasoning one
+// level up: the same slack the card allows between two clocks measuring one
+// rate, allowed between two figures describing one run.
+const streamsIdentityTolerance = 0.02
+
 // streamLines renders the concurrent-run headline. It is two lines because the
 // contract's single line is ~95 columns and none of its figures may be dropped.
 func streamLines(s *tape.RunSummary) []string {
@@ -1049,14 +1068,25 @@ func streamLines(s *tape.RunSummary) []string {
 	// is weighted by how long each round decoded, so "4 × 14.4 = 50.6" would
 	// print false arithmetic. The three figures are listed instead, and
 	// failures count against every stream the run sent.
-	if s.Rounds > 1 {
+	//
+	// Neither is a run whose streams stopped at different times (lead,
+	// 2026-09-15): the aggregate is the run's tokens over the run's decode
+	// window, and a window whose tail holds one stream divides by time the
+	// others were not in. The ExLlamaV3 two-stream take read 2 × 11.6 against
+	// a 19.4 aggregate for exactly that reason. Both figures are the run's,
+	// and the "×" between them is the part that is not.
+	if s.Rounds > 1 || !streamsMultiply(a, n) {
+		sent, label := n, fmt.Sprintf("%d streams", n)
+		if s.Rounds > 1 {
+			sent, label = n*s.Rounds, fmt.Sprintf("%d streams per round", n)
+		}
 		parts := []string{
-			fmt.Sprintf("%d streams per round", n),
+			label,
 			formatRateUnit(a.PerStreamPredictedPerSecond) + " each",
 			formatRateUnit(a.AggregatePredictedPerSecond) + " aggregate",
 		}
 		if a.StreamsFailed > 0 {
-			parts = append(parts, fmt.Sprintf("%d of %d failed", a.StreamsFailed, n*s.Rounds))
+			parts = append(parts, fmt.Sprintf("%d of %d failed", a.StreamsFailed, sent))
 		}
 		first = wrapJoin(parts, " · ", innerWidth-speedLabelW)
 	}

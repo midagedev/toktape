@@ -336,7 +336,7 @@ func TestRecordExLlamaV3EndToEnd(t *testing.T) {
 	if want := int64(100000) * 1024; s.Memory.AtEnd.RSSBytes != want {
 		t.Errorf("AtEnd.RSSBytes = %d, want the tree sum %d", s.Memory.AtEnd.RSSBytes, want)
 	}
-	if !warnsAbout(s.Warnings, "memory, faults and CPU summed over 2 processes (pid 8821 and its children)") {
+	if !warnsAbout(s.Warnings, "memory, faults and CPU summed over the server and its 1 child process") {
 		t.Errorf("Warnings lack the tree warning: %q", s.Warnings)
 	}
 	// The model is a directory, so no single mapping identifies it and the

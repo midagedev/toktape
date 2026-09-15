@@ -234,7 +234,7 @@ func ExampleExLlamaV3() *tape.RunSummary {
 			{Index: 1, UsedBytes: 23174611968, ProcBytes: 22983488512, UtilPct: 93, TempC: 67, PowerW: 341, ClockMHz: 1950},
 		},
 		Warnings: []string{
-			"memory, faults and CPU summed over 2 processes (pid 8821 and its children)",
+			"memory, faults and CPU summed over the server and its 1 child process",
 		},
 	}
 }

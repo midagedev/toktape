@@ -828,7 +828,15 @@ func (r *run) openSampler() (procmon.FaultSampler, func()) {
 // processes map, and it does not claim otherwise.
 func (r *run) warnTreeProcesses(st *state) {
 	if n := st.firstTreeProcs(); n > 1 {
-		r.warn("memory, faults and CPU summed over %d processes (pid %d and its children)", n, r.pid)
+		// Without the pid: the sentence is printed on a card people publish,
+		// where a process id of a machine the reader does not have is noise,
+		// and the tape carries it anyway as summary.server.pid (lead,
+		// 2026-09-15).
+		children := "1 child process"
+		if n > 2 {
+			children = fmt.Sprintf("%d child processes", n-1)
+		}
+		r.warn("memory, faults and CPU summed over the server and its %s", children)
 	}
 }
 
