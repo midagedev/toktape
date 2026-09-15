@@ -2,6 +2,7 @@ package placement
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/midagedev/toktape/internal/tape"
@@ -244,6 +245,100 @@ func TestEstimateNGL20TwoGPUs(t *testing.T) {
 	}
 	if want := int64(synLayers*perLayer + bEmbd + bOut + bNorm + bNgram); total != want {
 		t.Errorf("device bytes sum to %d, want %d", total, want)
+	}
+}
+
+// TestEstimateWithGPUIndices: the option narrows the device set the estimate
+// is spread over and names the devices by their host indices (lead, 2026-09-16).
+//
+// A server launched with CUDA_VISIBLE_DEVICES=0 on a two-GPU box is, to
+// llama.cpp, a one-GPU server — and to a recorder that knows only how many
+// devices the host has, the even split over both was the only story
+// available. The caller that measured which card actually holds the weights
+// hands the surviving host indices here, and the split is replayed over
+// exactly those devices. FAIL-first: without the option every call below
+// spread the model over both GPUs (the package did not compile).
+func TestEstimateWithGPUIndices(t *testing.T) {
+	flags := tape.ServerFlags{NGL: "20"}
+	two := Estimate(synModel(), flags, 2, false) // today's even split, the baseline
+
+	// The one-GPU split carries every byte the two-GPU one put on cards.
+	oneGPUBytes := int64(19*perLayer + bOut + bNorm)
+
+	t.Run("only host index 0 in play", func(t *testing.T) {
+		s := Estimate(synModel(), flags, 2, false, WithGPUIndices([]int{0}))
+		checkDevice(t, s, "GPU0", oneGPUBytes, map[tape.TensorClass]int64{
+			tape.ClassAttention: 19 * (bAttn + bNorm),
+			tape.ClassFFN:       19 * bNorm,
+			tape.ClassExperts:   19 * (bExps + bGate + bShexp),
+			tape.ClassOutput:    bOut + bNorm,
+		})
+		for _, name := range deviceNames(s) {
+			if name == "GPU1" {
+				t.Errorf("GPU1 is a device of the summary (%v); the estimate was told only GPU0 is in play", deviceNames(s))
+			}
+		}
+		// The CPU side of the split is the narrowing's to keep constant: the
+		// input layer never offloads, whatever devices are in play.
+		checkDevice(t, s, tape.DeviceCPU, bEmbd+bNgram+21*perLayer, map[tape.TensorClass]int64{
+			tape.ClassEmbed:     bEmbd,
+			tape.ClassNGram:     bNgram,
+			tape.ClassAttention: 21 * (bAttn + bNorm),
+			tape.ClassFFN:       21 * bNorm,
+			tape.ClassExperts:   21 * (bExps + bGate + bShexp),
+		})
+	})
+
+	t.Run("only host index 1 in play", func(t *testing.T) {
+		s := Estimate(synModel(), flags, 2, false, WithGPUIndices([]int{1}))
+		if got, want := deviceNames(s), []string{tape.DeviceCPU, "GPU1"}; !slices.Equal(got, want) {
+			t.Fatalf("devices = %v, want %v: the surviving card keeps its host name", got, want)
+		}
+		checkDevice(t, s, "GPU1", oneGPUBytes, map[tape.TensorClass]int64{
+			tape.ClassAttention: 19 * (bAttn + bNorm),
+			tape.ClassFFN:       19 * bNorm,
+			tape.ClassExperts:   19 * (bExps + bGate + bShexp),
+			tape.ClassOutput:    bOut + bNorm,
+		})
+		if got, want := deviceByName(t, s, "GPU1").Layers, "21-39 attn, 21-39 ffn, 21-39 exps, out"; got != want {
+			t.Errorf("GPU1 Layers = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("two indices split as gpus does", func(t *testing.T) {
+		s := Estimate(synModel(), flags, 2, false, WithGPUIndices([]int{0, 1}))
+		assertSameSplit(t, s, two)
+	})
+
+	t.Run("nil and empty mean not known", func(t *testing.T) {
+		assertSameSplit(t, Estimate(synModel(), flags, 2, false, WithGPUIndices(nil)), two)
+		assertSameSplit(t, Estimate(synModel(), flags, 2, false, WithGPUIndices([]int{})), two)
+	})
+
+	t.Run("every byte is accounted for exactly once", func(t *testing.T) {
+		s := Estimate(synModel(), flags, 2, false, WithGPUIndices([]int{0}))
+		var total int64
+		for _, d := range s.Devices {
+			total += d.Bytes
+		}
+		if want := int64(synLayers*perLayer + bEmbd + bOut + bNorm + bNgram); total != want {
+			t.Errorf("device bytes sum to %d, want %d", total, want)
+		}
+	})
+}
+
+// assertSameSplit holds that two summaries spread the model identically:
+// same device names, same bytes, same layers on each.
+func assertSameSplit(t *testing.T, got, want tape.PlacementSummary) {
+	t.Helper()
+	if len(got.Devices) != len(want.Devices) {
+		t.Fatalf("devices = %v, want %v", deviceNames(got), deviceNames(want))
+	}
+	for i := range want.Devices {
+		g, w := got.Devices[i], want.Devices[i]
+		if g.Device != w.Device || g.Bytes != w.Bytes || g.Layers != w.Layers {
+			t.Errorf("device %d = %q %d %q, want %q %d %q", i, g.Device, g.Bytes, g.Layers, w.Device, w.Bytes, w.Layers)
+		}
 	}
 }
 

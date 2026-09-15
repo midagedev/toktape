@@ -31,8 +31,9 @@ const (
 type Option func(*options)
 
 type options struct {
-	model    tape.ModelInfo
-	hasModel bool
+	model      tape.ModelInfo
+	hasModel   bool
+	gpuIndices []int
 }
 
 // WithModel gives Estimate the model's card line, which lets it fill
@@ -52,11 +53,49 @@ func WithModel(m tape.ModelInfo) Option {
 	}
 }
 
+// WithGPUIndices names the host GPU indices the estimate is spread over.
+//
+// A server launched with CUDA_VISIBLE_DEVICES=1 on a two-GPU box is, to
+// llama.cpp, a one-GPU server whose only card is the host's GPU1 — and no
+// command line toktape can read says so. The caller that measured which
+// devices hold the server's weights hands those indices here and the estimate
+// is replayed over exactly them, which narrows a guess without ever claiming
+// it became an observation: the summary's Source stays what it was.
+//
+// Device names come from the indices, so one card in play at host index 1
+// places its tensors on "GPU1", not "GPU0". The indices are the host's own
+// (tape.HostInfo.GPUs' Index) and are used as given — the recorder builds
+// them from the run's own device readings, which name every card exactly
+// once. A nil or empty slice means "not known" and the estimate spreads over
+// the gpus positions, named GPU0..GPU<gpus-1>, exactly as before. When both
+// are given the option wins: the device set is exactly the indices, and the
+// count is not consulted.
+func WithGPUIndices(indices []int) Option {
+	return func(o *options) {
+		o.gpuIndices = indices
+	}
+}
+
+// devices is the device set this estimate is spread over, by host index: the
+// indices WithGPUIndices named, or the gpus positions when it named none.
+func (o options) devices(gpus int) []int {
+	if len(o.gpuIndices) > 0 {
+		return o.gpuIndices
+	}
+	ds := make([]int, gpus)
+	for i := range ds {
+		ds[i] = i
+	}
+	return ds
+}
+
 // Estimate replays llama.cpp's placement rules over the tensor headers and
 // the server's flags.
 //
 // gpus is the number of GPU devices llama.cpp was given; with gpus == 0 every
-// tensor is on the CPU whatever -ngl said. lazy says whether the server loads
+// tensor is on the CPU whatever -ngl said. Pass WithGPUIndices to spread the
+// estimate over the devices a measurement says are actually in play, named by
+// their host indices instead of position. lazy says whether the server loads
 // the n-gram / engram tables lazily; when it does, those bytes are reported as
 // NeverLoadedBytes and left out of the device totals so the card cannot count
 // them twice (handover lesson 3).
@@ -81,6 +120,12 @@ func EstimateVerbose(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bo
 	if gpus < 0 {
 		gpus = 0
 	}
+	// The devices the estimate is spread over, by host index: the ones
+	// WithGPUIndices named, or the gpus positions named GPU0.. when it named
+	// none. Everything below asks the set, never the count, so an estimate
+	// over host index 1 alone splits and names exactly like an estimate over
+	// one GPU at position 0 — only the device names differ.
+	devices := opt.devices(gpus)
 
 	sum := tape.PlacementSummary{Source: SourceUnknown}
 
@@ -104,11 +149,11 @@ func EstimateVerbose(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bo
 	}
 
 	ngl, nglOK := ParseNGL(flags.NGL)
-	if !nglOK && gpus > 0 {
+	if !nglOK && len(devices) > 0 {
 		// The flag that decides which layers were offloaded was not observed.
 		// Guessing a default here would print a device breakdown nobody
-		// measured, so the summary stays unknown. (With gpus == 0 there is
-		// nothing to guess: llama.cpp keeps everything on the CPU.)
+		// measured, so the summary stays unknown. (With no device in play
+		// there is nothing to guess: llama.cpp keeps everything on the CPU.)
 		return sum, warnings
 	}
 
@@ -139,7 +184,7 @@ func EstimateVerbose(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bo
 		iGPUStart = 0
 	}
 	actGPULayers := 0
-	if gpus > 0 {
+	if len(devices) > 0 {
 		actGPULayers = min(nGPU, nLayerAll+1)
 	}
 
@@ -159,15 +204,15 @@ func EstimateVerbose(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bo
 	}
 	// Always present, even at zero bytes: an empty GPU is a finding.
 	get(tape.DeviceCPU)
-	for i := 0; i < gpus; i++ {
-		get(gpuDevice(i))
+	for _, idx := range devices {
+		get(gpuDevice(idx))
 	}
 
 	for _, t := range tensors {
 		if lazy && t.Class == tape.ClassNGram {
 			continue // counted in NeverLoadedBytes, not resident anywhere
 		}
-		dev := deviceFor(t, rules, nLayerAll, iGPUStart, actGPULayers, gpus)
+		dev := deviceFor(t, rules, nLayerAll, iGPUStart, actGPULayers, devices)
 		b := get(dev)
 		b.bytes += t.Bytes
 		b.classes[t.Class] += t.Bytes
@@ -210,8 +255,10 @@ func EstimateVerbose(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bo
 	return sum, warnings
 }
 
-// deviceFor decides one tensor's device, in llama.cpp's own order.
-func deviceFor(t Tensor, rules []Override, nLayerAll, iGPUStart, actGPULayers, gpus int) string {
+// deviceFor decides one tensor's device, in llama.cpp's own order. devices is
+// the set of host GPU indices the estimate is spread over (EstimateVerbose
+// resolves it from gpus and WithGPUIndices once, up front).
+func deviceFor(t Tensor, rules []Override, nLayerAll, iGPUStart, actGPULayers int, devices []int) string {
 	// 1. -ot / -cmoe / -ncmoe. Checked before the layer assignment and first
 	//    match wins (llama-model-loader.cpp, "check overrides").
 	for _, r := range rules {
@@ -253,20 +300,25 @@ func deviceFor(t Tensor, rules []Override, nLayerAll, iGPUStart, actGPULayers, g
 	// 4. Which GPU. llama.cpp walks the cumulative tensor-split points:
 	//    upper_bound(splits, (il - i_gpu_start) / act_gpu_layers). With an even
 	//    split those points are (i+1)/gpus and the whole expression collapses
-	//    to the integer division below.
+	//    to the integer division below — over the devices in play, which are
+	//    llama.cpp's own devices however the host numbered the cards behind
+	//    them (WithGPUIndices).
 	//
 	//    ESTIMATE: with no --tensor-split llama.cpp weights the split by each
 	//    device's FREE memory, which toktape cannot see after the fact. An
 	//    even split is the closest honest stand-in, and it is exact whenever
 	//    the devices are identical and idle.
-	if gpus <= 1 {
-		return gpuDevice(0)
+	//
+	//    devices is never empty here: with no device in play, actGPULayers is
+	//    0 and step 3 already returned the CPU.
+	if len(devices) <= 1 {
+		return gpuDevice(devices[0])
 	}
-	idx := (slot - iGPUStart) * gpus / actGPULayers
-	if idx >= gpus {
-		idx = gpus - 1
+	idx := (slot - iGPUStart) * len(devices) / actGPULayers
+	if idx >= len(devices) {
+		idx = len(devices) - 1
 	}
-	return gpuDevice(idx)
+	return gpuDevice(devices[idx])
 }
 
 // sortedDevices orders the device names deterministically: CPU first, then

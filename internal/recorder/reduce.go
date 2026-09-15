@@ -2,9 +2,13 @@ package recorder
 
 import (
 	"encoding/json"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/midagedev/toktape/internal/gpu"
+	"github.com/midagedev/toktape/internal/placement"
 	"github.com/midagedev/toktape/internal/procmon"
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
@@ -55,6 +59,7 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 	cache := server.CacheVerdict(timings, mem.MajFaultsDecode, agg.TotalPredictedN)
 
 	gpusAtEnd := lastGPUs(samples)
+	r.narrowPlacement(gpusAtEnd)
 	contention := r.contention(samples)
 
 	summary := tape.RunSummary{
@@ -233,6 +238,110 @@ func lastGPUs(samples []tape.RunSample) []tape.GPUSample {
 		}
 	}
 	return nil
+}
+
+// procBytesFloor is the smallest ProcBytes a device may hold and still count
+// as holding the server's weights (gpusInPlay, below). A card with the
+// server's context on it but not its weights reports a few MiB; the floor
+// leaves room for that while keeping one MiB — what the dark card of a
+// CUDA_VISIBLE_DEVICES take holds — decisively out.
+const procBytesFloor = 256 << 20
+
+// gpusInPlay is the devices the run's own reading shows the server holding
+// weights on, or nil when the reading cannot say.
+//
+// ProcBytes is the one figure that is this server's: it is the VRAM the
+// server's PID holds, read per device, so a card carrying another process's
+// 20 GB and none of this server's is not in play. UsedBytes is deliberately
+// not consulted — another process's allocation is not this server's
+// placement, and this is the one place that distinction decides where the
+// weights are claimed to be. When no device reported ProcBytes at all the
+// server's process was never identified and the column is absent, so the
+// answer is "cannot say" (nil) rather than a guess in either direction.
+func gpusInPlay(gpusAtEnd []tape.GPUSample) (inPlay []int) {
+	var anyProc bool
+	for _, g := range gpusAtEnd {
+		if g.ProcBytes <= 0 {
+			continue
+		}
+		anyProc = true
+		if g.ProcBytes > procBytesFloor {
+			inPlay = append(inPlay, g.Index)
+		}
+	}
+	if !anyProc {
+		return nil
+	}
+	return inPlay
+}
+
+// narrowPlacement re-estimates the placement over only the devices the run's
+// own readings show holding the server's weights (lead, 2026-09-16).
+//
+// collectPlacement runs before the run does, so all it can do is spread the
+// model over every device the box has — and a server launched with
+// CUDA_VISIBLE_DEVICES=0 on a two-GPU box then had half of a 29 GB model
+// claimed for a card that held one MiB, which bandwidth.Contradiction
+// correctly refused to derive anything from. The samples that exist by reduce
+// time name the devices the server's PID actually holds VRAM on, so the
+// estimate is replayed over exactly those and the safety net stays for the
+// cases it was built for: a placement the readings contradict still derives
+// nothing.
+//
+// Only an estimate is narrowed. An engine's placement is its own report and
+// an unknown one is not a placement; re-estimating either would put a guess
+// where a record was. An in-play set that is empty, or spans every device the
+// reading saw, changes nothing, and so does one nobody could compute.
+func (r *run) narrowPlacement(gpusAtEnd []tape.GPUSample) {
+	if r.place.Source != placement.SourceGGUFArgs {
+		return
+	}
+	inPlay := gpusInPlay(gpusAtEnd)
+	if len(inPlay) == 0 || len(inPlay) == len(gpusAtEnd) {
+		return
+	}
+	// lazy stays false as collectPlacement left it, and WithModel rides along
+	// so the per-device active bytes are filled the same way, over the
+	// narrowed device set.
+	sum, warns := placement.EstimateVerbose(r.tensors, r.flags, len(r.host.GPUs), false,
+		placement.WithModel(r.model),
+		placement.WithGPUIndices(inPlay))
+	r.place = sum
+	// The re-estimate runs over the same tensors and flags as the first one,
+	// so its warnings are the sentences collectPlacement already appended; a
+	// warning that is genuinely new (the estimator grew one) still rides
+	// through, but a repeat must not print twice.
+	for _, w := range warns {
+		if !slices.Contains(r.warnings, w) {
+			r.warn("%s", w)
+		}
+	}
+	r.warn("placement estimated over %s, the only %s holding the server's weights",
+		gpuNames(inPlay), pluralDevices(len(inPlay)))
+}
+
+// gpuNames lists GPU indices the way a warning names them: "GPU0" alone,
+// "GPU0 and GPU2", "GPU0, GPU1 and GPU3".
+func gpuNames(indices []int) string {
+	names := make([]string, len(indices))
+	for i, idx := range indices {
+		names[i] = "GPU" + strconv.Itoa(idx)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	if len(names) == 1 {
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
+// pluralDevices is the warning's noun, in the number the list beside it is.
+func pluralDevices(n int) string {
+	if n == 1 {
+		return "device"
+	}
+	return "devices"
 }
 
 // contention labels the run busy or not, or declines to label it.
