@@ -449,11 +449,18 @@ writes files under `~/.toktape`. There is no telemetry and no account.
 
 | | |
 | --- | --- |
-| Servers | llama-server (upstream llama.cpp), ik_llama.cpp |
+| Servers | llama-server (upstream llama.cpp), ik_llama.cpp, any server that answers `/props` with an `engine` object |
 | Linux | primary target, x86_64 and arm64, full `/proc` view |
 | macOS | builds and runs; attach with `--url`; no `/proc` view, so memory and fault rows are `?` |
 | Windows | through WSL2 |
 | GPU | NVIDIA through `nvidia-smi` |
+
+The server does not have to be llama.cpp. One that reports its own engine —
+its name and version, the model's format and shape, and which bytes sit on
+which device — is recorded from that report, with no GGUF opened and no
+command line parsed. [exl3-serve](https://github.com/midagedev/exl3-serve)
+does that for ExLlamaV3: it presents one EXL3 model on the llama-server
+surface toktape already speaks, so an EXL3 model records unchanged.
 
 Roadmap: a macOS collector without sudo, an Ollama offload card from
 `/api/ps`, and `toktape ab URL1 URL2` — two servers, one prompt, side by

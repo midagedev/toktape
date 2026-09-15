@@ -430,11 +430,19 @@ HTTP 슬롯, 프리픽스 캐시 재사용, 대기열이 찬 상태의 TTFT, 스
 
 | | |
 | --- | --- |
-| 서버 | llama-server(upstream llama.cpp), ik_llama.cpp |
+| 서버 | llama-server(upstream llama.cpp), ik_llama.cpp, `/props`에 `engine` 정보를 담아 답하는 서버 |
 | Linux | 기본 대상, x86_64·arm64, `/proc` 뷰 전체 |
 | macOS | 빌드·실행 가능, `--url`로 부착. `/proc` 뷰가 없어 메모리·폴트 행은 `?` |
 | Windows | WSL2를 통해 |
 | GPU | `nvidia-smi`를 통한 NVIDIA |
+
+서버가 llama.cpp일 필요는 없습니다. 자기 엔진을 스스로 보고하는 서버라면,
+그러니까 엔진 이름과 버전, 모델의 형식과 형상, 어떤 바이트가 어느 장치에
+올라가 있는지를 `/props`로 알려 주면, toktape는 그 보고만으로 녹화합니다.
+GGUF를 열지도 않고 명령줄을 파싱하지도 않습니다.
+[exl3-serve](https://github.com/midagedev/exl3-serve)가 ExLlamaV3에 대해 그
+일을 합니다. EXL3 모델 하나를 toktape가 이미 아는 llama-server 표면에 얹어
+주므로, EXL3 모델도 손댈 것 없이 그대로 녹화됩니다.
 
 로드맵: sudo 없는 macOS 수집기, `/api/ps` 기반 Ollama 오프로드 카드,
 `toktape ab URL1 URL2`(서버 둘, 프롬프트 하나, 나란히).

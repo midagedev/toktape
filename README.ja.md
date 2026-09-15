@@ -443,11 +443,19 @@ HTTP スロット、プレフィックスキャッシュの再利用、キュー
 
 | | |
 | --- | --- |
-| サーバー | llama-server（upstream llama.cpp）、ik_llama.cpp |
+| サーバー | llama-server（upstream llama.cpp）、ik_llama.cpp、`/props` に `engine` 情報を載せて返すサーバー |
 | Linux | 主要ターゲット、x86_64・arm64、`/proc` ビュー完備 |
 | macOS | ビルド・実行可、`--url` でアタッチ。`/proc` ビューがないためメモリ・フォールトの行は `?` |
 | Windows | WSL2 経由 |
 | GPU | `nvidia-smi` 経由の NVIDIA |
+
+サーバーは llama.cpp でなくても構いません。エンジン自身が名乗るサーバー、
+つまりエンジン名とバージョン、モデルの形式と形状、どのバイトがどのデバイスに
+載っているかを `/props` で返すサーバーであれば、toktape はその報告だけで
+記録します。GGUF を開くことも、コマンドラインを解析することもありません。
+[exl3-serve](https://github.com/midagedev/exl3-serve) が ExLlamaV3 に対して
+それを行います。EXL3 モデル 1 つを toktape がすでに話せる llama-server の
+インターフェースに載せるので、EXL3 モデルもそのまま記録できます。
 
 ロードマップ: sudo 不要の macOS コレクター、`/api/ps` に基づく Ollama オフロード
 カード、`toktape ab URL1 URL2`（サーバー 2 台、プロンプト 1 つ、並べて表示）。
