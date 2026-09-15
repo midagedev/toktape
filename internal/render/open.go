@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 	"github.com/midagedev/toktape/internal/tui"
 )
@@ -324,21 +325,17 @@ func openAttachLine(l *openLine, tp *tape.Tape) *openLine {
 	return l
 }
 
-// openModelName is headerLine's model segment: the label, or the file name
-// without its extension, with the quant appended only when the label does not
-// already carry it.
+// openModelName is headerLine's model segment: card.ModelNameQuant — the
+// model that actually ran, with the quant appended only when the name does not
+// already carry it — or "?" when nothing was observed, exactly as before
+// (2026-09-15, user: "모델이 다 실제값으로 찍혀야해": a re-quantised variant
+// keeps the base model's GGUF header, so the header's general.name must not
+// be the name the clip opens on).
 func openModelName(s tape.RunSummary) string {
-	name := s.Model.Name
-	if name == "" {
-		name = strings.TrimSuffix(s.Model.FileName, ".gguf")
+	if n := card.ModelNameQuant(s.Model); n != "" {
+		return n
 	}
-	if name == "" {
-		return "?"
-	}
-	if q := s.Model.Quant; q != "" && !strings.Contains(name, q) {
-		name += " " + q
-	}
-	return name
+	return "?"
 }
 
 // openLine assembles one line of the open to an exact column count.

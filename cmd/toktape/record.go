@@ -782,19 +782,18 @@ func headerLine(s *tape.RunSummary) string {
 		parts[0] += " (" + s.Server.Build + ")"
 	}
 
-	// The quant is appended only when the label does not already carry it.
-	// Falling back to the file name means the label is often
-	// "Qwen3.5-35B-A3B-UD-Q4_K_M", and appending the quant to that would
-	// print it twice.
-	model := s.Model.Name
-	if model == "" {
-		model = strings.TrimSuffix(s.Model.FileName, ".gguf")
-	}
+	// The model is card.ModelNameQuant — the model that ran, with the quant
+	// appended only when the name does not already carry it (2026-09-15, user:
+	// "모델이 다 실제값으로 찍혀야해"): the variant directory for a shard set, the
+	// file's stem for one file, never the GGUF header's general.name, which a
+	// re-quantised variant keeps from the base model. This was the sixth private
+	// copy of the fallback; the other five went to card that day and this one
+	// with them, because render's openAttachLine replicates this line and a
+	// disagreement between the two is a clip that opens naming another model
+	// than the run it opens on.
+	model := card.ModelNameQuant(s.Model)
 	if model == "" {
 		model = "?"
-	}
-	if q := s.Model.Quant; q != "" && !strings.Contains(model, q) {
-		model += " " + q
 	}
 	parts = append(parts, model)
 

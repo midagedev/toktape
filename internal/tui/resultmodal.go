@@ -44,7 +44,19 @@ func resultModal(m Model, th Theme, boxW int) []string {
 	// a run's model to someone comparing cards: the same name at two quants is
 	// two different machines' worth of bytes, and the size is the figure every
 	// "will it fit" question starts from.
-	title = " " + strings.Join(nonEmpty(modelName(s.Model), s.Model.Quant, fmtG(s.Model.FileBytes)), " · ") + " "
+	//
+	// 2026-09-15 (user: "모델이 다 실제값으로 찍혀야해"): the name is
+	// card.ModelName — the model that ran, never the GGUF header's
+	// general.name — and the quant segment is omitted when the name already
+	// carries it, so a variant directory like
+	// DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16 does not read
+	// "Q3_K_M · Q3_K_M". card.ModelNameQuant is the judge of that, the same
+	// one the title bar uses.
+	titleSegs := []string{card.ModelName(s.Model), fmtG(s.Model.FileBytes)}
+	if card.ModelNameQuant(s.Model) != card.ModelName(s.Model) {
+		titleSegs = []string{card.ModelName(s.Model), s.Model.Quant, fmtG(s.Model.FileBytes)}
+	}
+	title = " " + strings.Join(nonEmpty(titleSegs...), " · ") + " "
 	// The date rides the other end of the same rule (user, 2026-09-14:
 	// "날짜도"). A card with no date is undatable evidence — engines move
 	// weekly, and last spring's rate is a different claim from today's — and

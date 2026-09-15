@@ -310,7 +310,11 @@ func TestTitleDropsTheRigFirst(t *testing.T) {
 	tp := roundsTape()
 	m := ModelAt(tp, inRound1(tp))
 	const (
-		model  = "R1 Distill Llama 70B Q4_K_M"
+		// 2026-09-15 (user: "모델이 다 실제값으로 찍혀야해"): the segment is
+		// card.ModelNameQuant — the file's stem, which carries the quant — not
+		// the header's "R1 Distill Llama 70B Q4_K_M". FAIL-first: the old title
+		// spelled the segment the general.name way and this test pinned it.
+		model  = "DeepSeek-R1-Distill-Llama-70B-Q4_K_M"
 		round  = "round 2/3 prose-1"
 		engine = "llama-server b3650"
 		rig    = "2× RTX 3090"

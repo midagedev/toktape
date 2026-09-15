@@ -1,4 +1,4 @@
-┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────────────────────────────────────────┐
+┌─ toktape · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────────────────────────────────────────┐
 │ stream 1/8                                        done │ stream 2/8                                         done │ SPEED ─────────────────────────────── │
 │ 9.1 tok/s  ▇██▇▇█▇██▇▇▇██▇ ttft 630 ms · 296/320       │ 9.1 tok/s  ▇██▇▇▇██▇▇▇██▇▇ ttft 690 ms · 301/320        │ decode                     72.9 tok/s │
 │ second waits, then the activations cross the bus,      │ 나온 숫자로 캐시 크기를 다시 계산해 보라. 화면          │ prefill                    2927 tok/s │

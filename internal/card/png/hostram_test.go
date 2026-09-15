@@ -32,7 +32,7 @@ func hostSegmentOf(t *testing.T, s *tape.RunSummary) (*canvas, segment) {
 	if err != nil {
 		t.Fatalf("renderCanvas: %v", err)
 	}
-	ct := build(s)
+	ct := contentOf(t, s)
 	for _, seg := range ct.segments {
 		if seg.col == colHost || len(seg.parts) == 2 {
 			return c, seg
@@ -138,7 +138,7 @@ func TestHostSplitIsNotAppliedToSomebodyElsesBytes(t *testing.T) {
 		Device: tape.DeviceCPU,
 		Bytes:  188 * gib,
 	})
-	ct := build(s)
+	ct := contentOf(t, s)
 	for _, seg := range ct.segments {
 		if seg.col != colHost {
 			continue

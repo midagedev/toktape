@@ -243,7 +243,12 @@ func TestHeaderLine(t *testing.T) {
 	got := headerLine(card.Example())
 	for _, want := range []string{
 		"→ llama-server at http://127.0.0.1:8080 (b3650)",
-		"R1 Distill Llama 70B Q4_K_M",
+		// 2026-09-15 (user: "모델이 다 실제값으로 찍혀야해"): the model segment is
+		// the file-based name, so the header's "R1 Distill Llama 70B" gave way
+		// to the file's own name (which already carries the quant). FAIL-first:
+		// the old line printed "R1 Distill Llama 70B Q4_K_M" and this want
+		// failed on it.
+		"DeepSeek-R1-Distill-Llama-70B-Q4_K_M",
 		"pid 48213",
 	} {
 		if !strings.Contains(got, want) {
@@ -255,6 +260,34 @@ func TestHeaderLine(t *testing.T) {
 	blind.Server.PID = 0
 	if got := headerLine(&blind); !strings.Contains(got, "no /proc view") {
 		t.Errorf("header without a pid = %q", got)
+	}
+}
+
+// TestLsModelColumnNamesTheVariant (2026-09-15, user: "모델이 다 실제값으로
+// 찍혀야해"): the MODEL column of `toktape ls` is the file-based name — the
+// variant directory for a shard set — never the GGUF header's general.name,
+// which a re-quantised variant keeps from the base model it was cut from.
+func TestLsModelColumnNamesTheVariant(t *testing.T) {
+	dir := t.TempDir()
+	s := card.ExampleSharded()
+	s.Model = tape.ModelInfo{
+		FileName: "DeepSeek-V4.1-Flash-Q3_K_M-00001-of-00009.gguf",
+		Dir:      "DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16",
+		Shards:   9,
+		Name:     "DeepSeek V4.1 Flash",
+		Quant:    "Q3_K_M",
+	}
+	writeTape(t, dir, s)
+
+	code, out, _ := exec(t, "ls", "--out", dir)
+	if code != exitOK {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(out, "DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16") {
+		t.Errorf("the MODEL column is not the variant directory:\n%s", out)
+	}
+	if strings.Contains(out, "DeepSeek V4.1 Flash") {
+		t.Errorf("the MODEL column printed the header's general.name:\n%s", out)
 	}
 }
 

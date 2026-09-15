@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -216,13 +217,13 @@ func rates(s tape.RunSummary) (decode, perStream, aggregate float64) {
 	return s.Timings.PredictedPerSecond, 0, s.Timings.PredictedPerSecond
 }
 
-// modelLabel is the model's short name: its general.name, else the file name
-// without the .gguf suffix.
+// modelLabel is card.ModelName — the model that ran (2026-09-15, user: "모델이
+// 다 실제값으로 찍혀야해"): the variant directory for a shard set, the file's
+// stem for one file, never the GGUF header's general.name, which a
+// re-quantised variant keeps from the base model. The ledger exports "" for an
+// unobserved model, the same empty cell card.ModelName returns.
 func modelLabel(m tape.ModelInfo) string {
-	if m.Name != "" {
-		return m.Name
-	}
-	return strings.TrimSuffix(m.FileName, ".gguf")
+	return card.ModelName(m)
 }
 
 // overrideTensors is the -ot patterns as one cell, verbatim and

@@ -42,7 +42,7 @@ func TestOxideCardsAreWritten(t *testing.T) {
 	}
 
 	t.Run("the contended variant shows a warn and a bad pill", func(t *testing.T) {
-		ct := build(contendedSummary())
+		ct := contentOf(t, contendedSummary())
 		var warn, bad int
 		for _, p := range ct.pills {
 			switch p.col {

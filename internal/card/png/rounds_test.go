@@ -52,7 +52,7 @@ func TestRoundsClauseReplacesThePerStreamLine(t *testing.T) {
 	}
 
 	t.Run("every other hero line matches the speculative run's shape", func(t *testing.T) {
-		rounds, base := build(card.ExampleRounds()), build(card.ExampleSpeculative())
+		rounds, base := contentOf(t, card.ExampleRounds()), contentOf(t, card.ExampleSpeculative())
 		if rounds.left.eyebrow != base.left.eyebrow || rounds.right.eyebrow != base.right.eyebrow ||
 			rounds.right.sub1 != base.right.sub1 {
 			t.Errorf("rounds hero %+v / %+v moved beyond sub1 against %+v / %+v", rounds.left, rounds.right, base.left, base.right)
@@ -62,7 +62,7 @@ func TestRoundsClauseReplacesThePerStreamLine(t *testing.T) {
 	t.Run("one round keeps its per-stream line", func(t *testing.T) {
 		s := card.ExampleSpeculative()
 		s.Rounds = 1
-		if got, want := build(s).left.sub1, build(card.ExampleSpeculative()).left.sub1; got != want {
+		if got, want := contentOf(t, s).left.sub1, contentOf(t, card.ExampleSpeculative()).left.sub1; got != want {
 			t.Errorf("hero.left.sub1 = %q for one round, want the plain run's %q", got, want)
 		}
 	})
@@ -70,7 +70,7 @@ func TestRoundsClauseReplacesThePerStreamLine(t *testing.T) {
 	t.Run("no observed rate keeps the per-stream line", func(t *testing.T) {
 		s := card.ExampleRounds()
 		s.Spread.PerStreamPredictedPerSecond = tape.Spread{}
-		if got := build(s).left.sub1; got != "4 × 14.4 tok/s per stream" {
+		if got := contentOf(t, s).left.sub1; got != "4 × 14.4 tok/s per stream" {
 			t.Errorf("hero.left.sub1 = %q, want the per-stream line rather than \"? median\"", got)
 		}
 	})

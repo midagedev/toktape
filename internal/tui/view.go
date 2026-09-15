@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -197,7 +198,11 @@ func titleSegments(m Model) []titleSeg {
 		}
 		segs = append(segs, titleSeg{text: " · ", role: roleDim}, titleSeg{text: text, role: role})
 	}
-	add(strings.Join(nonEmpty(modelName(s.Model), s.Model.Quant), " "), roleText)
+	// The model segment is card.ModelNameQuant: the model that actually ran —
+	// the variant directory for a split set, the file's stem for one file —
+	// never the GGUF header's general.name, which a re-quantised variant keeps
+	// from the base model (2026-09-15, user: "모델이 다 실제값으로 찍혀야해").
+	add(card.ModelNameQuant(s.Model), roleText)
 	if m.Rounds > 1 {
 		add(roundLabel(m), roleDim)
 	}

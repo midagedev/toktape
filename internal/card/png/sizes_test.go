@@ -27,9 +27,23 @@ func wsRigSummary() *tape.RunSummary {
 	return s
 }
 
-// footerSlack is the clearance the reflow was measured against: a row must fit
-// its column with room to spare, not merely avoid the ellipsis by a pixel.
-const footerSlack = 8
+// footerSlack lives in theme.go since 2026-09-15: the model column's wrap
+// (modelFooterRows) measures against the same clearance this test does, so the
+// number is production's to own. Still 8.
+
+// contentOf builds the content the way a render does, canvas and all: since
+// 2026-09-15 the footer's model column measures its rows during build
+// (modelFooterRows), so a build handed no canvas would return strings the card
+// never draws.
+func contentOf(t *testing.T, s *tape.RunSummary) *content {
+	t.Helper()
+	fs, err := newFontSet()
+	if err != nil {
+		t.Fatalf("newFontSet: %v", err)
+	}
+	defer fs.Close()
+	return build(newCanvas(fs), s)
+}
 
 // TestFooterRowsFitTheirColumn is the TTP-54 contract in numbers (2026-09-14,
 // user: "png카드가 너무 트위터에서 보기에 글씨가 작아"). The body type grew
@@ -55,7 +69,7 @@ func TestFooterRowsFitTheirColumn(t *testing.T) {
 
 	for name, s := range sums {
 		t.Run(name, func(t *testing.T) {
-			ct := build(s)
+			ct := build(cv, s)
 			for i, col := range ct.cols {
 				if got := cv.measure(col.label, stColLabel); got > footerColW-footerSlack {
 					t.Errorf("col%d label %q measures %dpx, want <= %dpx",

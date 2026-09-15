@@ -1,4 +1,4 @@
-┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────────────────────────┐
+┌─ toktape · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────────────────────────┐
 │ stream 1/8                                answer │ stream 2/8                                 answer │ SPEED ─────────────────────────── │
 │ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 630 ms · 104/320    │ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 690 ms · 103/320     │ decode                 72.8 tok/s │
 │                                                  │ 컨텍스트를 네 배로 늘리면 갑자기 자리가           │ prefill                4880 tok/s │

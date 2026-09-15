@@ -33,7 +33,7 @@ func TestSweepClauseNamesTheBestNMax(t *testing.T) {
 	}
 
 	t.Run("every other hero line matches the rounds run's shape", func(t *testing.T) {
-		sweep, rounds := build(card.ExampleSweep()), build(card.ExampleRounds())
+		sweep, rounds := contentOf(t, card.ExampleSweep()), contentOf(t, card.ExampleRounds())
 		if sweep.left.eyebrow != rounds.left.eyebrow || sweep.right.eyebrow != rounds.right.eyebrow ||
 			sweep.right.sub1 != rounds.right.sub1 {
 			t.Errorf("sweep hero %+v / %+v moved beyond sub1 against %+v / %+v", sweep.left, sweep.right, rounds.left, rounds.right)
@@ -46,14 +46,14 @@ func TestSweepClauseNamesTheBestNMax(t *testing.T) {
 		tie := card.ExampleSweep()
 		tie.BySpecNMax[0].Spread.PerStreamPredictedPerSecond.Median = 16.1
 		for name, s := range map[string]*tape.RunSummary{"one value": one, "a tie": tie} {
-			if got := build(s).left.sub1; got != "15.5 median of 12 prompts · 8.0–20.9 tok/s" {
+			if got := contentOf(t, s).left.sub1; got != "15.5 median of 12 prompts · 8.0–20.9 tok/s" {
 				t.Errorf("%s: hero.left.sub1 = %q, want the rounds clause", name, got)
 			}
 		}
 	})
 
 	t.Run("a rounds run keeps its clause", func(t *testing.T) {
-		if got := build(card.ExampleRounds()).left.sub1; got != "14.8 median of 6 prompts · 9.1–19.3 tok/s" {
+		if got := contentOf(t, card.ExampleRounds()).left.sub1; got != "14.8 median of 6 prompts · 9.1–19.3 tok/s" {
 			t.Errorf("hero.left.sub1 = %q", got)
 		}
 	})

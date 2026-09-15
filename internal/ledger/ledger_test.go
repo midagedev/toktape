@@ -48,9 +48,13 @@ func TestColumnsAreUnique(t *testing.T) {
 func TestFromTapeSingleStream(t *testing.T) {
 	tp := tapeOf(card.Example())
 	want := map[string]string{
-		"id":           "20260913-142530-r1-distill-llama-70b",
-		"tape":         "20260913-142530-r1-distill-llama-70b.tape",
-		"model":        "R1 Distill Llama 70B",
+		"id":   "20260913-142530-r1-distill-llama-70b",
+		"tape": "20260913-142530-r1-distill-llama-70b.tape",
+		// 2026-09-15 (user: "모델이 다 실제값으로 찍혀야해"): the model column is
+		// the file-based name, so the GGUF header's "R1 Distill Llama 70B"
+		// gave way to the file's stem. FAIL-first: the old code printed the
+		// header's name here and this expectation failed on it.
+		"model":        "DeepSeek-R1-Distill-Llama-70B-Q4_K_M",
 		"quant":        "Q4_K_M",
 		"params":       "70553706496",
 		"size_gb":      "42.5",
@@ -154,6 +158,25 @@ func TestFromTapeConcurrent(t *testing.T) {
 		if got := get(t, coldTape, col); got != w {
 			t.Errorf("on a cold run %s = %q, want %q", col, got, w)
 		}
+	}
+}
+
+// TestFromTapeModelColumnNamesTheVariant (2026-09-15, user: "모델이 다 실제값으로
+// 찍혀야해"): the model column of a re-quantised variant's run is the variant
+// directory the shard set sits in, not the GGUF header's general.name — the
+// header still says the base model, and a ledger that prints it cannot tell
+// the two runs on the rig apart.
+func TestFromTapeModelColumnNamesTheVariant(t *testing.T) {
+	tp := tapeOf(&tape.RunSummary{Model: tape.ModelInfo{
+		FileName: "DeepSeek-V4.1-Flash-Q3_K_M-00001-of-00009.gguf",
+		Dir:      "DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16",
+		Shards:   9,
+		Name:     "DeepSeek V4.1 Flash",
+		Quant:    "Q3_K_M",
+	}})
+	const want = "DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16"
+	if got := get(t, tp, "model"); got != want {
+		t.Errorf("model = %q, want the variant directory %q", got, want)
 	}
 }
 

@@ -153,6 +153,80 @@ func TestModelLabel(t *testing.T) {
 	}
 }
 
+// TestModelName is the 2026-09-15 contract (user: "모델이 다 실제값으로 찍혀야해"):
+// the name a surface prints is the model that actually ran — the file's stem,
+// or the variant directory a shard set sits in — and never the GGUF header's
+// general.name, because a re-quantised variant keeps the base model's header.
+func TestModelName(t *testing.T) {
+	cases := []struct {
+		name      string
+		m         tape.ModelInfo
+		want      string
+		wantQuant string
+	}{
+		{
+			// The real recording the change exists for: nine parts of a Q3_K_M
+			// re-quant inside a variant directory whose stem carries the quant.
+			"the real recording: the variant directory, not the header",
+			tape.ModelInfo{
+				Path:     "/models/DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16/DeepSeek-V4.1-Flash-Q3_K_M-00001-of-00009.gguf",
+				FileName: "DeepSeek-V4.1-Flash-Q3_K_M-00001-of-00009.gguf",
+				Dir:      "DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16",
+				Shards:   9,
+				Name:     "DeepSeek V4.1 Flash",
+				Quant:    "Q3_K_M",
+			},
+			"DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16",
+			// The quant is already inside the name and is not printed twice.
+			"DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16",
+		}, {
+			// A single file with a header name: the file, not the header.
+			"the file wins over the header for a single file",
+			Example().Model,
+			"DeepSeek-R1-Distill-Llama-70B-Q4_K_M",
+			"DeepSeek-R1-Distill-Llama-70B-Q4_K_M",
+		}, {
+			// The quant already inside, in the other case: lower-case in the
+			// file name against the server's upper-case spelling.
+			"a lower-case quant in the name is not appended twice",
+			tape.ModelInfo{FileName: "qwen3-30b-a3b-q4_k_m.gguf", Quant: "Q4_K_M"},
+			"qwen3-30b-a3b-q4_k_m",
+			"qwen3-30b-a3b-q4_k_m",
+		}, {
+			// No file was recorded, so the header's name is the only
+			// observation left — and the quant joins it.
+			"no file recorded: general.name is all that was observed",
+			tape.ModelInfo{Name: "DeepSeek V4.1 Flash", Quant: "Q3_K_M"},
+			"DeepSeek V4.1 Flash",
+			"DeepSeek V4.1 Flash Q3_K_M",
+		}, {
+			// Nothing was observed at all.
+			"nothing observed",
+			tape.ModelInfo{},
+			"",
+			// Even a quant that somehow arrived alone does not print: callers
+			// omit the whole segment when the name is unknown.
+			"",
+		}, {
+			// The one shape that appends: a quant the name does not carry.
+			"a quant the name does not carry is appended",
+			tape.ModelInfo{FileName: "gpt-oss-120b.gguf", Quant: "Q8_0"},
+			"gpt-oss-120b",
+			"gpt-oss-120b Q8_0",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := ModelName(c.m); got != c.want {
+				t.Errorf("ModelName = %q, want %q", got, c.want)
+			}
+			if got := ModelNameQuant(c.m); got != c.wantQuant {
+				t.Errorf("ModelNameQuant = %q, want %q", got, c.wantQuant)
+			}
+		})
+	}
+}
+
 // TestShardedGolden pins the sharded fixture's card and JSON. It is a separate
 // test from TestTextGolden so the two tracks touching this package do not both
 // edit card_test.go.

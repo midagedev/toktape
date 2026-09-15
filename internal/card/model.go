@@ -81,3 +81,51 @@ func shardsPart(m tape.ModelInfo) string {
 	}
 	return strconv.Itoa(m.Shards) + " shards"
 }
+
+// ModelName is what every surface calls the model when the name has to be the
+// model that actually ran: the variant label a shard set's directory gives,
+// else the file's stem.
+//
+// The precedence is dir-based label > file stem > general.name > "", and
+// general.name is last on purpose (2026-09-15, user: "모델이 다 실제값으로
+// 찍혀야해"). A re-quantised variant keeps the original's GGUF header — the
+// parts of DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16 still say
+// "DeepSeek V4.1 Flash" — so the header names the base model, not the bytes
+// that ran. The file system is the only witness of which variant was loaded,
+// and it wins whenever anything of it was recorded: the directory a split set
+// sits in (ModelLabel), or the file's own name with the extension and the
+// part marker dropped. general.name is read only when no file was recorded at
+// all — it is observed, so it is printed rather than "?" — and nothing
+// observed prints nothing; callers keep their own "?" or omission behaviour.
+func ModelName(m tape.ModelInfo) string {
+	if Sharded(m) {
+		return ModelLabel(m)
+	}
+	if m.FileName != "" {
+		return ModelStem(m.FileName)
+	}
+	return m.Name
+}
+
+// ModelNameQuant is ModelName with the quant appended, unless the name already
+// carries it — "DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16" contains
+// Q3_K_M, and a file named qwen3-30b-a3b-q4_k_m contains Q4_K_M just as well
+// case-blind. An unknown name stays empty even when a quant was observed:
+// callers omit the whole segment rather than print a quant that belongs to no
+// model they could name.
+func ModelNameQuant(m tape.ModelInfo) string {
+	name := ModelName(m)
+	if name == "" {
+		return ""
+	}
+	if m.Quant != "" && !containsFold(name, m.Quant) {
+		return name + " " + m.Quant
+	}
+	return name
+}
+
+// containsFold reports whether s contains sub, ignoring case, for the quant's
+// upper-case spelling against a file name's lower-case one.
+func containsFold(s, sub string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
+}

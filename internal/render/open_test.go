@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/midagedev/toktape/internal/card"
+	"github.com/midagedev/toktape/internal/tape"
 	"github.com/midagedev/toktape/internal/tui"
 )
 
@@ -110,11 +111,40 @@ func TestOpenAttachLineMatchesTheCLI(t *testing.T) {
 	// imported, so the wording is replicated — and pinned here against the
 	// line that function produces for this fixture. If the CLI's wording
 	// changes, this is the test that says the clip is now lying about it.
-	const want = "→ llama-server at http://127.0.0.1:8080 (b3650) · R1 Distill Llama 70B Q4_K_M · pid 48213"
+	//
+	// 2026-09-15 (user: "모델이 다 실제값으로 찍혀야해"): the model segment is the
+	// file-based name, so the header's "R1 Distill Llama 70B" gave way to the
+	// file's own name. FAIL-first: the old segment printed
+	// "R1 Distill Llama 70B Q4_K_M" and this want failed on it.
+	const want = "→ llama-server at http://127.0.0.1:8080 (b3650) · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · pid 48213"
 	got := strings.TrimRight(card.StripANSI(
 		openAttachLine(newOpenLine(DefaultWidth), tui.ExampleTapeN(4)).String()), " ")
 	if got != want {
 		t.Errorf("attach line =\n  %q\nwant\n  %q", got, want)
+	}
+}
+
+// TestOpenModelNameIsTheFileNotTheHeader (2026-09-15, user: "모델이 다 실제값으로
+// 찍혀야해"): the cold open's attach line names the model that actually ran. A
+// re-quantised variant keeps the base model's general.name in its GGUF header,
+// so the header's "DeepSeek V4.1 Flash" must lose to the variant directory the
+// nine parts sit in — and the quant, already inside the name, must not be
+// printed twice.
+func TestOpenModelNameIsTheFileNotTheHeader(t *testing.T) {
+	s := tape.RunSummary{Model: tape.ModelInfo{
+		Path:     "/models/DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16/DeepSeek-V4.1-Flash-Q3_K_M-00001-of-00009.gguf",
+		FileName: "DeepSeek-V4.1-Flash-Q3_K_M-00001-of-00009.gguf",
+		Dir:      "DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16",
+		Shards:   9,
+		Name:     "DeepSeek V4.1 Flash",
+		Quant:    "Q3_K_M",
+	}}
+	const want = "DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16"
+	if got := openModelName(s); got != want {
+		t.Errorf("openModelName = %q, want the variant directory %q", got, want)
+	}
+	if got := openModelName(s); strings.Contains(got, " Q3_K_M") {
+		t.Errorf("openModelName printed the quant twice: %q", got)
 	}
 }
 

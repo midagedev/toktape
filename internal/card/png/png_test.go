@@ -946,7 +946,7 @@ func TestAnswerCutPillFitsTheCard(t *testing.T) {
 	s.Timings.PredictedN = 128
 	s.Timings.ReasoningN = 128
 
-	c := build(&s)
+	c := contentOf(t, &s)
 	var texts []string
 	for _, p := range c.pills {
 		texts = append(texts, p.text)
@@ -960,7 +960,7 @@ func TestAnswerCutPillFitsTheCard(t *testing.T) {
 
 	// And it is absent when the run answered.
 	s.Timings.ReasoningN = 96
-	if got, want := len(build(&s).pills), 3; got != want {
+	if got, want := len(contentOf(t, &s).pills), 3; got != want {
 		t.Errorf("pills = %d, want %d for a run that answered", got, want)
 	}
 

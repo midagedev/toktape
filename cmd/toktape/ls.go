@@ -69,15 +69,12 @@ func runLs(c *cli, args []string) int {
 	return exitOK
 }
 
-// modelLabel is the model's short name for a list row.
+// modelLabel is card.ModelName for a list row (2026-09-15, user: "모델이 다
+// 실제값으로 찍혀야해"): the model that ran, never the GGUF header's
+// general.name, which a re-quantised variant keeps from the base model. "?" is
+// the table's word for an unobserved model.
 func modelLabel(s tape.RunSummary) string {
-	if s.Model.Name != "" {
-		return s.Model.Name
-	}
-	if s.Model.FileName != "" {
-		return strings.TrimSuffix(s.Model.FileName, ".gguf")
-	}
-	return "?"
+	return orUnknown(card.ModelName(s.Model))
 }
 
 // table lays out rows in aligned columns, measuring with card.Width so a

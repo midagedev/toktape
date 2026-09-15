@@ -197,6 +197,14 @@ const (
 	footerRow0Base = bandFooterTop + 66 // 484
 	footerRowStep  = 23
 	footerRows     = 4
+
+	// footerSlack is the clearance a footer row is measured against: a row must
+	// fit its column with room to spare, not merely avoid the ellipsis by a
+	// pixel. It was the fit test's own number (sizes_test.go) until 2026-09-15,
+	// when the model column began wrapping its own rows against the same
+	// clearance (modelFooterRows) — two thresholds for one column is how a row
+	// can pass one and be cut by the other.
+	footerSlack = 8
 )
 
 // Bottom strip. Three lines now: the flags, the environment the footer grid

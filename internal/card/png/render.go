@@ -10,7 +10,7 @@ import (
 // draw paints the whole card. The order is back to front: panel, rules, then
 // every band top to bottom.
 func (c *canvas) draw(s *tape.RunSummary) {
-	ct := build(s)
+	ct := build(c, s)
 
 	c.fill(image.Rect(0, 0, Width, Height), colBase)
 	panel := image.Rect(panelInset, panelTop, Width-panelInset, panelBottom)

@@ -102,13 +102,15 @@ type footerCol struct {
 	rows  [footerRows]string
 }
 
-// build derives the whole card from the summary.
-func build(s *tape.RunSummary) *content {
+// build derives the whole card from the summary. It takes the canvas because
+// the footer's model column measures its rows before it commits to them
+// (modelFooterRows) and the measuring is the canvas's job.
+func build(cv *canvas, s *tape.RunSummary) *content {
 	c := &content{}
 	c.buildHeader(s)
 	c.buildHero(s)
 	c.buildMemory(s)
-	c.buildFooter(s)
+	c.buildFooter(cv, s)
 	c.env = envLine(s)
 	c.flags = flagsLine(s.Server)
 	return c
@@ -783,8 +785,8 @@ func contentionObserved(ci tape.ContentionInfo) bool {
 
 // ---------------------------------------------------------------- footer ---
 
-func (c *content) buildFooter(s *tape.RunSummary) {
-	c.cols[0] = footerCol{label: "model", rows: modelFooterRows(s.Model)}
+func (c *content) buildFooter(cv *canvas, s *tape.RunSummary) {
+	c.cols[0] = footerCol{label: "model", rows: modelFooterRows(cv, s.Model)}
 
 	c.cols[1] = footerCol{label: "rig", rows: [footerRows]string{
 		strings.Join(rigGPUs(s.Host.GPUs), " + "),
@@ -859,56 +861,74 @@ func engineFlagRow(names, values []string) string {
 	return strings.Join(parts, " · ")
 }
 
-// modelDisplayName is what the footer's model column calls the model: the
-// GGUF's own general.name when it has one, else the file name — or, for a
-// split set, the variant label the text card's MODEL line uses, because part
-// one's name is the same string for every variant of the model (TTP-32).
-// card.ModelLabel returns the file name unchanged for a single file, so this
-// is byte-identical to what it was for every non-sharded card.
-func modelDisplayName(m tape.ModelInfo) string {
-	if strings.TrimSpace(m.Name) != "" {
-		return m.Name
-	}
-	return orUnknown(card.ModelLabel(m))
-}
-
 // modelFooterRows is the four-row model column of the footer grid.
 //
-// A split set (TTP-32) spends its middle two rows differently. Two variants of
-// one model are hard-linked side by side and share general.name as well as
-// every file name, so the directory can be the only thing on the whole card
-// that says which of them ran, and it has to be readable: the part count joins
-// the quant, the parameter count goes up to join it, and the size row closes
-// with the variant. A single-file model is untouched — every row is the string
-// it always was — and the architecture row never moves.
+// 2026-09-15 (user: "모델이 다 실제값으로 찍혀야해"): row 0 is card.ModelName —
+// the variant directory for a shard set, the file's stem for one file — never
+// the GGUF header's general.name, which a re-quantised variant keeps from the
+// base model it was cut from. The variantTag the size row used to close with
+// is gone with it: row 0 is the variant now, and printing parts of it twice is
+// what this change removed.
 //
-// The column is 255px and a 40-character directory does not fit beside a size
-// and a parameter count; it was measured truncating to "DeepSeek-V4.1-F…",
-// which is the one thing on the card that must not be cut. variantTag drops the
-// part the row above already says.
-func modelFooterRows(m tape.ModelInfo) [footerRows]string {
+// A name wider than the column — the real recording's 45-character directory
+// measures 376 px against 346 — wraps at the last "-", "_" or "." that lets
+// row 0 keep its separator, and the two rows that frees spend as one: the
+// quant, the shard count, the size and the parameter count join with " · " so
+// the architecture row stays the last row. The joined row gives its parts up
+// in order of least importance when it is too wide — the parameter count
+// first, then the shard count — and never the quant or the size. A name too
+// wide for any separator falls to the canvas's own ellipsis, the same cut
+// every other footer cell takes.
+//
+// Widths are measured, not estimated, so this takes the canvas (TTP-32's
+// lesson: the column is 346 px and a 40-character directory is 320 of them).
+func modelFooterRows(cv *canvas, m tape.ModelInfo) [footerRows]string {
+	name := orUnknown(card.ModelName(m))
+	shape := modelShape(m)
 	quant := orUnknown(m.Quant)
-	size := joinParts(" · ", formatFileGiB(m.FileBytes), formatParamsB(m.Params))
-	if card.Sharded(m) {
-		quant = joinParts(" · ", orUnknown(m.Quant), shardsPart(m), formatParamsB(m.Params))
-		size = joinParts(" · ", formatFileGiB(m.FileBytes), variantTag(m))
+	size := formatFileGiB(m.FileBytes)
+	params := formatParamsB(m.Params)
+	fits := footerColW - footerSlack
+
+	if cv.measure(name, stSmallB) <= fits {
+		if !card.Sharded(m) {
+			return [footerRows]string{name, quant, joinParts(" · ", size, params), shape}
+		}
+		// The TTP-32 layout minus the variant tag: the shard count and the
+		// parameter count join the quant, the size row is the size alone.
+		return [footerRows]string{name, joinParts(" · ", quant, shardsPart(m), params), size, shape}
 	}
-	return [footerRows]string{modelDisplayName(m), quant, size, modelShape(m)}
+
+	// The wrap: rows 0 and 1 spell the name across the separator, and the
+	// middle two rows become one.
+	row0, rest := wrapModelName(cv, name)
+	mid := joinParts(" · ", quant, shardsPart(m), size, params)
+	if cv.measure(mid, stSmall) > fits {
+		mid = joinParts(" · ", quant, shardsPart(m), size)
+	}
+	return [footerRows]string{row0, rest, mid, shape}
 }
 
-// variantTag is the part of the model's directory the rest of the column does
-// not already say: "DeepSeek-V4.1-Flash-engramQ8-tokembdBF16" beside a model
-// called DeepSeek V4.1 Flash is "engramQ8-tokembdBF16", which is exactly what
-// separates the hard-linked variants of one model set. It is a substring of the
-// recorded directory, never a rewrite of it, and the text card and the tape
-// keep the directory whole. A directory that shares no prefix with the file
-// name is printed as it stands.
-func variantTag(m tape.ModelInfo) string {
-	stem := card.ModelStem(m.FileName)
-	if stem == "" || !strings.HasPrefix(m.Dir, stem) {
-		return m.Dir
+// wrapModelName splits name at the last "-", "_" or "." whose prefix (separator
+// included, so the name reads as folded rather than glued) still fits the
+// column. A name no separator helps is returned whole and the canvas's own
+// ellipsis takes it, the same cut every other footer cell takes.
+func wrapModelName(cv *canvas, name string) (row0, rest string) {
+	fits := footerColW - footerSlack
+	rs := []rune(name)
+	best := -1
+	for i, r := range rs {
+		if r != '-' && r != '_' && r != '.' {
+			continue
+		}
+		if cv.measure(string(rs[:i+1]), stSmallB) <= fits {
+			best = i
+		}
 	}
-	return strings.TrimLeft(strings.TrimPrefix(m.Dir, stem), "-_. ")
+	if best < 0 {
+		return name, ""
+	}
+	return string(rs[:best+1]), string(rs[best+1:])
 }
 
 // modelShape is the architecture line: dense models have no expert counts, so
