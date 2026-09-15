@@ -4,9 +4,10 @@ import "strings"
 
 // A headline figure drawn three rows tall out of half blocks, for the result
 // modal (user, 2026-09-14: the share card's numbers were unreadable at the
-// size a feed shows a clip). Only what a rate can contain — digits, the
-// decimal point and "?" — and only the two rates the modal leads with: a
-// figure this size anywhere else would be shouting.
+// size a feed shows a clip). Only what the headline figures can contain —
+// digits, the decimal point and "?" — and only the two the modal leads with:
+// one rate and one latency (2026-09-15), not two rates. A figure this size
+// anywhere else would be shouting.
 //
 // Three rows and three columns a glyph. A taller face reads as a banner, and
 // the shorter one still leaves a "34.5" at twice the height of the line

@@ -17,12 +17,19 @@ import (
 // clipped at the bottom, with a local file path in its footer. The clip's last
 // frame is the one a reader looks at longest, so it is now what the prompt
 // modal already is — a box over the screen the reader has been watching —
-// carrying only what a post needs to settle: the two rates, drawn large enough
-// to read at feed size, the rig, the engine and where the model sits. The full
-// card is still `toktape card`.
+// carrying only what a post needs to settle: the decode rate and the time to
+// first token, drawn large enough to read at feed size, the rig, the engine
+// and where the model sits. The full card is still `toktape card`.
 //
-// Two rates and nothing else wear the accent, which is the emphasis contract
-// the rest of the screen follows.
+// The two figures were two rates until 2026-09-15, when the hierarchy changed
+// (user-approved): engine benchmarks put the prompt length in the prefill
+// metric's own name and serving benchmarks print TTFT instead of a prefill
+// rate at all, so a bare prefill tok/s at feed size is a figure the reader
+// cannot compare with anything. The prefill rate now lives in the caption,
+// named with its length by card.PrefillLabel.
+//
+// The two figures and nothing else wear the accent, which is the emphasis
+// contract the rest of the screen follows.
 func resultModal(m Model, th Theme, boxW int) []string {
 	inner := boxW - 4
 	s := m.Summary
@@ -61,12 +68,12 @@ func resultModal(m Model, th Theme, boxW int) []string {
 	}
 	blank := func() { line("") }
 
-	// Two hero columns: decode on the left, prefill on the right, each a
-	// figure three rows tall with its unit beside the bottom row and one line
-	// under it saying what the figure is.
-	dec, pre := heroFigures(s)
+	// Two hero columns: decode on the left, time to first token on the right,
+	// each a figure three rows tall with its unit beside the bottom row and
+	// one line under it saying what the figure is.
+	dec, ttft := heroFigures(s)
 	colW := inner / 2
-	left, right := bigFigure(dec.figure), bigFigure(pre.figure)
+	left, right := bigFigure(dec.figure), bigFigure(ttft.figure)
 	blank()
 	for k := 0; k < bigRows; k++ {
 		l := newLine(th, inner)
@@ -77,17 +84,28 @@ func resultModal(m Model, th Theme, boxW int) []string {
 		}
 		l.gapTo(inner - colW)
 		l.add(th.accentBold, right[k])
-		if k == bigRows-1 {
-			l.add(th.dim, " tok/s")
+		// The TTFT's unit is whichever half fmtMsParts gave, and nothing when
+		// the TTFT itself was never measured — a unit beside "?" would claim a
+		// precision the run did not observe.
+		if k == bigRows-1 && ttft.unit != "" {
+			l.add(th.dim, " "+ttft.unit)
 		}
 		line(l.String())
 	}
-	l := newLine(th, inner)
-	l.space(2)
-	l.addTrunc(th.dim, dec.caption)
-	l.gapTo(inner - colW)
-	l.addTrunc(th.dim, pre.caption)
-	line(l.String())
+	// The right caption starts at the column the right figure does and runs to
+	// the modal's inner edge, so its budget is what is left of inner from
+	// there — not colW-2, which is the left caption's.
+	capRows := ttftCaption(ttft, colW)
+	for i, cap := range capRows {
+		l := newLine(th, inner)
+		l.space(2)
+		if i == 0 {
+			l.addTrunc(th.dim, dec.caption)
+		}
+		l.gapTo(inner - colW)
+		l.addTrunc(th.dim, cap)
+		line(l.String())
+	}
 	blank()
 
 	for _, s := range []string{rigLine(s.Host), engineLine(m)} {
@@ -122,7 +140,7 @@ func resultModal(m Model, th Theme, boxW int) []string {
 	// reader needs to find the tape and the tool. No file path — a path on the
 	// recorder's disk means nothing to anyone else.
 	brand := "toktape · github.com/midagedev/toktape"
-	l = newLine(th, inner)
+	l := newLine(th, inner)
 	l.space(2)
 	l.add(th.dim, truncate(orUnknown(s.ID), inner-2-width(brand)-3))
 	l.gapTo(width(brand))
@@ -132,51 +150,115 @@ func resultModal(m Model, th Theme, boxW int) []string {
 	return rows
 }
 
-// heroFigure is one of the modal's two headline rates and the line under it.
+// heroFigure is one of the modal's two headline figures, the unit drawn dim
+// beside its bottom row, and the line under it.
 type heroFigure struct {
-	figure  string
+	figure string
+	// unit is empty when the figure itself is unknown, so the modal draws no
+	// unit beside "?" (the decode column's " tok/s" is drawn literally below
+	// and always present: an unmeasured rate is still a rate).
+	unit string
+	// caption is the fullest line under the figure. falls is the caption's
+	// fallback ladder, fullest first, down to the line that must fit; the
+	// renderer walks it against the column budget. words and label are the
+	// ladder's two halves, kept apart so that a caption too wide for any rung
+	// can be drawn on two lines instead of losing one of them.
 	caption string
+	falls   []string
+	words   string
+	label   string
 }
 
-// heroFigures picks the run's two rates. A run of several streams leads with
-// the aggregate, which is the figure that answers "what does this box do"; a
-// single stream leads with its own server-reported rate. Both come from the
-// summary, never re-derived from tokens: the summary is the record.
-func heroFigures(s tape.RunSummary) (dec, pre heroFigure) {
+// heroFigures picks the modal's two headline figures: the decode rate and the
+// time to first token. A run of several streams leads with the aggregate
+// decode, which is the figure that answers "what does this box do"; a single
+// stream leads with its own server-reported rate. Both come from the summary,
+// never re-derived from tokens: the summary is the record.
+//
+// The right-hand figure was the prefill rate until 2026-09-15. Engine
+// benchmarks put the prompt length in the prefill metric's name and serving
+// benchmarks print TTFT instead of a prefill rate at all, so the headline pair
+// is now decode and TTFT, and the prefill rate rides in the caption as
+// card.PrefillLabel — with its prompt length in llama-bench's vocabulary.
+func heroFigures(s tape.RunSummary) (dec, ttft heroFigure) {
 	// The decode figure's own label says "sample" when the generation was too
-	// short to be a rate, and the prefill figure's says "short prompt" when
-	// the prompt was too short to be a prefill measurement (TTP-65/74,
-	// 2026-09-14). Both go through the predicates in internal/card, which the
-	// text card and the share image also ask: this modal is the third
-	// rendering of one run, and three renderers deciding for themselves
-	// whether a figure needs qualifying is how a figure ends up quoted
-	// without one.
+	// short to be a rate, and a stream too short to be a rate inside a mean
+	// that is one says so beside it (TTP-65/74/83, 2026-09-14). Both go
+	// through the predicates in internal/card, which the text card and the
+	// share image also ask: this modal is the third rendering of one run, and
+	// three renderers deciding for themselves whether a figure needs
+	// qualifying is how a figure ends up quoted without one. The prefill
+	// qualification now rides on PrefillLabel, which asks card.ShortPrompt
+	// itself, for the same reason.
 	decode := "decode"
 	if card.IsSample(&s) {
 		decode = "sample"
 	}
-	// A stream too short to be a rate inside a mean that is one (TTP-83,
-	// 2026-09-14): the label stays decode and says so beside it, the way the
-	// prefill caption carries "short prompt".
 	if card.ShortStream(&s) {
 		decode += " · short stream"
 	}
-	prefill := "prefill"
-	if card.ShortPrompt(&s) {
-		prefill += " · short prompt"
-	}
 	if n := s.Concurrency; n > 1 {
 		a := s.Aggregate
-		dec = heroFigure{fmtRate(a.AggregatePredictedPerSecond),
-			fmt.Sprintf("%s · %d streams · %s tok/s each", decode, n, fmtRate(a.PerStreamPredictedPerSecond))}
-		pre = heroFigure{fmtRate(a.AggregatePromptPerSecond),
-			prefill + " · ttft p50 " + fmtMs(a.TTFTp50Ms)}
-		return dec, pre
+		dec = heroFigure{figure: fmtRate(a.AggregatePredictedPerSecond),
+			caption: fmt.Sprintf("%s · %d streams · %s tok/s each", decode, n, fmtRate(a.PerStreamPredictedPerSecond))}
+	} else {
+		t := s.Timings
+		dec = heroFigure{figure: fmtRate(t.PredictedPerSecond), caption: fmt.Sprintf("%s · %d tokens", decode, t.PredictedN)}
 	}
-	t := s.Timings
-	dec = heroFigure{fmtRate(t.PredictedPerSecond), fmt.Sprintf("%s · %d tokens", decode, t.PredictedN)}
-	pre = heroFigure{fmtRate(t.PromptPerSecond), prefill + " · ttft " + fmtMs(t.TTFTMs)}
-	return dec, pre
+
+	// card owns which reading is the headline TTFT (the aggregate's p50 above
+	// one stream, the stream's own below it) and whether the p95 beside it is
+	// a second fact. The big figure is drawn three rows tall rather than
+	// printed, so it asks card.TTFTMs for the number and splits it here; the
+	// p50's own rendering is not used — the figure above the caption IS the
+	// p50 and the caption's words name it — so only the p95 string and the
+	// pair verdict come back from TTFTPercentiles.
+	num, unit := fmtMsParts(card.TTFTMs(&s))
+	_, p95, pair := card.TTFTPercentiles(&s, fmtMs)
+	label := card.PrefillLabel(&s)
+	// "p50" earns its place only on the rung that prints the p95 beside it. A
+	// median with no spread next to it is not a median to the reader, it is
+	// four columns that name nothing — and those four are exactly what pushed
+	// the whole "first token" clause off the eight-stream example's line at
+	// the smallest screen, leaving the figure above it unnamed (lead,
+	// 2026-09-15: candidate 40 columns against a 39-column budget).
+	// Every rung carries the words AND the label: dropping the words was the
+	// old bottom rung and it is what left the figure unnamed. When no rung
+	// fits, the caption wraps to two lines rather than losing either half.
+	words := "first token"
+	falls := []string{words + " · " + label}
+	if pair {
+		words = "first token p50 · p95 " + p95
+		falls = append([]string{words + " · " + label}, falls...)
+	}
+	ttft = heroFigure{figure: num, unit: unit, caption: falls[0], falls: falls, words: words, label: label}
+	return dec, ttft
+}
+
+// ttftCaption is the caption under the TTFT figure, as one line where one line
+// will carry it and as two where it will not.
+//
+// The ladder exists because the label is the payload: the p95 is the first
+// thing to give up, and a caption truncated mid-label would qualify nothing —
+// " · short prompt" is exactly the clause a reader must not lose. But the
+// bottom rung of that ladder is the label ALONE, and a run whose label is long
+// (four streams of a 63-token prompt: "pp63 × 4 · 2927 tok/s · short prompt",
+// 36 columns of a 39-column budget) then leaves the figure above it unnamed —
+// "810 ms" over a line that says only what the prefill was (lead, 2026-09-15).
+//
+// So the words wrap rather than fall off. Two lines are only ever spent when
+// one will not do, which is why this returns a slice instead of always drawing
+// a second row: the hero and every run like it still read as one line.
+func ttftCaption(f heroFigure, budget int) []string {
+	for _, c := range f.falls {
+		if width(c) <= budget {
+			return []string{c}
+		}
+	}
+	// Nothing worded fits beside the label, so the words take a line of their
+	// own. The label is still never cut: at this width it is drawn as it is
+	// and the column it overruns is the modal's own padding.
+	return []string{f.words, f.label}
 }
 
 // rigLine is the box: GPUs, CPU and RAM, each only when observed.

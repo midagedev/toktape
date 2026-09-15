@@ -38,10 +38,17 @@ func fmtRate(v float64) string {
 	return strconv.FormatFloat(v, 'f', 0, 64)
 }
 
-// fmtMs renders a millisecond figure as an integer with its unit.
-func fmtMs(v float64) string {
+// fmtMsParts renders a millisecond figure as its number and unit halves:
+// ("10.8", "s"), ("1.05", "s"), ("630", "ms"), and ("?", "") when it was
+// never measured.
+//
+// The result modal draws the number three rows tall and the unit dim beside
+// the bottom row, so the halves have to come out of the same rendering fmtMs
+// prints — a second formatter beside it is where the two would drift. fmtMs
+// is these halves joined, by construction.
+func fmtMsParts(v float64) (num, unit string) {
 	if v <= 0 {
-		return unknown
+		return unknown, ""
 	}
 	// A second or more prints in seconds ("1.05 s") so the figure never grows
 	// past the six cells "250 ms" takes: at hero width the stat line's reserved
@@ -49,11 +56,20 @@ func fmtMs(v float64) string {
 	// count off the line mid-run (TTP-29 finding, lead 2026-09-13).
 	if v >= 1000 {
 		if v < 10000 {
-			return strconv.FormatFloat(v/1000, 'f', 2, 64) + " s"
+			return strconv.FormatFloat(v/1000, 'f', 2, 64), "s"
 		}
-		return strconv.FormatFloat(v/1000, 'f', 1, 64) + " s"
+		return strconv.FormatFloat(v/1000, 'f', 1, 64), "s"
 	}
-	return strconv.FormatFloat(v, 'f', 0, 64) + " ms"
+	return strconv.FormatFloat(v, 'f', 0, 64), "ms"
+}
+
+// fmtMs renders a millisecond figure as an integer with its unit.
+func fmtMs(v float64) string {
+	num, unit := fmtMsParts(v)
+	if unit == "" {
+		return num
+	}
+	return num + " " + unit
 }
 
 // fmtPct renders a 0..1 ratio as an integer percentage. Zero is a real
