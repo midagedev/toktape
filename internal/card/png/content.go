@@ -526,12 +526,21 @@ func promptTokens(s *tape.RunSummary) int {
 	return s.Timings.PromptN + s.Timings.CacheN
 }
 
-// bandwidthString renders "≈ 91 GB/s · 10% of peak". The "≈" marks it as an
-// estimate (spec §3.2 S6). Empty when it was not derivable.
+// bandwidthString renders "≈ 91 GB/s · 10% of peak", or "≈ 112–206 GB/s ·
+// 15–27% of peak" above one stream on a sparse MoE — concurrent streams share
+// a forward pass, and the truth is a range until their routed experts' overlap
+// is known (lead, 2026-09-16). The "≈" marks it as an estimate (spec §3.2 S6).
+// Empty when it was not derivable.
 //
 // "of peak" is measured against the ceiling this run's placement allows; see
 // internal/bandwidth, which owns the arithmetic for both renderers (TTP-34,
 // 2026-09-13).
+//
+// This clause rides the single-stream hero's sub1 line (buildHero); a
+// concurrent hero carries no bandwidth clause, its two sub-rows being spoken
+// for by the stream arithmetic and the token count. The renderer computes
+// through CombinedRange regardless, so wherever it is asked to print, it
+// cannot disagree with the text card's figures.
 func bandwidthString(s *tape.RunSummary) string {
 	// TTP-67, 2026-09-14; the reasoning is in internal/card/verify.go. With a
 	// draft model the weights were read once per verify step and not once per
@@ -556,13 +565,13 @@ func bandwidthString(s *tape.RunSummary) string {
 		}
 		return out
 	}
-	combined, ok := bandwidth.Combined(s)
+	low, high, ok := bandwidth.CombinedRange(s)
 	if !ok {
 		return ""
 	}
-	out := "≈ " + formatGBs(combined) + " effective"
-	if ratio, ok := bandwidth.OfPeak(s); ok {
-		out += " · " + formatPct(ratio) + " of peak"
+	out := "≈ " + formatGBsRange(low, high) + " effective"
+	if rlow, rhigh, ok := bandwidth.OfPeakRange(s); ok {
+		out += " · " + formatPctRange(rlow, rhigh) + " of peak"
 	}
 	return out
 }

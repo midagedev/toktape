@@ -156,6 +156,33 @@ func TestExplainSaysWhyTheRatioAppears(t *testing.T) {
 	}
 }
 
+// TestExplainSaysWhyTheEffectiveLineIsARange (2026-09-16): above one stream
+// the listing prints both bounds and one line naming the reason — the
+// always-read part crosses once a pass, the routed experts once per token
+// unless two tokens pick the same expert. One stream keeps the single figure.
+func TestExplainSaysWhyTheEffectiveLineIsARange(t *testing.T) {
+	// heroSummary: two streams over the ws sparse MoE. The bounds are
+	// 7.639161280 GB × 13.480323588557033 = 102.978366 GB/s and
+	// (7.639161280 + 258.767585280 × 6/384) GB × the same rate = 157.482597 GB/s.
+	out := Explain(heroSummary()).String()
+	if want := "effective 103.0–157.5 GB/s"; !strings.Contains(out, want) {
+		t.Errorf("the concurrent block lacks %q:\n%s", want, out)
+	}
+	if !strings.Contains(out, "so the truth is between") {
+		t.Errorf("the concurrent block does not name the reason:\n%s", out)
+	}
+
+	// One stream: the single-figure line wsLegacySummary always printed. The
+	// recorded figure is 155.4 GB/s and there is nothing to bound.
+	single := Explain(wsSummary()).String()
+	if want := "effective 155.4 GB/s"; !strings.Contains(single, want) {
+		t.Errorf("the single-stream block lacks %q:\n%s", want, single)
+	}
+	if strings.Contains(single, "so the truth is between") {
+		t.Errorf("a single stream has no reason line:\n%s", single)
+	}
+}
+
 func TestExplainNil(t *testing.T) {
 	e := Explain(nil)
 	if e.CeilingKnown || e.OfPeakKnown || e.RAMKnown || e.VerifyKnown || e.HostKnown {
@@ -214,13 +241,18 @@ func TestExplainEnginePlacementPrintsAbsencesAsAbsences(t *testing.T) {
 // changes for an engine placement only. A GGUF tape keeps every line this file
 // printed before them — recorded active bytes, the class estimate where there
 // is no recording, the gap sum line, and the effective figure Combined keeps.
+// 2026-09-16: the effective figure itself widened to a range on the concurrent
+// GGUF fixture (heroSummary is two streams on a sparse MoE), so this asserts
+// the range's low end where it asserted the single figure; the spec-required
+// behaviour change is track "band", and TestExplainSaysWhyTheEffectiveLineIsARange
+// pins the reason line beside it.
 func TestExplainGGUFWritesWhatItAlwaysWrote(t *testing.T) {
 	s := heroSummary()
 	e := Explain(s)
 	if !e.EffectiveKnown {
 		t.Fatal("a GGUF tape with a recorded effective figure has EffectiveKnown = false")
 	}
-	if out := e.String(); !strings.Contains(out, "effective 103.0 GB/s") {
+	if out := e.String(); !strings.Contains(out, "effective 103.0–157.5 GB/s") {
 		t.Errorf("the GGUF block lost its effective figure:\n%s", out)
 	} else if strings.Contains(out, "refused for an engine placement") {
 		t.Errorf("a GGUF tape is refused an engine placement's refusal:\n%s", out)

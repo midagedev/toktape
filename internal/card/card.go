@@ -970,7 +970,10 @@ func promptTokens(s *tape.RunSummary) int {
 	return s.Timings.PromptN + s.Timings.CacheN
 }
 
-// bandwidthString renders "≈ 91 GB/s, 9% of peak". Empty when the effective
+// bandwidthString renders "≈ 91 GB/s, 9% of peak", or "≈ 112–206 GB/s,
+// 15–27% of peak" above one stream on a sparse MoE, where concurrent streams
+// share a forward pass and only their routed experts' overlap decides where
+// in the range the traffic sat (lead, 2026-09-16). Empty when the effective
 // bandwidth was not derivable; the "≈" marks it as an estimate (spec §3.2 S6).
 //
 // "of peak" is measured against the ceiling this run's placement allows, not
@@ -1007,13 +1010,13 @@ func bandwidthString(s *tape.RunSummary) string {
 		}
 		return out
 	}
-	combined, ok := bandwidth.Combined(s)
+	low, high, ok := bandwidth.CombinedRange(s)
 	if !ok {
 		return ""
 	}
-	out := "≈ " + formatGBs(combined)
-	if ratio, ok := bandwidth.OfPeak(s); ok {
-		out += ", " + formatPct(ratio) + " of peak"
+	out := "≈ " + formatGBsRange(low, high)
+	if rlow, rhigh, ok := bandwidth.OfPeakRange(s); ok {
+		out += ", " + formatPctRange(rlow, rhigh) + " of peak"
 	}
 	return out
 }

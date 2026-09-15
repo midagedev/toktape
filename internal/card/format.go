@@ -74,6 +74,19 @@ func formatGBs(bytesPerSec int64) string {
 	return strconv.FormatFloat(v, 'f', 0, 64) + " GB/s"
 }
 
+// formatGBsRange renders one bandwidth, or the bounds between two, with the
+// unit printed once after the second number: "91 GB/s", "112–206 GB/s"
+// (lead, 2026-09-16 — concurrent streams share a forward pass, so the Decode
+// row's clause is a range). Bounds that render identically print as one
+// figure: a range whose ends round together says nothing a figure does not.
+func formatGBsRange(low, high int64) string {
+	lowS, highS := formatGBs(low), formatGBs(high)
+	if lowS == highS {
+		return highS
+	}
+	return strings.TrimSuffix(lowS, " GB/s") + "–" + highS
+}
+
 // formatMs renders a millisecond figure as an integer.
 func formatMs(v float64) string {
 	if v <= 0 {
@@ -102,6 +115,17 @@ func formatPct(ratio float64) string {
 		return "0%"
 	}
 	return strconv.FormatFloat(ratio*100, 'f', 0, 64) + "%"
+}
+
+// formatPctRange renders one ratio, or the bounds between two, with the sign
+// printed once after the second number: "9%", "15–27%" — the ratio form of
+// formatGBsRange, over OfPeakRange's pair.
+func formatPctRange(low, high float64) string {
+	lowS, highS := formatPct(low), formatPct(high)
+	if lowS == highS {
+		return highS
+	}
+	return strings.TrimSuffix(lowS, "%") + "–" + highS
 }
 
 // formatInt renders a count, or "?" when it is zero (unobserved).

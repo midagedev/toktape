@@ -482,6 +482,74 @@ func Combined(s *tape.RunSummary) (int64, bool) {
 	return s.Timings.EffectiveBandwidthBytesPerSec, true
 }
 
+// CombinedRange is Combined as the bounds a concurrent run's traffic lies
+// between, and whether a card may print them at all (lead, 2026-09-16).
+//
+// A batched engine runs one forward pass per PER-STREAM token — the rate the
+// card's "each" figure names — and each pass reads the always-read part of the
+// model once, however many tokens ride it. The routed experts are the
+// exception: every token routes to its own NExpertsUsed of NExperts, and those
+// bytes are shared only when two tokens pick the same expert. So over n
+// streams a pass reads between ActiveBytesPerToken and
+// ActiveBytesPerToken + (n-1) × routed-experts-per-token, and the honest clause
+// is the range. On the four-stream Qwen3.6-35B-A3B take this was written for,
+// the card printed "≈ 112 GB/s" — the low end, i.e. every stream picking the
+// same 8 experts — where the truth is 112–206 GB/s.
+//
+// ok is Combined's ok, kept refusal for refusal: no recorded figure, or an
+// engine placement, and there is no range to print either. At one stream
+// (Concurrency <= 1) low == high == Combined — nothing about a single-stream
+// card changes. A dense model (ExpertsSplit not ok, or no routed bytes) also
+// collapses to low == high: it reads its weights once a pass whatever the
+// batch, and the figure is exact, not a bound.
+//
+// A mixed placement and a draft run keep whatever Combined does for them — the
+// function mirrors Combined, and the CARD is what refuses those paths, one
+// branch earlier (bandwidth.RAM, verifyRAM), which this range does not touch.
+func CombinedRange(s *tape.RunSummary) (low, high int64, ok bool) {
+	v, ok := Combined(s)
+	if !ok {
+		return 0, 0, false
+	}
+	if s.Concurrency <= 1 {
+		return v, v, true
+	}
+	// The passes-per-second of a batched engine is the per-stream rate, the
+	// figure the card prints beside "each", with the per-stream mean as the
+	// fallback a tape without the aggregate view falls back to.
+	rate := s.Aggregate.PerStreamPredictedPerSecond
+	if rate == 0 {
+		rate = s.Timings.PredictedPerSecond
+	}
+	// A tape with the recorded figure but neither rate (or no active bytes to
+	// scale) has no range to compute; the recorded figure is the per-stream
+	// product itself, so it stands as both bounds rather than the row going
+	// dark. Only a hand-built summary can get here — the recorder derives the
+	// figure from one of these rates.
+	if rate <= 0 || s.Model.ActiveBytesPerToken <= 0 {
+		return v, v, true
+	}
+	// What one pass reads at the top end: the always-read bytes, plus the
+	// routed stack once for every stream beyond the first. The share is
+	// ExpertsSplit's, the same recovery activeBytesOn's fallback makes, so the
+	// two never disagree about what "routed" means.
+	perPass := s.Model.ActiveBytesPerToken
+	if split, ok := ExpertsSplit(s); ok {
+		if routed := split.Sparse * int64(s.Model.NExpertsUsed) / int64(s.Model.NExperts); routed > 0 {
+			n := s.Aggregate.Streams
+			if n <= 0 {
+				n = s.Concurrency
+			}
+			if n > 1 {
+				perPass += int64(n-1) * routed
+			}
+		}
+	}
+	low = int64(math.Round(float64(s.Model.ActiveBytesPerToken) * rate))
+	high = int64(math.Round(float64(perPass) * rate))
+	return low, high, true
+}
+
 // OfPeak is the run's measured effective bandwidth as a fraction of the
 // ceiling its placement allows, and whether it was derivable.
 //
@@ -498,4 +566,24 @@ func OfPeak(s *tape.RunSummary) (float64, bool) {
 		return 0, false
 	}
 	return float64(s.Timings.EffectiveBandwidthBytesPerSec) / float64(ceiling), true
+}
+
+// OfPeakRange is CombinedRange over Ceiling: the two ratios the card prints
+// beside the two bounds, low ratio from low bytes, and whether they may be
+// printed at all. It is refused wherever CombinedRange or Ceiling is refused,
+// which keeps it beside the figure it qualifies: a card printing the range
+// with a single ratio, or the bounds with no ratio while the ceiling is
+// known, would be two clauses disagreeing about one run (lead, 2026-09-16).
+//
+// At one stream, and for a dense model, both ratios are OfPeak's single one.
+func OfPeakRange(s *tape.RunSummary) (low, high float64, ok bool) {
+	lowB, highB, ok := CombinedRange(s)
+	if !ok {
+		return 0, 0, false
+	}
+	ceiling, ok := Ceiling(s)
+	if !ok || ceiling <= 0 {
+		return 0, 0, false
+	}
+	return float64(lowB) / float64(ceiling), float64(highB) / float64(ceiling), true
 }

@@ -79,6 +79,14 @@ type Explanation struct {
 	// different questions and this carries the second.
 	EffectiveBytesPerSec int64
 	EffectiveKnown       bool
+	// EffectiveRangeLow/HighBytesPerSec and EffectiveRangeKnown are
+	// CombinedRange (2026-09-16): above one stream the recorded figure is only
+	// the low end of what the traffic may have been, and these are both ends.
+	// At one stream, or for a dense model, both ends are the single figure
+	// above — the listing then prints that figure and no reason line.
+	EffectiveRangeLowBytesPerSec  int64
+	EffectiveRangeHighBytesPerSec int64
+	EffectiveRangeKnown           bool
 	// OfPeak / OfPeakKnown are OfPeak.
 	OfPeak      float64
 	OfPeakKnown bool
@@ -124,6 +132,7 @@ func Explain(s *tape.RunSummary) Explanation {
 	// Combined, not the raw timings field, so the listing and the card answer
 	// "may this figure be printed" the same way for an engine placement.
 	e.EffectiveBytesPerSec, e.EffectiveKnown = Combined(s)
+	e.EffectiveRangeLowBytesPerSec, e.EffectiveRangeHighBytesPerSec, e.EffectiveRangeKnown = CombinedRange(s)
 	e.EnginePlacement = s.Placement.Source == placement.SourceEngine
 	e.Contradiction = Contradiction(s)
 
@@ -223,8 +232,16 @@ func (e Explanation) String() string {
 		p("ceiling ? — a device carrying active bytes has no known peak, or the gap is over tolerance")
 	}
 	if e.EffectiveKnown || !e.EnginePlacement {
-		// A GGUF tape prints what it always printed, figure or "?".
-		p("effective %s", gbps(e.EffectiveBytesPerSec))
+		// A GGUF tape prints what it always printed, figure or "?" — except
+		// that above one stream the recorded figure is only the low end of
+		// what the traffic may have been (2026-09-16), and then both bounds
+		// print, with the reason a line of its own.
+		if e.EffectiveRangeKnown && e.EffectiveRangeLowBytesPerSec != e.EffectiveRangeHighBytesPerSec {
+			p("effective %s–%s", gbpsNumber(e.EffectiveRangeLowBytesPerSec), gbps(e.EffectiveRangeHighBytesPerSec))
+			p("        the always-read part crosses once a pass, the routed experts once per token unless two tokens pick the same expert, so the truth is between")
+		} else {
+			p("effective %s", gbps(e.EffectiveBytesPerSec))
+		}
 	} else {
 		// The recorder wrote the figure; Combined refuses it for this
 		// placement, and the listing says why rather than dressing the
@@ -301,6 +318,13 @@ func gbps(n int64) string {
 		return "?"
 	}
 	return fmt.Sprintf("%.1f GB/s", float64(n)/1e9)
+}
+
+// gbpsNumber is gbps without the unit, for the low end of a range whose high
+// end carries it: "103.0–157.5 GB/s". The card's formatGBsRange spells the
+// same rule for the Decode row.
+func gbpsNumber(n int64) string {
+	return strings.TrimSuffix(gbps(n), " GB/s")
 }
 
 func ms(sec float64) string {

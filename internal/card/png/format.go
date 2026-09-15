@@ -75,6 +75,18 @@ func formatGBs(bytesPerSec int64) string {
 	return strconv.FormatFloat(v, 'f', 0, 64) + " GB/s"
 }
 
+// formatGBsRange renders one bandwidth, or the bounds between two, with the
+// unit printed once after the second number: "91 GB/s", "112–206 GB/s".
+// Character-for-character the text card's rule (internal/card/format.go) —
+// the two renderings must bound the same run the same way.
+func formatGBsRange(low, high int64) string {
+	lowS, highS := formatGBs(low), formatGBs(high)
+	if lowS == highS {
+		return highS
+	}
+	return strings.TrimSuffix(lowS, " GB/s") + "–" + highS
+}
+
 func formatMs(v float64) string {
 	if v <= 0 {
 		return unknown
@@ -95,6 +107,17 @@ func formatPct(ratio float64) string {
 		return "0%"
 	}
 	return strconv.FormatFloat(ratio*100, 'f', 0, 64) + "%"
+}
+
+// formatPctRange renders one ratio, or the bounds between two, with the sign
+// printed once after the second number: "10%", "15–27%". The text card's rule
+// (internal/card/format.go).
+func formatPctRange(low, high float64) string {
+	lowS, highS := formatPct(low), formatPct(high)
+	if lowS == highS {
+		return highS
+	}
+	return strings.TrimSuffix(lowS, "%") + "–" + highS
 }
 
 func formatInt(n int) string {
