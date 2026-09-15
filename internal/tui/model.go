@@ -142,6 +142,14 @@ type Model struct {
 	// key hints — "q quit", "c for the card" — are not drawn on it: on a
 	// clip's final frame they read as instructions the viewer cannot follow.
 	Replay bool
+	// CardAge is how long the result modal has been on screen: zero the
+	// moment it appears, growing for as long as it holds. It is the ONLY
+	// input to the gleam that sweeps the modal's figures once (GleamSweep),
+	// and it is NOT run time — the run has been over for CardAge's whole
+	// life, and nothing else on the card may read it. The renderer derives
+	// it from the schedule's card phase; the live program from the moment
+	// "c" was pressed.
+	CardAge time.Duration
 	// PID of the server process, 0 when it was not found locally.
 	PID int
 	// Err is the last fatal error; non-empty replaces the body with it.

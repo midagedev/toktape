@@ -2,38 +2,40 @@ package tui
 
 import "strings"
 
-// A headline figure drawn three rows tall out of half blocks, for the result
+// A headline figure drawn five rows tall out of half blocks, for the result
 // modal (user, 2026-09-14: the share card's numbers were unreadable at the
-// size a feed shows a clip). Only what the headline figures can contain —
-// digits, the decimal point and "?" — and only the two the modal leads with:
-// one rate and one latency (2026-09-15), not two rates. A figure this size
-// anywhere else would be shouting.
+// size a feed shows a clip; 2026-09-15: at three rows the modal's figures
+// rasterised to ~19 px on a phone-width timeline, so the face grew to five
+// rows and five columns a glyph). Only what the headline figures can contain
+// — digits, the decimal point and "?" — and only the two the modal leads
+// with: one rate and one latency (2026-09-15), not two rates. A figure this
+// size anywhere else would be shouting.
 //
-// Three rows and three columns a glyph. A taller face reads as a banner, and
-// the shorter one still leaves a "34.5" at twice the height of the line
-// beneath it, which is the whole job.
-const bigRows = 3
+// Five rows and five columns a glyph. The bottom row is a full rule on every
+// digit so the figure reads as seated, and the leaning strokes (the "1", the
+// "7") are what keeps a five-row digit from reading as a banner.
+const bigRows = 5
 
-// bigGlyphs is the face: three rows a rune, every row bigGlyphW wide except
+// bigGlyphs is the face: five rows a rune, every row bigGlyphW wide except
 // the decimal point, which is one column so it does not open a gap the eye
 // reads as a space.
 var bigGlyphs = map[rune][bigRows]string{
-	'0': {"▄▀▄", "█ █", "▀▀▀"},
-	'1': {"▄█ ", " █ ", "▀▀▀"},
-	'2': {"▀▀▄", "▄▀ ", "▀▀▀"},
-	'3': {"▀▀▄", " ▀█", "▀▀▀"},
-	'4': {"█ █", "▀▀█", "  ▀"},
-	'5': {"█▀▀", "▀▀▄", "▀▀▀"},
-	'6': {"▄▀▀", "█▀▄", "▀▀▀"},
-	'7': {"▀▀█", "  █", "  ▀"},
-	'8': {"▄▀▄", "█▀█", "▀▀▀"},
-	'9': {"▄▀▄", "▀▀█", "▀▀▀"},
-	'.': {" ", " ", "▀"},
-	'?': {"▀▀▄", " ▄▀", " ▄ "},
+	'0': {"▄▀▀▀▄", "█   █", "█   █", "█   █", "▀▀▀▀▀"},
+	'1': {"  ▄█ ", "   █ ", "   █ ", "   █ ", "▀▀▀▀▀"},
+	'2': {"▄▀▀▀▄", "    █", "▄▀▀▀▀", "█    ", "▀▀▀▀▀"},
+	'3': {"▀▀▀▀▄", "    █", " ▀▀▀█", "    █", "▀▀▀▀▀"},
+	'4': {"█   █", "█   █", "▀▀▀▀█", "    █", "    ▀"},
+	'5': {"█▀▀▀▀", "█    ", "▀▀▀▀▄", "    █", "▀▀▀▀▀"},
+	'6': {"▄▀▀▀▀", "█    ", "█▀▀▀▄", "█   █", "▀▀▀▀▀"},
+	'7': {"▀▀▀▀█", "    █", "   ▄▀", "  █  ", "  ▀  "},
+	'8': {"▄▀▀▀▄", "█   █", "█▀▀▀█", "█   █", "▀▀▀▀▀"},
+	'9': {"▄▀▀▀▄", "█   █", "▀▀▀▀█", "    █", "▀▀▀▀▀"},
+	'.': {" ", " ", " ", " ", "▀"},
+	'?': {"▀▀▀▀▄", "    █", "  ▄▀ ", "     ", "  ▀  "},
 }
 
 // bigFigure draws s in the face, one column between glyphs. A rune the face
-// does not have is drawn as "?" — the figure comes from fmtRate, which only
+// does not have is drawn as "?" — the figure comes from fmtRate, who only
 // produces the runes above, so this is a guard and not a path.
 func bigFigure(s string) [bigRows]string {
 	var rows [bigRows]strings.Builder

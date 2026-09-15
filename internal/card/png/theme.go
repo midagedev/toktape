@@ -133,6 +133,18 @@ const (
 )
 
 // Hero row.
+//
+// 2026-09-15: heroNumberSize grew 64 → 96. The number's digits carry no
+// descenders, so what has to fit is ink, not the face's ascent box: at 96 px
+// the digits' ink is 71 px tall (measured on the hinted face), and with the
+// baseline at bandHeroTop+121 the ink spans 168..240 — 12 px under the
+// eyebrow's ink and 12 px over the first sub-line's, splitting the air the
+// 64 px number used to take 31/17 the other way. The two sub-lines did not
+// move: their 22 px spacing and their 9 px clearance off the band's end were
+// already the tightest the band allows, and the number's growth is paid for
+// entirely out of the air above and below it. The widest real figure still
+// fits the column: "11234" measures 290 px, plus the 12 px unit gap and the
+// 65 px "tok/s", 367 of the column's 504.
 const (
 	heroSplitX     = 600 // vertical hairline between the two hero columns
 	heroGutter     = 36
@@ -141,11 +153,11 @@ const (
 	heroRuleBottom = bandMemTop - 18
 
 	heroEyebrowBase = bandHeroTop + 38  // 156
-	heroNumberBase  = bandHeroTop + 116 // 234
+	heroNumberBase  = bandHeroTop + 121 // 239
 	heroSub1Base    = bandHeroTop + 144 // 262
 	heroSub2Base    = bandHeroTop + 166 // 284
 
-	heroNumberSize = 64
+	heroNumberSize = 96
 	heroUnitSize   = 22
 	heroUnitGap    = 12
 )

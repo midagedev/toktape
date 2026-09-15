@@ -35,9 +35,10 @@ type Options struct {
 // closes or the user presses q.
 //
 // It is the only function in this package that reads the wall clock, and it
-// reads it for one purpose: to turn elapsed real time into the clip time t
-// that View animates from. Everything else downstream is a pure function of
-// that number and of the model the events built.
+// reads it to turn elapsed real time into the durations a pure View animates
+// from: the clip time t since the program started, and CardAge since the
+// result modal was opened. Everything else downstream is a pure function of
+// those numbers and of the model the events built.
 func Run(ctx context.Context, opts Options) error {
 	th := PlainTheme()
 	if opts.Colour {
@@ -87,6 +88,11 @@ type program struct {
 	events <-chan Event
 	start  time.Time
 	t      time.Duration
+	// cardAt is when the result modal was opened, zero while it is closed. It
+	// is the wall-clock origin of Model.CardAge, the same way start is the
+	// origin of t: the tick turns both into durations once, and View stays a
+	// pure function of the model.
+	cardAt time.Time
 	w, h   int
 	quit   bool
 }
@@ -136,8 +142,15 @@ func (p *program) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch {
 			case p.model.Mode == ModeCard:
 				p.model.Mode = ModeLive
+				p.model.CardAge = 0
+				p.cardAt = time.Time{}
 			case p.model.Done:
 				p.model.Mode = ModeCard
+				// The card's own clock starts here: the gleam sweeps once from
+				// the moment the card appears, and closing the card resets it
+				// so opening it again sweeps again.
+				p.model.CardAge = 0
+				p.cardAt = time.Now()
 			}
 		case "left", "h", "[":
 			w, h := p.size()
@@ -149,6 +162,11 @@ func (p *program) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return p, nil
 	case tickMsg:
 		p.t = time.Since(p.start)
+		// The card ages with the same tick that carries t, from the tick's
+		// own stamp so the age and the frame it draws are one clock reading.
+		if p.model.Mode == ModeCard && !p.cardAt.IsZero() {
+			p.model.CardAge = time.Time(msg).Sub(p.cardAt)
+		}
 		return p, tickCmd()
 	case eventMsg:
 		if msg.closed {

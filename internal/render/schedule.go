@@ -62,6 +62,15 @@ type Frame struct {
 	At time.Duration
 	// Anim is the t handed to tui.View, or the open's own clock when InOpen.
 	Anim time.Duration
+	// CardAge is how long the frame's result modal has been on screen: how
+	// far into the card hold the frame's clip time is, clamped to the hold.
+	// Zero everywhere except card frames, where it drives the modal's one
+	// gleam pass (tui.GleamSweep) — a clock of the card's own, deliberately
+	// not Anim: every frame of the hold carries the same Anim (RunEnd), so a
+	// gleam driven off Anim would be frozen, and the GIF encoder would drop
+	// the hold's frames as identical anyway. The poster frame is the settled
+	// end (≥ GleamSweep), never mid-sweep: it is the thumbnail.
+	CardAge time.Duration
 	// Mode is the screen the frame draws. Open frames are not a tui.Mode —
 	// the cold open is not the TUI — so Mode stays ModeLive there and InOpen
 	// is what a renderer branches on.
@@ -308,7 +317,9 @@ func (s Schedule) Frame(i int) Frame {
 	at := clip
 	if s.poster {
 		if i == 0 {
-			f.At, f.Anim, f.Mode = s.RunEnd, s.RunEnd, tui.ModeCard
+			// The poster is the card's settled state: the still a feed holds
+			// before play, never a frame mid-sweep (see Frame.CardAge).
+			f.At, f.Anim, f.Mode, f.CardAge = s.RunEnd, s.RunEnd, tui.ModeCard, tui.GleamSweep
 			return f
 		}
 		// The clip time this frame would have had without the poster, from
@@ -349,6 +360,17 @@ func (s Schedule) Frame(i int) Frame {
 		f.At = s.RunEnd
 		f.Anim = s.RunEnd
 		f.Mode = tui.ModeCard
+		// The card's own age, from this frame's place in the hold: Anim is
+		// the same RunEnd on every card frame, so this is the only clock a
+		// one-pass gleam can run on. Clamped at both ends — a frame the
+		// snapping pushed past the hold's far end does not age past it.
+		f.CardAge = at - (s.Open + s.Intro + s.Stream)
+		if f.CardAge < 0 {
+			f.CardAge = 0
+		}
+		if f.CardAge > s.Card {
+			f.CardAge = s.Card
+		}
 	}
 	return f
 }

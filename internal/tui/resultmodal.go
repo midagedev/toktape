@@ -69,21 +69,44 @@ func resultModal(m Model, th Theme, boxW int) []string {
 	blank := func() { line("") }
 
 	// Two hero columns: decode on the left, time to first token on the right,
-	// each a figure three rows tall with its unit beside the bottom row and
+	// each a figure five rows tall with its unit beside the bottom row and
 	// one line under it saying what the figure is.
 	dec, ttft := heroFigures(s)
 	colW := inner / 2
 	left, right := bigFigure(dec.figure), bigFigure(ttft.figure)
+	// The gleam: while the card is younger than GleamSweep, a band of accent
+	// lightnesses crosses both figures once, together, each over its own
+	// columns (gleamStyle). After it — and on every frame of the card's
+	// settled tail, the poster included — the figures are painted accentBold
+	// in one piece, byte-identical to the modal before the gleam existed.
+	p := float64(m.CardAge) / float64(GleamSweep)
+	addFigure := func(l *lineBuf, row string, r int) {
+		if p >= 1 {
+			l.add(th.accentBold, row)
+			return
+		}
+		// One figure row's runes are all single-column — half blocks and the
+		// spaces between glyphs — so the rune index is the figure's own
+		// column. Spaces are left unpainted: a style on a blank advances
+		// nothing the eye can see and would spend escapes on gaps.
+		for x, g := range []rune(row) {
+			if g == ' ' {
+				l.space(1)
+				continue
+			}
+			l.add(gleamStyle(th, p, len([]rune(row)), r, x), string(g))
+		}
+	}
 	blank()
 	for k := 0; k < bigRows; k++ {
 		l := newLine(th, inner)
 		l.space(2)
-		l.add(th.accentBold, left[k])
+		addFigure(l, left[k], k)
 		if k == bigRows-1 {
 			l.add(th.dim, " tok/s")
 		}
 		l.gapTo(inner - colW)
-		l.add(th.accentBold, right[k])
+		addFigure(l, right[k], k)
 		// The TTFT's unit is whichever half fmtMsParts gave, and nothing when
 		// the TTFT itself was never measured — a unit beside "?" would claim a
 		// precision the run did not observe.

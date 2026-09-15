@@ -701,6 +701,12 @@ func TestResultModalPaintsByRole(t *testing.T) {
 	m := ModelAt(ExampleTapeN(4), doneAt)
 	m.Mode = ModeCard
 	m.Theme = th
+	// 2026-09-15: driven at CardAge = GleamSweep, the settled end of the
+	// gleam, because a freshly-appeared card (CardAge 0) is one frame of a
+	// sweep that this test's "every figure cell is the accent" assertion
+	// would read as a violation. Settled, the test's meaning is unchanged:
+	// if it fails now, the gleam broke the settled state itself.
+	m.CardAge = GleamSweep
 	rows := parseFrame(View(m, doneAt, w, h), w, h)
 	// The modal is the box drawn inside the screen's frame: its top rule is
 	// the first row after the screen's own with a ┌ past the left border, and
@@ -757,6 +763,87 @@ func TestResultModalPaintsByRole(t *testing.T) {
 	}
 	if big == 0 || bars == 0 {
 		t.Errorf("the gate checked %d figure cells and %d bar cells; both classes must be on the frame", big, bars)
+	}
+}
+
+// TestResultModalGleamMidSweep is the gleam's own contract (2026-09-15), read
+// at CardAge = GleamSweep/2: every big-figure cell wears one of exactly the
+// four accent lightnesses of the sweep — never a text shade, never a warn —
+// and at least one cell wears accentHigh, the band's centre, so the pass is
+// actually crossing the figures rather than sitting at one end.
+//
+// FAIL-first on the pre-gleam modal: the figures were accentBold on every
+// cell at every CardAge, so "at least one cell wears accentHigh" failed with
+// zero.
+func TestResultModalGleamMidSweep(t *testing.T) {
+	const w, h = 120, 36
+	th := ColourTheme()
+	m := ModelAt(ExampleTapeN(4), doneAt)
+	m.Mode = ModeCard
+	m.Theme = th
+	m.CardAge = GleamSweep / 2
+	rows := parseFrame(View(m, doneAt, w, h), w, h)
+
+	// The modal's own box, located the way the parent test locates it, so the
+	// live screen behind the modal is never mistaken for its figures.
+	top, x0, x1 := -1, -1, -1
+	for y := 1; y < len(rows) && top < 0; y++ {
+		for x := 1; x < len(rows[y]); x++ {
+			if rows[y][x].r == '┌' {
+				top, x0 = y, x
+				break
+			}
+		}
+	}
+	if top >= 0 {
+		for x := x0; x < len(rows[top]); x++ {
+			if rows[top][x].r == '┐' {
+				x1 = x
+			}
+		}
+	}
+	if top < 0 {
+		t.Fatal("no modal on the card-mode frame")
+	}
+
+	allowed := map[string]bool{
+		styleHex(th.accentHigh): true,
+		styleHex(th.accent):     true,
+		styleHex(th.accentMid):  true,
+		styleHex(th.accentBold): true,
+	}
+	big, high := 0, 0
+	for y := top; y < len(rows); y++ {
+		row := rows[y]
+		for x, c := range row {
+			if x < x0 || x > x1 {
+				continue
+			}
+			if c.r != '▀' && c.r != '▄' && c.r != '█' {
+				continue
+			}
+			// The placement bar's glyph is a block too; it is not a figure
+			// cell and never wears the figure's styles.
+			if c.r == barGlyph {
+				continue
+			}
+			big++
+			if !allowed[c.fg] {
+				t.Errorf("a big figure cell (%q at row %d col %d) is %s, want one of the gleam's four accent lightnesses", c.r, y, x, c.fg)
+			}
+			if c.fg == styleHex(th.accentHigh) {
+				high++
+			}
+		}
+		if row[x0].r == '└' {
+			break
+		}
+	}
+	if big == 0 {
+		t.Fatal("no big figure cells on the frame; the gate read nothing")
+	}
+	if high == 0 {
+		t.Errorf("%d figure cells and none in accentHigh: the band is not crossing the figures at CardAge = GleamSweep/2", big)
 	}
 }
 

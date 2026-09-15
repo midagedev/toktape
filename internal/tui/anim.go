@@ -3,6 +3,8 @@ package tui
 import (
 	"math"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Everything that moves on this screen is a pure function of the clip time t.
@@ -25,6 +27,26 @@ const (
 	// TickInterval is the redraw period of the live program. The tick carries
 	// no state; it only advances t.
 	TickInterval = 50 * time.Millisecond
+	// GleamSweep is the one pass of light the result modal's figures take when
+	// the card appears: CardAge 0 to GleamSweep, settled after. It is the modal
+	// clock's only use, so it lives here beside the other durations.
+	GleamSweep = 1 * time.Second
+)
+
+// The gleam's shape. A band of five lightnesses-worth of travel, leaning
+// forward by two columns a row so it reads as a slash of light rather than a
+// vertical wipe (the italic the face cannot carry: shearing the glyphs
+// themselves steps in whole columns, which breaks the "5" and the "8" and
+// grows a five-digit figure past the modal's column).
+const (
+	gleamBand  = 5
+	gleamSlant = 2
+	// gleamLead is the travel added at each end so the lean enters and leaves
+	// clean: the largest lean offset is gleamSlant*(bigRows-1)/2, and an
+	// extension of exactly that still leaves the top row's first cell at
+	// distance 5 — inside the band — when the sweep starts. One more settles
+	// both ends, for every figure width from 1 to 35.
+	gleamLead = gleamSlant*(bigRows-1)/2 + 1
 )
 
 // spinnerFrames is the spinner shown while a stream is still in prefill.
@@ -104,6 +126,47 @@ func shimmerStart(t time.Duration, w int) int {
 	}
 	phase := float64(t%shimmerDur) / float64(shimmerDur)
 	return int(phase*float64(w)) % w
+}
+
+// gleamStyle is the style of one cell of a result-modal figure: row r of
+// bigRows (0 at the top) and column x of a figure w columns wide, at phase
+// p = CardAge/GleamSweep.
+//
+// One hue, five lightnesses, one pass (TTP-28: the accent is reserved for
+// exactly these figures, so spending four more of its lightnesses on them
+// breaks nothing the contract holds; a second hue would). At p ≥ 1 the answer
+// is accentBold on every cell — byte-identical in colour to the settled card,
+// which is load-bearing: the poster frame, the thumbnail and the last four
+// seconds of the card hold are exactly what they were before the gleam
+// existed, and the GIF encoder's dropped-frame run depends on those frames
+// not moving. That is also why the sweep happens once and not on a loop: a
+// repeating gleam would keep the card's frames different from each other for
+// the whole hold, which is the one property the card's settled tail has.
+//
+// The band leans: the top row is lit ahead of the bottom row by
+// gleamSlant*(bigRows-1)/2 columns, so the light reads as a slash travelling
+// across the figures rather than a bar wiping them. The lean widens the
+// travel at both ends — the band reaches the top row's first cell before it
+// would reach an unleaned one, and leaves the bottom row's last cell after —
+// so the travel is w + 2*gleamBand + 2*gleamLead with the band starting at
+// -(gleamBand + gleamLead), and at p = 0 and p = 1 every cell of every figure
+// width is back on accentBold rather than snapping to it mid-lit.
+func gleamStyle(th Theme, p float64, w, r, x int) lipgloss.Style {
+	if p >= 1 {
+		return th.accentBold
+	}
+	c := p*float64(w+2*gleamBand+2*gleamLead) - float64(gleamBand+gleamLead) +
+		float64(gleamSlant)*float64((bigRows-1)/2-r)
+	d := math.Abs(float64(x) - c)
+	switch {
+	case d <= 1:
+		return th.accentHigh
+	case d <= 3:
+		return th.accent
+	case d <= 5:
+		return th.accentMid
+	}
+	return th.accentBold
 }
 
 // p95 returns the 95th percentile of vals using the nearest-rank method. An

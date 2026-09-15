@@ -256,6 +256,7 @@ func FrameText(tp *tape.Tape, o Options, f Frame) string {
 	m := tui.ModelAt(tp, f.At)
 	m.Theme = tui.ColourTheme()
 	m.Mode = f.Mode
+	m.CardAge = f.CardAge
 	m.TapePath = o.TapePath
 	m.Replay = true
 	return tui.View(m, f.Anim, o.Width, o.Height)
