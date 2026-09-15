@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/midagedev/toktape/internal/placement"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -76,6 +77,22 @@ func caveatCases() []caveatCase {
 			s.Aggregate.PeakDecodingStreams = 1
 		},
 		onCard: "decoded one at a time",
+	}, {
+		code: CodePlacementContradicted,
+		// The estimate splits the model across both cards; the run's own
+		// reading says GPU1 held one MiB (lead, 2026-09-15). The q6k take's
+		// shape: the server was started under CUDA_VISIBLE_DEVICES, which
+		// the argument parser cannot see, so the placement is a guess about
+		// a machine this run was not.
+		mutate: func(s *tape.RunSummary) {
+			s.GPUsAtEnd[1].ProcBytes = 0
+			s.GPUsAtEnd[1].UsedBytes = 1 << 20
+		},
+		// Wrap-safe on purpose: onCard is a plain Contains against the wrapped
+		// card, and the sentence's tail ("... are not this run's") breaks
+		// across lines at this width. The whole sentence is checked by
+		// hasWrapped below.
+		onCard: "weights on GPU1",
 	}, {
 		code:   CodeAnswerCut,
 		mutate: func(s *tape.RunSummary) { s.Timings.ReasoningN = s.Timings.PredictedN },
@@ -500,14 +517,71 @@ func TestStreamsNotConcurrentTextAndGates(t *testing.T) {
 	}
 }
 
+// TestPlacementContradictedSentenceIsTheTwoFigures (lead, 2026-09-15): the
+// sentence names the device and the two figures the predicate compared,
+// because a caveat a reader cannot check is one they will ignore — and the
+// two figures are the whole case.
+func TestPlacementContradictedSentenceIsTheTwoFigures(t *testing.T) {
+	s := clean(t)
+	s.GPUsAtEnd[1].ProcBytes = 0
+	s.GPUsAtEnd[1].UsedBytes = 1 << 20
+	want := "the placement estimate puts 20.9 GiB of weights on GPU1, which held 0.0 GiB: the split and everything derived from it are not this run's"
+	cs := Caveats(s)
+	if len(cs) != 1 || cs[0].Code != CodePlacementContradicted || cs[0].Text != want {
+		t.Fatalf("Caveats = %+v, want exactly %s: %q", cs, CodePlacementContradicted, want)
+	}
+	if cs[0].Severity != SeverityFigure {
+		t.Errorf("severity = %q, want figure: the split carries more than the ratio the card already declined to print", cs[0].Severity)
+	}
+	// The explain listing carries its reading in the same rank position, so
+	// "why did this card warn" is answered where the other codes are.
+	ex := ExplainCaveats(s)
+	if i, j := strings.Index(ex, CodePlacementContradicted), strings.Index(ex, CodeStreamsNotConcurrent); i < 0 || j < 0 || i < j {
+		t.Errorf("the reading is missing or not ranked after streams_not_concurrent:\n%s", ex)
+	}
+	if !strings.Contains(ex, "20.9 GiB") || !strings.Contains(ex, "0.0 GiB") {
+		t.Errorf("the reading does not carry the two figures:\n%s", ex)
+	}
+}
+
+// TestPlacementContradictedNeedsAnEstimateAndAMeasurement: the two shapes the
+// caveat must stay out of. An engine placement is the engine's own report,
+// not a guess to check against the box, and a placement the reading agrees
+// with is not contradicted whatever its source.
+func TestPlacementContradictedNeedsAnEstimateAndAMeasurement(t *testing.T) {
+	has := func(s *tape.RunSummary) bool {
+		for _, c := range Caveats(s) {
+			if c.Code == CodePlacementContradicted {
+				return true
+			}
+		}
+		return false
+	}
+	s := clean(t)
+	s.Placement.Source = placement.SourceEngine
+	s.GPUsAtEnd[1].ProcBytes, s.GPUsAtEnd[1].UsedBytes = 0, 1<<20
+	if has(s) {
+		t.Error("the caveat fired on an engine placement")
+	}
+	if has(clean(t)) {
+		t.Error("the caveat fired on a placement the measurement agrees with")
+	}
+}
+
 // TestStreamsNotConcurrentRanksDirectlyUnderStreamsFailed: it qualifies the
 // same Streams row a failed stream does, one step less loudly — the figure
 // exists, but it is a queue's. The ranks below it keep their order and stay
 // consecutive, or the listing and the caveat line disagree about what outranks
 // what.
 func TestStreamsNotConcurrentRanksDirectlyUnderStreamsFailed(t *testing.T) {
+	// placement_contradicted entered at rank 2 (lead, 2026-09-15), directly
+	// under the two streams codes and above answer_cut: it qualifies a
+	// derived figure rather than a measured one — the ratio the card has
+	// already declined to print — but what it contradicts is the placement
+	// the whole MEMORY block is built on.
 	want := []string{
-		CodeStreamsFailed, CodeStreamsNotConcurrent, CodeAnswerCut, CodeShortGeneration,
+		CodeStreamsFailed, CodeStreamsNotConcurrent, CodePlacementContradicted,
+		CodeAnswerCut, CodeShortGeneration,
 		CodeShortStream, CodeColdCache, CodeShortPromptForPrefill, CodeClientDisagrees,
 		CodeRecorded, CodeMachineContended, CodeConditionsChanged, CodeRunCutByClock,
 		CodeNoProcView,

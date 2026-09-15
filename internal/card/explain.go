@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/midagedev/toktape/internal/bandwidth"
+	"github.com/midagedev/toktape/internal/placement"
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -51,6 +53,7 @@ func ExplainCaveats(s *tape.RunSummary) string {
 		{CodeStreamsNotConcurrent, fmt.Sprintf("peak_decoding_streams %s of %d sent at once, slots busy max %s",
 			orUnknown(countOrEmpty(s.Aggregate.PeakDecodingStreams)), s.Concurrency,
 			orUnknown(countOrEmpty(s.Aggregate.SlotsBusyMax)))},
+		{CodePlacementContradicted, placementContradictionReading(s)},
 		{CodeAnswerCut, fmt.Sprintf("%d of %d predicted tokens were reasoning",
 			t.ReasoningN, t.PredictedN)},
 		{CodeShortGeneration, fmt.Sprintf("predicted_n %d, recorded label %q, floor %d",
@@ -112,6 +115,22 @@ func ExplainCaveats(s *tape.RunSummary) string {
 		b.WriteString("  nothing qualifies this run's figures — every number on the card is quotable\n")
 	}
 	return b.String()
+}
+
+// placementContradictionReading is the placement_contradicted reading: the
+// two figures the sentence names, and the source that made them checkable.
+// An engine placement is never contradicted (bandwidth.Contradiction stands
+// aside for the engine's own report), so its line says that rather than
+// reading as a check that failed to run.
+func placementContradictionReading(s *tape.RunSummary) string {
+	if s.Placement.Source == placement.SourceEngine {
+		return fmt.Sprintf("source %q — the engine's own report, not an estimate to check", s.Placement.Source)
+	}
+	if c := bandwidth.Contradiction(s); c != nil {
+		return fmt.Sprintf("source %q: GPU%d placed %s, held %s",
+			s.Placement.Source, c.Device, formatGiB(c.PlacedBytes), formatGiB(c.MeasuredBytes))
+	}
+	return fmt.Sprintf("source %q, no device the end reading contradicts", s.Placement.Source)
 }
 
 // explainRoundPrompt is one round's reading for ExplainCaveats: the line of the

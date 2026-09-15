@@ -187,12 +187,8 @@ func DeviceBytesPerSec(s *tape.RunSummary, device string) int64 {
 	if device == tape.DeviceCPU {
 		return HostBytesPerSec(s.Host)
 	}
-	rest, ok := strings.CutPrefix(device, "GPU")
+	idx, ok := gpuIndex(device)
 	if !ok {
-		return 0
-	}
-	idx, err := strconv.Atoi(rest)
-	if err != nil {
 		return 0
 	}
 	for _, g := range s.Host.GPUs {
@@ -201,6 +197,104 @@ func DeviceBytesPerSec(s *tape.RunSummary, device string) int64 {
 		}
 	}
 	return 0
+}
+
+// gpuIndex is the placement name of a GPU device ("GPU0", "GPU1", ...) as the
+// index the summary's GPU tables carry. It is the only join between a
+// placement device and a measured reading of that device, so it exists once:
+// DeviceBytesPerSec walks Host.GPUs through it and Contradiction walks
+// GPUsAtEnd through it, and the two can never disagree about what "GPU1"
+// names.
+func gpuIndex(device string) (int, bool) {
+	rest, ok := strings.CutPrefix(device, "GPU")
+	if !ok {
+		return 0, false
+	}
+	idx, err := strconv.Atoi(rest)
+	if err != nil {
+		return 0, false
+	}
+	return idx, true
+}
+
+// PlacementContradiction is one device of a placement estimate the run's own
+// GPU readings contradict (lead, 2026-09-15).
+type PlacementContradiction struct {
+	// Device is the GPU index the estimate and the reading disagree about.
+	Device int
+	// PlacedBytes is what the placement estimate puts on the device.
+	PlacedBytes int64
+	// MeasuredBytes is what the device was measured holding at the end of
+	// the run: ProcBytes when the server's own VRAM was read, else
+	// UsedBytes.
+	MeasuredBytes int64
+}
+
+// The contradiction rule's two thresholds. They are constants because they
+// encode a judgement about what a disagreement means, not a measurement.
+const (
+	// contradictFloorBytes is the smallest placement figure the check holds a
+	// device to. An estimate under a gibibyte is not claiming a split worth
+	// defending — a card holding most of a model is the shape the check
+	// exists for, and a stray rule putting embeddings somewhere would
+	// otherwise fire it.
+	contradictFloorBytes = 1 << 30
+	// contradictHoldFraction: a measured hold under this fraction of the
+	// placed bytes is a contradiction. A quarter leaves room for a KV cache
+	// and buffers the estimate does not count, while one MiB against 14 GB —
+	// the take this rule came from — is nowhere near the border.
+	contradictHoldFraction = 0.25
+)
+
+// Contradiction is the device of an ESTIMATED placement the run's own GPU
+// readings contradict, or nil when there is none.
+//
+// Only a placement this package could have derived wrongly is checkable: an
+// engine's own report (placement.SourceEngine) is the record, and the device
+// it names holding nothing is the engine's business to explain, not a guess
+// of ours gone wrong. A device the end reading never saw is a missing view,
+// not a contradiction — GPUsAtEnd may simply have been unreadable. The
+// measured hold is ProcBytes when the server's own VRAM was read, else
+// UsedBytes.
+func Contradiction(s *tape.RunSummary) *PlacementContradiction {
+	if s == nil || s.Placement.Source == placement.SourceEngine {
+		return nil
+	}
+	for _, d := range s.Placement.Devices {
+		idx, ok := gpuIndex(d.Device)
+		if !ok || d.Bytes < contradictFloorBytes {
+			continue
+		}
+		for _, g := range s.GPUsAtEnd {
+			if g.Index != idx {
+				continue
+			}
+			measured := g.ProcBytes
+			if measured <= 0 {
+				measured = g.UsedBytes
+			}
+			if float64(measured) < contradictHoldFraction*float64(d.Bytes) {
+				return &PlacementContradiction{
+					Device:        idx,
+					PlacedBytes:   d.Bytes,
+					MeasuredBytes: measured,
+				}
+			}
+			break
+		}
+	}
+	return nil
+}
+
+// PlacementContradicted is Contradiction in verdict form: the GPU index whose
+// measured reading contradicts the placement estimate, and whether there is
+// one. It is the shape a caveat or a card wants; a caller that needs the two
+// figures for its sentence wants Contradiction.
+func PlacementContradicted(s *tape.RunSummary) (device int, ok bool) {
+	if c := Contradiction(s); c != nil {
+		return c.Device, true
+	}
+	return 0, false
 }
 
 // activeBytesOn is the bytes device d reads to decode one token, given the
@@ -312,10 +406,21 @@ func tiedEmbeddings(p tape.PlacementSummary) bool {
 //
 // ok is false when the model reports no active bytes per token, when the
 // placement carries none, when any device carrying active bytes has an
-// unknown bandwidth, or when the per-device sum disagrees with
-// Model.ActiveBytesPerToken by more than SplitTolerance.
+// unknown bandwidth, when the per-device sum disagrees with
+// Model.ActiveBytesPerToken by more than SplitTolerance, or when the
+// placement is an estimate the run's own GPU readings contradict
+// (Contradiction, 2026-09-15).
 func Ceiling(s *tape.RunSummary) (int64, bool) {
 	if s == nil || s.Model.ActiveBytesPerToken <= 0 {
+		return 0, false
+	}
+	// A placement the run's own readings contradict is not a split this
+	// figure may be derived from. The estimate cannot see
+	// CUDA_VISIBLE_DEVICES, so a one-card run on a two-card box was handed a
+	// ceiling averaged over a card that held one MiB — 46 % of a peak this
+	// run never touched. The measured figures stand (Combined is untouched);
+	// it is the split and everything derived from it that are not this run's.
+	if Contradiction(s) != nil {
 		return 0, false
 	}
 	tied := tiedEmbeddings(s.Placement)

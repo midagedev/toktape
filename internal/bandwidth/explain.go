@@ -101,6 +101,13 @@ type Explanation struct {
 	// the per-device and ram/verify lines below say so instead of silently
 	// reading as a failure to derive.
 	EnginePlacement bool
+
+	// Contradiction is the estimated placement's device the end reading
+	// contradicted (lead, 2026-09-15), or nil when there is none. When it is
+	// set, CeilingBytesPerSec and OfPeakKnown below are the refusal it
+	// caused, and the device rows above it are the split that was not this
+	// run's.
+	Contradiction *PlacementContradiction
 }
 
 // Explain derives every bandwidth figure of a run and reports the workings.
@@ -118,6 +125,7 @@ func Explain(s *tape.RunSummary) Explanation {
 	// "may this figure be printed" the same way for an engine placement.
 	e.EffectiveBytesPerSec, e.EffectiveKnown = Combined(s)
 	e.EnginePlacement = s.Placement.Source == placement.SourceEngine
+	e.Contradiction = Contradiction(s)
 
 	tied := tiedEmbeddings(s.Placement)
 	for _, d := range s.Placement.Devices {
@@ -204,6 +212,10 @@ func (e Explanation) String() string {
 		p("host    %s (%s)", gbps(e.HostBytesPerSec), e.HostSource)
 	} else {
 		p("host    ? — no RAMBytesPerSec and no RAMSpeed x RAMChannels")
+	}
+	if e.Contradiction != nil {
+		p("placement ? — contradicted: GPU%d is estimated to hold %s and held %s, so no ceiling is derived from the split",
+			e.Contradiction.Device, gb(e.Contradiction.PlacedBytes), gb(e.Contradiction.MeasuredBytes))
 	}
 	if e.CeilingKnown {
 		p("ceiling %s", gbps(e.CeilingBytesPerSec))

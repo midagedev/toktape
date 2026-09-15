@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/midagedev/toktape/internal/bandwidth"
+	"github.com/midagedev/toktape/internal/gpu"
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -1214,12 +1215,12 @@ func hostSection(s *tape.RunSummary) []string {
 	parts := make([]string, 0, len(s.GPUsAtEnd)+2)
 	throttled := unknown
 	for _, g := range s.GPUsAtEnd {
-		parts = append(parts, fmt.Sprintf("GPU%d %s %s", g.Index, tempString(g.TempC), powerString(g.PowerW)))
+		parts = append(parts, fmt.Sprintf("GPU%d %s %s", g.Index, tempString(g.TempC), powerString(g)))
 	}
 	if len(s.GPUsAtEnd) > 0 {
 		throttled = "no"
 		for _, g := range s.GPUsAtEnd {
-			if g.Throttled {
+			if GPUThrottled(g) {
 				throttled = "yes"
 				break
 			}
@@ -1270,11 +1271,39 @@ func tempString(c float64) string {
 	return strconv.FormatFloat(c, 'f', 0, 64) + "°C"
 }
 
-func powerString(w float64) string {
-	if w <= 0 {
-		return unknown + " W"
+// powerString is one GPU's power figure: the draw against the limit when both
+// were read, the draw alone on a tape recorded before the limit was (2026-09-15).
+// "281 of 300 W" is the figure the card owes a reader who is about to argue
+// about a decode rate: it says the card was boosting into its own cap and not
+// above it, which the bare draw cannot.
+func powerString(g tape.GPUSample) string {
+	draw := unknown
+	if g.PowerW > 0 {
+		draw = strconv.FormatFloat(g.PowerW, 'f', 0, 64)
 	}
-	return strconv.FormatFloat(w, 'f', 0, 64) + " W"
+	if g.PowerLimitW <= 0 {
+		return draw + " W"
+	}
+	return draw + " of " + strconv.FormatFloat(g.PowerLimitW, 'f', 0, 64) + " W"
+}
+
+// GPUThrottled is the card's throttle verdict for one GPU sample: whether the
+// card was held below the hardware's own operating point. It is the text card's
+// and the PNG's single verdict, so the two cannot disagree.
+//
+// The mask decides when the tape carries one, and it is deliberately narrower
+// than the wide Throttled the tape and `-o json` keep: a card boosting into
+// its own power cap sets sw power cap on every such run, which made
+// "throttled: yes" true of every run and therefore of none.
+// gpu.ThrottleHeldBelowSettingsMask is the bits that say the hardware stepped
+// in. A tape with no mask — recorded before 2026-09-15 — keeps the stored
+// g.Throttled verdict: re-deriving it would print "no" beside a "yes" the run
+// recorded, and the wide verdict is the only one that tape has.
+func GPUThrottled(g tape.GPUSample) bool {
+	if g.ThrottleMask != 0 {
+		return g.ThrottleMask&gpu.ThrottleHeldBelowSettingsMask != 0
+	}
+	return g.Throttled
 }
 
 // LlamaCPPFlags reports whether srv's flags are llama.cpp's. Everything that

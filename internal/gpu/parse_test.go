@@ -35,6 +35,7 @@ func TestParseQueryGPUTwoRTX3090(t *testing.T) {
 		UtilPct:          98,
 		TempC:            71,
 		PowerW:           342.15,
+		PowerLimitW:      350,
 		ClockSMMHz:       1740,
 		ThrottleMask:     ThrottleNone,
 		ThrottleKnown:    true,
@@ -68,6 +69,9 @@ func TestParseQueryGPUUnknownCells(t *testing.T) {
 	r := rows[0]
 	if r.PowerW != 0 {
 		t.Errorf("[N/A] power: got %v want 0", r.PowerW)
+	}
+	if r.PowerLimitW != 0 {
+		t.Errorf("[N/A] power limit: got %v want 0", r.PowerLimitW)
 	}
 	if r.ThrottleKnown {
 		t.Errorf("[Not Supported] throttle reasons should be unknown, got mask %#x", r.ThrottleMask)
@@ -108,6 +112,37 @@ func TestParseQueryGPUFourGPUBox(t *testing.T) {
 	}
 }
 
+// TestParseQueryGUPowerLimit (lead, 2026-09-15): the limit sits directly
+// after the draw it is only a figure against, and an unreadable cell is the
+// zero value exactly as an unreadable draw is — the field count is
+// position-based, so this is also the test that the column landed where
+// QueryGPUFields says it did (the clock and throttle cells after it still
+// parse).
+func TestParseQueryGUPowerLimit(t *testing.T) {
+	rows, err := ParseQueryGPU(
+		// index,name,total,used,util,temp,draw,limit,clocks.sm,throttle,driver,gen,width,uuid
+		"0, NVIDIA RTX A6000, 49140, 28889, 97, 66, 281.03, 300.00, 1950, 0x0000000000000004, 570.86.15, 4, 16, GPU-1\n" +
+			"1, NVIDIA RTX A6000, 49140, 28889, 97, 66, [N/A], [Not Supported], 1710, 0x0, 570.86.15, 4, 16, GPU-2\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows: got %d want 2", len(rows))
+	}
+	if rows[0].PowerLimitW != 300 {
+		t.Errorf("power.limit: got %v want 300", rows[0].PowerLimitW)
+	}
+	if rows[0].ThrottleMask != ThrottleSWPowerCap || rows[0].ClockSMMHz != 1950 {
+		t.Errorf("the cells after the new column shifted: mask %#x, clocks %d", rows[0].ThrottleMask, rows[0].ClockSMMHz)
+	}
+	if rows[1].PowerLimitW != 0 {
+		t.Errorf("[Not Supported] limit: got %v want 0", rows[1].PowerLimitW)
+	}
+	if rows[1].ClockSMMHz != 1710 || rows[1].UUID != "GPU-2" {
+		t.Errorf("row 1 after an unreadable limit: %+v", rows[1])
+	}
+}
+
 func TestParseQueryGPUErrors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -125,21 +160,21 @@ func TestParseQueryGPUErrors(t *testing.T) {
 		{
 			name:    "too few columns",
 			in:      "0, NVIDIA GeForce RTX 4090, 24564, 1024\n",
-			wantErr: "row 1: got 4 columns, want 13",
+			wantErr: "row 1: got 4 columns, want 14",
 		},
 		{
 			name:    "non-numeric cell",
-			in:      "0, NVIDIA GeForce RTX 4090, twelve, 1024, 10, 40, 70.1, 1500, 0x0, 570.86.15, 4, 16, GPU-1\n",
+			in:      "0, NVIDIA GeForce RTX 4090, twelve, 1024, 10, 40, 70.1, 300, 1500, 0x0, 570.86.15, 4, 16, GPU-1\n",
 			wantErr: "row 1 field memory.total",
 		},
 		{
 			name:    "bad bitmask",
-			in:      "0, NVIDIA GeForce RTX 4090, 24564, 1024, 10, 40, 70.1, 1500, zzz, 570.86.15, 4, 16, GPU-1\n",
+			in:      "0, NVIDIA GeForce RTX 4090, 24564, 1024, 10, 40, 70.1, 300, 1500, zzz, 570.86.15, 4, 16, GPU-1\n",
 			wantErr: "row 1 field clocks_throttle_reasons.active",
 		},
 		{
 			name:    "error reports the offending row number",
-			in:      "0, A, 1, 1, 1, 1, 1, 1, 0x0, d, 4, 16, GPU-1\n1, B, 1, 1, 1, 1, 1, 1, 0x0, d, 4, 16\n",
+			in:      "0, A, 1, 1, 1, 1, 1, 1, 1, 0x0, d, 4, 16, GPU-1\n1, B, 1, 1, 1, 1, 1, 1, 0x0, d, 4, 16\n",
 			wantErr: "row 2: got 12 columns",
 		},
 	}

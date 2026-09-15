@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/midagedev/toktape/internal/bandwidth"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -61,6 +62,14 @@ const (
 	// a time — so the Streams row's "N × per-stream = aggregate" reads as N
 	// concurrent sessions when the aggregate is one stream behind a queue.
 	CodeStreamsNotConcurrent = "streams_not_concurrent"
+	// CodePlacementContradicted: the placement ESTIMATE puts weights on a GPU
+	// the run's own reading says held (almost) nothing (lead, 2026-09-15).
+	// The estimate cannot see CUDA_VISIBLE_DEVICES, so a one-card run on a
+	// two-card box got a split across both and every figure derived from it —
+	// the bandwidth ceiling, the "of peak" ratio — was measured against a
+	// machine this run was not. The measured figures stand; the derived ones
+	// print "?".
+	CodePlacementContradicted = "placement_contradicted"
 	// CodeAnswerCut: the whole generation budget went to reasoning tokens and
 	// no answer was produced.
 	CodeAnswerCut = "answer_cut"
@@ -134,6 +143,13 @@ const (
 // never shared an instant mean it exists but measures a queue. Both are the
 // server's own concurrency story contradicting the row's "N at once".
 //
+// placement_contradicted sits directly under the two streams codes (lead,
+// 2026-09-15). It qualifies a derived figure rather than a measured one — the
+// ratio the card has already declined to print — but what it contradicts is
+// the placement the whole MEMORY block is built on, which costs more than a
+// run-level caveat: two cards of this run cannot be compared with anything,
+// because the device rows themselves describe a machine this run was not.
+//
 // short_stream sits directly under short_generation and above cold_cache
 // (TTP-83, 2026-09-14). It is short_generation's own question one stream
 // down: a stream too short to be a rate, averaged into a per-stream mean that
@@ -153,17 +169,18 @@ const (
 var caveatRank = map[string]int{
 	CodeStreamsFailed:         0,
 	CodeStreamsNotConcurrent:  1,
-	CodeAnswerCut:             2,
-	CodeShortGeneration:       3,
-	CodeShortStream:           4,
-	CodeColdCache:             5,
-	CodeShortPromptForPrefill: 6,
-	CodeClientDisagrees:       7,
-	CodeRecorded:              8,
-	CodeMachineContended:      9,
-	CodeConditionsChanged:     10,
-	CodeRunCutByClock:         11,
-	CodeNoProcView:            12,
+	CodePlacementContradicted: 2,
+	CodeAnswerCut:             3,
+	CodeShortGeneration:       4,
+	CodeShortStream:           5,
+	CodeColdCache:             6,
+	CodeShortPromptForPrefill: 7,
+	CodeClientDisagrees:       8,
+	CodeRecorded:              9,
+	CodeMachineContended:      10,
+	CodeConditionsChanged:     11,
+	CodeRunCutByClock:         12,
+	CodeNoProcView:            13,
 }
 
 // MinPrefillPromptTokens is tape.MinPrefillPromptTokens, re-exported so this
@@ -417,6 +434,11 @@ func Caveats(s *tape.RunSummary) []Caveat {
 	}
 	if streamsNotConcurrent(s) {
 		add(CodeStreamsNotConcurrent, SeverityFigure, streamsNotConcurrentText(s))
+	}
+	if c := bandwidth.Contradiction(s); c != nil {
+		add(CodePlacementContradicted, SeverityFigure, fmt.Sprintf(
+			"the placement estimate puts %s of weights on GPU%d, which held %s: the split and everything derived from it are not this run's",
+			formatGiB(c.PlacedBytes), c.Device, formatGiB(c.MeasuredBytes)))
 	}
 	if w := answerCutWarning(s); w != "" {
 		add(CodeAnswerCut, SeverityFigure, w)

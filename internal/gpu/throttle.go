@@ -36,6 +36,34 @@ func Throttled(mask uint64) bool {
 	return mask&^ThrottleIgnoreMask != 0
 }
 
+// ThrottleHeldBelowSettingsMask is the narrower verdict the CARD prints: the
+// bits that say the hardware stepped in and held the device below the
+// operating point it was set to, as opposed to the device running at the
+// operating point it was SET to.
+//
+// The difference is sw power cap (and applications clocks), and it is the
+// whole point. A power sweep of one model on one card with nothing but the
+// board power limit changed (lead, 2026-09-15) set sw power cap at every
+// level, because any card boosting into its own cap sets it:
+//
+//	300 W cap: drew 281 W at 1950 MHz, 141 tok/s
+//	200 W cap: drew 199 W at 1710 MHz, 133 tok/s
+//	150 W cap: drew 150 W at 1335 MHz, 120 tok/s
+//
+//	Three different machines by the wide verdict's own account, all
+//	"throttled: yes" — a sentence true of every run is not a reading. At each
+//	level the card did exactly what it was set to do: it drew up to its limit
+//	and no further. The held-below bits — hw slowdown, hw/sw thermal slowdown,
+//	hw power brake, sync boost — are the ones that say the card could not hold
+//	the operating point, and they are the card's verdict. Throttled above keeps
+//	the wide mask for the tape and `-o json`, where a figure below peak clocks
+//	for any reason is still worth recording.
+const ThrottleHeldBelowSettingsMask = ThrottleHWSlowdown |
+	ThrottleSyncBoost |
+	ThrottleSWThermalSlowdown |
+	ThrottleHWThermalSlowdown |
+	ThrottleHWPowerBrakeSlowdown
+
 var throttleNames = []struct {
 	bit  uint64
 	name string

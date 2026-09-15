@@ -133,7 +133,7 @@ func TestDevices(t *testing.T) {
 }
 
 func TestDevicesUnknownCardHasNoBandwidth(t *testing.T) {
-	f := &fakeRunner{gpuOut: "0, NVIDIA GeForce RTX 9090, 24564, 1024, 10, 40, 70.1, 1500, 0x0, 590.1, 5, 16, GPU-1\n"}
+	f := &fakeRunner{gpuOut: "0, NVIDIA GeForce RTX 9090, 24564, 1024, 10, 40, 70.1, 300, 1500, 0x0, 590.1, 5, 16, GPU-1\n"}
 	c, _ := OpenWith(context.Background(), f.run)
 	defer c.Close()
 	devs, err := c.Devices(context.Background())
@@ -191,6 +191,15 @@ func TestSampleAttributesProcessesByUUID(t *testing.T) {
 	if samples[0].UsedBytes != 78214*mibI || samples[0].UtilPct != 100 || samples[0].TempC != 62 || samples[0].PowerW != 391.44 || samples[0].ClockMHz != 1410 {
 		t.Errorf("sample 0 readings: %+v", samples[0])
 	}
+	// The limit rides beside the draw and the mask beside the verdict, so a
+	// rendered card can print "391 of 400 W" and narrow its throttle verdict
+	// without re-reading the box it was recorded on (2026-09-15).
+	if samples[0].PowerLimitW != 400 {
+		t.Errorf("sample 0 PowerLimitW: got %v want 400", samples[0].PowerLimitW)
+	}
+	if samples[3].ThrottleMask != ThrottleHWThermalSlowdown {
+		t.Errorf("sample 3 ThrottleMask: got %#x, want the hw thermal slowdown the verdict came from", samples[3].ThrottleMask)
+	}
 }
 
 func TestSampleWithoutServerPIDAttributesNothing(t *testing.T) {
@@ -241,7 +250,7 @@ func TestSampleSingleGPUAcceptsTwoColumnComputeApps(t *testing.T) {
 	if samples[0].OtherProcs != 1 {
 		t.Errorf("OtherProcs: got %d want 1", samples[0].OtherProcs)
 	}
-	if samples[0].PowerW != 0 || samples[0].Throttled {
+	if samples[0].PowerW != 0 || samples[0].PowerLimitW != 0 || samples[0].Throttled {
 		t.Errorf("unknown cells must stay zero: %+v", samples[0])
 	}
 }
@@ -282,7 +291,7 @@ func TestSampleReportsQueryErrors(t *testing.T) {
 
 func TestQueryArgs(t *testing.T) {
 	gpu := strings.Join(queryGPUArgs(), " ")
-	if !strings.Contains(gpu, "--query-gpu=index,name,memory.total,memory.used,utilization.gpu,temperature.gpu,power.draw,clocks.sm,clocks_throttle_reasons.active,driver_version,pcie.link.gen.current,pcie.link.width.current,uuid") {
+	if !strings.Contains(gpu, "--query-gpu=index,name,memory.total,memory.used,utilization.gpu,temperature.gpu,power.draw,power.limit,clocks.sm,clocks_throttle_reasons.active,driver_version,pcie.link.gen.current,pcie.link.width.current,uuid") {
 		t.Errorf("query-gpu args: %s", gpu)
 	}
 	if !strings.Contains(gpu, "--format=csv,noheader,nounits") {

@@ -125,8 +125,15 @@ func (c *smiCollector) Sample(ctx context.Context, serverPID int) ([]tape.GPUSam
 			UtilPct:   r.UtilPct,
 			TempC:     r.TempC,
 			PowerW:    r.PowerW,
-			ClockMHz:  r.ClockSMMHz,
-			Throttled: r.ThrottleKnown && Throttled(r.ThrottleMask),
+			// The limit rides beside the draw and the mask beside the verdict,
+			// so a rendered card can print "281 of 300 W" and narrow its
+			// throttle verdict without re-reading the box it was recorded on
+			// (2026-09-15). maskCell already zeroes an unreadable cell, so the
+			// raw mask is 0 exactly when it was not read.
+			PowerLimitW:  r.PowerLimitW,
+			ClockMHz:     r.ClockSMMHz,
+			ThrottleMask: r.ThrottleMask,
+			Throttled:    r.ThrottleKnown && Throttled(r.ThrottleMask),
 		})
 	}
 	if serverPID <= 0 {

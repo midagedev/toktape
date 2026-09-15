@@ -1109,13 +1109,15 @@ func osString(h tape.HostInfo) string {
 }
 
 // throttledString is "?" until at least one GPU reading exists: with no
-// sample, "no" would be a claim we never measured.
+// sample, "no" would be a claim we never measured. The verdict itself is the
+// text card's own (card.GPUThrottled), so the image cannot print "yes" where
+// the card prints "no".
 func throttledString(s *tape.RunSummary) string {
 	if len(s.GPUsAtEnd) == 0 {
 		return unknown
 	}
 	for _, g := range s.GPUsAtEnd {
-		if g.Throttled {
+		if card.GPUThrottled(g) {
 			return "yes"
 		}
 	}
@@ -1136,7 +1138,7 @@ func gpuStateString(gs []tape.GPUSample) string {
 	}
 	parts := make([]string, 0, len(gs))
 	for _, g := range gs {
-		parts = append(parts, fmt.Sprintf("GPU%d %s %s", g.Index, tempString(g.TempC), powerString(g.PowerW)))
+		parts = append(parts, fmt.Sprintf("GPU%d %s %s", g.Index, tempString(g.TempC), powerString(g)))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -1148,11 +1150,19 @@ func tempString(c float64) string {
 	return strconv.FormatFloat(c, 'f', 0, 64) + "°C"
 }
 
-func powerString(w float64) string {
-	if w <= 0 {
-		return unknown + "W"
+// powerString is one GPU's power figure in the strip's compact spacing: the
+// draw against the limit when both were read, the draw alone on a tape
+// recorded before the limit was (2026-09-15). Mirrors internal/card's
+// powerString figure for figure — the two renderings must agree.
+func powerString(g tape.GPUSample) string {
+	draw := unknown
+	if g.PowerW > 0 {
+		draw = strconv.FormatFloat(g.PowerW, 'f', 0, 64)
 	}
-	return strconv.FormatFloat(w, 'f', 0, 64) + "W"
+	if g.PowerLimitW <= 0 {
+		return draw + "W"
+	}
+	return draw + " of " + strconv.FormatFloat(g.PowerLimitW, 'f', 0, 64) + "W"
 }
 
 // startedString formats the recorded start time. It never reads the clock: a

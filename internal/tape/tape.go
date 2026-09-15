@@ -302,15 +302,27 @@ type GPUInfo struct {
 
 // GPUSample is one reading of one device.
 type GPUSample struct {
-	Index      int     `json:"index"`
-	UsedBytes  int64   `json:"used_bytes"`
-	ProcBytes  int64   `json:"proc_bytes,omitempty"` // VRAM held by the server PID, when known
-	UtilPct    float64 `json:"util_pct,omitempty"`
-	TempC      float64 `json:"temp_c,omitempty"`
-	PowerW     float64 `json:"power_w,omitempty"`
-	ClockMHz   int     `json:"clock_mhz,omitempty"`
-	Throttled  bool    `json:"throttled,omitempty"`
-	OtherProcs int     `json:"other_procs,omitempty"` // compute processes other than the server
+	Index     int     `json:"index"`
+	UsedBytes int64   `json:"used_bytes"`
+	ProcBytes int64   `json:"proc_bytes,omitempty"` // VRAM held by the server PID, when known
+	UtilPct   float64 `json:"util_pct,omitempty"`
+	TempC     float64 `json:"temp_c,omitempty"`
+	PowerW    float64 `json:"power_w,omitempty"`
+	ClockMHz  int     `json:"clock_mhz,omitempty"`
+	// PowerLimitW is the board's enforced power limit (nvidia-smi
+	// power.limit), the denominator the draw above only means anything
+	// against (lead, 2026-09-15). A sweep on one A6000 drew 281 W of 300,
+	// 199 of 200 and 150 of 150, and every run reported Throttled: a card
+	// that says "throttled: yes" for all three has told the reader nothing,
+	// while "281 of 300 W" and "150 of 150 W" are different sentences. 0 =
+	// not read.
+	PowerLimitW float64 `json:"power_limit_w,omitempty"`
+	Throttled   bool    `json:"throttled,omitempty"`
+	// ThrottleMask is gpu.Throttle* — the reasons behind Throttled, kept so a
+	// surprising verdict can be explained from the tape instead of from the
+	// box it was recorded on. 0 = none set, or a tape older than the field.
+	ThrottleMask uint64 `json:"throttle_mask,omitempty"`
+	OtherProcs   int    `json:"other_procs,omitempty"` // compute processes other than the server
 }
 
 // TensorClass buckets tensors for the placement view.

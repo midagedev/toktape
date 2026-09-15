@@ -24,6 +24,7 @@ var QueryGPUFields = []string{
 	"utilization.gpu",
 	"temperature.gpu",
 	"power.draw",
+	"power.limit",
 	"clocks.sm",
 	"clocks_throttle_reasons.active",
 	"driver_version",
@@ -51,6 +52,7 @@ type DeviceRow struct {
 	UtilPct          float64
 	TempC            float64
 	PowerW           float64
+	PowerLimitW      float64
 	ClockSMMHz       int
 	// ThrottleMask is the clocks_throttle_reasons.active bitmask.
 	// ThrottleKnown is false when the device did not report it.
@@ -117,16 +119,19 @@ func ParseQueryGPU(s string) ([]DeviceRow, error) {
 		if row.PowerW, err = floatCell(rec[6], line, QueryGPUFields[6]); err != nil {
 			return nil, err
 		}
-		if row.ClockSMMHz, err = intCell(rec[7], line, QueryGPUFields[7]); err != nil {
+		if row.PowerLimitW, err = floatCell(rec[7], line, QueryGPUFields[7]); err != nil {
 			return nil, err
 		}
-		if row.ThrottleMask, row.ThrottleKnown, err = maskCell(rec[8], line, QueryGPUFields[8]); err != nil {
+		if row.ClockSMMHz, err = intCell(rec[8], line, QueryGPUFields[8]); err != nil {
 			return nil, err
 		}
-		row.Driver = stringCell(rec[9])
-		row.PCIeGen = stringCell(rec[10])
-		row.PCIeWidth = stringCell(rec[11])
-		row.UUID = stringCell(rec[12])
+		if row.ThrottleMask, row.ThrottleKnown, err = maskCell(rec[9], line, QueryGPUFields[9]); err != nil {
+			return nil, err
+		}
+		row.Driver = stringCell(rec[10])
+		row.PCIeGen = stringCell(rec[11])
+		row.PCIeWidth = stringCell(rec[12])
+		row.UUID = stringCell(rec[13])
 		rows = append(rows, row)
 	}
 	return rows, nil
