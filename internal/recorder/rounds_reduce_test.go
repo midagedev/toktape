@@ -228,6 +228,58 @@ func TestRoundFaultsSplitsEachRound(t *testing.T) {
 	}
 }
 
+// TestReduceRoundsPeakIsTheLowestRoundPeak (lead, 2026-09-15): a peak over
+// every record of a multi-round run counts two rounds' decoding as one
+// instant, and rounds are sequential. The run's PeakDecodingStreams is the
+// lowest per-round peak above zero — one serial round already makes the
+// aggregate a queue — and 0 when no round had a window. RoundSummary keeps no
+// peak of its own (the schema holds it run-level), so the per-round reduction
+// is exactly the call it always was.
+func TestReduceRoundsPeakIsTheLowestRoundPeak(t *testing.T) {
+	s, ms := time.Second, time.Millisecond
+	// tenRec: ten tokens, first at first (absolute), 100 ms apart — enough
+	// span for a window, few enough to read at a glance.
+	tenRec := func(round, index int, sent, first time.Duration) tape.RequestRecord {
+		rec := tape.RequestRecord{Index: index, Round: round, StartedAt: sent}
+		for i := 0; i < 10; i++ {
+			rec.Tokens = append(rec.Tokens, tape.TokenEvent{T: first - sent + time.Duration(i)*100*ms, Index: i})
+		}
+		rec.Timings = tape.TimingsSummary{PredictedN: 10}
+		return rec
+	}
+	// Round 0: two streams decoding together 1–2 s. Round 1: two serial
+	// streams, 11–12 s and 13–14 s.
+	recs := []tape.RequestRecord{
+		tenRec(0, 0, 0, s),
+		tenRec(0, 1, 0, s),
+		tenRec(1, 0, 10*s, 11*s),
+		tenRec(1, 1, 10*s, 13*s),
+	}
+	// The precondition the override exists for: the naive aggregate over every
+	// record sees round 0's overlap and answers 2.
+	if got := server.Aggregate(recs).PeakDecodingStreams; got != 2 {
+		t.Fatalf("the naive peak is %d, want 2 — the fixture no longer tells the rounds apart", got)
+	}
+	agg, per, _ := reduceRounds(recs, []string{"overlap", "serial"}, 2)
+	if agg.PeakDecodingStreams != 1 {
+		t.Errorf("run peak = %d, want 1: round 1 decoded one stream at a time, and rounds never share an instant", agg.PeakDecodingStreams)
+	}
+	// The per-round summaries are untouched: no peak field to carry, and the
+	// figures they do carry are the same reductions as before.
+	if len(per) != 2 || per[0].Streams != 2 || per[1].Streams != 2 ||
+		per[0].PredictedN != 20 || per[1].PredictedN != 20 {
+		t.Errorf("PerRound = %+v, want two two-stream rounds of 20 tokens each", per)
+	}
+	// And no round with a window means the run reports the schema's unknown.
+	serial := []tape.RequestRecord{
+		roundRec(0, 0, 0, 500*ms, 2500*ms, 40, 21),
+		roundRec(1, 0, 10*s, 10500*ms, 11500*ms, 20, 11),
+	}
+	if agg, _, _ := reduceRounds(serial, []string{"a", "b"}, 1); agg.PeakDecodingStreams != 0 {
+		t.Errorf("no round had a window, run peak = %d, want 0", agg.PeakDecodingStreams)
+	}
+}
+
 // TestExampleRoundsFollowsTheReduction: the card fixture's spread and run-level
 // draft totals are what this package's reduction would compute from its
 // rounds, so a golden drawn from the fixture pins the recorder's arithmetic

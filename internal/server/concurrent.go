@@ -210,5 +210,56 @@ func Aggregate(recs []tape.RequestRecord) tape.AggregateTimings {
 	// SlotsBusyMax comes from /slots polling in tape.RunSample and Scaling
 	// needs a single-stream baseline from the same run; neither is derivable
 	// from the records alone, so both stay 0 rather than being guessed.
+	// PeakDecodingStreams is the one aggregate figure the token timeline does
+	// carry, so it is derived here and every caller of Aggregate gets it.
+	out.PeakDecodingStreams = PeakDecodingStreams(recs)
 	return out
+}
+
+// PeakDecodingStreams is the most answered streams whose decode windows share
+// one instant: tape.AggregateTimings.PeakDecodingStreams, on its own because
+// the rounds reduction needs it per round (internal/recorder/rounds.go).
+//
+// A stream's window is [StartedAt + Tokens[1].T, StartedAt +
+// Tokens[len-2].T] — the timeline less each end, where the first token is
+// prefill's last step and the last is the stream finishing. A stream with
+// fewer than three tokens has no window, and a failed stream is not an
+// answered one. Windows that only touch at an endpoint overlap: a queue
+// handing the engine from one stream straight to the next still has both
+// decoding at that instant. 0 when no stream has a window.
+func PeakDecodingStreams(recs []tape.RequestRecord) int {
+	type edge struct {
+		t     time.Duration
+		delta int
+	}
+	var edges []edge
+	for i := range recs {
+		r := &recs[i]
+		if r.Error != "" || len(r.Tokens) < 3 {
+			continue
+		}
+		edges = append(edges,
+			edge{r.StartedAt + r.Tokens[1].T, +1},
+			edge{r.StartedAt + r.Tokens[len(r.Tokens)-2].T, -1})
+	}
+	if len(edges) == 0 {
+		return 0
+	}
+	// Starts before ends at the same instant, so a touch counts: the running
+	// count is then the streams decoding at that instant, which is the
+	// question.
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].t != edges[j].t {
+			return edges[i].t < edges[j].t
+		}
+		return edges[i].delta > edges[j].delta
+	})
+	live, peak := 0, 0
+	for _, e := range edges {
+		live += e.delta
+		if live > peak {
+			peak = live
+		}
+	}
+	return peak
 }

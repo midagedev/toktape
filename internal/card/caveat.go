@@ -53,6 +53,14 @@ type Caveat struct {
 const (
 	// CodeStreamsFailed: some of the run's streams never produced a figure.
 	CodeStreamsFailed = "streams_failed"
+	// CodeStreamsNotConcurrent: the run sent several streams at once, every
+	// one answered and none too short for a decode window, and the token
+	// timeline still never had all of them decoding at one instant
+	// (Aggregate.PeakDecodingStreams, lead, 2026-09-15). A 2-session
+	// ExLlamaV3 take did exactly that — slots busy 2, one stream decoding at
+	// a time — so the Streams row's "N × per-stream = aggregate" reads as N
+	// concurrent sessions when the aggregate is one stream behind a queue.
+	CodeStreamsNotConcurrent = "streams_not_concurrent"
 	// CodeAnswerCut: the whole generation budget went to reasoning tokens and
 	// no answer was produced.
 	CodeAnswerCut = "answer_cut"
@@ -107,7 +115,9 @@ const (
 //
 // The ranking is by what the caveat costs, not by how loud it sounds. The top
 // group is every caveat that changes what the two hero figures MEAN: a failed
-// stream is a figure the run did not produce, a cut answer is a rate with
+// stream is a figure the run did not produce, streams that never decoded
+// together make the aggregate a queue's throughput and not N streams'
+// (lead, 2026-09-15), a cut answer is a rate with
 // nothing behind it, a short generation is a sample, a short stream is a
 // sample inside the per-stream mean, a cold run's decode rate
 // is partly the disk's rate, and a short prompt makes the prefill figure not a
@@ -117,6 +127,12 @@ const (
 // arriving from disk during decode means the decode number is partly a
 // benchmark of the disk. It qualifies the headline, so it ranks with the
 // headline.
+//
+// streams_not_concurrent sits directly under streams_failed because it
+// qualifies the same Streams row one step less loudly: a failed stream means
+// the aggregate figure does not exist for part of the run, streams that
+// never shared an instant mean it exists but measures a queue. Both are the
+// server's own concurrency story contradicting the row's "N at once".
 //
 // short_stream sits directly under short_generation and above cold_cache
 // (TTP-83, 2026-09-14). It is short_generation's own question one stream
@@ -136,17 +152,18 @@ const (
 // cost is comparability with the next card. The last is a missing view.
 var caveatRank = map[string]int{
 	CodeStreamsFailed:         0,
-	CodeAnswerCut:             1,
-	CodeShortGeneration:       2,
-	CodeShortStream:           3,
-	CodeColdCache:             4,
-	CodeShortPromptForPrefill: 5,
-	CodeClientDisagrees:       6,
-	CodeRecorded:              7,
-	CodeMachineContended:      8,
-	CodeConditionsChanged:     9,
-	CodeRunCutByClock:         10,
-	CodeNoProcView:            11,
+	CodeStreamsNotConcurrent:  1,
+	CodeAnswerCut:             2,
+	CodeShortGeneration:       3,
+	CodeShortStream:           4,
+	CodeColdCache:             5,
+	CodeShortPromptForPrefill: 6,
+	CodeClientDisagrees:       7,
+	CodeRecorded:              8,
+	CodeMachineContended:      9,
+	CodeConditionsChanged:     10,
+	CodeRunCutByClock:         11,
+	CodeNoProcView:            12,
 }
 
 // MinPrefillPromptTokens is tape.MinPrefillPromptTokens, re-exported so this
@@ -234,6 +251,36 @@ func ShortPrompt(s *tape.RunSummary) bool {
 		return false
 	}
 	return shortPromptCount(promptTokens(s))
+}
+
+// streamsNotConcurrent reports whether the run sent several streams at once
+// and the token timeline never had all of them decoding at one instant, with
+// every cheaper explanation ruled out first: a failed stream is streams_failed's
+// partial run, a stream too short for a window is short_stream's, and a peak of
+// 0 is a tape older than the field — unknown, not observed. MinPredictedN is
+// the witness that window lengths were knowable at all.
+func streamsNotConcurrent(s *tape.RunSummary) bool {
+	a := s.Aggregate
+	return s.Concurrency >= 2 && a.StreamsFailed == 0 &&
+		a.MinPredictedN > 0 && a.ShortStreams == 0 &&
+		a.PeakDecodingStreams > 0 && a.PeakDecodingStreams < s.Concurrency
+}
+
+// streamsNotConcurrentText is the sentence for a run whose streams took turns.
+//
+// Two cases, because they tell the reader different things: a peak of 1 is the
+// trial's own "one stream behind a queue" and says so, and a partial peak says
+// how many of the N ever shared an instant — "at most 2 of 4" is a different
+// machine finding than "one at a time", and one sentence for both would hide it.
+func streamsNotConcurrentText(s *tape.RunSummary) string {
+	n := s.Concurrency
+	if s.Aggregate.PeakDecodingStreams == 1 {
+		return fmt.Sprintf(
+			"the %d streams decoded one at a time: the aggregate is one stream behind a queue, not %d at once", n, n)
+	}
+	return fmt.Sprintf(
+		"at most %d of %d streams decoded at once: the aggregate is not %d concurrent streams",
+		s.Aggregate.PeakDecodingStreams, n, n)
 }
 
 // shortStreamText says how much of the per-stream rate is a sample.
@@ -337,6 +384,9 @@ func Caveats(s *tape.RunSummary) []Caveat {
 		add(CodeStreamsFailed, SeverityFigure, fmt.Sprintf(
 			"%d of %d streams failed: the aggregate is over the ones that finished",
 			n, streamsSent(s)))
+	}
+	if streamsNotConcurrent(s) {
+		add(CodeStreamsNotConcurrent, SeverityFigure, streamsNotConcurrentText(s))
 	}
 	if w := answerCutWarning(s); w != "" {
 		add(CodeAnswerCut, SeverityFigure, w)

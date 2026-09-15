@@ -314,10 +314,13 @@ func (st *state) roundFaults(mem *tape.MemorySummary, timeline []uint64) {
 //
 // The aggregate is server.Aggregate over every record — totals, failures, the
 // per-stream mean and the TTFT percentiles need no correction — with its three
-// windows replaced by the sums of the rounds' own windows. server.Aggregate
-// stretches a window from the first round's start to the last round's last
-// token, so the pauses between rounds, and every later round's prefill, would
-// land in WallMs and in both rate denominators (TestReduceRoundsLeavesTheGapsOut).
+// windows replaced by the sums of the rounds' own windows, and its peak
+// decoding streams by the lowest per-round peak. server.Aggregate stretches a
+// window from the first round's start to the last round's last token, so the
+// pauses between rounds, and every later round's prefill, would land in WallMs
+// and in both rate denominators (TestReduceRoundsLeavesTheGapsOut); its peak
+// counts two rounds' decoding as one instant, which rounds never share
+// (TestReduceRoundsPeakIsTheLowestRoundPeak).
 // A round's window is recovered from its own rate as tokens / rate, which is
 // exactly how server.Aggregate formed that rate. Streams is N, the streams sent
 // at once, because the card prints "N × per-stream = aggregate".
@@ -338,11 +341,18 @@ func reduceRounds(recs []tape.RequestRecord, names []string, streams int) (tape.
 		wallMs                   float64
 		decodeSec, promptSec     float64
 		decodeTokens, promptToks int
+		peakStreams              int
 	)
 	per := make([]tape.RoundSummary, len(names))
 	for k, rr := range byRound {
 		a := server.Aggregate(rr)
 		wallMs += a.WallMs
+		// The run's peak is the lowest per-round peak above zero: one serial
+		// round already makes the aggregate a queue, and 0 when no round had
+		// a window is the schema's unknown.
+		if p := a.PeakDecodingStreams; p > 0 && (peakStreams == 0 || p < peakStreams) {
+			peakStreams = p
+		}
 		if a.AggregatePredictedPerSecond > 0 {
 			decodeSec += float64(a.TotalPredictedN) / a.AggregatePredictedPerSecond
 			decodeTokens += a.TotalPredictedN
@@ -386,6 +396,7 @@ func reduceRounds(recs []tape.RequestRecord, names []string, streams int) (tape.
 	}
 
 	agg.WallMs = wallMs
+	agg.PeakDecodingStreams = peakStreams
 	agg.AggregatePredictedPerSecond, agg.AggregatePromptPerSecond = 0, 0
 	if decodeSec > 0 {
 		agg.AggregatePredictedPerSecond = float64(decodeTokens) / decodeSec

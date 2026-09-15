@@ -464,6 +464,20 @@ type AggregateTimings struct {
 	TTFTp95Ms                   float64 `json:"ttft_p95_ms"`
 	// SlotsBusyMax is the highest number of busy slots observed via /slots.
 	SlotsBusyMax int `json:"slots_busy_max,omitempty"`
+	// PeakDecodingStreams is the most answered streams that were decoding at
+	// one instant (lead, 2026-09-15). SlotsBusyMax is the server's word;
+	// this is the token timeline's. They part when an engine takes N requests
+	// into N slots but runs one job at a time. A 2-session ExLlamaV3 take did
+	// that: slots busy 2, stream 1 decoded 4.3 s → 101.5 s, stream 0's
+	// first token came at 105.2 s, and the aggregate was one stream behind
+	// a queue. A stream's decode window runs from its second token to its
+	// second-to-last (RequestRecord.StartedAt + TokenEvent.T), so a stream
+	// starting on the token another one ends on is not overlap. A stream
+	// with fewer than three tokens has no window. With rounds it is the lowest
+	// per-round peak, because one serial round already makes the aggregate a
+	// queue. 0 = unknown: a tape older than the field, or no stream had a
+	// window.
+	PeakDecodingStreams int `json:"peak_decoding_streams,omitempty"`
 	// Scaling = AggregatePredictedPerSecond / (single-stream rate * Streams)
 	// when a single-stream baseline exists in the same run; 0 when unknown.
 	Scaling float64 `json:"scaling,omitempty"`

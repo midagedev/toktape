@@ -80,3 +80,24 @@ func TestExplainCaveatsSurvivesAnEmptySummary(t *testing.T) {
 		}
 	}
 }
+
+// TestExplainCaveatsPeakDecodingStreamsRow (lead, 2026-09-15): the reading
+// prints "?" for a figure an old tape never carried and the numbers when it
+// did, beside the slots figure it parts from — "why did this card not warn"
+// is answered by the row, not by re-deriving the sweep.
+func TestExplainCaveatsPeakDecodingStreamsRow(t *testing.T) {
+	s := clean(t)
+	s.Concurrency = 2
+	// A tape older than both fields: neither the peak nor the slots poll.
+	s.Aggregate.SlotsBusyMax = 0
+	if line := lineFor(t, ExplainCaveats(s), CodeStreamsNotConcurrent); !strings.Contains(line,
+		"peak_decoding_streams ? of 2 sent at once, slots busy max ?") {
+		t.Errorf("a tape older than both fields reads %q", line)
+	}
+	s.Aggregate.SlotsBusyMax = 2
+	s.Aggregate.PeakDecodingStreams = 1
+	if line := lineFor(t, ExplainCaveats(s), CodeStreamsNotConcurrent); !strings.Contains(line,
+		"peak_decoding_streams 1 of 2 sent at once, slots busy max 2") {
+		t.Errorf("the recorded figures read %q", line)
+	}
+}

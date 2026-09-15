@@ -46,6 +46,11 @@ func ExplainCaveats(s *tape.RunSummary) string {
 	readings := []struct{ code, reading string }{
 		{CodeStreamsFailed, fmt.Sprintf("%d failed of %d streams",
 			s.Aggregate.StreamsFailed, streamsSent(s))},
+		// The timeline's peak beside the server's own slots figure it parts
+		// from, both "?" on a tape older than the fields.
+		{CodeStreamsNotConcurrent, fmt.Sprintf("peak_decoding_streams %s of %d sent at once, slots busy max %s",
+			orUnknown(countOrEmpty(s.Aggregate.PeakDecodingStreams)), s.Concurrency,
+			orUnknown(countOrEmpty(s.Aggregate.SlotsBusyMax)))},
 		{CodeAnswerCut, fmt.Sprintf("%d of %d predicted tokens were reasoning",
 			t.ReasoningN, t.PredictedN)},
 		{CodeShortGeneration, fmt.Sprintf("predicted_n %d, recorded label %q, floor %d",

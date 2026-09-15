@@ -66,6 +66,17 @@ func caveatCases() []caveatCase {
 		mutate: func(s *tape.RunSummary) { s.Aggregate.Streams, s.Aggregate.StreamsFailed = 8, 1 },
 		onCard: "1 of 8 streams failed",
 	}, {
+		code: CodeStreamsNotConcurrent,
+		// Two streams sent at once, both answered, neither too short for a
+		// window — and the token timeline says they took turns
+		// (Aggregate.PeakDecodingStreams, 2026-09-15).
+		mutate: func(s *tape.RunSummary) {
+			s.Concurrency = 2
+			s.Aggregate.Streams, s.Aggregate.MinPredictedN = 2, 100
+			s.Aggregate.PeakDecodingStreams = 1
+		},
+		onCard: "decoded one at a time",
+	}, {
 		code:   CodeAnswerCut,
 		mutate: func(s *tape.RunSummary) { s.Timings.ReasoningN = s.Timings.PredictedN },
 		onCard: "answer cut",
@@ -430,5 +441,80 @@ func TestShortPromptUsesTheWholePrompt(t *testing.T) {
 	s.Timings.PromptN, s.Timings.CacheN = 0, 0
 	if ShortPrompt(s) {
 		t.Error("a prompt nobody counted is unknown, not short")
+	}
+}
+
+// TestStreamsNotConcurrentTextAndGates (lead, 2026-09-15): two sentences — the
+// trial's own "one at a time" when the peak is 1, the partial one when it is
+// higher — and every gate that must hold the caveat back. A caveat that fires
+// on a run the timeline does not contradict is how a warning block loses the
+// reader, so each gate is its own case.
+func TestStreamsNotConcurrentTextAndGates(t *testing.T) {
+	// twoStreams is the trial's summary shape: two streams sent at once, both
+	// answered, neither too short for a window.
+	twoStreams := func(mutate func(*tape.RunSummary)) []Caveat {
+		s := clean(t)
+		s.Concurrency = 2
+		s.Aggregate.Streams, s.Aggregate.MinPredictedN = 2, 100
+		mutate(s)
+		return Caveats(s)
+	}
+	has := func(cs []Caveat, code string) bool {
+		for _, c := range cs {
+			if c.Code == code {
+				return true
+			}
+		}
+		return false
+	}
+
+	cs := twoStreams(func(s *tape.RunSummary) { s.Aggregate.PeakDecodingStreams = 1 })
+	if want := "the 2 streams decoded one at a time: the aggregate is one stream behind a queue, not 2 at once"; len(cs) != 1 || cs[0].Text != want {
+		t.Errorf("peak 1 of 2: Caveats = %+v, want exactly that one sentence %q", cs, want)
+	}
+	if cs[0].Severity != SeverityFigure {
+		t.Errorf("severity = %q, want figure: the aggregate row's claim is what is wrong", cs[0].Severity)
+	}
+	cs = twoStreams(func(s *tape.RunSummary) {
+		s.Concurrency = 3
+		s.Aggregate.PeakDecodingStreams = 2
+	})
+	if want := "at most 2 of 3 streams decoded at once: the aggregate is not 3 concurrent streams"; len(cs) != 1 || cs[0].Text != want {
+		t.Errorf("peak 2 of 3: Caveats = %+v, want exactly that one sentence %q", cs, want)
+	}
+
+	// The gates. Some raise another code instead — a failed stream is
+	// streams_failed's partial run, a short stream is short_stream's — so the
+	// assertion is that THIS code stays out, not that the list is empty.
+	for name, mutate := range map[string]func(*tape.RunSummary){
+		"the peak equals the concurrency":            func(s *tape.RunSummary) { s.Aggregate.PeakDecodingStreams = 2 },
+		"the peak is 0, a tape older than the field": func(s *tape.RunSummary) {},
+		"a stream failed":                            func(s *tape.RunSummary) { s.Aggregate.StreamsFailed = 1 },
+		"a stream is too short for a window":         func(s *tape.RunSummary) { s.Aggregate.MinPredictedN, s.Aggregate.ShortStreams = 10, 1 },
+		"the minimum itself was never recorded":      func(s *tape.RunSummary) { s.Aggregate.MinPredictedN = 0 },
+		"the run sent one stream":                    func(s *tape.RunSummary) { s.Concurrency = 1 },
+	} {
+		if cs := twoStreams(mutate); has(cs, CodeStreamsNotConcurrent) {
+			t.Errorf("%s: the caveat fired on %+v", name, cs)
+		}
+	}
+}
+
+// TestStreamsNotConcurrentRanksDirectlyUnderStreamsFailed: it qualifies the
+// same Streams row a failed stream does, one step less loudly — the figure
+// exists, but it is a queue's. The ranks below it keep their order and stay
+// consecutive, or the listing and the caveat line disagree about what outranks
+// what.
+func TestStreamsNotConcurrentRanksDirectlyUnderStreamsFailed(t *testing.T) {
+	want := []string{
+		CodeStreamsFailed, CodeStreamsNotConcurrent, CodeAnswerCut, CodeShortGeneration,
+		CodeShortStream, CodeColdCache, CodeShortPromptForPrefill, CodeClientDisagrees,
+		CodeRecorded, CodeMachineContended, CodeConditionsChanged, CodeRunCutByClock,
+		CodeNoProcView,
+	}
+	for i, c := range want {
+		if caveatRank[c] != i {
+			t.Errorf("caveatRank[%s] = %d, want %d", c, caveatRank[c], i)
+		}
 	}
 }
