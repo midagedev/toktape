@@ -174,6 +174,16 @@ func Aggregate(recs []tape.RequestRecord) tape.AggregateTimings {
 		if n < tape.MinDecodeTokens {
 			out.ShortStreams++
 		}
+		// How many answered streams the server's own figure did not confirm
+		// within tape.RateTolerance (tape.AggregateTimings.DisagreeingStreams):
+		// the run-level flag above one stream describes the means, so this
+		// count is where the per-stream fact survives. Either rate at 0 is an
+		// absence, not a disagreement — the same guard the card's
+		// clientDisagrees applies to the summary's own figures.
+		if r.Timings.PredictedPerSecond > 0 && r.Timings.ClientPredictedPerSecond > 0 &&
+			!r.Timings.ClientAgreesWithServer {
+			out.DisagreeingStreams++
+		}
 		out.TotalPromptN += r.Timings.PromptN
 		rate := r.Timings.PredictedPerSecond
 		if rate == 0 {

@@ -478,6 +478,17 @@ type AggregateTimings struct {
 	// queue. 0 = unknown: a tape older than the field, or no stream had a
 	// window.
 	PeakDecodingStreams int `json:"peak_decoding_streams,omitempty"`
+	// DisagreeingStreams is how many answered streams had a client rate the
+	// server's own figure did not confirm within RateTolerance (lead,
+	// 2026-09-15). The run-level TimingsSummary above one stream is a mean,
+	// and a mean of agreeing and disagreeing streams can itself agree: a
+	// two-stream take read 11.79 against 11.49 on one stream (2.6 %) and
+	// 11.57 against 11.58 on the other, and the means agreed to 1.3 %. The
+	// caveat used to fire on the AND of the per-stream flags while printing
+	// those means, so the card contradicted its own numbers. This is the
+	// count the caveat says out loud instead. 0 = every answered stream
+	// agreed, or a tape older than the field.
+	DisagreeingStreams int `json:"disagreeing_streams,omitempty"`
 	// Scaling = AggregatePredictedPerSecond / (single-stream rate * Streams)
 	// when a single-stream baseline exists in the same run; 0 when unknown.
 	Scaling float64 `json:"scaling,omitempty"`

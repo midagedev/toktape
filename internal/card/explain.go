@@ -63,9 +63,14 @@ func ExplainCaveats(s *tape.RunSummary) string {
 			s.Cache.Label, formatFloat1(s.Memory.MajFaultsPerToken))},
 		{CodeShortPromptForPrefill, fmt.Sprintf("%d prompt tokens, floor %d",
 			promptTokens(s), MinPrefillPromptTokens)},
-		{CodeClientDisagrees, fmt.Sprintf("server %s, client %s, agrees %v, tolerance %s",
+		// The per-stream count beside the run-level flag it now decides
+		// independently of (lead, 2026-09-15): the flag describes the means,
+		// so both numbers are needed to answer "why did this card warn" — and
+		// "why did it not" when the means agree and a stream does not.
+		{CodeClientDisagrees, fmt.Sprintf("server %s, client %s, agrees %v, %d of %d streams disagree, tolerance %s",
 			formatRate(t.PredictedPerSecond), formatRate(t.ClientPredictedPerSecond),
-			t.ClientAgreesWithServer, formatPct(tape.RateTolerance))},
+			t.ClientAgreesWithServer, s.Aggregate.DisagreeingStreams, answeredStreams(s),
+			formatPct(tape.RateTolerance))},
 		{CodeRecorded, fmt.Sprintf("%d recorded warning(s)", len(s.Warnings))},
 		{CodeMachineContended, fmt.Sprintf("contended %v, %d reason(s), loadavg1 %s",
 			s.Contention.Contended, len(s.Contention.Reasons), formatFloat1(s.Contention.LoadAvg1))},

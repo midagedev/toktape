@@ -358,6 +358,36 @@ func clientDisagrees(s *tape.RunSummary) bool {
 	return !t.ClientAgreesWithServer
 }
 
+// clientDisagreesText is the sentence for CodeClientDisagrees, which is two
+// facts wearing one code (lead, 2026-09-15): the run-level figures disagree,
+// or they agree while some of the streams behind their mean did not. Above one
+// stream Timings is a mean, and a mean of disagreeing and agreeing streams can
+// itself agree — the real tape this split is about read 11.7 against 11.5 at
+// run level (1.3 %, inside the tolerance) while one of its two streams read
+// 11.79 against 11.49 (2.6 %). One sentence for both made the caveat
+// contradict its own numbers, so the run-level case keeps the sentence that
+// names the run-level figures and the per-stream case says the count the
+// schema field carries. The run-level disagreement outranks: it is the one
+// that qualifies the figures the card actually prints.
+func clientDisagreesText(s *tape.RunSummary) string {
+	if clientDisagrees(s) {
+		return fmt.Sprintf(
+			"the client measured %s where the server reported %s, over the %s tolerance",
+			formatRateUnit(s.Timings.ClientPredictedPerSecond),
+			formatRateUnit(s.Timings.PredictedPerSecond),
+			formatPct(tape.RateTolerance))
+	}
+	// 0 is every answered stream agreed, or a tape older than the field —
+	// either way there is no per-stream fact to say.
+	d := s.Aggregate.DisagreeingStreams
+	if d <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"%d of %d streams measured a rate the server did not confirm within %s: the card's figures are the mean over the streams",
+		d, answeredStreams(s), formatPct(tape.RateTolerance))
+}
+
 // noProcView reports whether the server process was never read through /proc.
 // The same test internal/card/png/content.go's hasProcMem uses, so the text
 // card, the image and -o json agree about whether the memory figures exist.
@@ -409,12 +439,8 @@ func Caveats(s *tape.RunSummary) []Caveat {
 			"short prompt: %d prompt tokens is under %d, so the prefill rate is not one",
 			promptTokens(s), MinPrefillPromptTokens))
 	}
-	if clientDisagrees(s) {
-		add(CodeClientDisagrees, SeverityRun, fmt.Sprintf(
-			"the client measured %s where the server reported %s, over the %s tolerance",
-			formatRateUnit(s.Timings.ClientPredictedPerSecond),
-			formatRateUnit(s.Timings.PredictedPerSecond),
-			formatPct(tape.RateTolerance)))
+	if text := clientDisagreesText(s); text != "" {
+		add(CodeClientDisagrees, SeverityRun, text)
 	}
 	for _, w := range s.Warnings {
 		if strings.TrimSpace(w) == "" {
@@ -464,6 +490,13 @@ func streamsSent(s *tape.RunSummary) int {
 		return n
 	}
 	return s.Concurrency
+}
+
+// answeredStreams is how many streams produced a figure: the sent count less
+// the failures. The denominator of a per-stream count — a failed stream has no
+// rate to disagree, so it is not one of the streams the caveat counts over.
+func answeredStreams(s *tape.RunSummary) int {
+	return streamsSent(s) - s.Aggregate.StreamsFailed
 }
 
 // runCutByClockText is the sentence for a run the wall-clock budget ended
@@ -526,16 +559,7 @@ func caveatLines(s *tape.RunSummary) []string {
 	}
 	line := cs[0].Text
 	if len(cs) > 1 {
-		rest := cs[1:]
-		codes := make([]string, 0, len(rest))
-		for _, c := range rest {
-			if len(codes) == maxCaveatCodesListed {
-				codes = append(codes, fmt.Sprintf("+%d more", len(rest)-maxCaveatCodesListed))
-				break
-			}
-			codes = append(codes, c.Code)
-		}
-		line = fmt.Sprintf("%d caveats — %s · %s", len(cs), line, strings.Join(codes, " · "))
+		line = fmt.Sprintf("%d caveats — %s · %s", len(cs), line, strings.Join(listedCaveatCodes(cs[1:]), " · "))
 	}
 	// Wrapped word by word, never truncated: a caveat cut off mid-sentence is
 	// worse than no caveat (the rule internal/card/conditions.go states for
@@ -548,6 +572,39 @@ func caveatLines(s *tape.RunSummary) []string {
 			continue
 		}
 		out = append(out, "  "+l)
+	}
+	return out
+}
+
+// listedCaveatCodes is the rest of the caveat line: each code once, in the
+// rank order the list gave them, with a count when the code repeats (lead,
+// 2026-09-15). Two recorder warnings are two caveats — `-o json` keeps both —
+// but the real tape's line read "recorded · recorded", which spends two of the
+// line's slots saying one thing. The count is the "×" the Streams row already
+// spells ("2 × 11.5 tok/s"), so "recorded ×2" reads as the same kind of
+// plural. maxCaveatCodesListed caps the codes, not the caveats: "%d caveats"
+// stays the true count, and a repeated code costs one slot instead of pushing
+// a distinct warning past the cap.
+func listedCaveatCodes(rest []Caveat) []string {
+	counts := map[string]int{}
+	var order []string
+	for _, c := range rest {
+		if _, dup := counts[c.Code]; !dup {
+			order = append(order, c.Code)
+		}
+		counts[c.Code]++
+	}
+	out := make([]string, 0, len(order))
+	for _, code := range order {
+		if len(out) == maxCaveatCodesListed {
+			out = append(out, fmt.Sprintf("+%d more", len(order)-maxCaveatCodesListed))
+			break
+		}
+		if n := counts[code]; n > 1 {
+			out = append(out, fmt.Sprintf("%s ×%d", code, n))
+			continue
+		}
+		out = append(out, code)
 	}
 	return out
 }

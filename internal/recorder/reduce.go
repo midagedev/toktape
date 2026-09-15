@@ -133,7 +133,6 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 		out tape.TimingsSummary
 		n   float64
 	)
-	agrees := true
 	// The draft figures are pooled rather than averaged (tape.TimingsSummary,
 	// TTP-30): accepted over drafted is a ratio, and the run's acceptance rate
 	// is the sum of the numerators over the sum of the denominators. Averaging
@@ -165,9 +164,6 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 		out.ITLp95Ms += t.ITLp95Ms
 		out.ITLp99Ms += t.ITLp99Ms
 		out.EffectiveBandwidthBytesPerSec += t.EffectiveBandwidthBytesPerSec
-		if !t.ClientAgreesWithServer {
-			agrees = false
-		}
 		if t.DraftN != nil {
 			draftReported = true
 			draftN += *t.DraftN
@@ -199,7 +195,18 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 	out.ITLp95Ms /= n
 	out.ITLp99Ms /= n
 	out.EffectiveBandwidthBytesPerSec = int64(float64(out.EffectiveBandwidthBytesPerSec)/n + 0.5)
-	out.ClientAgreesWithServer = agrees
+	// The agreement flag describes the figures it is printed beside, and above
+	// one stream those are the means, not the streams' own verdicts ANDed
+	// together. The AND was wrong because a mean of disagreeing and agreeing
+	// streams can itself agree: the two-stream take in
+	// tape.AggregateTimings.DisagreeingStreams' doc read 11.79 against 11.49
+	// on one stream (2.6 %) and 11.57 against 11.58 on the other, so the means
+	// agreed to 1.3 % while the flag said they did not — a caveat that
+	// contradicted the numbers it printed. The per-stream fact is now said as
+	// the count that field carries. RatesAgree keeps the absent-rate case
+	// false, as the AND did: a rate that was never measured is not an
+	// agreement.
+	out.ClientAgreesWithServer = server.RatesAgree(out.ClientPredictedPerSecond, out.PredictedPerSecond)
 	out.DecodeLabel = "sample"
 	if out.PredictedN >= tape.MinDecodeTokens {
 		out.DecodeLabel = "decode"
