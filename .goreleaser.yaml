@@ -90,19 +90,26 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **A clip can skip the wait for prefill without speeding anything up.**
-    `toktape render <tape> --prefill-lead 3s` opens the clip three seconds
-    before the first token instead of at the run's start. Nothing is
-    compressed: every frame that is in the clip plays at 1:1, and the tile's
-    clock is still measured from the run's start, so the clip opens on the
-    true elapsed time and says for itself how much of the wait is not shown.
-    On a box whose prefill takes ten seconds, that is the difference between a
-    clip that opens on a spinner and one that opens on tokens.
+    **The server no longer has to be llama.cpp.** A server that answers
+    `/props` with an `engine` object — its name and version, the model's
+    format, quant and shape, and which bytes sit on which device — is recorded
+    from that report: no GGUF is opened and no command line is parsed. The
+    card then names the engine that ran, prints the model file's own name, and
+    shows the engine's flags verbatim. The first one recorded this way is
+    ExLlamaV3 1.5.0 serving a 154 GiB EXL3 model with per-expert placement
+    across two GPUs and host RAM.
 
-    This repo's own hero is rendered that way —
-    [33 s](https://drive.google.com/file/d/1Z07G3-fiRBpMu_T9efOdb_vmCobCNaLD/view?usp=drivesdk),
-    where the same run from its start is 42 s. The recording is unchanged from
-    v0.2.0; only the window onto it moved.
+    **What such an engine does not report now prints as `?`.** Figures that
+    are only meaningful for a memory-mapped GGUF are withheld rather than
+    estimated: no RAM-versus-disk split of the host's share, and no single
+    bandwidth over a placement that spans both the host bus and two GPU buses.
+    `toktape card --explain` says which figure was refused and why.
+
+    **A take whose streams took turns says so.** `--sessions N` asks for N
+    concurrent streams, but a server can accept N and still run one at a time.
+    The card now reads that off its own token timeline, not the server's slot
+    count, and a run whose streams never decoded together carries a caveat
+    instead of an aggregate that looks like N streams and measures a queue.
 
     Coming from v0.1.0? Read the
     [v0.2.0 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.0)
