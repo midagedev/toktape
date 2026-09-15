@@ -1,21 +1,21 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────────────────────────┐
-│ stream 1/8                                answer │ stream 2/8                                 answer │ PLACEMENT ─────────────────────── │
-│ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 630 ms · 104/320    │ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 690 ms · 103/320     │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│                                                  │ 컨텍스트를 네 배로 늘리면 갑자기 자리가           │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-│ Nothing in there is clever, and that is          │ 모자란다. 계산은 어렵지 않다. 레이어 수에 키와    │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ exactly the point. A dense seventy billion       │ 값 두 벌을 곱하고, 거기에 KV 헤드가 차지하는      │      ▆ weights  ▆ kv  ▆ buf       │
+│ stream 1/8                                answer │ stream 2/8                                 answer │ SPEED ─────────────────────────── │
+│ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 630 ms · 104/320    │ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 690 ms · 103/320     │ decode                 72.8 tok/s │
+│                                                  │ 컨텍스트를 네 배로 늘리면 갑자기 자리가           │ prefill                4880 tok/s │
+│ Nothing in there is clever, and that is          │ 모자란다. 계산은 어렵지 않다. 레이어 수에 키와    │ ttft           810 ms · 25% cache │
+│ exactly the point. A dense seventy billion       │ 값 두 벌을 곱하고, 거기에 KV 헤드가 차지하는      │ 8 streams          9.1 tok/s each │
 │ parameter model at Q4_K_M is about forty two     │ 채널 수와 컨텍스트 토큰 수를 곱한 다음, 원소      │                                   │
-│ gigabytes of weights, and every single one of    │ 하나가 몇 바이트인지를 곱하면 된다. 팔십          │ MEMORY ────────────────────────── │
-│ those bytes is read again for every token you    │ 레이어짜리 칠십억 단위 모델이 만 육천 토큰을      │ rss         1.2G file        0.8G │
-│ generate. That one sentence explains▍            │ 잡으면 반정밀도로는 오 기가바이트가 넘고,▍        │ virt       48.0G anon        0.4G │
-├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤ maj/tok                       0.0 │
-│ stream 3/8                                answer │ stream 4/8                                 answer │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ gigabytes of weights, and every single one of    │ 하나가 몇 바이트인지를 곱하면 된다. 팔십          │ PLACEMENT ─────────────────────── │
+│ those bytes is read again for every token you    │ 레이어짜리 칠십억 단위 모델이 만 육천 토큰을      │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
+│ generate. That one sentence explains▍            │ 잡으면 반정밀도로는 오 기가바이트가 넘고,▍        │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ stream 3/8                                answer │ stream 4/8                                 answer │      ▆ weights  ▆ kv  ▆ buf       │
 │ 9.1 tok/s  ▇█▇██▇▇▇██▇▇ ttft 750 ms · 103/320    │ 9.1 tok/s  ▇█▇██▇▇▇██▇▇ ttft 810 ms · 102/320     │                                   │
-│ slots are busy it reads that same set once and   │ first position that differs ends the reuse, and   │ SPEED ─────────────────────────── │
-│ produces eight tokens from it, one for each      │ everything after it is evaluated again, however   │ prefill                4880 tok/s │
-│ sequence, because the matrix multiply is         │ small the difference was. One extra space in      │ decode                 72.8 tok/s │
-│ batched across them. The expensive part is       │ your system message, a timestamp you helpfully    │ ttft           810 ms · 25% cache │
-│ amortised eight ways. What is not amortised is   │ injected, a tool list whose order comes out of    │ 8 streams          9.1 tok/s each │
+│ slots are busy it reads that same set once and   │ first position that differs ends the reuse, and   │ MEMORY ────────────────────────── │
+│ produces eight tokens from it, one for each      │ everything after it is evaluated again, however   │ rss         1.2G file        0.8G │
+│ sequence, because the matrix multiply is         │ small the difference was. One extra space in      │ virt       48.0G anon        0.4G │
+│ batched across them. The expensive part is       │ your system message, a timestamp you helpfully    │ maj/tok                       0.0 │
+│ amortised eight ways. What is not amortised is   │ injected, a tool list whose order comes out of    │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ the attention step, where every sequence▍        │ a map and therefore changes between▍              │                                   │
 ├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤ RESOURCES ────────── contended no │
 │ stream 5/8                                answer │ stream 6/8                                 answer │ CPU       6%  1.9 cores  load 3.1 │

@@ -1,21 +1,21 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
-│ stream 1/8                           done │ stream 2/8                           done │ PLACEMENT ────────────────── │
-│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 296/320 │ 9.1 tok/s  █▇▇███▇▇ ttft 690 ms · 301/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
-│ rest while the first waits. Each token    │ 사용량을 나란히 보여 주는 이유도          │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
-│ therefore takes the sum of the two        │ 그것이다. 두 값이 어긋나면 설정이         │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ halves rather than the maximum, which     │ 생각과 다르게 잡혀 있다는 뜻이고,         │      ▆ weights  ▆ kv  ▆ buf  │
+│ stream 1/8                           done │ stream 2/8                           done │ SPEED ────────────────────── │
+│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 296/320 │ 9.1 tok/s  █▇▇███▇▇ ttft 690 ms · 301/320 │ decode            72.9 tok/s │
+│ rest while the first waits. Each token    │ 사용량을 나란히 보여 주는 이유도          │ prefill           2927 tok/s │
+│ therefore takes the sum of the two        │ 그것이다. 두 값이 어긋나면 설정이         │ ttft      810 ms · 25% cache │
+│ halves rather than the maximum, which     │ 생각과 다르게 잡혀 있다는 뜻이고,         │ 8 streams     9.1 tok/s each │
 │ is why adding a card raises the memory    │ 그때는 속도를 재기 전에 배치부터 고쳐야   │                              │
-│ you                                       │ 한다. 실제로 자리가 모자랄 때 손대는      │ MEMORY ───────────────────── │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ rss       1.2G file     0.8G │
-│ stream 3/8                           done │ stream 4/8                           done │ virt     48.0G anon     0.4G │
-│ 9.1 tok/s  ▇▇█▇██▇▇ ttft 750 ms · 306/320 │ 9.1 tok/s  █▇███▇▇█ ttft 810 ms · 311/320 │ maj/tok                  0.0 │
-│ a slot is doing that it competes with     │ preamble, send them to the same server    │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ you                                       │ 한다. 실제로 자리가 모자랄 때 손대는      │ PLACEMENT ────────────────── │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
+│ stream 3/8                           done │ stream 4/8                           done │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
+│ 9.1 tok/s  ▇▇█▇██▇▇ ttft 750 ms · 306/320 │ 9.1 tok/s  █▇███▇▇█ ttft 810 ms · 311/320 │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ a slot is doing that it competes with     │ preamble, send them to the same server    │      ▆ weights  ▆ kv  ▆ buf  │
 │ the sessions already generating. That     │ so they share the slot that holds it.     │                              │
-│ is why time to first token spreads out    │ And when you cannot avoid a change,       │ SPEED ────────────────────── │
-│ as the slots fill, and why a burst of     │ make it late rather than early, because   │ prefill           2927 tok/s │
-│ arrivals makes ongoing streams            │ the cost is not the size                  │ decode            72.9 tok/s │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ ttft      810 ms · 25% cache │
-│ stream 5/8                           done │ stream 6/8                           done │ 8 streams     9.1 tok/s each │
+│ is why time to first token spreads out    │ And when you cannot avoid a change,       │ MEMORY ───────────────────── │
+│ as the slots fill, and why a burst of     │ make it late rather than early, because   │ rss       1.2G file     0.8G │
+│ arrivals makes ongoing streams            │ the cost is not the size                  │ virt     48.0G anon     0.4G │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ maj/tok                  0.0 │
+│ stream 5/8                           done │ stream 6/8                           done │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ 9.1 tok/s  ▇███▇▇██ ttft 870 ms · 316/320 │ 9.1 tok/s  ▇██▇▇█▇█ ttft 930 ms · 300/320 │                              │
 │ 가운데 값을 쓰고, 세 값이 서로 많이       │ are unpacked on the fly and multiplied    │ RESOURCES ───── contended no │
 │ 다르면 그 사실 자체를 기록하라.           │ at a higher precision, so the speed       │ CPU  0%  0.1 cores  load 3.1 │

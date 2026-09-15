@@ -15,8 +15,8 @@ import (
 // resources were doing while it did.
 //
 // It always returns exactly rows lines of exactly cw columns. Sections are
-// ordered so the reader's eye runs placement → memory → speed → resources,
-// which is the causal order of the question the tool exists to answer.
+// ordered so the measured result leads (user, 2026-09-15): speed first, then
+// the machine that produced it — placement, memory, resources.
 func rightPane(m Model, th Theme, t time.Duration, cw, rows int) []string {
 	lines, _ := rightPaneLines(m, th, t, cw, rows)
 	return fitRows(lines, strings.Repeat(" ", cw), rows)
@@ -71,12 +71,12 @@ func buildRightPane(m Model, th Theme, t time.Duration, cw, h int) []string {
 		out = append(out, l.String())
 	}
 
+	section("SPEED", "", th.dim)
+	out = append(out, speedRows(m, th, t, cw)...)
 	section("PLACEMENT", "", th.dim)
 	out = append(out, placementRows(m, th, t, cw)...)
 	section("MEMORY", "", th.dim)
 	out = append(out, memoryRows(m, th, t, cw)...)
-	section("SPEED", "", th.dim)
-	out = append(out, speedRows(m, th, t, cw)...)
 	// A contended run is tagged amber rather than hidden (handover lesson 6).
 	contended := m.Summary.Contention.Contended
 	tag := "contended no"
@@ -147,9 +147,10 @@ func placementRows(m Model, th Theme, t time.Duration, cw int) []string {
 		l := newLine(th, cw)
 		l.add(th.dim, pad("vram", labelW))
 		// Three shades descending, none of them the accent itself: the bar
-		// is a proportion, and the pane's lit figure is the decode rate four
-		// rows down (TTP-28). Weights is the largest share and the lightest
-		// shade, so the bar reads in the same order as the legend under it.
+		// is a proportion, and the pane's lit figure is the decode row that
+		// leads the SPEED section above it (TTP-28). Weights is the largest
+		// share and the lightest shade, so the bar reads in the same order as
+		// the legend under it.
 		l.add(th.accentMuted, segs[0])
 		l.add(th.accentLow, segs[1])
 		l.add(th.dim, segs[2])
@@ -380,31 +381,13 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	// per-stream mean is the "each" row under them. The tiles carry every
 	// stream's own rate already.
 	many := m.Summary.Concurrency > 1
-	prefill := livePromptRate(m, many)
-	if m.Done {
-		prefill = m.Summary.Timings.PromptPerSecond
-		if many {
-			prefill = m.Summary.Aggregate.AggregatePromptPerSecond
-		}
-		if prefill <= 0 {
-			prefill = m.Summary.Aggregate.AggregatePromptPerSecond
-		}
-	}
-	l := newLine(th, cw)
-	l.add(th.dim, "prefill ")
-	if m.prefilling() {
-		l.add(th.accent, spinnerAt(t))
-	} else {
-		l.space(1)
-	}
-	val := fmtRate(prefill) + " tok/s"
-	l.gapTo(width(val))
-	l.add(th.text, val)
-	out = append(out, l.String())
 
 	// The decode rate is a step function of token arrivals, so the tween needs
 	// no stored "previous value": the previous figure is the same reduction
 	// over one token fewer, and the step time is that token's arrival.
+	//
+	// The row leads the section (2026-09-15): the measured result comes first,
+	// and the prefill that produced it reads under it.
 	prevAgg, curAgg, since := m.decodeRateAt(t)
 	agg := ease(prevAgg, curAgg, since, t)
 	n := len(m.Streams)
@@ -440,6 +423,28 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 		lead = agg
 	}
 	out = append(out, kvRow(th, cw, label, fmtRate(lead)+" tok/s", th.accentBold))
+
+	prefill := livePromptRate(m, many)
+	if m.Done {
+		prefill = m.Summary.Timings.PromptPerSecond
+		if many {
+			prefill = m.Summary.Aggregate.AggregatePromptPerSecond
+		}
+		if prefill <= 0 {
+			prefill = m.Summary.Aggregate.AggregatePromptPerSecond
+		}
+	}
+	l := newLine(th, cw)
+	l.add(th.dim, "prefill ")
+	if m.prefilling() {
+		l.add(th.accent, spinnerAt(t))
+	} else {
+		l.space(1)
+	}
+	val := fmtRate(prefill) + " tok/s"
+	l.gapTo(width(val))
+	l.add(th.text, val)
+	out = append(out, l.String())
 
 	ttft := liveTTFT(m)
 	if m.Done {

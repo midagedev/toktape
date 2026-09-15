@@ -1,21 +1,21 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
-│ stream 1/8                         answer │ stream 2/8                         answer │ PLACEMENT ────────────────── │
-│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 104/320 │ 9.1 tok/s  ██▇▇▇██▇ ttft 690 ms · 103/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│         it                                │ 메모리다. 가중치는 모델을 올리는 순간     │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-│         x = blk.ffn(x)                    │ 크기가 정해지고 그 뒤로는 변하지          │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│     }                                     │ 않지만, KV 캐시는 슬롯마다 따로 잡히고    │      ▆ weights  ▆ kv  ▆ buf  │
+│ stream 1/8                         answer │ stream 2/8                         answer │ SPEED ────────────────────── │
+│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 104/320 │ 9.1 tok/s  ██▇▇▇██▇ ttft 690 ms · 103/320 │ decode            72.8 tok/s │
+│         it                                │ 메모리다. 가중치는 모델을 올리는 순간     │ prefill           4880 tok/s │
+│         x = blk.ffn(x)                    │ 크기가 정해지고 그 뒤로는 변하지          │ ttft      810 ms · 25% cache │
+│     }                                     │ 않지만, KV 캐시는 슬롯마다 따로 잡히고    │ 8 streams     9.1 tok/s each │
 │     return argmax(m.head(x))              │ 컨텍스트 길이에 정비례해서 자란다.        │                              │
-│ }                                         │ 그래서 같은 모델을 같은 카드에 올려도     │ MEMORY ───────────────────── │
-│ ```                                       │ 컨텍스트를 네 배로 늘리면 갑자기 자리가   │ rss       1.2G file     0.8G │
-│                                           │ 모자란다. 계산은 어렵지 않다. 레이어      │ virt     48.0G anon     0.4G │
-│ Nothing in there is clever, and that is   │ 수에 키와 값 두 벌을 곱하고, 거기에 KV    │ maj/tok                  0.0 │
-│ exactly the point. A dense seventy        │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ }                                         │ 그래서 같은 모델을 같은 카드에 올려도     │ PLACEMENT ────────────────── │
+│ ```                                       │ 컨텍스트를 네 배로 늘리면 갑자기 자리가   │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
+│                                           │ 모자란다. 계산은 어렵지 않다. 레이어      │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+│ Nothing in there is clever, and that is   │ 수에 키와 값 두 벌을 곱하고, 거기에 KV    │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ exactly the point. A dense seventy        │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │      ▆ weights  ▆ kv  ▆ buf  │
 │ billion parameter model at Q4_K_M is      │ 수를 곱한 다음, 원소 하나가 몇            │                              │
-│ about forty two gigabytes of weights,     │ 바이트인지를 곱하면 된다. 팔십            │ SPEED ────────────────────── │
-│ and every single one of those bytes is    │ 레이어짜리 칠십억 단위 모델이 만 육천     │ prefill           4880 tok/s │
-│ read again for every token you            │ 토큰을 잡으면 반정밀도로는 오             │ decode            72.8 tok/s │
-│ generate. That one sentence explains▍     │ 기가바이트가 넘고,▍                       │ ttft      810 ms · 25% cache │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ 8 streams     9.1 tok/s each │
+│ about forty two gigabytes of weights,     │ 바이트인지를 곱하면 된다. 팔십            │ MEMORY ───────────────────── │
+│ and every single one of those bytes is    │ 레이어짜리 칠십억 단위 모델이 만 육천     │ rss       1.2G file     0.8G │
+│ read again for every token you            │ 토큰을 잡으면 반정밀도로는 오             │ virt     48.0G anon     0.4G │
+│ generate. That one sentence explains▍     │ 기가바이트가 넘고,▍                       │ maj/tok                  0.0 │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ stream 3/8                         answer │ stream 4/8                         answer │                              │
 │ 9.1 tok/s  ██▇███▇▇ ttft 750 ms · 103/320 │ 9.1 tok/s  ██▇███▇▇ ttft 810 ms · 102/320 │ RESOURCES ───── contended no │
 │ most benchmarks print. Each session       │ value tensors it already computed for a   │ CPU  6%  1.9 cores  load 3.1 │

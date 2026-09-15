@@ -1,21 +1,21 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
-│ stream 1/4                         answer │ stream 2/4                         answer │ PLACEMENT ────────────────── │
-│ 12.5 tok/s ▇▇███▇▇█ ttft 630 ms · 143/320 │ 12.5 tok/s ▇▇███▇▇█ ttft 690 ms · 142/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.1G │
-│                                           │ 수에 키와 값 두 벌을 곱하고, 거기에 KV    │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.1G │
-│ Nothing in there is clever, and that is   │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ exactly the point. A dense seventy        │ 수를 곱한 다음, 원소 하나가 몇            │      ▆ weights  ▆ kv  ▆ buf  │
+│ stream 1/4                         answer │ stream 2/4                         answer │ SPEED ────────────────────── │
+│ 12.5 tok/s ▇▇███▇▇█ ttft 630 ms · 143/320 │ 12.5 tok/s ▇▇███▇▇█ ttft 690 ms · 142/320 │ decode            50.0 tok/s │
+│                                           │ 수에 키와 값 두 벌을 곱하고, 거기에 KV    │ prefill           2440 tok/s │
+│ Nothing in there is clever, and that is   │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │ ttft      690 ms · 25% cache │
+│ exactly the point. A dense seventy        │ 수를 곱한 다음, 원소 하나가 몇            │ 4 streams    12.5 tok/s each │
 │ billion parameter model at Q4_K_M is      │ 바이트인지를 곱하면 된다. 팔십            │                              │
-│ about forty two gigabytes of weights,     │ 레이어짜리 칠십억 단위 모델이 만 육천     │ MEMORY ───────────────────── │
-│ and every single one of those bytes is    │ 토큰을 잡으면 반정밀도로는 오             │ rss       1.2G file     0.8G │
-│ read again for every token you            │ 기가바이트가 넘고, 캐시 타입을 여덟       │ virt     48.0G anon     0.4G │
-│ generate. That one sentence explains      │ 비트로 내리면 절반을 조금 넘는 수준으로   │ maj/tok                  0.0 │
-│ most of what you are seeing. Decoding     │ 줄어든다. 이 절약분이 그대로 가중치를     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ about forty two gigabytes of weights,     │ 레이어짜리 칠십억 단위 모델이 만 육천     │ PLACEMENT ────────────────── │
+│ and every single one of those bytes is    │ 토큰을 잡으면 반정밀도로는 오             │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.1G │
+│ read again for every token you            │ 기가바이트가 넘고, 캐시 타입을 여덟       │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.1G │
+│ generate. That one sentence explains      │ 비트로 내리면 절반을 조금 넘는 수준으로   │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ most of what you are seeing. Decoding     │ 줄어든다. 이 절약분이 그대로 가중치를     │      ▆ weights  ▆ kv  ▆ buf  │
 │ is not compute bound on this rig. It is   │ 올릴 공간이 되기 때문에, 카드가 빠듯할    │                              │
-│ a memory bandwidth problem wearing a      │ 때 가장 먼저 건드릴 손잡이가 캐시         │ SPEED ────────────────────── │
-│ compute costume, and the arithmetic is    │ 타입이다. 품질 이야기가 나오면 대개       │ prefill           2440 tok/s │
-│ simple enough to do in your head. Take    │ 과장돼 있다. 키와 값을 여덟 비트로        │ decode            50.0 tok/s │
-│ the bytes the▍                            │ 저장하는 것은▍                            │ ttft      690 ms · 25% cache │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ 4 streams    12.5 tok/s each │
+│ a memory bandwidth problem wearing a      │ 때 가장 먼저 건드릴 손잡이가 캐시         │ MEMORY ───────────────────── │
+│ compute costume, and the arithmetic is    │ 타입이다. 품질 이야기가 나오면 대개       │ rss       1.2G file     0.8G │
+│ simple enough to do in your head. Take    │ 과장돼 있다. 키와 값을 여덟 비트로        │ virt     48.0G anon     0.4G │
+│ the bytes the▍                            │ 저장하는 것은▍                            │ maj/tok                  0.0 │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ stream 3/4                         answer │ stream 4/4 · thinking                     │                              │
 │ 12.5 tok/s ▇▇███▇▇█ ttft 750 ms · 141/320 │ 12.5 tok/s ▇███▇▇██ ttft 810 ms · 141/320 │ RESOURCES ───── contended no │
 │ total rises. Then the practical half,     │ most common mistake by a wide margin.     │ CPU  6%  1.9 cores  load 3.1 │

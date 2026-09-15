@@ -1,21 +1,21 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────────────────────────────────────────┐
-│ stream 1/8                                        done │ stream 2/8                                         done │ PLACEMENT ─────────────────────────── │
-│ 9.1 tok/s  ▇██▇▇█▇██▇▇▇██▇ ttft 630 ms · 296/320       │ 9.1 tok/s  ▇██▇▇▇██▇▇▇██▇▇ ttft 690 ms · 301/320        │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
-│ second waits, then the activations cross the bus,      │ 나온 숫자로 캐시 크기를 다시 계산해 보라. 화면          │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
-│ which costs almost nothing because an activation is    │ 오른쪽의 메모리 칸이 그 계산과 실제 장치 사용량을       │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ a few kilobytes, and the second card runs the rest     │ 나란히 보여 주는 이유도 그것이다. 두 값이 어긋나면      │      ▆ weights  ▆ kv  ▆ buf           │
+│ stream 1/8                                        done │ stream 2/8                                         done │ SPEED ─────────────────────────────── │
+│ 9.1 tok/s  ▇██▇▇█▇██▇▇▇██▇ ttft 630 ms · 296/320       │ 9.1 tok/s  ▇██▇▇▇██▇▇▇██▇▇ ttft 690 ms · 301/320        │ decode                     72.9 tok/s │
+│ second waits, then the activations cross the bus,      │ 나온 숫자로 캐시 크기를 다시 계산해 보라. 화면          │ prefill                    2927 tok/s │
+│ which costs almost nothing because an activation is    │ 오른쪽의 메모리 칸이 그 계산과 실제 장치 사용량을       │ ttft               810 ms · 25% cache │
+│ a few kilobytes, and the second card runs the rest     │ 나란히 보여 주는 이유도 그것이다. 두 값이 어긋나면      │ 8 streams              9.1 tok/s each │
 │ while the first waits. Each token therefore takes      │ 설정이 생각과 다르게 잡혀 있다는 뜻이고, 그때는         │                                       │
-│ the sum of the two halves rather than the maximum,     │ 속도를 재기 전에 배치부터 고쳐야 한다. 실제로 자리가    │ MEMORY ────────────────────────────── │
-│ which is why adding a card raises the memory you       │ 모자랄 때 손대는                                        │ rss           1.2G file          0.8G │
-├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ virt         48.0G anon          0.4G │
-│ stream 3/8                                        done │ stream 4/8                                         done │ maj/tok                           0.0 │
-│ 9.1 tok/s  ██▇▇▇██▇▇█▇██▇▇ ttft 750 ms · 306/320       │ 9.1 tok/s  █▇▇█▇██▇▇▇██▇▇▇ ttft 810 ms · 311/320        │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ the sum of the two halves rather than the maximum,     │ 속도를 재기 전에 배치부터 고쳐야 한다. 실제로 자리가    │ PLACEMENT ─────────────────────────── │
+│ which is why adding a card raises the memory you       │ 모자랄 때 손대는                                        │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
+├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
+│ stream 3/8                                        done │ stream 4/8                                         done │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ 9.1 tok/s  ██▇▇▇██▇▇█▇██▇▇ ttft 750 ms · 306/320       │ 9.1 tok/s  █▇▇█▇██▇▇▇██▇▇▇ ttft 810 ms · 311/320        │      ▆ weights  ▆ kv  ▆ buf           │
 │ the decode batch, and while a slot is doing that it    │ than letting a hash map decide the order for you. If    │                                       │
-│ competes with the sessions already generating. That    │ several agents share a preamble, send them to the       │ SPEED ─────────────────────────────── │
-│ is why time to first token spreads out as the slots    │ same server so they share the slot that holds it. And   │ prefill                    2927 tok/s │
-│ fill, and why a burst of arrivals makes ongoing        │ when you cannot avoid a change, make it late rather     │ decode                     72.9 tok/s │
-│ streams                                                │ than early, because the cost is not the size            │ ttft               810 ms · 25% cache │
-├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ 8 streams              9.1 tok/s each │
+│ competes with the sessions already generating. That    │ several agents share a preamble, send them to the       │ MEMORY ────────────────────────────── │
+│ is why time to first token spreads out as the slots    │ same server so they share the slot that holds it. And   │ rss           1.2G file          0.8G │
+│ fill, and why a burst of arrivals makes ongoing        │ when you cannot avoid a change, make it late rather     │ virt         48.0G anon          0.4G │
+│ streams                                                │ than early, because the cost is not the size            │ maj/tok                           0.0 │
+├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ stream 5/8                                        done │ stream 6/8                                         done │                                       │
 │ 9.1 tok/s  █▇▇███▇▇███▇▇██ ttft 870 ms · 316/320       │ 9.1 tok/s  ▇▇▇██▇▇▇██▇▇█▇█ ttft 930 ms · 300/320        │ RESOURCES ────────────── contended no │
 │ 나는 이유가 대부분 여기에 있다. 마지막으로 한 번만     │ that quantisation does not change the arithmetic the    │ CPU           0%  0.1 cores  load 3.1 │

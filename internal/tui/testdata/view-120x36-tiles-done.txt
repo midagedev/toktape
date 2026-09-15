@@ -1,21 +1,21 @@
 ┌─ toktape · R1 Distill Llama 70B Q4_K_M · llama-server b3650 · 2× RTX 3090 ───────────────────────────────────────────┐
-│ stream 1/4                           done │ stream 2/4                           done │ PLACEMENT ────────────────── │
-│ 12.5 tok/s ██▇▇▇██▇ ttft 630 ms · 296/320 │ 12.5 tok/s █▇▇███▇▇ ttft 690 ms · 301/320 │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
-│ half of the network and the second        │ 여덟 몫으로 나뉘거나, 설정에 따라서는     │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
-│ holds the upper half, so the two          │ 슬롯마다 전체 컨텍스트를 따로 잡는다.     │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ devices do not work at the same time.     │ 어느 쪽인지 모르면 메모리 계산이 여덟     │      ▆ weights  ▆ kv  ▆ buf  │
+│ stream 1/4                           done │ stream 2/4                           done │ SPEED ────────────────────── │
+│ 12.5 tok/s ██▇▇▇██▇ ttft 630 ms · 296/320 │ 12.5 tok/s █▇▇███▇▇ ttft 690 ms · 301/320 │ decode            50.1 tok/s │
+│ half of the network and the second        │ 여덟 몫으로 나뉘거나, 설정에 따라서는     │ prefill           1897 tok/s │
+│ holds the upper half, so the two          │ 슬롯마다 전체 컨텍스트를 따로 잡는다.     │ ttft      690 ms · 25% cache │
+│ devices do not work at the same time.     │ 어느 쪽인지 모르면 메모리 계산이 여덟     │ 4 streams    12.5 tok/s each │
 │ The first one runs its layers while the   │ 배 틀린다. 실행 로그에 슬롯 하나가 몇     │                              │
-│ second waits, then the activations        │ 토큰을 갖는지가 찍히니 그 줄을 먼저       │ MEMORY ───────────────────── │
-│ cross the bus, which costs almost         │ 확인하고, 거기서 나온 숫자로 캐시         │ rss       1.2G file     0.8G │
-│ nothing because an activation is a few    │ 크기를 다시 계산해 보라. 화면 오른쪽의    │ virt     48.0G anon     0.4G │
-│ kilobytes, and the second card runs the   │ 메모리 칸이 그 계산과 실제 장치           │ maj/tok                  0.0 │
-│ rest while the first waits. Each token    │ 사용량을 나란히 보여 주는 이유도          │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ second waits, then the activations        │ 토큰을 갖는지가 찍히니 그 줄을 먼저       │ PLACEMENT ────────────────── │
+│ cross the bus, which costs almost         │ 확인하고, 거기서 나온 숫자로 캐시         │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
+│ nothing because an activation is a few    │ 크기를 다시 계산해 보라. 화면 오른쪽의    │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
+│ kilobytes, and the second card runs the   │ 메모리 칸이 그 계산과 실제 장치           │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ rest while the first waits. Each token    │ 사용량을 나란히 보여 주는 이유도          │      ▆ weights  ▆ kv  ▆ buf  │
 │ therefore takes the sum of the two        │ 그것이다. 두 값이 어긋나면 설정이         │                              │
-│ halves rather than the maximum, which     │ 생각과 다르게 잡혀 있다는 뜻이고,         │ SPEED ────────────────────── │
-│ is why adding a card raises the memory    │ 그때는 속도를 재기 전에 배치부터 고쳐야   │ prefill           1897 tok/s │
-│ you                                       │ 한다. 실제로 자리가 모자랄 때 손대는      │ decode            50.1 tok/s │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ ttft      690 ms · 25% cache │
-│ stream 3/4                           done │ stream 4/4 · thinking · cut               │ 4 streams    12.5 tok/s each │
+│ halves rather than the maximum, which     │ 생각과 다르게 잡혀 있다는 뜻이고,         │ MEMORY ───────────────────── │
+│ is why adding a card raises the memory    │ 그때는 속도를 재기 전에 배치부터 고쳐야   │ rss       1.2G file     0.8G │
+│ you                                       │ 한다. 실제로 자리가 모자랄 때 손대는      │ virt     48.0G anon     0.4G │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ maj/tok                  0.0 │
+│ stream 3/4                           done │ stream 4/4 · thinking · cut               │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
 │ 12.5 tok/s ▇▇█▇██▇▇ ttft 750 ms · 306/320 │ 12.5 tok/s █▇▇█▇██▇ ttft 810 ms · 320/320 │                              │
 │ demands. So the aggregate climbs          │ first two cases and mitigates the         │ RESOURCES ───── contended no │
 │ steeply at first and then flattens,       │ third. I should be careful not to         │ CPU  0%  0.1 cores  load 3.1 │
