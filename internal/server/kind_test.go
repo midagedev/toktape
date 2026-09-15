@@ -102,6 +102,11 @@ func TestRefineKind(t *testing.T) {
 		{"nothing observed", tape.ServerUnknown, "", nil, tape.ServerUnknown},
 		// A flag value is user text, not the binary: only argv[0] is read.
 		{"an ik path in a later argument is not a marker", tape.ServerUnknown, "/usr/local/bin/llama-server", []string{"llama-server", "-m", "/src/ik_llama.cpp/models/x.gguf"}, tape.ServerUnknown},
+		// The engine block's word is the record (2026-09-15, ExLlamaV3): the
+		// kind it stamped is never overwritten by a process name, because the
+		// kind is stamped from /props' engine.name and nothing else.
+		{"engine kind survives an ik-looking exe", tape.ServerExLlamaV3, "/src/ik_llama.cpp/build/bin/llama-server", nil, tape.ServerExLlamaV3},
+		{"engine kind survives a python argv", tape.ServerExLlamaV3, "/opt/venv/bin/python", []string{"python", "-m", "exllamav3.server"}, tape.ServerExLlamaV3},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -197,7 +197,7 @@ func TestActiveBytesOnMirrorsActiveGo(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			d := tape.DevicePlacement{Device: "GPU0", Classes: c.classes}
-			if got := activeBytesOn(d, c.model, c.tied); got != c.want {
+			if got := activeBytesOn(d, &tape.RunSummary{Model: c.model}, c.tied); got != c.want {
 				t.Errorf("activeBytesOn = %d, want %d", got, c.want)
 			}
 		})

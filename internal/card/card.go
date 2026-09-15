@@ -1006,10 +1006,11 @@ func bandwidthString(s *tape.RunSummary) string {
 		}
 		return out
 	}
-	if s.Timings.EffectiveBandwidthBytesPerSec <= 0 {
+	combined, ok := bandwidth.Combined(s)
+	if !ok {
 		return ""
 	}
-	out := "≈ " + formatGBs(s.Timings.EffectiveBandwidthBytesPerSec)
+	out := "≈ " + formatGBs(combined)
 	if ratio, ok := bandwidth.OfPeak(s); ok {
 		out += ", " + formatPct(ratio) + " of peak"
 	}
@@ -1246,6 +1247,14 @@ func powerString(w float64) string {
 	return strconv.FormatFloat(w, 'f', 0, 64) + " W"
 }
 
+// LlamaCPPFlags reports whether srv's flags are llama.cpp's. Everything that
+// prints a flag branches on this one predicate: an ExLlamaV3 run's argv is the
+// engine's own (-gs, -mcs, ...), and rendering it through the llama.cpp token
+// set would print five "?"-shaped holes where named flags should be and teach
+// flags the run never had (2026-09-15, ExLlamaV3). Every known kind keeps its
+// flags — the question is what the argv means, not whether it was read.
+func LlamaCPPFlags(srv tape.ServerInfo) bool { return srv.Kind != tape.ServerExLlamaV3 }
+
 // flagsSection renders the flag line.
 //
 // The five argument-starters (-fa, -b, -ub, -ctk, -ctv) are always printed and
@@ -1254,7 +1263,18 @@ func powerString(w float64) string {
 // omitted when empty. Everything except the -ot group wraps without
 // truncation; the -ot group, which can be arbitrarily long, is truncated with
 // "…" so it never costs more than one extra line.
+//
+// An engine run prints its own argv instead, verbatim in Flags.Other: one
+// element per string the engine reported, joined with single spaces the way it
+// would be retyped. "?" when the engine named no arguments at all.
 func flagsSection(s *tape.RunSummary) []string {
+	if !LlamaCPPFlags(s.Server) {
+		args := s.Server.Flags.Other
+		if len(args) == 0 {
+			args = []string{unknown}
+		}
+		return labelled("FLAGS", blockLabelW, wrapJoin(args, " ", innerWidth-blockLabelW))
+	}
 	base, ot := flagTokens(s.Server)
 	avail := innerWidth - blockLabelW
 	lines := wrapJoin(base, " ", avail)

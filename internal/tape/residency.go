@@ -43,6 +43,15 @@ func Residency(p PlacementSummary, m MemSample) HostResidency {
 	if placed <= 0 || m.RSSBytes <= 0 {
 		return r
 	}
+	// An engine-reported placement (Source "engine", placement.SourceEngine;
+	// 2026-09-15, ExLlamaV3) is not a mapping of the model file: the engine
+	// loads its CPU experts into its own anonymous memory, so RSSFile says
+	// nothing about them, and min(RSSFile, placed) would report nearly all of
+	// them "on disk" — the opposite of the truth. No split is derivable; the
+	// placed figure stands alone.
+	if p.Source == "engine" {
+		return r
+	}
 	r.Resident = min(m.RSSFileBytes, placed)
 	r.Paged = placed - r.Resident
 	r.Ok = true

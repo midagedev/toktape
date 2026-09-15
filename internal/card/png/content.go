@@ -556,10 +556,11 @@ func bandwidthString(s *tape.RunSummary) string {
 		}
 		return out
 	}
-	if s.Timings.EffectiveBandwidthBytesPerSec <= 0 {
+	combined, ok := bandwidth.Combined(s)
+	if !ok {
 		return ""
 	}
-	out := "≈ " + formatGBs(s.Timings.EffectiveBandwidthBytesPerSec) + " effective"
+	out := "≈ " + formatGBs(combined) + " effective"
 	if ratio, ok := bandwidth.OfPeak(s); ok {
 		out += " · " + formatPct(ratio) + " of peak"
 	}
@@ -796,15 +797,29 @@ func (c *content) buildFooter(cv *canvas, s *tape.RunSummary) {
 	}}
 
 	f := s.Server.Flags
-	// The five argument-starters distinguish "?" (no argv was read) from
-	// "default" (a read argv did not set it); ngl is not one of the five.
-	read := argvObserved(s.Server)
+	// An engine's argv is its own, so the two flag rows carry it verbatim
+	// instead of the llama.cpp token set; the kind and the context row are the
+	// same for everyone (2026-09-15, ExLlamaV3).
+	var row1, row2 string
+	if card.LlamaCPPFlags(s.Server) {
+		// The five argument-starters distinguish "?" (no argv was read) from
+		// "default" (a read argv did not set it); ngl is not one of the five.
+		read := argvObserved(s.Server)
+		row1 = engineFlagRow([]string{"fa", "ctk", "ctv"},
+			[]string{flagValue(f.FlashAttn, read), flagValue(f.CacheTypeK, read), flagValue(f.CacheTypeV, read)})
+		row2 = engineFlagRow([]string{"b", "ub", "ngl"},
+			[]string{flagValue(f.Batch, read), flagValue(f.UBatch, read), orUnknown(f.NGL)})
+	} else {
+		args := strings.Join(f.Other, " ")
+		if args == "" {
+			args = unknown
+		}
+		row1, row2 = wrapEngineArgs(cv, args)
+	}
 	c.cols[2] = footerCol{label: "engine", rows: [footerRows]string{
 		engineString(s.Server),
-		engineFlagRow([]string{"fa", "ctk", "ctv"},
-			[]string{flagValue(f.FlashAttn, read), flagValue(f.CacheTypeK, read), flagValue(f.CacheTypeV, read)}),
-		engineFlagRow([]string{"b", "ub", "ngl"},
-			[]string{flagValue(f.Batch, read), flagValue(f.UBatch, read), orUnknown(f.NGL)}),
+		row1,
+		row2,
 		joinParts(" · ", "ctx "+formatInt(s.Server.CtxSize), "slots "+formatInt(s.Server.NSlots)),
 	}}
 }
@@ -929,6 +944,34 @@ func wrapModelName(cv *canvas, name string) (row0, rest string) {
 		return name, ""
 	}
 	return string(rs[:best+1]), string(rs[best+1:])
+}
+
+// wrapEngineArgs is wrapModelName for an engine's argv: rows 1 and 2 of the
+// footer's engine column spell it across a space when it is wider than the
+// column, measured (never estimated — TTP-32's lesson) at the row style. The
+// break lands before the space, so row 1 carries whole arguments; a tail still
+// too wide for row 2 falls to the canvas's own ellipsis, the same cut every
+// other footer cell takes. An argv that fits is returned whole with an empty
+// second row (2026-09-15, ExLlamaV3).
+func wrapEngineArgs(cv *canvas, args string) (row1, row2 string) {
+	fits := footerColW - footerSlack
+	if cv.measure(args, stSmall) <= fits {
+		return args, ""
+	}
+	rs := []rune(args)
+	best := -1
+	for i, r := range rs {
+		if r != ' ' {
+			continue
+		}
+		if cv.measure(string(rs[:i]), stSmall) <= fits {
+			best = i
+		}
+	}
+	if best < 0 {
+		return args, ""
+	}
+	return string(rs[:best]), string(rs[best+1:])
 }
 
 // modelShape is the architecture line: dense models have no expert counts, so
@@ -1128,7 +1171,17 @@ func startedString(s *tape.RunSummary) string {
 // ones that end comment threads (docs/research/02-sharing-artifacts.md §5.2).
 // The rest are omitted when empty. The -ot group goes last because it is the
 // only part that can be arbitrarily long, so truncation eats it first.
+//
+// An engine's argv is not llama.cpp's, so the strip carries the engine's own
+// arguments joined with single spaces — the way they were typed — and "?" when
+// it named none (2026-09-15, ExLlamaV3).
 func flagsLine(srv tape.ServerInfo) string {
+	if !card.LlamaCPPFlags(srv) {
+		if len(srv.Flags.Other) == 0 {
+			return unknown
+		}
+		return strings.Join(srv.Flags.Other, " ")
+	}
 	f := srv.Flags
 	read := argvObserved(srv)
 	var base []string

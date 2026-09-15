@@ -12,6 +12,7 @@ type Stat struct {
 	PID       int    // field 1
 	Comm      string // field 2, without the surrounding parentheses
 	State     string // field 3
+	PPid      int    // field 4, ppid: the parent the tree samplers walk
 	MinFaults uint64 // field 10, minflt, cumulative
 	MajFaults uint64 // field 12, majflt, cumulative
 	// UTime and STime are the process's cumulative user and system CPU time
@@ -48,6 +49,9 @@ func ParseStat(data []byte) (Stat, error) {
 		return Stat{}, fmt.Errorf("procmon: stat: want at least 15 fields, got %d", len(f)+2)
 	}
 	st.State = f[0]
+	if st.PPid, err = strconv.Atoi(f[4-3]); err != nil {
+		return Stat{}, fmt.Errorf("procmon: stat: ppid field: %w", err)
+	}
 	if st.MinFaults, err = strconv.ParseUint(f[10-3], 10, 64); err != nil {
 		return Stat{}, fmt.Errorf("procmon: stat: minflt field: %w", err)
 	}

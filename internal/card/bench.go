@@ -35,7 +35,13 @@ func LlamaBenchTable(s *tape.RunSummary) string {
 	// row's distinction between "?" (no argv was read) and "default" (an argv
 	// was read and did not set it). ngl is not one of the five and keeps "?":
 	// the card omits it entirely when unset, and a llama-bench column cannot.
-	fa := flagValue(s.Server.Flags.FlashAttn, argvObserved(s.Server))
+	// An engine run's argv was read but is not llama.cpp's, so "default"
+	// would claim a flag position the engine has no concept of; it keeps "?"
+	// (2026-09-15, ExLlamaV3).
+	fa := unknown
+	if LlamaCPPFlags(s.Server) {
+		fa = flagValue(s.Server.Flags.FlashAttn, argvObserved(s.Server))
+	}
 
 	var b strings.Builder
 	b.WriteString("| model | size | params | backend | ngl | fa | test | t/s |\n")

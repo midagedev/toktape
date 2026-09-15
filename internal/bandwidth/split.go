@@ -319,7 +319,7 @@ func RAM(s *tape.RunSummary) (RAMSide, bool) {
 		return RAMSide{}, false
 	}
 	tied := tiedEmbeddings(s.Placement)
-	cpuActive := activeBytesOn(cpu, s.Model, tied)
+	cpuActive := activeBytesOn(cpu, s, tied)
 	if cpuActive <= 0 {
 		return RAMSide{}, false
 	}
@@ -330,7 +330,7 @@ func RAM(s *tape.RunSummary) (RAMSide, bool) {
 		if d.Device == tape.DeviceCPU {
 			continue
 		}
-		elsewhere += activeBytesOn(d, s.Model, tied)
+		elsewhere += activeBytesOn(d, s, tied)
 	}
 	if elsewhere <= 0 {
 		return RAMSide{}, false
@@ -547,7 +547,15 @@ func Speculative(s *tape.RunSummary) (Verify, bool) {
 		return Verify{}, false
 	}
 	tied := tiedEmbeddings(s.Placement)
-	cpuActive := activeBytesOn(cpu, s.Model, tied)
+	cpuActive := activeBytesOn(cpu, s, tied)
+	// No CPU active bytes, no per-step figure to build. On a GGUF placement
+	// that implies no CPU expert bytes either, so perStep below would already
+	// be 0; on an engine placement the class fallback is off by design and
+	// continuing on the class totals alone would drive cpuOncePerStep negative
+	// and print a per-step RAM figure nobody measured (2026-09-15, ExLlamaV3).
+	if cpuActive <= 0 {
+		return Verify{}, false
+	}
 
 	// Only the STACKED expert weights re-expand with the batch: B tokens route
 	// to up to B×used distinct slices of the stack instead of used. The

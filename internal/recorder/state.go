@@ -12,8 +12,8 @@ import (
 )
 
 // state is everything the concurrent halves of a run share: the one
-// procmon.Sampler, the fault timeline the tokens build, the periodic samples
-// and the progress callback.
+// procmon.FaultSampler, the fault timeline the tokens build, the periodic
+// samples and the progress callback.
 //
 // One mutex guards all of it. procmon.Sampler is documented as not safe for
 // concurrent use, and under RunConcurrent every stream's OnToken hook runs on
@@ -21,13 +21,13 @@ import (
 // samples and the callback the same mutex costs nothing and makes the
 // callback safe for an implementation that keeps no lock.
 //
-// The Sampler is touched by the token hooks and by nothing else. The periodic
+// The sampler is touched by the token hooks and by nothing else. The periodic
 // reader takes its memory picture through the stateless procmon.ReadMem for
-// the reason given at takeSample: sharing the Sampler's latch would let the
+// the reason given at takeSample: sharing the sampler's latch would let the
 // samples eat the faults the tokens are there to report.
 type state struct {
 	mu      sync.Mutex
-	sampler *procmon.Sampler
+	sampler procmon.FaultSampler
 	// perStream[i][j] is the major-fault delta of stream i's j-th token.
 	perStream [][]uint64
 	// timeline holds the same deltas in arrival order across all streams.
@@ -66,9 +66,15 @@ type state struct {
 	// started with --no-slots returns 501), so the poll is not retried every
 	// interval for the length of the run.
 	slotsDead bool
+
+	// treeProcs latches the process count of the FIRST periodic reading that
+	// saw more than one process in an engine run's tree (2026-09-15,
+	// ExLlamaV3), for the warning the recorder prints after the sampler
+	// stops. 0 means no reading ever saw a child.
+	treeProcs int
 }
 
-func newState(n int, sampler *procmon.Sampler, progress func(Event)) *state {
+func newState(n int, sampler procmon.FaultSampler, progress func(Event)) *state {
 	st := &state{
 		sampler:   sampler,
 		perStream: make([][]uint64, n),
@@ -248,6 +254,26 @@ func (st *state) snapshot() ([]uint64, []tape.RunSample, int) {
 	return st.timeline, st.samples, st.tokens
 }
 
+// noteTreeProcs latches n when it is the first reading that saw a tree of
+// more than one process (takeSample doc). The count at first sight is what
+// the warning names: a worker that appears later does not change what the
+// earlier samples already summed.
+func (st *state) noteTreeProcs(n int) {
+	st.mu.Lock()
+	if st.treeProcs == 0 {
+		st.treeProcs = n
+	}
+	st.mu.Unlock()
+}
+
+// firstTreeProcs is the latched process count, 0 when no reading ever saw a
+// child (warnTreeProcesses decides on it).
+func (st *state) firstTreeProcs() int {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.treeProcs
+}
+
 // sampleLoop takes a host reading every interval until stop is closed. It
 // takes one reading immediately and one on the way out, so a run shorter than
 // the interval still produces samples rather than an empty time series.
@@ -278,6 +304,10 @@ type sampleDeps struct {
 	gpus     gpu.Collector
 	client   *server.Client
 	pollSlot bool
+	// tree says the pid's whole process tree is the engine (2026-09-15,
+	// ExLlamaV3): the reading sums parent and children, and latches the
+	// count for the recorder's warning. Every other kind reads one pid.
+	tree bool
 }
 
 // takeSample reads the process, the devices, the load average and the slot
@@ -292,7 +322,8 @@ type sampleDeps struct {
 // watched number in the clip — would under-report by however often the
 // sampler happened to tick. ReadMem is stateless and returns the same
 // tape.MemSample, so the token hooks stay the only consumer of the latch and
-// sum(per-token deltas) is the whole run.
+// sum(per-token deltas) is the whole run. ReadMemTree, the engine run's
+// variant, is stateless for the same reason.
 //
 // Nothing here is taken under the mutex: ReadMem, the GPU read and the /slots
 // poll touch no shared state, and an nvidia-smi exec can outlast the sample
@@ -300,7 +331,14 @@ type sampleDeps struct {
 func (st *state) takeSample(ctx context.Context, dep sampleDeps) {
 	var mem tape.MemSample
 	if dep.pid > 0 {
-		if m, err := procmon.ReadMem(dep.fsRoot, dep.pid); err == nil {
+		if dep.tree {
+			if m, n, err := procmon.ReadMemTree(dep.fsRoot, dep.pid); err == nil {
+				mem = m
+				if n > 1 {
+					st.noteTreeProcs(n)
+				}
+			}
+		} else if m, err := procmon.ReadMem(dep.fsRoot, dep.pid); err == nil {
 			mem = m
 		}
 	}

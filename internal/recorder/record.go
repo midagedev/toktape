@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -184,6 +185,13 @@ func (r *run) attach(ctx context.Context) error {
 			r.client, r.props = c, props
 			r.kind = server.DetectKind(props)
 			r.build, r.commit = server.BuildFromProps(props.BuildInfo)
+			// An engine block's version is its build, verbatim, with no
+			// commit to name: exllamav3's "1.5.0" is not a bNNNN counter and
+			// the engine object is the record over any build_info a shim
+			// keeps (2026-09-15, ExLlamaV3).
+			if props.EngineName() == "exllamav3" {
+				r.build, r.commit = props.Engine.Version, ""
+			}
 			r.emit(Event{Kind: EventDiscovered, Stream: -1, Message: c.BaseURL()})
 			r.emit(Event{Kind: EventProps, Stream: -1, Message: r.build})
 			return nil
@@ -310,7 +318,16 @@ func (r *run) waitReason(err error) (reason string, waitable bool) {
 // When it is not — the normal case for a remote server — the file name and
 // the quantisation are still recoverable from the path /props reported, and
 // everything the header would have supplied stays zero.
+//
+// An engine block short-circuits all of that (2026-09-15, ExLlamaV3): an
+// engine that is not llama.cpp has no GGUF to open and reports the model in
+// its own words, which is the record — there is no file to fail to read and
+// no warning to print about one.
 func (r *run) collectModel() {
+	if r.props.Engine != nil {
+		r.collectEngineModel()
+		return
+	}
 	path := r.props.ModelPath
 	if path == "" {
 		r.warn("server did not report model_path, model shape unknown")
@@ -343,15 +360,69 @@ func (r *run) collectModel() {
 	r.fillShardSet(path, false)
 }
 
+// collectEngineModel records the model the engine block reported, verbatim:
+// every key it did not send stays 0 and prints "?", exactly as an unobserved
+// key always has. Name stays "" so the card falls back to the directory name
+// the path ends in, and Shards stays 0 — the engine's Files count is its own,
+// and a split-GGUF naming scheme does not apply to it.
+func (r *run) collectEngineModel() {
+	m := r.props.Engine.Model
+	fileName := ""
+	if path := r.props.ModelPath; path != "" {
+		fileName = filepath.Base(path)
+	}
+	r.model = tape.ModelInfo{
+		Path:                r.props.ModelPath,
+		FileName:            fileName,
+		Format:              m.Format,
+		Arch:                m.Arch,
+		Quant:               m.Quant,
+		FileBytes:           m.Bytes,
+		Params:              m.Params,
+		NLayers:             m.NLayers,
+		NExperts:            m.NExperts,
+		NExpertsUsed:        m.NExpertsUsed,
+		CtxTrain:            m.CtxTrain,
+		ActiveBytesPerToken: m.ActiveBytesPerToken,
+	}
+}
+
 // collectProcess finds the local server process and reads its argv, which is
 // where every flag the card prints comes from. The process also settles the
 // engine /props may not have named, and an ik_llama.cpp server's commit.
+//
+// An engine run's flags are the engine block's own argv, recorded before the
+// PID search so a run whose process was never found still has them: the
+// engine object is the record, and server.ParseFlags — which knows
+// llama.cpp's argument starters — would misread every engine flag
+// (2026-09-15, ExLlamaV3). The process's real argv is still recorded
+// verbatim whenever the pid is found; it is simply not parsed.
 func (r *run) collectProcess() {
-	if r.props.ModelPath == "" {
-		return
+	if r.kind == tape.ServerExLlamaV3 && r.props.Engine != nil {
+		r.flags = tape.ServerFlags{Other: r.props.Engine.Args}
+		if d := r.props.Engine.Draft; d != nil {
+			r.flags.DraftModel = d.Model
+			if d.NMax > 0 {
+				r.flags.DraftMax = strconv.Itoa(d.NMax)
+			}
+		}
 	}
-	pid, err := procmon.FindPID(r.opts.FSRoot, r.props.ModelPath)
-	if err != nil {
+	pid := 0
+	if r.props.ModelPath != "" {
+		if p, err := procmon.FindPID(r.opts.FSRoot, r.props.ModelPath); err == nil {
+			pid = p
+		}
+	}
+	if pid == 0 {
+		// No model path named a process — for an engine there never is one.
+		// The listening socket still names its holder, and for a loopback URL
+		// that is a process this /proc can read. A port on another host names
+		// a process over there, so only loopback asks (2026-09-15).
+		if p, err := r.findPIDByURLPort(); err == nil {
+			pid = p
+		}
+	}
+	if pid == 0 {
 		r.warn("pid not found: no memory, page faults or flags")
 		r.emit(Event{Kind: EventPIDNotFound, Stream: -1})
 		return
@@ -361,10 +432,19 @@ func (r *run) collectProcess() {
 
 	args, err := procmon.Args(r.opts.FSRoot, pid)
 	if err != nil {
-		r.warn("argv of pid %d unreadable, server flags unknown", pid)
+		// For llama.cpp the argv is where every flag comes from, so losing it
+		// loses the flags. An engine run already has its flags from the
+		// engine block; only the verbatim argv line is missing here.
+		if r.kind == tape.ServerExLlamaV3 {
+			r.warn("argv of pid %d unreadable", pid)
+		} else {
+			r.warn("argv of pid %d unreadable, server flags unknown", pid)
+		}
 	} else {
 		r.args = args
-		r.flags = server.ParseFlags(args)
+		if r.kind != tape.ServerExLlamaV3 {
+			r.flags = server.ParseFlags(args)
+		}
 	}
 
 	// ik_llama.cpp's /props names neither the engine nor a build (TTP-33,
@@ -392,6 +472,29 @@ func (r *run) collectProcess() {
 			r.warn("%s", msg)
 		}
 	}
+}
+
+// findPIDByURLPort is the generic pid fallback: the pid holding the socket
+// that listens on the server URL's port (procmon.FindPIDByPort). Only a
+// loopback URL asks — a port on another host names a process over there, not
+// one this /proc can read — and it never overrides a successful model-path
+// match, because the model path is the surer identification when there is
+// one (2026-09-15, ExLlamaV3).
+func (r *run) findPIDByURLPort() (int, error) {
+	u, err := url.Parse(r.client.BaseURL())
+	if err != nil {
+		return 0, err
+	}
+	switch u.Hostname() {
+	case "127.0.0.1", "localhost", "::1":
+	default:
+		return 0, fmt.Errorf("recorder: %s is not a loopback host", u.Hostname())
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil || port <= 0 {
+		return 0, fmt.Errorf("recorder: no port in %s", r.client.BaseURL())
+	}
+	return procmon.FindPIDByPort(r.opts.FSRoot, port)
 }
 
 // collectHost reads the hardware line and opens the GPU backend.
@@ -424,7 +527,14 @@ func (r *run) collectHost(ctx context.Context) {
 // collectPlacement replays llama.cpp's placement rules over the tensor
 // headers and the observed flags. Without a header there is nothing to
 // replay, and the summary says so rather than guessing a breakdown.
+//
+// An engine block is taken instead of any replay (2026-09-15, ExLlamaV3):
+// the engine knows where it put each tensor, and its figures are the record.
 func (r *run) collectPlacement() {
+	if r.props.Engine != nil {
+		r.place = r.enginePlacement()
+		return
+	}
 	if len(r.tensors) == 0 {
 		r.place = tape.PlacementSummary{Source: placement.SourceUnknown}
 		return
@@ -443,6 +553,136 @@ func (r *run) collectPlacement() {
 	r.place = sum
 	for _, w := range warns {
 		r.warn("%s", w)
+	}
+}
+
+// enginePlacement records the placement the engine block reported, in the
+// engine's own words: device order verbatim, bytes per device, classes
+// summed into the tape's vocabulary. Three checks run over it, and each one
+// is a warning plus the honest figure — never a correction, because the
+// server's figures are the record:
+//
+//   - a device whose bytes are not the sum of its classes keeps its bytes;
+//   - per-device active bytes: NO device sending them is the normal case —
+//     an engine that swaps experts between devices on the fly has no static
+//     answer — and keeps the model's figure without a word; a partial or
+//     inconsistent set zeroes every active figure, model included, so no
+//     bandwidth line is ever computed from a bad split;
+//   - a GPU<n> the host probe did not name is kept and said, since the card's
+//     other rows name that same device.
+func (r *run) enginePlacement() tape.PlacementSummary {
+	ep := r.props.Engine.Placement
+	sum := tape.PlacementSummary{Source: placement.SourceEngine}
+	nActive, sumActive := 0, int64(0)
+	for _, d := range ep.Devices {
+		dev := tape.DevicePlacement{
+			Device:              d.Device,
+			Bytes:               d.Bytes,
+			Layers:              d.Layers,
+			Classes:             map[tape.TensorClass]int64{},
+			ActiveBytesPerToken: d.ActiveBytesPerToken,
+		}
+		var classSum int64
+		for k, v := range d.Classes {
+			dev.Classes[tensorClass(k)] += v
+			classSum += v
+		}
+		if d.Bytes != classSum {
+			r.warn("%s reports %s over classes summing %s; the device's own figure is kept",
+				d.Device, humanBytes(d.Bytes), humanBytes(classSum))
+		}
+		if d.ActiveBytesPerToken > 0 {
+			nActive++
+			sumActive += d.ActiveBytesPerToken
+		}
+		// The probe's list is the only ground truth toktape has for what
+		// GPUs exist; with no list at all there is already a warning about
+		// that, and one per device would only crowd it.
+		if n, ok := gpuIndex(d.Device); ok && len(r.host.GPUs) > 0 && (n < 0 || n >= len(r.host.GPUs)) {
+			r.warn("%s is not among this host's %d GPUs; the device is kept as the engine reported it",
+				d.Device, len(r.host.GPUs))
+		}
+		sum.Devices = append(sum.Devices, dev)
+		if d.Device != tape.DeviceCPU {
+			sum.VRAMWeightsBytes += d.Bytes
+		}
+	}
+	sum.VRAMKVBytes = ep.VRAMKVBytes
+
+	// The per-device active split, when the engine sends one at all, must be
+	// whole (every device) and agree with the model's figure within 1%.
+	model := r.props.Engine.Model.ActiveBytesPerToken
+	if nActive > 0 {
+		consistent := nActive == len(ep.Devices) && model > 0 &&
+			abs64(sumActive-model)*100 <= model
+		if !consistent {
+			for i := range sum.Devices {
+				sum.Devices[i].ActiveBytesPerToken = 0
+			}
+			// The model's figure goes too, here and now: reduce reads it for
+			// the per-record bandwidth, so a bad split must not survive into
+			// that line either.
+			r.model.ActiveBytesPerToken = 0
+			r.warn("per-device active bytes (%d of %d devices, %s) disagree with the model's %s; all active figures zeroed",
+				nActive, len(ep.Devices), humanBytes(sumActive), humanBytes(model))
+		}
+	}
+	return sum
+}
+
+// tensorClass maps an engine placement's class key onto the tape's class
+// values. A key outside the vocabulary is not dropped: its bytes are real
+// wherever the engine filed them, so they sum into ClassOther.
+func tensorClass(key string) tape.TensorClass {
+	switch key {
+	case "attention":
+		return tape.ClassAttention
+	case "experts":
+		return tape.ClassExperts
+	case "ffn":
+		return tape.ClassFFN
+	case "embeddings":
+		return tape.ClassEmbed
+	case "output":
+		return tape.ClassOutput
+	case "ngram":
+		return tape.ClassNGram
+	default:
+		return tape.ClassOther
+	}
+}
+
+// gpuIndex reads the n of a "GPU<n>" device name, which is the nvidia-smi
+// index the engine contract says it is. ok is false for the CPU and for any
+// other spelling.
+func gpuIndex(device string) (n int, ok bool) {
+	if !strings.HasPrefix(device, "GPU") || len(device) <= len("GPU") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(device[len("GPU"):])
+	return n, err == nil
+}
+
+// abs64 is |a| for the tolerance check above.
+func abs64(a int64) int64 {
+	if a < 0 {
+		return -a
+	}
+	return a
+}
+
+// humanBytes sizes a byte count the way the card does, for warnings that
+// name figures next to figures.
+func humanBytes(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(b)/(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(b)/(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.1f kB", float64(b)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", b)
 	}
 }
 
@@ -525,6 +765,7 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 	clk.stop()
 	r.observe(time.Since(origin), 0, witnessEnd)
 	stopSampling()
+	r.warnTreeProcesses(st)
 
 	if recs == nil {
 		return nil, nil, fmt.Errorf("%w: %v", ErrAllStreamsFailed, err)
@@ -550,11 +791,23 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 // openSampler opens the process sampler when the server process is local, and
 // returns the function that closes it again. The sampler is nil, and the
 // closer a no-op, when there is no /proc view.
-func (r *run) openSampler() (*procmon.Sampler, func()) {
+//
+// An engine run watches the whole process tree (2026-09-15, ExLlamaV3): the
+// engine is two processes — the CPU expert work runs in a multiprocessing
+// child of the port listener — and a single-pid sampler would attribute the
+// child's faults to nobody. llama-server and ik keep the single-process
+// sampler byte-for-byte.
+func (r *run) openSampler() (procmon.FaultSampler, func()) {
 	if r.pid <= 0 {
 		return nil, func() {}
 	}
-	s, err := procmon.NewSamplerAt(r.opts.FSRoot, r.pid)
+	var s procmon.FaultSampler
+	var err error
+	if r.kind == tape.ServerExLlamaV3 {
+		s, err = procmon.NewTreeSamplerAt(r.opts.FSRoot, r.pid)
+	} else {
+		s, err = procmon.NewSamplerAt(r.opts.FSRoot, r.pid)
+	}
 	if err != nil {
 		r.warn("process sampler unavailable, no memory or fault series")
 		return nil, func() {}
@@ -564,6 +817,19 @@ func (r *run) openSampler() (*procmon.Sampler, func()) {
 	// phase (procmon.Sampler.FaultDelta doc).
 	_, _, _ = s.FaultDelta()
 	return s, func() { s.Close() }
+}
+
+// warnTreeProcesses says, once per engine run, that its process figures are
+// sums over the engine's process tree rather than one pid (2026-09-15,
+// ExLlamaV3). It is emitted after the sampler stops — r.warn calls Progress,
+// and Options.Progress promises calls serialised with the sampler's events —
+// and only when a reading ever saw more than one process. The sentence stops
+// where the honesty does: summed RSS can double-count the file pages both
+// processes map, and it does not claim otherwise.
+func (r *run) warnTreeProcesses(st *state) {
+	if n := st.firstTreeProcs(); n > 1 {
+		r.warn("memory, faults and CPU summed over %d processes (pid %d and its children)", n, r.pid)
+	}
 }
 
 // startSampling starts the periodic host reader and returns the function that
@@ -579,6 +845,9 @@ func (r *run) startSampling(ctx context.Context, st *state) func() {
 		gpus:     r.gpus,
 		client:   r.client,
 		pollSlot: r.props.TotalSlots > 0,
+		// Engine runs sum the process tree (openSampler doc); every other
+		// kind reads one pid, as they always have.
+		tree: r.kind == tape.ServerExLlamaV3,
 	}
 	go func() {
 		defer close(done)

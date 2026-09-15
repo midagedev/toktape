@@ -102,7 +102,18 @@ func runCard(c *cli, args []string) int {
 // Neither explainer can fail. A run they can say nothing about produces a
 // listing whose every verdict is "no" and whose every figure is "?", which is
 // itself the answer to "why is the card not printing it".
+//
+// An engine run (2026-09-15, ExLlamaV3) gets a third listing first: where its
+// figures came from and what the recorder made of them. It goes first because
+// it reframes the other two — a "?" in the caveat listing of a run whose
+// placement was never replayed means something different from a "?" on a
+// GGUF run, and the reader should know which card they are reading before the
+// verdicts start.
 func explainCard(w io.Writer, s *tape.RunSummary) {
+	if e := card.ExplainEnginePlacement(s); e != "" {
+		fmt.Fprint(w, e)
+		fmt.Fprintln(w)
+	}
 	fmt.Fprint(w, card.ExplainCaveats(s))
 	fmt.Fprintln(w)
 	fmt.Fprint(w, bandwidth.Explain(s).String())

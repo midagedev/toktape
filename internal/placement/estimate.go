@@ -13,6 +13,10 @@ const (
 	// SourceGGUFArgs: derived from the GGUF tensor headers plus the server's
 	// own -ngl/-ot/-cmoe arguments.
 	SourceGGUFArgs = "gguf+args"
+	// SourceEngine: reported by the engine itself through /props' engine
+	// block (2026-09-15, ExLlamaV3). The engine knows where it put each
+	// tensor, so nothing is replayed; the figures are its own.
+	SourceEngine = "engine"
 	// SourceUnknown: the arguments that decide placement were not observed,
 	// so no device breakdown is claimed.
 	SourceUnknown = "unknown"

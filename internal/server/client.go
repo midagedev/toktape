@@ -175,6 +175,12 @@ type Props struct {
 	DefaultGenerationSettings struct {
 		NCtx int `json:"n_ctx"`
 	} `json:"default_generation_settings"`
+	// Engine is the one extra object an engine that is not llama.cpp reports
+	// about itself (2026-09-15, ExLlamaV3 behind a llama-server-protocol shim).
+	// nil when the body had no engine key — which is every llama-server and ik
+	// /props there has ever been — so absent engine and empty engine stay
+	// distinguishable.
+	Engine *EngineProps `json:"engine,omitempty"`
 
 	// Raw is the whole response, so a field this struct does not name is still
 	// available to the caller and to DetectKind.
@@ -182,6 +188,83 @@ type Props struct {
 	// Headers are the response headers; the Server header is one of the
 	// signals DetectKind uses.
 	Headers http.Header `json:"-"`
+}
+
+// EngineProps is the engine object of /props. Every key inside it is optional;
+// an omitted key decodes to its zero value, which the recorder records as
+// unknown ("?" on the card) rather than guessing at.
+//
+// The three members carry everything the card needs from an engine it cannot
+// read out of a GGUF header and an argv: what it is (Name, Version), how it was
+// launched (Args — the engine's own argv, one element per string, verbatim),
+// what model it loaded (Model) and where it put the weights (Placement).
+type EngineProps struct {
+	Name      string          `json:"name"`
+	Version   string          `json:"version"`
+	Args      []string        `json:"args"`
+	Model     EngineModel     `json:"model"`
+	Placement EnginePlacement `json:"placement"`
+	// Draft names the engine's speculative drafter when one ran: Model is
+	// what drafts ("mtp" for a model's own MTP head, or a draft model's name)
+	// and NMax the most tokens drafted per step. Both verbatim, both optional
+	// (2026-09-15).
+	Draft *EngineDraft `json:"draft,omitempty"`
+}
+
+// EngineDraft is the engine block's speculative-decoding identity. It fills
+// the same two card fields -md and --draft-max fill for llama-server.
+type EngineDraft struct {
+	Model string `json:"model"`
+	NMax  int    `json:"n_max"`
+}
+
+// EngineModel is the model an engine reported: the shape a GGUF header would
+// have supplied, in the engine's own words. Quant is verbatim and may contain
+// spaces and separators ("EXL3 4.05 bpw · head 6.0"); ActiveBytesPerToken is
+// the same quantity tape.ModelInfo.ActiveBytesPerToken is.
+type EngineModel struct {
+	Format              string `json:"format"`
+	Arch                string `json:"arch"`
+	Quant               string `json:"quant"`
+	Bytes               int64  `json:"bytes"`
+	Files               int    `json:"files"`
+	Params              int64  `json:"params"`
+	NLayers             int    `json:"n_layers"`
+	NExperts            int    `json:"n_experts"`
+	NExpertsUsed        int    `json:"n_experts_used"`
+	CtxTrain            int    `json:"ctx_train"`
+	ActiveBytesPerToken int64  `json:"active_bytes_per_token"`
+}
+
+// EnginePlacement is where an engine put the weights, in the engine's own
+// accounting: one row per device, the bytes each tensor class occupies there,
+// and the KV cache's VRAM bytes.
+type EnginePlacement struct {
+	Devices     []EngineDevice `json:"devices"`
+	VRAMKVBytes int64          `json:"vram_kv_bytes"`
+}
+
+// EngineDevice is one device of an engine placement. Device is tape.DeviceCPU
+// or "GPU<n>" with n the nvidia-smi index. Bytes is the device's total, which
+// the contract says is the sum of its classes. ActiveBytesPerToken is what the
+// device is read for on one token — normally OMITTED: an engine that swaps
+// experts between devices on the fly does not have a static answer.
+type EngineDevice struct {
+	Device              string           `json:"device"`
+	Bytes               int64            `json:"bytes"`
+	Classes             map[string]int64 `json:"classes"`
+	Layers              string           `json:"layers"`
+	ActiveBytesPerToken int64            `json:"active_bytes_per_token"`
+}
+
+// EngineName is the engine object's name, or "" when the body had none. It is
+// the one accessor DetectKind and the recorder both branch on, so the string
+// they compare is spelled once.
+func (p *Props) EngineName() string {
+	if p == nil || p.Engine == nil {
+		return ""
+	}
+	return p.Engine.Name
 }
 
 // Props reads GET /props.
@@ -337,12 +420,19 @@ func hasIKMarker(s string) bool {
 // ik_llama.cpp serves the same routes as llama-server, so no field
 // distinguishes them by contract. The rules, in order:
 //
+//   - an engine object naming exllamav3 is tape.ServerExLlamaV3 (2026-09-15):
+//     the engine said what it is, in the one field that exists for saying it;
 //   - an ik marker anywhere in the response or the Server header is
 //     tape.ServerIKLlama;
 //   - a build_info key, with any value, is tape.ServerLlamaCPP — mainline
 //     stamps one on every build;
 //   - anything else is tape.ServerUnknown: it answered /props and did not say
 //     what it is.
+//
+// The engine rule comes first because the two under it scan every value in the
+// body for a marker, and an engine object is full of user-chosen paths and
+// version strings that must not be mistaken for either. An engine object
+// naming anything else leaves detection exactly as it was.
 //
 // The last rule is measured (TTP-33, 2026-09-13): a real ik_llama.cpp
 // 7b79b229 /props has no build_info and no marker outside model_path and
@@ -351,6 +441,9 @@ func hasIKMarker(s string) bool {
 func DetectKind(p *Props) tape.ServerKind {
 	if p == nil {
 		return tape.ServerUnknown
+	}
+	if p.EngineName() == "exllamav3" {
+		return tape.ServerExLlamaV3
 	}
 	hay := strings.ToLower(p.BuildInfo)
 	for k, v := range p.Raw {
@@ -382,7 +475,9 @@ func DetectKind(p *Props) tape.ServerKind {
 // same name. Only argv[0] is read: later arguments are user text (a model under
 // an ik_llama.cpp directory names no engine).
 func RefineKind(k tape.ServerKind, exe string, argv []string) tape.ServerKind {
-	if k == tape.ServerIKLlama {
+	if k == tape.ServerIKLlama || k == tape.ServerExLlamaV3 {
+		// An engine block's kind is stamped from engine.name and nothing else
+		// (tape.ServerExLlamaV3 doc); the process cannot outvote it.
 		return k
 	}
 	hay := strings.ToLower(exe)

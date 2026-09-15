@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/midagedev/toktape/internal/placement"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -87,6 +88,13 @@ type Explanation struct {
 	// of ClassExperts, which is what explains a gap when there is one.
 	ExpertsSplit      ExpertsClassBytes
 	ExpertsSplitKnown bool
+
+	// EnginePlacement says the placement is an engine's own report through
+	// /props (placement.SourceEngine, 2026-09-15, ExLlamaV3) rather than a
+	// replay. Its devices' active bytes, when absent, are not estimated —
+	// the per-device and ram/verify lines below say so instead of silently
+	// reading as a failure to derive.
+	EnginePlacement bool
 }
 
 // Explain derives every bandwidth figure of a run and reports the workings.
@@ -101,13 +109,14 @@ func Explain(s *tape.RunSummary) Explanation {
 	}
 	e.RecordActiveBytesPerToken = s.Model.ActiveBytesPerToken
 	e.EffectiveBytesPerSec = s.Timings.EffectiveBandwidthBytesPerSec
+	e.EnginePlacement = s.Placement.Source == placement.SourceEngine
 
 	tied := tiedEmbeddings(s.Placement)
 	for _, d := range s.Placement.Devices {
 		db := DeviceBandwidth{
 			Device:              d.Device,
 			Bytes:               d.Bytes,
-			ActiveBytesPerToken: activeBytesOn(d, s.Model, tied),
+			ActiveBytesPerToken: activeBytesOn(d, s, tied),
 			Recorded:            d.ActiveBytesPerToken > 0,
 			PeakBytesPerSec:     DeviceBytesPerSec(s, d.Device),
 		}
@@ -143,9 +152,17 @@ func (e Explanation) String() string {
 	p := func(format string, args ...any) { fmt.Fprintf(&b, format+"\n", args...) }
 
 	p("record  %s/token (model.active_bytes_per_token)", gb(e.RecordActiveBytesPerToken))
+	if e.EnginePlacement {
+		p("source  engine — placement reported by the engine through /props, not replayed")
+	}
 	for _, d := range e.Devices {
 		src := "estimated from class totals"
-		if d.Recorded {
+		switch {
+		case d.Recorded && e.EnginePlacement:
+			src = "reported by the engine"
+		case !d.Recorded && e.EnginePlacement:
+			src = "not estimated — engine placement"
+		case d.Recorded:
 			src = "recorded per device"
 		}
 		p("  %-5s resident %-10s active %-10s  %-26s  peak %-10s  floor %s",
@@ -188,6 +205,8 @@ func (e Explanation) String() string {
 		if e.RAM.OfPeak > 0 {
 			p("        %.1f %% of the host bus", e.RAM.OfPeak*100)
 		}
+	} else if e.EnginePlacement {
+		p("ram     ? — engine placement without per-device active bytes; the class estimate is off")
 	} else {
 		p("ram     ? — not a mixed placement, or no decode rate")
 	}
@@ -209,6 +228,8 @@ func (e Explanation) String() string {
 		} else {
 			p("        ? %% of the host bus — no host figure; %s", exact)
 		}
+	} else if e.EnginePlacement {
+		p("verify  ? — no draft figures, or an engine placement without per-device active bytes")
 	} else {
 		p("verify  ? — no draft figures, or a concurrent run with no aggregate token count")
 	}

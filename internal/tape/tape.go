@@ -166,7 +166,13 @@ type ServerKind string
 const (
 	ServerLlamaCPP ServerKind = "llama-server"
 	ServerIKLlama  ServerKind = "ik_llama.cpp"
-	ServerUnknown  ServerKind = "unknown"
+	// ServerExLlamaV3 is an ExLlamaV3 engine behind a llama-server-compatible
+	// HTTP front (2026-09-15). exllamav3 ships no HTTP server of its own, so
+	// the kind is only ever stamped from /props' engine.name, never guessed
+	// from a process name. Its model, placement and flags come from that same
+	// engine block (EngineSource), not from a GGUF or an argv.
+	ServerExLlamaV3 ServerKind = "exllamav3"
+	ServerUnknown   ServerKind = "unknown"
 )
 
 // ServerInfo is what /props, the process command line and the build report.
@@ -220,7 +226,11 @@ type ModelInfo struct {
 	Dir string `json:"dir,omitempty"`
 	// Shards is N when FileName is one part of an -00001-of-0000N set;
 	// FileBytes is then the sum of all N parts. 0 = a single file.
-	Shards       int    `json:"shards,omitempty"`
+	Shards int `json:"shards,omitempty"`
+	// Format is the weight format when it is not GGUF: "exl3" (2026-09-15).
+	// "" is GGUF, which every tape before this field was. A non-GGUF model's
+	// shape is what its engine reported, never a header this recorder read.
+	Format       string `json:"format,omitempty"`
 	Name         string `json:"name,omitempty"`  // general.name
 	Arch         string `json:"arch,omitempty"`  // general.architecture
 	Quant        string `json:"quant,omitempty"` // exact sub-type: Q4_K_M, IQ4_NL, UD-Q4_K_M — never "Q4"

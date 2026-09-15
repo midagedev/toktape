@@ -157,7 +157,7 @@ func TestExpertsSplitWS(t *testing.T) {
 	tied := tiedEmbeddings(s.Placement)
 	var perDevice int64
 	for _, d := range s.Placement.Devices {
-		perDevice += activeBytesOn(d, s.Model, tied)
+		perDevice += activeBytesOn(d, s, tied)
 	}
 	if want := int64(wsActiveBytesPerToken); perDevice != want {
 		t.Fatalf("per-device active sum = %d, want the record %d (delta %d)", perDevice, want, perDevice-want)
@@ -208,7 +208,7 @@ func TestExpertsSplitWSLegacy(t *testing.T) {
 	tied := tiedEmbeddings(s.Placement)
 	var perDevice int64
 	for _, d := range s.Placement.Devices {
-		perDevice += activeBytesOn(d, s.Model, tied)
+		perDevice += activeBytesOn(d, s, tied)
 	}
 	if want := int64(6_820_987_840); perDevice != want {
 		t.Fatalf("per-device active sum = %d, want %d", perDevice, want)

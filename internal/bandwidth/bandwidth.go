@@ -75,6 +75,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/midagedev/toktape/internal/placement"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -236,10 +237,23 @@ func DeviceBytesPerSec(s *tape.RunSummary, device string) int64 {
 // no residue and the SplitTolerance check below passes by construction. Zero
 // means a tape recorded before the field existed, and every tape already on
 // disk is that shape, so the fallback stays live and tested.
-func activeBytesOn(d tape.DevicePlacement, m tape.ModelInfo, tied bool) int64 {
+//
+// One placement never runs the fallback at all: an engine's (SourceEngine,
+// 2026-09-15, ExLlamaV3). Its classes say where the weights SIT, in the
+// engine's own accounting, and an engine that swaps experts between devices
+// on the fly has no static answer to what each device is read for. Scaling
+// class totals by the routing fraction would present a guess as a figure, so
+// the estimate returns 0 and the RAM and verify lines stay absent — absent,
+// never "?" dressed up as 0. A per-device figure the engine DID send still
+// wins through the branch above: that one is a report, not an estimate.
+func activeBytesOn(d tape.DevicePlacement, s *tape.RunSummary, tied bool) int64 {
 	if d.ActiveBytesPerToken > 0 {
 		return d.ActiveBytesPerToken
 	}
+	if s == nil || s.Placement.Source == placement.SourceEngine {
+		return 0
+	}
+	m := s.Model
 	var total int64
 	for class, b := range d.Classes {
 		if b <= 0 {
@@ -309,7 +323,7 @@ func Ceiling(s *tape.RunSummary) (int64, bool) {
 	var sum int64
 	var seconds float64
 	for _, d := range s.Placement.Devices {
-		a := activeBytesOn(d, s.Model, tied)
+		a := activeBytesOn(d, s, tied)
 		if a <= 0 {
 			continue
 		}
@@ -339,6 +353,28 @@ func Ceiling(s *tape.RunSummary) (int64, bool) {
 	// would report a ceiling of bw-1 for the single-device case the formula is
 	// supposed to reduce to exactly.
 	return int64(math.Round(float64(sum) / seconds)), true
+}
+
+// Combined is the one figure over every device a token was read from —
+// ModelInfo.ActiveBytesPerToken times the decode rate — and whether a card may
+// print it at all.
+//
+// It is refused for an engine-reported placement (2026-09-15, ExLlamaV3). The
+// two cases this package already refuses a combined figure for both hold
+// there by construction: the placement is mixed across host RAM and VRAM
+// (TTP-56: one figure over three buses is a bandwidth against no ceiling that
+// exists), and the engine's own draft means the hardware never read the
+// weights once per accepted token (TTP-67). Without the per-device split,
+// which such an engine does not report, the honest answer is no figure. A
+// GGUF placement keeps the figure exactly as before.
+func Combined(s *tape.RunSummary) (int64, bool) {
+	if s == nil || s.Timings.EffectiveBandwidthBytesPerSec <= 0 {
+		return 0, false
+	}
+	if s.Placement.Source == placement.SourceEngine {
+		return 0, false
+	}
+	return s.Timings.EffectiveBandwidthBytesPerSec, true
 }
 
 // OfPeak is the run's measured effective bandwidth as a fraction of the

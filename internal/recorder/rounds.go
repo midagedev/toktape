@@ -233,6 +233,7 @@ func (r *run) streamRounds(ctx context.Context, rounds [][]server.StreamRequest)
 		}
 	}
 	stopSampling()
+	r.warnTreeProcesses(st)
 	if cutAfter > 0 {
 		r.warn("the run's budget ran out after round %d of %d", cutAfter, len(rounds))
 	}
