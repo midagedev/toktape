@@ -90,30 +90,29 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **The server no longer has to be llama.cpp.** A server that answers
-    `/props` with an `engine` object — its name and version, the model's
-    format, quant and shape, and which bytes sit on which device — is recorded
-    from that report: no GGUF is opened and no command line is parsed. The
-    card then names the engine that ran, prints the model file's own name, and
-    shows the engine's flags verbatim. The first one recorded this way is
-    ExLlamaV3 1.5.0 serving a 154 GiB EXL3 model with per-expert placement
-    across two GPUs and host RAM.
+    **The card's caveats now say what its figures say.** Three sentences a
+    concurrent run could print were wrong about the run they described.
 
-    **What such an engine does not report now prints as `?`.** Figures that
-    are only meaningful for a memory-mapped GGUF are withheld rather than
-    estimated: no RAM-versus-disk split of the host's share, and no single
-    bandwidth over a placement that spans both the host bus and two GPU buses.
-    `toktape card --explain` says which figure was refused and why.
+    The client-versus-server warning judged the streams' own verdicts while
+    printing their mean, so a card could say "over the 2% tolerance" about two
+    figures 1.3% apart. It now judges the figures it prints, and says
+    separately how many streams the server's own number did not confirm.
 
-    **A take whose streams took turns says so.** `--sessions N` asks for N
-    concurrent streams, but a server can accept N and still run one at a time.
-    The card now reads that off its own token timeline, not the server's slot
-    count, and a run whose streams never decoded together carries a caveat
-    instead of an aggregate that looks like N streams and measures a queue.
+    The Streams row stops writing `2 × 11.6 tok/s = 19.4 tok/s aggregate`.
+    Both figures are the run's — the streams finished ten seconds apart, so
+    the aggregate divides by a window whose tail holds one stream — and the
+    equation between them was the false part. The three figures are listed
+    instead whenever the product misses the aggregate by more than 2%.
 
-    Coming from v0.1.0? Read the
+    A warning that fires twice is listed once with a count, and the caveat
+    about a server whose memory is summed over a process tree no longer
+    prints a process id onto a card people publish.
+
+    New since v0.1.0 or v0.2.1? The
+    [v0.2.2 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.2)
+    describe recording a server that is not llama.cpp, and the
     [v0.2.0 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.0)
-    first: `-n` changed meaning in that release.
+    the release where `-n` changed meaning.
 
   footer: |
     ## Install
