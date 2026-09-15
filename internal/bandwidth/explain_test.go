@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/midagedev/toktape/internal/placement"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -162,5 +163,77 @@ func TestExplainNil(t *testing.T) {
 	}
 	if e.String() == "" {
 		t.Error("String() should still render an all-unknown explanation")
+	}
+}
+
+// TestExplainEnginePlacementPrintsAbsencesAsAbsences (lead, 2026-09-15): the
+// explain block of the exl3 trial printed "active 0" per device, a
+// "sum 0/token gap +100 %" line and "effective 238.7 GB/s", and all three read
+// as figures. None is one: the engine reported no per-device active bytes —
+// which is an absence, and absences print as "?" (CLAUDE.md) — and the
+// combined figure is refused for exactly this placement (Combined). The block
+// says so per line instead, with the reason attached to the "?".
+func TestExplainEnginePlacementPrintsAbsencesAsAbsences(t *testing.T) {
+	s := &tape.RunSummary{
+		Model:     engineModelFixture(),
+		Placement: tape.PlacementSummary{Source: placement.SourceEngine, Devices: []tape.DevicePlacement{engineDeviceFixture()}},
+		// The recorder did write this figure (it is ActiveBytesPerToken × the
+		// decode rate); the point of the row is that the card refuses it.
+		Timings: tape.TimingsSummary{EffectiveBandwidthBytesPerSec: 138_600_000_000},
+	}
+	e := Explain(s)
+	out := e.String()
+	for _, want := range []string{
+		"active ?",
+		"sum     ? — the engine reported no per-device active bytes, so there is nothing to sum",
+		"effective ? — refused for an engine placement: one figure over RAM and VRAM buses is not a bandwidth",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the engine block lacks %q:\n%s", want, out)
+		}
+	}
+	for _, stale := range []string{"active 0", "sum     0/token", "+100", "effective 138.6"} {
+		if strings.Contains(out, stale) {
+			t.Errorf("the engine block still prints %q, a figure nobody measured:\n%s", stale, out)
+		}
+	}
+	// The rendering changed; the arithmetic did not: the gap against the
+	// model's own figure stays computed, for a consumer that wants the number.
+	if e.Gap != s.Model.ActiveBytesPerToken {
+		t.Errorf("Gap = %d, want the record figure it always was", e.Gap)
+	}
+	if e.WithinTolerance {
+		t.Error("a 100 % gap is within tolerance; the check it feeds is unchanged")
+	}
+	if e.EffectiveKnown {
+		t.Error("EffectiveKnown = true; Combined refuses the figure for an engine placement")
+	}
+}
+
+// TestExplainGGUFWritesWhatItAlwaysWrote: the engine changes are rendering
+// changes for an engine placement only. A GGUF tape keeps every line this file
+// printed before them — recorded active bytes, the class estimate where there
+// is no recording, the gap sum line, and the effective figure Combined keeps.
+func TestExplainGGUFWritesWhatItAlwaysWrote(t *testing.T) {
+	s := heroSummary()
+	e := Explain(s)
+	if !e.EffectiveKnown {
+		t.Fatal("a GGUF tape with a recorded effective figure has EffectiveKnown = false")
+	}
+	if out := e.String(); !strings.Contains(out, "effective 103.0 GB/s") {
+		t.Errorf("the GGUF block lost its effective figure:\n%s", out)
+	} else if strings.Contains(out, "refused for an engine placement") {
+		t.Errorf("a GGUF tape is refused an engine placement's refusal:\n%s", out)
+	}
+
+	// The estimate path: a device with no recorded figure under gguf+args is
+	// estimated, and an estimate prints as the figure it is, never as "?".
+	legacy := Explain(wsLegacySummary())
+	out := legacy.String()
+	if strings.Contains(out, "active ?") {
+		t.Errorf("a GGUF class estimate prints as an absence:\n%s", out)
+	}
+	if !strings.Contains(out, "sum     ") || strings.Contains(out, "sum     ?") {
+		t.Errorf("the GGUF sum line is not the gap line it always was:\n%s", out)
 	}
 }

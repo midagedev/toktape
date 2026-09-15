@@ -71,8 +71,14 @@ type Explanation struct {
 	// CeilingBytesPerSec / CeilingKnown are Ceiling.
 	CeilingBytesPerSec int64
 	CeilingKnown       bool
-	// EffectiveBytesPerSec is the measured figure the ratio divides.
+	// EffectiveBytesPerSec is the measured figure the ratio divides, and
+	// EffectiveKnown is Combined's ok: the recorder may have written
+	// Timings.EffectiveBandwidthBytesPerSec on a placement where one figure
+	// over every bus is refused (an engine placement, 2026-09-15), so the
+	// field's presence and the card's willingness to print it are two
+	// different questions and this carries the second.
 	EffectiveBytesPerSec int64
+	EffectiveKnown       bool
 	// OfPeak / OfPeakKnown are OfPeak.
 	OfPeak      float64
 	OfPeakKnown bool
@@ -108,7 +114,9 @@ func Explain(s *tape.RunSummary) Explanation {
 		return e
 	}
 	e.RecordActiveBytesPerToken = s.Model.ActiveBytesPerToken
-	e.EffectiveBytesPerSec = s.Timings.EffectiveBandwidthBytesPerSec
+	// Combined, not the raw timings field, so the listing and the card answer
+	// "may this figure be printed" the same way for an engine placement.
+	e.EffectiveBytesPerSec, e.EffectiveKnown = Combined(s)
 	e.EnginePlacement = s.Placement.Source == placement.SourceEngine
 
 	tied := tiedEmbeddings(s.Placement)
@@ -157,20 +165,34 @@ func (e Explanation) String() string {
 	}
 	for _, d := range e.Devices {
 		src := "estimated from class totals"
+		active := gb(d.ActiveBytesPerToken)
 		switch {
 		case d.Recorded && e.EnginePlacement:
 			src = "reported by the engine"
 		case !d.Recorded && e.EnginePlacement:
 			src = "not estimated — engine placement"
+			// The engine said nothing here; "active 0" would read as a
+			// measured zero, and an absence prints as "?" (CLAUDE.md).
+			active = "?"
 		case d.Recorded:
 			src = "recorded per device"
 		}
 		p("  %-5s resident %-10s active %-10s  %-26s  peak %-10s  floor %s",
-			d.Device, gb(d.Bytes), gb(d.ActiveBytesPerToken), src,
+			d.Device, gb(d.Bytes), active, src,
 			gbps(d.PeakBytesPerSec), ms(d.FloorSeconds))
 	}
-	p("sum     %s/token   gap %s (%+.2f %%)  within %.0f %% tolerance: %v",
-		gb(e.SumActiveBytesPerToken), gb(e.Gap), e.GapFraction*100, SplitTolerance*100, e.WithinTolerance)
+	// An engine placement that reported no per-device active bytes has no sum
+	// either: the 0 is the same absence the device rows just printed as "?",
+	// and a gap line against it would read "+100 %" against nothing. The
+	// figures stay computed on the struct (GapFraction, WithinTolerance); only
+	// the rendering stands aside, the same deal the ram/verify lines below
+	// already have for this placement.
+	if e.EnginePlacement && !anyRecorded(e.Devices) {
+		p("sum     ? — the engine reported no per-device active bytes, so there is nothing to sum")
+	} else {
+		p("sum     %s/token   gap %s (%+.2f %%)  within %.0f %% tolerance: %v",
+			gb(e.SumActiveBytesPerToken), gb(e.Gap), e.GapFraction*100, SplitTolerance*100, e.WithinTolerance)
+	}
 	if e.ExpertsSplitKnown {
 		p("experts sparse %s + dense %s (router + shared expert, read in full)",
 			gb(e.ExpertsSplit.Sparse), gb(e.ExpertsSplit.Dense))
@@ -188,7 +210,15 @@ func (e Explanation) String() string {
 	} else {
 		p("ceiling ? — a device carrying active bytes has no known peak, or the gap is over tolerance")
 	}
-	p("effective %s", gbps(e.EffectiveBytesPerSec))
+	if e.EffectiveKnown || !e.EnginePlacement {
+		// A GGUF tape prints what it always printed, figure or "?".
+		p("effective %s", gbps(e.EffectiveBytesPerSec))
+	} else {
+		// The recorder wrote the figure; Combined refuses it for this
+		// placement, and the listing says why rather than dressing the
+		// refusal up as a bandwidth.
+		p("effective ? — refused for an engine placement: one figure over RAM and VRAM buses is not a bandwidth")
+	}
 	if e.OfPeakKnown {
 		p("of peak %.1f %%", e.OfPeak*100)
 	} else {
@@ -234,6 +264,17 @@ func (e Explanation) String() string {
 		p("verify  ? — no draft figures, or a concurrent run with no aggregate token count")
 	}
 	return b.String()
+}
+
+// anyRecorded reports whether any device's active-bytes figure is the tape's
+// own rather than this package's estimate or the engine's silence.
+func anyRecorded(devs []DeviceBandwidth) bool {
+	for _, d := range devs {
+		if d.Recorded {
+			return true
+		}
+	}
+	return false
 }
 
 func gb(n int64) string {
