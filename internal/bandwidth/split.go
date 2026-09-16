@@ -306,22 +306,38 @@ type RAMSide struct {
 // all-GPU run there is only one bus, the whole-model effective bandwidth is
 // already a figure against a real ceiling, and splitting it out would say the
 // same thing twice. ok is also false without a decode rate to multiply by.
+//
+// ok is also false when the derived figure exceeds the host bus it must have
+// been carried on by more than CeilingSlack (2026-09-16): the bytes the split
+// says the CPU streams cannot have moved faster than the bus, so a figure over
+// it means the split is wrong — the qwen38 defect, where a 26.8 GiB lookup
+// table read by row was counted as streamed — and the honest output is no
+// figure, not "1033% of peak".
 func RAM(s *tape.RunSummary) (RAMSide, bool) {
+	side, ok, refusal := ramSide(s)
+	return side, ok && refusal == nil
+}
+
+// ramSide is RAM with the reason a refusal happened. Its ok carries every
+// reason the view is not derivable that is not a ceiling refusal, so only a
+// non-nil third return is the over-the-bus case, carrying which figure it
+// was, what it read, and the bus it cannot have.
+func ramSide(s *tape.RunSummary) (RAMSide, bool, *FigureRefusal) {
 	if s == nil {
-		return RAMSide{}, false
+		return RAMSide{}, false, nil
 	}
 	rate, streams, ok := decodeRate(s)
 	if !ok {
-		return RAMSide{}, false
+		return RAMSide{}, false, nil
 	}
 	cpu, found := device(s.Placement, tape.DeviceCPU)
 	if !found {
-		return RAMSide{}, false
+		return RAMSide{}, false, nil
 	}
 	tied := tiedEmbeddings(s.Placement)
 	cpuActive := activeBytesOn(cpu, s, tied)
 	if cpuActive <= 0 {
-		return RAMSide{}, false
+		return RAMSide{}, false, nil
 	}
 
 	// Mixed, or there is nothing to separate.
@@ -333,7 +349,7 @@ func RAM(s *tape.RunSummary) (RAMSide, bool) {
 		elsewhere += activeBytesOn(d, s, tied)
 	}
 	if elsewhere <= 0 {
-		return RAMSide{}, false
+		return RAMSide{}, false, nil
 	}
 
 	out := RAMSide{
@@ -342,10 +358,21 @@ func RAM(s *tape.RunSummary) (RAMSide, bool) {
 		Streams:             streams,
 	}
 	if peak := HostBytesPerSec(s.Host); peak > 0 {
+		// Over the bus that must have carried it, the figure is not a reading
+		// of anything: the active split counted traffic the bus never saw. The
+		// slack is CeilingSlack's (rounding, and a host figure derived from DDR
+		// speed × channels rather than measured — see bandwidth.go).
+		if overCeiling(out.BytesPerSec, peak) {
+			return RAMSide{}, false, &FigureRefusal{
+				Which:            RefusedRAM,
+				BytesPerSec:      out.BytesPerSec,
+				LimitBytesPerSec: peak,
+			}
+		}
 		out.OfPeak = float64(out.BytesPerSec) / float64(peak)
 	}
 	out.Exact = cpuActiveExact(s, cpu)
-	return out, true
+	return out, true, nil
 }
 
 // cpuActiveExact reports whether the CPU's active-bytes figure is PROVABLY the
@@ -504,6 +531,16 @@ type Verify struct {
 // the batch over, without a decode window, on a concurrent run with no
 // Aggregate.TotalPredictedN or no aggregate rate, or when the arithmetic does
 // not describe a real run (no steps, a batch under one token).
+//
+// It deliberately takes NO over-the-ceiling refusal (2026-09-16), although
+// RAMSide does. Two reasons, and either is enough. The figure is an UPPER
+// BOUND by construction — the distinct-experts model assumes independent
+// routing — so sitting over the wall says the bound is loose, not that the
+// split is wrong. And it is host-independent: whether it clears the bus
+// depends on which host figure it is set beside, and on the ws fixture the
+// same correct step figure reads 0.94x against the measured STREAM bus and
+// 1.13x against a DMI derivation 17 % below it — refusing on the second
+// would be refusing a right answer for the provenance of the ruler.
 func Speculative(s *tape.RunSummary) (Verify, bool) {
 	if s == nil || s.Timings.DraftN == nil || s.Timings.DraftNAccepted == nil {
 		return Verify{}, false

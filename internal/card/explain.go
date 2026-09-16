@@ -54,6 +54,7 @@ func ExplainCaveats(s *tape.RunSummary) string {
 			orUnknown(countOrEmpty(s.Aggregate.PeakDecodingStreams)), s.Concurrency,
 			orUnknown(countOrEmpty(s.Aggregate.SlotsBusyMax)))},
 		{CodePlacementContradicted, placementContradictionReading(s)},
+		{CodeBandwidthOverCeiling, bandwidthOverCeilingReading(s)},
 		{CodeAnswerCut, fmt.Sprintf("%d of %d predicted tokens were reasoning",
 			t.ReasoningN, t.PredictedN)},
 		{CodeShortGeneration, fmt.Sprintf("predicted_n %d, recorded label %q, floor %d",
@@ -131,6 +132,18 @@ func placementContradictionReading(s *tape.RunSummary) string {
 			s.Placement.Source, c.Device, formatGiB(c.PlacedBytes), formatGiB(c.MeasuredBytes))
 	}
 	return fmt.Sprintf("source %q, no device the end reading contradicts", s.Placement.Source)
+}
+
+// bandwidthOverCeilingReading is the bandwidth_over_ceiling reading: the view
+// that was refused, the figure it read, the bus or ceiling it exceeded, and
+// the slack the rule allows — the four numbers behind the sentence, so a
+// reader can restate the check (2026-09-16).
+func bandwidthOverCeilingReading(s *tape.RunSummary) string {
+	if r := bandwidth.RefusedFigure(s); r != nil {
+		return fmt.Sprintf("%s figure %s, ceiling %s, slack %s",
+			r.Which, formatGBs(r.BytesPerSec), formatGBs(r.LimitBytesPerSec), formatPct(bandwidth.CeilingSlack))
+	}
+	return "no bandwidth figure exceeds its ceiling"
 }
 
 // explainRoundPrompt is one round's reading for ExplainCaveats: the line of the

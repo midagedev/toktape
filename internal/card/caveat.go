@@ -70,6 +70,15 @@ const (
 	// machine this run was not. The measured figures stand; the derived ones
 	// print "?".
 	CodePlacementContradicted = "placement_contradicted"
+	// CodeBandwidthOverCeiling: a bandwidth figure — the host-bus view, the
+	// verify step, or the one figure over every device — exceeded the bus or
+	// ceiling that must have carried it by more than 5 % (2026-09-16), so the
+	// card prints no bandwidth clause at all and this names both figures. A
+	// figure over its ceiling is not a reading of anything: the qwen38 tapes
+	// printed "≈ 1416 GB/s from RAM, 978% of peak" on a host bus that measures
+	// 144.8 GB/s, because a 26.8 GiB embedding table read by row was counted
+	// as streamed per-token weight traffic. The Decode row keeps its rate.
+	CodeBandwidthOverCeiling = "bandwidth_over_ceiling"
 	// CodeAnswerCut: the whole generation budget went to reasoning tokens and
 	// no answer was produced.
 	CodeAnswerCut = "answer_cut"
@@ -150,6 +159,15 @@ const (
 // run-level caveat: two cards of this run cannot be compared with anything,
 // because the device rows themselves describe a machine this run was not.
 //
+// bandwidth_over_ceiling sits directly under placement_contradicted
+// (2026-09-16). It is the same kind of caveat — a derived figure the card has
+// already declined to print, with the two figures it compared named in the
+// sentence — and it qualifies the same memory block: a bandwidth over the bus
+// that carried it means the active split is wrong, so the placement story and
+// the rate disagree about one run. It ranks under the contradiction because
+// the contradiction unseats the device rows themselves, where this unseats
+// only what was built on top of them.
+//
 // short_stream sits directly under short_generation and above cold_cache
 // (TTP-83, 2026-09-14). It is short_generation's own question one stream
 // down: a stream too short to be a rate, averaged into a per-stream mean that
@@ -170,17 +188,18 @@ var caveatRank = map[string]int{
 	CodeStreamsFailed:         0,
 	CodeStreamsNotConcurrent:  1,
 	CodePlacementContradicted: 2,
-	CodeAnswerCut:             3,
-	CodeShortGeneration:       4,
-	CodeShortStream:           5,
-	CodeColdCache:             6,
-	CodeShortPromptForPrefill: 7,
-	CodeClientDisagrees:       8,
-	CodeRecorded:              9,
-	CodeMachineContended:      10,
-	CodeConditionsChanged:     11,
-	CodeRunCutByClock:         12,
-	CodeNoProcView:            13,
+	CodeBandwidthOverCeiling:  3,
+	CodeAnswerCut:             4,
+	CodeShortGeneration:       5,
+	CodeShortStream:           6,
+	CodeColdCache:             7,
+	CodeShortPromptForPrefill: 8,
+	CodeClientDisagrees:       9,
+	CodeRecorded:              10,
+	CodeMachineContended:      11,
+	CodeConditionsChanged:     12,
+	CodeRunCutByClock:         13,
+	CodeNoProcView:            14,
 }
 
 // MinPrefillPromptTokens is tape.MinPrefillPromptTokens, re-exported so this
@@ -412,6 +431,28 @@ func noProcView(s *tape.RunSummary) bool {
 	return s.Memory.AtEnd.RSSBytes <= 0
 }
 
+// bandwidthOverCeilingText is the sentence for CodeBandwidthOverCeiling, and
+// like the placement contradiction's it is the two figures compared, because
+// they are the whole case: a reader who cannot check a caveat against the
+// numbers it names will ignore it (2026-09-16).
+//
+// One sentence shape per view — the bus that was exceeded differs. The ram
+// view names the HOST BUS; the combined figure names the CEILING the
+// placement allows, the harmonic mean of the devices it reads, which is a
+// derived limit rather than a measured one. What the two share is the
+// consequence clause: the figure is gone from the card, and the reason is
+// always the same class of defect — something the split counted as streamed
+// was read by row.
+func bandwidthOverCeilingText(r *bandwidth.FigureRefusal) string {
+	read := formatGBs(r.BytesPerSec)
+	over := formatGBs(r.LimitBytesPerSec)
+	tail := "so no bandwidth is derived: some of what the placement counts as streamed is read by row"
+	if r.Which == bandwidth.RefusedRAM {
+		return fmt.Sprintf("the bytes this run's placement implies read %s from a %s bus, %s", read, over, tail)
+	}
+	return fmt.Sprintf("the bytes this run's placement implies read %s against the %s this placement allows, %s", read, over, tail)
+}
+
 // Caveats is every qualification that applies to this run, most serious first.
 //
 // An empty result is the claim the card is really making when it prints no
@@ -439,6 +480,9 @@ func Caveats(s *tape.RunSummary) []Caveat {
 		add(CodePlacementContradicted, SeverityFigure, fmt.Sprintf(
 			"the placement estimate puts %s of weights on GPU%d, which held %s: the split and everything derived from it are not this run's",
 			formatGiB(c.PlacedBytes), c.Device, formatGiB(c.MeasuredBytes)))
+	}
+	if r := bandwidth.RefusedFigure(s); r != nil {
+		add(CodeBandwidthOverCeiling, SeverityFigure, bandwidthOverCeilingText(r))
 	}
 	if w := answerCutWarning(s); w != "" {
 		add(CodeAnswerCut, SeverityFigure, w)

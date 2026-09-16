@@ -95,6 +95,76 @@ const bytesPerTransfer = 8
 // (CLAUDE.md).
 const SplitTolerance = 0.10
 
+// CeilingSlack is how far a bandwidth figure may sit over the ceiling that
+// refuses it before the refusal fires (2026-09-16, the lookup round).
+//
+// The rule it belongs to: a figure that exceeds the bus it must have been
+// carried on — RAMSide.BytesPerSec and Verify.RAMBytesPerSec against the host
+// bandwidth, Combined against Ceiling — is not a reading of anything, and the
+// honest output is no figure. The qwen38 Qwen3.8-Flash-Next tapes printed
+// "≈ 1495 GB/s from RAM, 1033% of peak" on a host bus that measures
+// 144.8 GB/s, because a 26.8 GiB per-layer embedding table read by row was
+// counted as streamed per-token weight traffic.
+//
+// The slack itself covers two small overshoots that are not a wrong split:
+// rounding (the figures are products of a rate and a byte count), and a host
+// ceiling derived from DDR speed × channels rather than measured, which is a
+// theoretical peak the real bus sits a little under. 5% is comfortably above
+// both and an order of magnitude under the 10x a mis-classified lookup table
+// produces.
+const CeilingSlack = 0.05
+
+// Which bandwidth figure a FigureRefusal refused.
+const (
+	// RefusedRAM is the host-bus view of a mixed placement (RAMSide).
+	RefusedRAM = "ram"
+	// RefusedCombined is the one figure over every device (Combined).
+	RefusedCombined = "combined"
+)
+
+// FigureRefusal is one bandwidth figure this run's placement refused for
+// exceeding the bus or ceiling that must have carried it: which figure, what
+// it read, and what it may not exceed. It is what the card's caveat names and
+// what Explain prints beside the "?" it left, because a refusal the reader
+// cannot check is indistinguishable from a failure to derive.
+//
+// The verify-step view (Speculative) is deliberately not among the refused:
+// its figure is an upper bound by construction and is host-independent, so
+// clearing the wall separates a loose bound or a low DMI derivation from a
+// wrong split no better than it separates the split's own defect. See
+// Speculative's comment.
+type FigureRefusal struct {
+	// Which figure: RefusedRAM or RefusedCombined.
+	Which string
+	// BytesPerSec is the refused figure.
+	BytesPerSec int64
+	// LimitBytesPerSec is the bus or placement ceiling it exceeded.
+	LimitBytesPerSec int64
+}
+
+// overCeiling reports whether figure exceeds limit by more than CeilingSlack.
+func overCeiling(figure, limit int64) bool {
+	return float64(figure) > float64(limit)*(1+CeilingSlack)
+}
+
+// RefusedFigure is the first bandwidth figure this run's placement refused
+// for exceeding its ceiling, or nil when none was: the RAM side first — it
+// names the bus, which is the more specific diagnosis — then the combined
+// figure. One refusal is one caveat; when both apply they are symptoms of the
+// same wrong active split.
+func RefusedFigure(s *tape.RunSummary) *FigureRefusal {
+	if s == nil {
+		return nil
+	}
+	if _, _, r := ramSide(s); r != nil {
+		return r
+	}
+	if _, _, r := combined(s); r != nil {
+		return r
+	}
+	return nil
+}
+
 // HostBandwidth is the host's RAM bandwidth in bytes per second, where the
 // figure came from, and whether there is one at all.
 //
@@ -472,14 +542,38 @@ func Ceiling(s *tape.RunSummary) (int64, bool) {
 // weights once per accepted token (TTP-67). Without the per-device split,
 // which such an engine does not report, the honest answer is no figure. A
 // GGUF placement keeps the figure exactly as before.
+//
+// It is also refused when the figure exceeds the ceiling the placement allows
+// by more than CeilingSlack (2026-09-16): a figure over the ceiling means the
+// active split is wrong — something the split counts as streamed is read by
+// row — and the honest output is no figure, not a number the bus could not
+// have carried.
 func Combined(s *tape.RunSummary) (int64, bool) {
+	v, ok, refusal := combined(s)
+	return v, ok && refusal == nil
+}
+
+// combined is Combined with the reason a refusal happened. Its ok carries
+// every reason the figure is not derivable that is not a ceiling refusal —
+// the engine guard, an absent figure — so only a non-nil third return is the
+// over-the-ceiling case, with the two figures the caveat names. The engine
+// refusal is not a FigureRefusal: it states no figures to check.
+func combined(s *tape.RunSummary) (int64, bool, *FigureRefusal) {
 	if s == nil || s.Timings.EffectiveBandwidthBytesPerSec <= 0 {
-		return 0, false
+		return 0, false, nil
 	}
 	if s.Placement.Source == placement.SourceEngine {
-		return 0, false
+		return 0, false, nil
 	}
-	return s.Timings.EffectiveBandwidthBytesPerSec, true
+	figure := s.Timings.EffectiveBandwidthBytesPerSec
+	if ceiling, ok := Ceiling(s); ok && overCeiling(figure, ceiling) {
+		return 0, false, &FigureRefusal{
+			Which:            RefusedCombined,
+			BytesPerSec:      figure,
+			LimitBytesPerSec: ceiling,
+		}
+	}
+	return figure, true, nil
 }
 
 // CombinedRange is Combined as the bounds a concurrent run's traffic lies
@@ -553,11 +647,19 @@ func CombinedRange(s *tape.RunSummary) (low, high int64, ok bool) {
 // OfPeak is the run's measured effective bandwidth as a fraction of the
 // ceiling its placement allows, and whether it was derivable.
 //
-// A run at the ceiling returns 1.0. Values above 1.0 are possible in principle
-// — a cache hit the model of a token's reads does not know about — and are
-// returned as measured rather than clamped, because a ratio over 100 % is a
-// signal that one of the two figures is wrong and hiding it would waste it.
+// A run at the ceiling returns 1.0. A ratio just above 1.0 — up to
+// 1 + CeilingSlack — is possible in principle, a cache hit the model of a
+// token's reads does not know about, and is returned as measured rather than
+// clamped, because a ratio over 100 % is a signal that one of the two figures
+// is wrong and hiding it would waste it (2026-09-16: the bound is now stated
+// where it always belonged, beside the claim it qualifies). Beyond that slack
+// the figure is refused: the recorded bandwidth is over what the placement
+// could have carried, the active split is wrong, and Combined has already
+// refused the figure this ratio would restate at full volume.
 func OfPeak(s *tape.RunSummary) (float64, bool) {
+	if _, _, r := combined(s); r != nil {
+		return 0, false
+	}
 	if s == nil || s.Timings.EffectiveBandwidthBytesPerSec <= 0 {
 		return 0, false
 	}

@@ -15,6 +15,12 @@ func TestClassify(t *testing.T) {
 		// Embeddings and output never carry a block index.
 		{"token_embd.weight", NoLayer, tape.ClassEmbed},
 		{"token_embd_norm.weight", NoLayer, tape.ClassEmbed},
+		// The per-layer input-embedding table classes with the embeddings
+		// (2026-09-16): it is a lookup read by row — ggml_get_rows touches a
+		// few KB a token — whatever its size. A 26.8 GiB per_layer_token_embd
+		// was classed "other" and so counted as per-token weight traffic,
+		// which printed a host-bus bandwidth 10x over the machine's own.
+		{"per_layer_token_embd.weight", NoLayer, tape.ClassEmbed},
 		{"output.weight", NoLayer, tape.ClassOutput},
 		{"output_norm.weight", NoLayer, tape.ClassOutput},
 
@@ -42,6 +48,9 @@ func TestClassify(t *testing.T) {
 		{"engram.table.0.weight", NoLayer, tape.ClassNGram},
 		{"ngram.embd.weight", NoLayer, tape.ClassNGram},
 		{"blk.2.n_gram_proj.weight", 2, tape.ClassNGram},
+		// The n-gram rule wins even on a name the embed rule matches, which is
+		// the rule order the unanchored embed match (2026-09-16) leans on.
+		{"token_embd_ngram.weight", NoLayer, tape.ClassNGram},
 
 		// Anything else.
 		{"rope_freqs.weight", NoLayer, tape.ClassOther},

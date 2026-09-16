@@ -1,6 +1,7 @@
 package bandwidth
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,6 +181,72 @@ func TestExplainSaysWhyTheEffectiveLineIsARange(t *testing.T) {
 	}
 	if strings.Contains(single, "so the truth is between") {
 		t.Errorf("a single stream has no reason line:\n%s", single)
+	}
+}
+
+// TestExplainBreaksActiveBytesDownByClass (2026-09-16): the listing carries
+// what a token reads BY CLASS — attention, ffn, output, other read in full,
+// experts routed, embeddings counted or not — summing to the model's own
+// figure. This is the line that makes a wrong host term obvious without a
+// tensor dump: the qwen38 defect was 30 GB of "other" on a model whose
+// attention is 2.2 GB.
+func TestExplainBreaksActiveBytesDownByClass(t *testing.T) {
+	out := Explain(heroSummary()).String()
+	for _, want := range []string{
+		// Every class the placement carries gets one line, in the classify
+		// order, the full-read classes marked as such.
+		"classes attention",
+		"2.185 GB  (read in full)",
+		// The experts line says routed of how much resident.
+		"(6 of 384 routed, of 259.599 GB resident)",
+		// The embeddings line says what the tied rule did with them.
+		"not counted — a row lookup (1.324 GB resident)",
+		// And the lines sum to the model's own figure.
+		"7.639 GB  (the record exactly)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the by-class block lacks %q:\n%s", want, out)
+		}
+	}
+
+	// A tape whose active bytes are the class estimate rather than per-device
+	// figures says so rather than inventing the same breakdown.
+	legacy := Explain(wsLegacySummary()).String()
+	if !strings.Contains(legacy, "classes ? — the active bytes are the class estimate") {
+		t.Errorf("the class-estimate tape does not say what its active bytes are:\n%s", legacy)
+	}
+	if strings.Contains(legacy, "row lookup") || strings.Contains(legacy, "routed, of") {
+		t.Errorf("a class-estimate tape prints a per-class breakdown it does not have:\n%s", legacy)
+	}
+}
+
+// TestExplainSaysWhichFigureItRefused: a refused figure is not an absence,
+// and the listing says which figure, what it was, and what ceiling it
+// exceeded (2026-09-16).
+func TestExplainSaysWhichFigureItRefused(t *testing.T) {
+	// The host side: 29.06 GB/token x 20.35 tok/s against the 115.8 GB/s bus.
+	out := Explain(lookupDefectSummary()).String()
+	if want := "ram     ? — refused: 591.2 GB/s is over the 115.8 GB/s host bus, so no figure is derived"; !strings.Contains(out, want) {
+		t.Errorf("the listing lacks the ram refusal line %q:\n%s", want, out)
+	}
+
+	// The combined figure: the recorded figure against the ceiling the
+	// placement allows, with the ratio standing aside beside it.
+	s := wsSummary()
+	s.Host.RAMBytesPerSec = wsSTREAMBytesPerSec
+	s.Host.RAMSource = tape.RAMSourceMeasured
+	ceiling, ok := Ceiling(s)
+	if !ok {
+		t.Fatal("the fixture must derive a ceiling for this test")
+	}
+	s.Timings.EffectiveBandwidthBytesPerSec = 10 * ceiling
+	out = Explain(s).String()
+	if want := fmt.Sprintf("effective ? — refused: %s is over the %s ceiling this placement allows, so no figure is derived",
+		gbps(10*ceiling), gbps(ceiling)); !strings.Contains(out, want) {
+		t.Errorf("the listing lacks the effective refusal line:\nwant %q\n%s", want, out)
+	}
+	if want := "of peak ? — the figure was refused over the ceiling"; !strings.Contains(out, want) {
+		t.Errorf("the of-peak line still reads as a missing ceiling:\n%s", out)
 	}
 }
 

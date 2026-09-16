@@ -58,6 +58,33 @@ func TestActiveBytesPerTokenTiedEmbeddings(t *testing.T) {
 	}
 }
 
+// TestActiveBytesPerTokenTiedCountsOnlyTheMainMatrix (2026-09-16): a tied
+// model reads its MAIN embedding matrix in full — the matrix IS the output
+// projection — but a per-layer lookup table is tied to no output projection
+// and is read by row (ggml_get_rows: a few KB a token) whatever the model
+// does with its logits, so it counts for nothing however large it is. The
+// qwen38 recording's 26.8 GiB per_layer_token_embd was counted here, and that
+// one tensor is the whole of the host-bus figure that printed 10x over the
+// machine.
+func TestActiveBytesPerTokenTiedCountsOnlyTheMainMatrix(t *testing.T) {
+	base := []Tensor{
+		NewTensor("blk.0.attn_q.weight", 100),
+		NewTensor("token_embd.weight", 1000),
+		NewTensor("per_layer_token_embd.weight", 28_800_138_240),
+		NewTensor("output_norm.weight", 5),
+	}
+	// Tied: the main matrix counts (it is the output projection), the
+	// per-layer table does not.
+	if got, want := ActiveBytesPerToken(base, 0, 0), int64(1105); got != want {
+		t.Errorf("tied: ActiveBytesPerToken = %d, want %d (the per-layer table must not count)", got, want)
+	}
+	// Untied: neither counts; decoding looks up one row of each.
+	untied := append(append([]Tensor{}, base...), NewTensor("output.weight", 300))
+	if got, want := ActiveBytesPerToken(untied, 0, 0), int64(405); got != want {
+		t.Errorf("untied: ActiveBytesPerToken = %d, want %d", got, want)
+	}
+}
+
 func TestActiveBytesPerTokenAllExpertsUsed(t *testing.T) {
 	ts := []Tensor{NewTensor("blk.0.ffn_down_exps.weight", 800)}
 	if got, want := ActiveBytesPerToken(ts, 8, 8), int64(800); got != want {

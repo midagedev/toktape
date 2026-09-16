@@ -94,6 +94,17 @@ func caveatCases() []caveatCase {
 		// hasWrapped below.
 		onCard: "weights on GPU1",
 	}, {
+		code: CodeBandwidthOverCeiling,
+		// The recorded figure is the model's own product, put 10x over the
+		// ceiling the placement allows (2026-09-16). The qwen38 tapes printed
+		// "1416 GB/s from RAM, 978% of peak" on a 144.8 GB/s bus because a
+		// 26.8 GiB lookup table was counted as streamed weight traffic; the
+		// refusal and this caveat are the recurrence layer of that defect.
+		mutate: func(s *tape.RunSummary) { s.Timings.EffectiveBandwidthBytesPerSec = 9_362_000_000_000 },
+		// Wrap-safe: the words that open the sentence's first wrapped line.
+		onCard:  "implies read 9362 GB/s",
+		notCard: "of peak",
+	}, {
 		code:   CodeAnswerCut,
 		mutate: func(s *tape.RunSummary) { s.Timings.ReasoningN = s.Timings.PredictedN },
 		onCard: "answer cut",
@@ -544,6 +555,41 @@ func TestPlacementContradictedSentenceIsTheTwoFigures(t *testing.T) {
 	}
 }
 
+// TestBandwidthOverCeilingSentenceIsTheTwoFigures (2026-09-16): the sentence
+// names both numbers it compared, the same deal as the placement
+// contradiction's — a caveat a reader cannot check is one they will ignore,
+// and the two figures are the whole case. The Decode row keeps its rate and
+// loses its bandwidth clause: a figure over the ceiling is not a reading of
+// anything, and the honest clause is none.
+func TestBandwidthOverCeilingSentenceIsTheTwoFigures(t *testing.T) {
+	s := clean(t)
+	// The placement allows 936.2 GB/s (two 3090s, everything offloaded); the
+	// recorded figure is put at 10x that.
+	s.Timings.EffectiveBandwidthBytesPerSec = 9_362_000_000_000
+	want := "the bytes this run's placement implies read 9362 GB/s against the 936 GB/s this placement allows, so no bandwidth is derived: some of what the placement counts as streamed is read by row"
+	cs := Caveats(s)
+	if len(cs) != 1 || cs[0].Code != CodeBandwidthOverCeiling || cs[0].Text != want {
+		t.Fatalf("Caveats = %+v, want exactly %s: %q", cs, CodeBandwidthOverCeiling, want)
+	}
+	if cs[0].Severity != SeverityFigure {
+		t.Errorf("severity = %q, want figure: the clause the card gave up was its headline qualifier", cs[0].Severity)
+	}
+	for _, part := range decodeParts(s) {
+		if strings.Contains(part, "GB/s") {
+			t.Errorf("the Decode row still carries a bandwidth clause: %q", part)
+		}
+	}
+	// The explain listing carries its reading in the same rank position,
+	// directly under placement_contradicted's.
+	ex := ExplainCaveats(s)
+	if i, j := strings.Index(ex, CodeBandwidthOverCeiling), strings.Index(ex, CodeAnswerCut); i < 0 || j < 0 || i > j {
+		t.Errorf("the reading is missing or not ranked under placement_contradicted:\n%s", ex)
+	}
+	if !strings.Contains(ex, "9362 GB/s") || !strings.Contains(ex, "936 GB/s") {
+		t.Errorf("the reading does not carry the two figures:\n%s", ex)
+	}
+}
+
 // TestPlacementContradictedNeedsAnEstimateAndAMeasurement: the two shapes the
 // caveat must stay out of. An engine placement is the engine's own report,
 // not a guess to check against the box, and a placement the reading agrees
@@ -579,9 +625,16 @@ func TestStreamsNotConcurrentRanksDirectlyUnderStreamsFailed(t *testing.T) {
 	// derived figure rather than a measured one — the ratio the card has
 	// already declined to print — but what it contradicts is the placement
 	// the whole MEMORY block is built on.
+	//
+	// bandwidth_over_ceiling entered at rank 3 (2026-09-16), directly under
+	// placement_contradicted: it is the same kind of caveat — a derived
+	// figure the card has already declined to print, with the two figures it
+	// compared named in the sentence — and it qualifies the same memory
+	// block: a bandwidth over the bus that carried it means the active split
+	// is wrong, so the placement story and the rate disagree about one run.
 	want := []string{
 		CodeStreamsFailed, CodeStreamsNotConcurrent, CodePlacementContradicted,
-		CodeAnswerCut, CodeShortGeneration,
+		CodeBandwidthOverCeiling, CodeAnswerCut, CodeShortGeneration,
 		CodeShortStream, CodeColdCache, CodeShortPromptForPrefill, CodeClientDisagrees,
 		CodeRecorded, CodeMachineContended, CodeConditionsChanged, CodeRunCutByClock,
 		CodeNoProcView,

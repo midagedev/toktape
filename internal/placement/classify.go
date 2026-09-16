@@ -3,6 +3,7 @@ package placement
 import (
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -34,8 +35,16 @@ var (
 	// it is the class that drives NeverLoadedBytes.
 	ngramRe = regexp.MustCompile(`(?i)(n_?gram|engram)`)
 
-	// embedRe matches the input embedding matrix.
-	embedRe = regexp.MustCompile(`^token_embd`)
+	// embedRe matches the input-embedding matrices: the model's main
+	// token_embd and the per-layer lookup tables (per_layer_token_embd.weight,
+	// masked_embd_centroids.weight, ...). Unanchored (2026-09-16): every such
+	// table is read by ROW — ggml_get_rows touches a few KB a token whatever
+	// the table's size — and classing the qwen38 recording's 26.8 GiB
+	// per_layer_token_embd as "other" made the placement count it as streamed
+	// per-token weight traffic, which printed a host-bus bandwidth 10x over
+	// the machine's own. The ngram rule above is checked first, so an n-gram
+	// table whose name carries the substring stays ClassNGram.
+	embedRe = regexp.MustCompile(`token_embd`)
 
 	// outputRe matches the output projection and its norm. Anchored so that
 	// "blk.0.attn_output.weight" is not classified as output.
@@ -64,7 +73,9 @@ var (
 // rules are applied in a fixed order; the first that matches wins:
 //
 //	*ngram* / *engram*      -> ClassNGram
-//	token_embd*             -> ClassEmbed
+//	*token_embd*            -> ClassEmbed (the main matrix and the per-layer
+//	                           lookup tables alike: read by row, a few KB a
+//	                           token, whatever their size)
 //	output* / output_norm   -> ClassOutput
 //	blk.N.*_exps / *_chexps
 //	       / ffn_gate_inp
@@ -122,4 +133,16 @@ func NewTensor(name string, bytes int64) Tensor {
 // ClassExperts but are read in full every token, so they are not sparse.
 func (t Tensor) IsSparseExpert() bool {
 	return sparseExpertRe.MatchString(t.Name)
+}
+
+// IsMainEmbedding reports whether the tensor is the model's MAIN embedding
+// matrix — the one and only embedding tensor a token can ever read in full,
+// because on a tied-embedding model that matrix is the output projection.
+// Every other embedding-class tensor (per_layer_token_embd.weight and its
+// kin) is a lookup read by row: ggml_get_rows touches a few KB a token
+// whatever the table's size, so however large it is, it is not per-token
+// weight traffic (2026-09-16 — a 26.8 GiB per-layer table counted as streamed
+// was the whole of a host-bus figure that printed 10x over the machine).
+func (t Tensor) IsMainEmbedding() bool {
+	return strings.HasPrefix(t.Name, "token_embd")
 }

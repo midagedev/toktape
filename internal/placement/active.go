@@ -22,7 +22,11 @@ import "github.com/midagedev/toktape/internal/tape"
 //     output.weight and runs the embedding matrix as the output projection —
 //     there it counts in full. Presence of output.weight is the test, not
 //     presence of the output class: output_norm.weight is class output and a
-//     tied model has one too.
+//     tied model has one too. And only the MAIN matrix (token_embd itself)
+//     ever counts in full: a per-layer lookup table is tied to no output
+//     projection and is read by row however large it is (2026-09-16 — the
+//     qwen38 recording's 26.8 GiB per_layer_token_embd counted here was the
+//     whole of a host-bus figure that printed 10x over the machine's own).
 //   - The n-gram / engram tables are excluded: they are lookup tables, not
 //     weights in the per-token matmul chain, and on the demo machine they were
 //     84.6 GB that was never read at all (handover lesson 3).
@@ -65,8 +69,12 @@ func ActiveBytesPerTokenTied(tensors []Tensor, expertsUsed, expertCount int, tie
 		case t.Class == tape.ClassNGram:
 			continue
 		case t.Class == tape.ClassEmbed:
-			// Tied embeddings: the matrix is the output projection too.
-			if !tied {
+			// Tied embeddings: the MAIN matrix is the output projection too,
+			// so a tied model reads it in full. Nothing else in the class
+			// ever counts: a per-layer table (per_layer_token_embd.weight) is
+			// a row lookup — a few KB a token — because no output projection
+			// is tied to it, whatever the model does with its logits.
+			if !tied || !t.IsMainEmbedding() {
 				continue
 			}
 			total += t.Bytes
