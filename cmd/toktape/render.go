@@ -79,6 +79,23 @@ Clip length
   --duration is the dishonest one: it compresses or stretches the same run
   into the time you name, and a viewer then cannot tell whether a stream
   stalled. Slow motion is a lie about the machine.
+
+Canvas, and cutting a window out of a clip
+  --size is a cell grid, not a pixel size, and the pixel canvas differs by
+  output: --gif and --cast draw 13 px cells, --mp4 and --frames draw 20 px
+  ones. The same tape at --size 120x36 comes out 992x684 as a GIF and
+  1488x1026 as frames, and no flag reconciles them. So rendering --frames and
+  encoding them yourself is not the picture --gif would have made.
+
+  When you want part of a clip, cut the finished GIF rather than re-rendering
+  or re-encoding it:
+
+      gifsicle --unoptimize clip.gif '#120-274' -O3 -o cut.gif
+
+  That is lossless and keeps this tool's own palette. Mind the index: frames
+  identical to the one before them are folded away, so a GIF holds fewer
+  images than seconds x fps, and gifsicle counts images. Run gifsicle --info
+  to see how many there are and what each one's delay is.
 `
 
 // renderFlags is every flag the render verb declares. See recordFlags for why
