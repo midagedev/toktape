@@ -220,11 +220,21 @@ func bodyStyle(th Theme, bl bodyLine, band tokenBand, class codeClass) lipgloss.
 	}
 	switch class {
 	case classKeyword:
-		return ladder[stop].Bold(true)
+		return th.codeKeyword
+	case classFunc:
+		return th.codeFunc
+	case classType:
+		return th.codeType
+	case classString:
+		return th.codeString
+	case classNumber:
+		return th.codeNumber
+	case classComment:
+		return th.codeComment
+	case classVar:
+		return th.codeVar
 	case classPunct:
 		stop++
-	case classComment:
-		stop += 2
 	case classFence:
 		return th.dim
 	}

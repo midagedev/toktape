@@ -34,6 +34,11 @@ const (
 	classPunct                    // punctuation and operators: one stop down
 	classComment                  // two stops down
 	classFence                    // the ``` line itself: chrome, dim
+	classString                   // a string or character literal (palette.CodeString)
+	classNumber                   // a number, a boolean, nil (palette.CodeNumber)
+	classFunc                     // what is called or defined (palette.CodeFunc)
+	classType                     // a class, type or builtin name (palette.CodeType)
+	classVar                      // a plain identifier (palette.CodeVar)
 )
 
 // codeClasses is, rune for rune over the text the stream's tokens spell out,
@@ -46,15 +51,56 @@ func codeClasses(s Stream) []codeClass {
 	)
 	for _, r := range textRuns(s) {
 		n := utf8.RuneCountInString(r.text)
-		if !r.reasoning && strings.Contains(r.text, "```") {
+		if !r.reasoning && strings.Contains(r.text, "`") {
 			if classes == nil {
 				classes = make([]codeClass, utf8.RuneCountInString(s.Text))
 			}
-			classifyFences(r.text, classes[off:off+n])
+			if strings.Contains(r.text, "```") {
+				classifyFences(r.text, classes[off:off+n])
+			}
+			classifySpans(r.text, classes[off:off+n])
 		}
 		off += n
 	}
 	return classes
+}
+
+// classifySpans marks the inline `code` spans of one answer run.
+//
+// Most of the code an answer shows is not fenced: it is a name, a call or a
+// flag inside a sentence, and until 2026-09-16 those read as prose, which is
+// what made a tile of an answer about code look like a tile of an answer
+// about anything (user: "코드 하일라이팅이 너무 안 예쁘다"). A span wears the
+// name hue, the same one a call inside a fenced block wears, so the two say
+// the same thing about the same text.
+//
+// Only a CLOSED span counts. While a stream is writing one, the opening
+// backtick is just a backtick, and colouring the rest of the answer until the
+// span closes would repaint the tile on every token.
+func classifySpans(text string, out []codeClass) {
+	runes := []rune(text)
+	open := -1
+	for i, r := range runes {
+		if r != '`' {
+			continue
+		}
+		// A fence is three of them; classifyFences owns those lines.
+		if i+2 < len(runes) && runes[i+1] == '`' && runes[i+2] == '`' {
+			open = -1
+			continue
+		}
+		if open < 0 {
+			open = i
+			continue
+		}
+		for k := open; k <= i && k < len(out); k++ {
+			if out[k] != classPlain {
+				continue // inside a fenced block: the lexer already spoke
+			}
+			out[k] = classVar
+		}
+		open = -1
+	}
 }
 
 // classifyFences finds the fenced blocks in one answer run and writes their
@@ -172,11 +218,34 @@ func lexBlock(lang, code string) []codeClass {
 
 // classOf maps chroma's token categories onto the pane's treatment.
 func classOf(t chroma.TokenType) codeClass {
+	switch t {
+	case chroma.NameFunction, chroma.NameFunctionMagic, chroma.NameDecorator,
+		chroma.NameBuiltin:
+		// A builtin is something being called, so it reads with the calls and
+		// not with the types: len() and a user's own helper are the same move
+		// to someone scanning a line.
+		return classFunc
+	case chroma.NameClass, chroma.NameBuiltinPseudo, chroma.NameException,
+		chroma.NameNamespace, chroma.KeywordType:
+		return classType
+	case chroma.NameConstant, chroma.KeywordConstant, chroma.NameLabel:
+		return classNumber
+	case chroma.NameAttribute, chroma.NameVariable, chroma.NameVariableClass,
+		chroma.NameVariableGlobal, chroma.NameVariableInstance, chroma.NameProperty,
+		chroma.NameTag:
+		return classVar
+	}
 	switch {
-	case t.InCategory(chroma.Keyword):
-		return classKeyword
 	case t.InCategory(chroma.Comment):
 		return classComment
+	case t.InCategory(chroma.Keyword):
+		return classKeyword
+	case t.InSubCategory(chroma.LiteralString):
+		return classString
+	case t.InSubCategory(chroma.LiteralNumber):
+		return classNumber
+	case t.InCategory(chroma.Literal):
+		return classString
 	case t.InCategory(chroma.Punctuation), t.InCategory(chroma.Operator):
 		return classPunct
 	}

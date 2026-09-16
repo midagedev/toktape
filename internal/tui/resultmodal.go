@@ -380,12 +380,21 @@ func placementLines(th Theme, p tape.PlacementSummary, res tape.HostResidency, c
 	// The host is split once: Residency sums every CPU device, so splitting a
 	// second one would spend the same bytes twice.
 	split := res.Ok && res.Paged > 0
-	shades := []lipgloss.Style{th.accentMuted, th.accentLow, th.dim}
+	// A device's colour says which device it is, not how far down a list it
+	// sits: the GPUs walk the share card's own GPU steps and the host wears
+	// the card's sand, so the modal and a posted PNG of the same run paint the
+	// same bar (2026-09-16). The sand is warm and well under Warn's
+	// saturation, so a mostly-offloaded bar does not read as an alarm.
+	gpus := 0
 	for _, d := range p.Devices {
 		if d.Bytes <= 0 {
 			continue
 		}
-		st := shades[min(len(legend), len(shades)-1)]
+		st := th.devHost
+		if d.Device != tape.DeviceCPU {
+			st = th.devGPU[min(gpus, len(th.devGPU)-1)]
+			gpus++
+		}
 		total += float64(d.Bytes)
 		if d.Device == tape.DeviceCPU && split {
 			split = false

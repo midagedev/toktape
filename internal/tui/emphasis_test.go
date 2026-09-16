@@ -806,11 +806,15 @@ func TestResultModalGleamMidSweep(t *testing.T) {
 		t.Fatal("no modal on the card-mode frame")
 	}
 
+	// The sweep's own ramp: the accent's lightnesses, plus the peak its core
+	// was given when the pass was made visible (2026-09-16). Still one hue.
 	allowed := map[string]bool{
-		styleHex(th.accentHigh): true,
-		styleHex(th.accent):     true,
-		styleHex(th.accentMid):  true,
-		styleHex(th.accentBold): true,
+		styleHex(th.gleamPeak):   true,
+		styleHex(th.accentHigh):  true,
+		styleHex(th.accent):      true,
+		styleHex(th.accentMid):   true,
+		styleHex(th.accentMuted): true,
+		styleHex(th.accentBold):  true,
 	}
 	big, high := 0, 0
 	for y := top; y < len(rows); y++ {
@@ -829,9 +833,9 @@ func TestResultModalGleamMidSweep(t *testing.T) {
 			}
 			big++
 			if !allowed[c.fg] {
-				t.Errorf("a big figure cell (%q at row %d col %d) is %s, want one of the gleam's four accent lightnesses", c.r, y, x, c.fg)
+				t.Errorf("a big figure cell (%q at row %d col %d) is %s, want one of the gleam's own ramp", c.r, y, x, c.fg)
 			}
-			if c.fg == styleHex(th.accentHigh) {
+			if c.fg == styleHex(th.gleamPeak) {
 				high++
 			}
 		}
@@ -843,7 +847,7 @@ func TestResultModalGleamMidSweep(t *testing.T) {
 		t.Fatal("no big figure cells on the frame; the gate read nothing")
 	}
 	if high == 0 {
-		t.Errorf("%d figure cells and none in accentHigh: the band is not crossing the figures at CardAge = GleamSweep/2", big)
+		t.Errorf("%d figure cells and none in the core: the band is not crossing the figures at CardAge = GleamSweep/2", big)
 	}
 }
 

@@ -72,6 +72,53 @@ const (
 	Bad = "#d47e70"
 )
 
+// The code hues (user 2026-09-16: "코드 하일라이팅이 너무 안 예쁘다, 우리
+// 팔레트를 살짝 확장하는게 어떨까", then "좀 더 밝게 가도 될 것 같아, 좀더
+// vscode스럽게 그리고 기왕 의존성 추가한거 하일라이팅 할 수 있는거 최대한
+// 활용하자").
+//
+// A fenced block used to be shaped and never coloured — keywords bold, the
+// rest walking the body's grey ladder — which left a function reading as prose
+// with two bold words in it. These are the roles a reader of code already
+// knows from an editor, at Dark+'s assignments (blue keywords, yellow calls,
+// salmon strings, green numbers and comments, purple types) with the
+// saturation pulled toward oxide's mute so a tile of code still belongs to the
+// same screen as the rates beside it.
+//
+// They sit ABOVE the body ladder on purpose: code is the one part of an answer
+// a reader stops to read, and the old rule that a class may only darken a rune
+// kept it under the prose around it. The write head still wins over every one
+// of them, so "this token just landed" survives.
+//
+// Teal is not among them. The accent is the rates and the active stream, and a
+// type wearing it would be the one colour on the screen that means two things.
+const (
+	// CodeKeyword is a keyword, an operator word and control flow: Dark+'s
+	// #569cd6 lifted out of its saturation.
+	CodeKeyword = "#8ab6de"
+	// CodeFunc is what is called or defined: a function, a method, a
+	// decorator. Dark+'s #dcdcaa, warmed a shade toward the palette's text.
+	CodeFunc = "#d8cd92"
+	// CodeType is a class, a type name or a builtin: Dark+ spends its purple
+	// on control flow, which oxide gives to the keyword blue, so the purple
+	// carries the types instead — the one hue no other role in this palette
+	// claims.
+	CodeType = "#bda9d8"
+	// CodeString is a string or a character literal.
+	CodeString = "#d4a288"
+	// CodeNumber is a number, a boolean, nil and the other built-in
+	// constants.
+	CodeNumber = "#b9cf9f"
+	// CodeComment is a comment, and the only code hue under the body's own
+	// luminance: a comment is the one thing in a block a reader may skip.
+	CodeComment = "#7e9a6b"
+	// CodeVar is a plain identifier — a variable, a field, a parameter — and
+	// the quietest of the set, a step off the neutral text rather than a hue
+	// of its own. Dark+ paints these too (#9cdcfe); at four tiles of code on
+	// one screen a fully saturated one would be the loudest thing on it.
+	CodeVar = "#a9c9e6"
+)
+
 // The derived shades (see the package doc for each blend).
 const (
 	// TextMid is the midpoint of Text and TextMuted.
@@ -113,6 +160,14 @@ const (
 	// saturation: 0.25 against Warn's 0.59.
 	CardHost = "#968b71"
 )
+
+// GleamPeak is the core of the one pass of light the result modal's figures
+// take when the card appears (user 2026-09-16: "메인숫자에 애니메이션 준게 너무
+// 티가 안나더라고"). The sweep used to run between Accent and AccentHigh, a
+// third of a stop apart, which on a 30 fps clip read as noise in the glyphs
+// rather than as a light crossing them. This is the top of the accent's own
+// ramp — the hue washed almost to white — so the band has somewhere to go.
+const GleamPeak = "#eaf6f2"
 
 // RGBA parses a "#rrggbb" palette entry into an opaque colour. It panics on a
 // malformed entry: the palette is fixed at compile time, so one is a

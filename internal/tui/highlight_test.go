@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/charmbracelet/lipgloss"
 	"strings"
 	"testing"
 	"time"
@@ -64,7 +65,7 @@ func TestCodeClassesFollowTheFence(t *testing.T) {
 		"func":      classKeyword,
 		"for":       classKeyword,
 		"go work":   classKeyword,
-		"run":       classPlain, // a name
+		"run":       classFunc, // a call (2026-09-16)
 		"{":         classPunct,
 		"++":        classPunct,
 		"That":      classPlain, // prose after the fence
@@ -114,7 +115,7 @@ func TestCodeClassesFollowTheFence(t *testing.T) {
 		"// one token": classComment,
 		"func (m":      classKeyword,
 		"range":        classKeyword,
-		"argmax":       classPlain,
+		"argmax":       classFunc,
 		"Nothing in":   classPlain,
 	} {
 		if got := classAt(t, m.Streams[0], exClasses, word); got != want {
@@ -123,39 +124,71 @@ func TestCodeClassesFollowTheFence(t *testing.T) {
 	}
 }
 
-// TestCodeShapesTheBodyWithoutLiftingIt: a class adds weight or depth on the
-// body's own ladder and never lifts a rune above its band; the write head
-// keeps its fill over any class.
-func TestCodeShapesTheBodyWithoutLiftingIt(t *testing.T) {
+// TestCodeWearsItsOwnHues: a fenced block is coloured by role, the write head
+// still wins over every role, and no role borrows a hue that means something
+// else on this screen.
+//
+// It replaces TestCodeShapesTheBodyWithoutLiftingIt, which pinned the opposite
+// rule — a class could only darken a rune, never lift it — and is gone by
+// instruction (user, 2026-09-16: "좀 더 밝게 가도 될 것 같아, 좀더 vscode스럽게
+// 그리고 기왕 의존성 추가한거 하일라이팅 할 수 있는거 최대한 활용하자"). The
+// reason the old rule existed is kept: prose still walks the grey ladder, and
+// the code hues appear only where the lexer found code.
+func TestCodeWearsItsOwnHues(t *testing.T) {
 	th := ColourTheme()
 	answer := bodyLine{}
-	settled := styleHex(th.textMuted)
-	if got := styleHex(bodyStyle(th, answer, bandSettled, classKeyword)); got != settled {
-		t.Errorf("a settled keyword is %s, want the settled tone %s (bold, not lighter)", got, settled)
+	for _, tc := range []struct {
+		class codeClass
+		want  lipgloss.Style
+		name  string
+	}{
+		{classKeyword, th.codeKeyword, "keyword"},
+		{classFunc, th.codeFunc, "call"},
+		{classType, th.codeType, "type"},
+		{classString, th.codeString, "string"},
+		{classNumber, th.codeNumber, "number"},
+		{classComment, th.codeComment, "comment"},
+		{classVar, th.codeVar, "identifier"},
+	} {
+		if got, want := styleHex(bodyStyle(th, answer, bandSettled, tc.class)), styleHex(tc.want); got != want {
+			t.Errorf("a settled %s is %s, want %s", tc.name, got, want)
+		}
 	}
 	if !bodyStyle(th, answer, bandSettled, classKeyword).GetBold() {
 		t.Error("a keyword is not bold")
 	}
-	if got, want := styleHex(bodyStyle(th, answer, bandSettled, classComment)), styleHex(th.dim); got != want {
-		t.Errorf("a settled comment is %s, want dim %s", got, want)
-	}
+	// Punctuation and the fence line stay chrome: they are the parts of a
+	// block a reader's eye should pass over.
 	if got, want := styleHex(bodyStyle(th, answer, bandSettled, classPunct)), styleHex(th.dimMid); got != want {
 		t.Errorf("settled punctuation is %s, want dimMid %s", got, want)
 	}
-	if got, want := styleHex(bodyStyle(th, answer, bandMid, classComment)), styleHex(th.dimMid); got != want {
-		t.Errorf("a mid-band comment is %s, want dimMid %s", got, want)
+	if got, want := styleHex(bodyStyle(th, answer, bandSettled, classFence)), styleHex(th.dim); got != want {
+		t.Errorf("a settled fence is %s, want dim %s", got, want)
 	}
-	for _, c := range []codeClass{classPlain, classKeyword, classPunct, classComment} {
+	// Plain prose is untouched by any of it.
+	if got, want := styleHex(bodyStyle(th, answer, bandSettled, classPlain)), styleHex(th.textMuted); got != want {
+		t.Errorf("settled prose is %s, want the body's own %s", got, want)
+	}
+	// The write head keeps its fill over every class: "this token just landed"
+	// outranks what the token is.
+	for _, c := range []codeClass{classPlain, classKeyword, classPunct, classComment,
+		classString, classNumber, classFunc, classType, classVar} {
 		if got, want := styleBG(bodyStyle(th, answer, bandFresh, c)), styleBG(th.textFresh); got != want {
 			t.Errorf("class %d at the write head lost the fill", c)
 		}
 	}
+	// No code hue may be one of the accent's shades: the accent is the rates
+	// and the active stream, and the emphasis contract (emphasis_test.go)
+	// reads the screen for exactly those (2026-09-16).
+	accents := accentShades()
+	for _, st := range []lipgloss.Style{th.codeKeyword, th.codeFunc, th.codeType,
+		th.codeString, th.codeNumber, th.codeComment, th.codeVar} {
+		if accents[styleHex(st)] {
+			t.Errorf("a code hue is an accent shade: %s", styleHex(st))
+		}
+	}
 }
 
-// TestACodeAnswerKeepsTheContracts runs the frame gates that matter on a
-// tile full of code: nothing but a rate wears the accent, the plain frame is
-// the coloured one with the palette stripped, and a settled body never wears
-// the header's tone.
 func TestACodeAnswerKeepsTheContracts(t *testing.T) {
 	const w, h = 120, 36
 	m := ModelAt(ExampleTapeN(2), midRun)

@@ -169,6 +169,32 @@ type Theme struct {
 	// fades with the band the moment the next token lands.
 	textFresh lipgloss.Style
 
+	// codeString and codeIdent are the two hues a fenced block may wear
+	// (palette.CodeString, palette.CodeIdent). Nothing outside a code block
+	// wears them, and both sit at the settled body's luminance, so a class
+	// still moves a rune sideways rather than up.
+	// gleamPeak is the core of the result modal's one pass of light
+	// (palette.GleamPeak). Nothing else wears it: it exists for a band two
+	// cells wide that crosses the figures once.
+	gleamPeak lipgloss.Style
+
+	// The placement bar's device hues, shared with the PNG share card
+	// (palette.CardGPU*, palette.CardHost) so a modal and a posted card colour
+	// the same devices the same way (2026-09-16). Before them the bar walked
+	// three shades of the accent and the host wore one of them, which made
+	// "where the weights live" — the one row the bar exists for — a question
+	// of lightness alone.
+	devGPU  [3]lipgloss.Style
+	devHost lipgloss.Style
+
+	codeKeyword lipgloss.Style
+	codeFunc    lipgloss.Style
+	codeType    lipgloss.Style
+	codeString  lipgloss.Style
+	codeNumber  lipgloss.Style
+	codeComment lipgloss.Style
+	codeVar     lipgloss.Style
+
 	// graphTrack is the unlit part of a resource graph's measured columns,
 	// painted as spaces; graphRidge is a column's topmost lit cell. Both sit
 	// on colDarkFill (see the exception above).
@@ -224,6 +250,18 @@ func ColourTheme() Theme {
 			textMuted:   fg(colTextMuted),
 			dimMid:      fg(colDimMid),
 			textFresh:   fg(colText).Background(lipgloss.Color(colDarkFill)),
+			gleamPeak:   fg(palette.GleamPeak).Bold(true),
+			devGPU: [3]lipgloss.Style{
+				fg(palette.CardGPU1), fg(palette.CardGPU2), fg(palette.CardGPU3),
+			},
+			devHost:     fg(palette.CardHost),
+			codeKeyword: fg(palette.CodeKeyword).Bold(true),
+			codeFunc:    fg(palette.CodeFunc),
+			codeType:    fg(palette.CodeType),
+			codeString:  fg(palette.CodeString),
+			codeNumber:  fg(palette.CodeNumber),
+			codeComment: fg(palette.CodeComment),
+			codeVar:     fg(palette.CodeVar),
 			graphTrack:  r.NewStyle().Background(lipgloss.Color(colDarkFill)),
 			graphRidge:  fg(colAccentMid).Background(lipgloss.Color(colDarkFill)),
 			graphSolo:   fg(colAccentMuted).Background(lipgloss.Color(colDarkFill)),

@@ -30,7 +30,7 @@ const (
 	// GleamSweep is the one pass of light the result modal's figures take when
 	// the card appears: CardAge 0 to GleamSweep, settled after. It is the modal
 	// clock's only use, so it lives here beside the other durations.
-	GleamSweep = 1 * time.Second
+	GleamSweep = 1400 * time.Millisecond
 )
 
 // The gleam's shape. A band of five lightnesses-worth of travel, leaning
@@ -157,14 +157,24 @@ func gleamStyle(th Theme, p float64, w, r, x int) lipgloss.Style {
 	}
 	c := p*float64(w+2*gleamBand+2*gleamLead) - float64(gleamBand+gleamLead) +
 		float64(gleamSlant)*float64((bigRows-1)/2-r)
-	d := math.Abs(float64(x) - c)
+	// Signed, not absolute: the figure is dim ahead of the band and settled
+	// behind it, so the pass reads as the number lighting up rather than as a
+	// brighter smudge travelling over an already-lit one (2026-09-16). The
+	// end state is unchanged — every cell is accentBold once the band has
+	// passed it, which is what keeps the settled tail and the poster frame
+	// byte-identical to a modal with no gleam at all.
+	d := float64(x) - c
 	switch {
-	case d <= 1:
-		return th.accentHigh
-	case d <= 3:
-		return th.accent
-	case d <= 5:
+	case d > float64(gleamBand):
+		return th.accentMuted // not lit yet
+	case d > 2:
 		return th.accentMid
+	case d > 1:
+		return th.accentHigh
+	case d >= -1:
+		return th.gleamPeak // the core
+	case d >= -3:
+		return th.accentHigh
 	}
 	return th.accentBold
 }
