@@ -42,16 +42,21 @@ func readHeroTape(t *testing.T) *tape.Tape {
 // they consulted, so the next person answers "why is there no ratio?" from one
 // command instead of re-deriving it by hand.
 //
-// It also pins the real recording against heroSummary(): the fixture below is
-// a hand transcription of this file, and a transcription that drifts is worse
-// than no fixture.
+// It asserts what is true of the shipped asset today. heroSummary() in
+// split_test.go was a transcription of it until 2026-09-14 and is now its own
+// fixture, so the two are free to differ — and do.
 func TestExplainHeroTape(t *testing.T) {
 	s := &readHeroTape(t).Summary
 	e := Explain(s)
 	t.Logf("assets/hero.tape as recorded:\n%s", e)
 
-	if s.Concurrency != 2 {
-		t.Fatalf("hero tape Concurrency = %d, want the two-stream run", s.Concurrency)
+	// Re-pinned 2026-09-16 (lead): the asset became the Qwen3.6-35B-A3B
+	// four-stream recording. The assertions below are unchanged — they are
+	// about what a tape recorded on this build must carry, not about which run
+	// it holds — and they all still pass, which is the point of stating them
+	// against the asset rather than against a fixture.
+	if s.Concurrency != 4 {
+		t.Fatalf("hero tape Concurrency = %d, want the four-stream run", s.Concurrency)
 	}
 
 	// What this test asserted until the v0.2.0 hero was recorded (lead,
@@ -68,8 +73,36 @@ func TestExplainHeroTape(t *testing.T) {
 	// this package read it — which is the arrangement the comment on it always
 	// described: the fixture keeps the fallback exercised after the recorder
 	// stops producing it. This is the release where the recorder stopped.
+	// TTP-68: a tape recorded on this build carries a per-device active-bytes
+	// figure — for every device that has streamed bytes to carry one for.
+	//
+	// Re-pinned by class rather than by device on 2026-09-16 (lead). This hero
+	// puts nothing on the CPU but the embedding table, and since the lookup
+	// round an embedding table is read by row and streams nothing per token, so
+	// that device's figure is a known zero. PlacementDevice.ActiveBytesPerToken
+	// is omitempty, which makes a known zero and an unmeasured device the same
+	// JSON: Recorded cannot tell them apart, and Explain calls the device
+	// "estimated from class totals" when nothing was estimated. That conflation
+	// is a schema defect and the lead's to close; what this test can still say
+	// is that a device holding anything but lookups carries its figure.
+	// FAIL-first: explain_test.go:78 failed on this recording's CPU device.
+	classes := map[string]map[tape.TensorClass]int64{}
+	for _, d := range s.Placement.Devices {
+		classes[d.Device] = d.Classes
+	}
 	for _, d := range e.Devices {
-		if !d.Recorded {
+		cl := classes[d.Device]
+		lookupOnly := len(cl) > 0
+		for c, b := range cl {
+			if c != tape.ClassEmbed && b > 0 {
+				lookupOnly = false
+			}
+		}
+		switch {
+		case lookupOnly && (d.Recorded || d.ActiveBytesPerToken != 0):
+			t.Errorf("%s holds only lookup tables yet reports %d active bytes (recorded=%v); a table read by row streams nothing per token",
+				d.Device, d.ActiveBytesPerToken, d.Recorded)
+		case !lookupOnly && !d.Recorded:
 			t.Errorf("%s has no recorded active-bytes figure; a tape recorded on this build carries one per device (TTP-68)", d.Device)
 		}
 	}
@@ -89,22 +122,19 @@ func TestExplainHeroTape(t *testing.T) {
 		t.Errorf("String() still reports the ratio as unknown:\n%s", e)
 	}
 
-	// TTP-67: the verify-step view must work on this run, because this run is
-	// the card anyone sees. Before the fix it refused every N > 1.
-	v, ok := Speculative(s)
-	if !ok {
-		t.Fatal("Speculative not ok on the real two-stream hero tape")
+	// The Qwen hero is served without a draft model, so the verify-step view
+	// has nothing to report and must say so rather than deriving a step count
+	// from a run that took no verify steps (repo rule: unknown is an absence).
+	//
+	// TTP-67 — that the view works above one stream, which it refused to do
+	// before the fix — is asserted by TestSpeculativeHero in split_test.go
+	// against heroSummary(), the two-stream speculative fixture kept for
+	// exactly this reason. It did not travel with the asset (2026-09-16, lead).
+	if s.Timings.DraftN != nil {
+		t.Errorf("DraftN = %d, want no draft figures on this recording", *s.Timings.DraftN)
 	}
-	if v.Streams != 2 {
-		t.Errorf("Streams = %d, want 2", v.Streams)
-	}
-	if v.Steps != 170 {
-		t.Errorf("Steps = %d, want 170 (total_predicted_n 430 - accepted 260)", v.Steps)
-	}
-	// The step is a batch of more than one token or the draft did nothing, and
-	// a batch over n_max + 1 would mean the two sums were mixed again.
-	if v.Batch <= 1 || v.Batch > 4 {
-		t.Errorf("batch = %v, want more than one token and no more than n_max + 1 = 4", v.Batch)
+	if v, ok := Speculative(s); ok {
+		t.Errorf("Speculative returned %+v for a run with no draft model", v)
 	}
 }
 

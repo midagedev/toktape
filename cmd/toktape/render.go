@@ -52,19 +52,29 @@ Clip length
 
       run seconds ≈ TTFT + --n-predict ÷ per-stream tok/s
 
-  -n does not lengthen it: the streams run at once. This repo's own hero is
-  2 streams of 215 tokens at 11.2 tok/s with a 10.8s TTFT — a 29.8s run, so a
-  35.9s clip, or 41.9s with --open. It was recorded with --for 30s, which is
-  the rule above: the clock ended it at 30s and the clip came out 30 + 6.
+  -n does not lengthen it: the streams run at once, and the run ends when the
+  last of them does. This repo's own hero is 4 streams at 42.8 tok/s with a
+  4.3s TTFT, recorded with --n-predict 512 and --for 90s. Three streams ran to
+  the 512; one stopped on its own at 137, so they averaged 418 tokens. The run
+  ended with the longest, 15.8s in, nowhere near the 90s budget — a 21.9s clip,
+  or 27.9s with --open.
+
+  Aim the formula with --n-predict, not with what the streams averaged: 512
+  tokens predicts 16.2s, and the 418 they actually averaged predicts 14.0s for
+  a run that took 15.8. A stream that stops early shortens no clip; it only
+  pulls the average below the one stream still writing.
 
   Either flag is set when you record. --prefill-lead is the one that is not:
   it opens the clip that long before the first token rather than at the run's
   start, so the wait for prefill is left out while every frame that is in the
   clip is still 1:1. Nothing has to say so — the tile's clock is measured from
-  the run's start, so a windowed clip opens on 7/30s instead of 0/30s. It
+  the run's start, so a windowed clip opens on 1/90s instead of 0/90s. It
   replaces the intro, which is a screen for a run that has not started yet.
-  The hero is rendered with --prefill-lead 3s: its first token is 10.8s in, so
-  7.8s of waiting is cut and the clip is 33.1s rather than 41.9s.
+  The hero is rendered with --prefill-lead 3s: its first token is 4.3s in, so
+  1.2s of waiting is cut and the clip is 25.7s rather than 27.9s. That cut is
+  small because this run's prefill is; the flag is worth reaching for on the
+  runs where the first token is tens of seconds out, which is where a clip
+  stops being one anybody watches to the end.
 
   --duration is the dishonest one: it compresses or stretches the same run
   into the time you name, and a viewer then cannot tell whether a stream

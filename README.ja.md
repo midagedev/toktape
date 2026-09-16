@@ -15,57 +15,50 @@ toktape は、すでに起動している llama-server にアタッチし、1 �
 それが 1 枚に収まります。1 ストリームでも同時 8 ストリームでも、記録の仕方は
 同じです。
 
-<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording two concurrent streams of a 444 GiB model, from the command being typed to the result"></p>
+<p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording four concurrent streams of a 35B sparse MoE, from the command being typed to the result"></p>
 
-<p align="center"><em>演出ではなく実際の実行です。DeepSeek V4.1 Flash Q3_K_M、444 GiB、エキスパートの大半をホスト RAM に置いたカード 2 枚のワークステーション。プロンプトにコマンドを打ち、サーバーを見つけてアタッチし、2 ストリームが同時にコードを書き、結果が出ます。クリップは最初のトークンの 3 秒前から始まります（<code>--prefill-lead 3s</code>）。プリフィルを待った残りの時間は、テープと、クリップが開いた時点ですでに画面に出ている時計のほうに残っています。見えているものはすべて 1:1 です。<code>assets/hero.tape</code> を <code>toktape render</code> と同じレンダラーで描き直したもので、下のカードは同じファイルから <code>toktape card assets/hero.tape</code> で出ます。</em></p>
+<p align="center"><em>演出ではなく実際の実行です。Qwen3.6-35B-A3B UD-Q6_K、27.3 GiB のスパース MoE を、カード 2 枚のワークステーションの RTX A6000 1 枚に丸ごと載せています。プロンプトにコマンドを打ち、サーバーを見つけてアタッチし、4 ストリームがそれぞれ 42.8 tok/s、合計 144 tok/s で同時に書き、結果が出ます。クリップは最初のトークンの 3 秒前から始まります（<code>--prefill-lead 3s</code>）。プリフィルを待った残りの時間は、テープと、クリップが開いた時点ですでに画面に出ている時計のほうに残っています。見えているものはすべて 1:1 です。<code>assets/hero.tape</code> を <code>toktape render</code> と同じレンダラーで描き直したもので、下のカードは同じファイルから <code>toktape card assets/hero.tape</code> で出ます。</em></p>
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ toktape v0.2.0              20260914-115114-deepseek-v4-1-flash-q3-k │
+│ toktape v0.2.3-2-g0f88bd3    20260916-084839-qwen3-6-35b-a3b-ud-q6-k │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MODEL    DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16-attnQ8      │
-│          9 shards · Q3_K_M · 444.2 GiB                               │
-│ ENGINE   llama-server b96 (e42d711e5) · linux 6.8.0-139-generic · ws │
-│ RIG      RTX A6000 48G · RTX 3090 24G                                │
-│          AMD Ryzen Threadripper PRO 5975WX 32-Cores · 252 GB         │
+│ MODEL    Qwen3.6-35B-A3B-UD-Q6_K.gguf · UD-Q6_K · 27.3 GiB           │
+│ ENGINE   ik_llama.cpp c10fbbcc · linux 6.8.0-139-generic             │
+│          workstation                                                 │
+│ RIG      RTX 3090 24G · RTX A6000 48G                                │
+│          AMD Ryzen Threadripper PRO 5975WX 32-Cores                  │
+│          252 GB DDR4-3600                                            │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        22.5 tok/s aggregate · 11.2 tok/s each                 │
-│               ≈ 115 GB/s from RAM per verify step, 99% of peak       │
-│ Prefill       51.8 tok/s aggregate · 25.9 tok/s each                 │
-│               279 prompt tokens · engine prefill 10732 ms            │
-│               queue 22 ms · TTFT p50 10754 ms                        │
-│ Draft         DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf   │
-│               n_max 3 · 52% accepted (260/504)                       │
-│               170 verify steps of 4.0 tokens                         │
-│ Context       16384 (279 in / 215 out · 64 thinking)                 │
-│ Prefix cache  0% hit (0/279) · cold                                  │
-│ Sampling      temp default · chat                                    │
-│ Streams       2 × 11.2 tok/s = 22.5 tok/s aggregate                  │
-│               TTFT p50 10754 ms p95 10754 ms · slots busy max 2      │
+│ Decode        144 tok/s aggregate · 42.8 tok/s each                  │
+│               ≈ 127–234 GB/s, 17–30% of peak                         │
+│ Prefill       217 tok/s aggregate · 80.8 tok/s each                  │
+│               234 prompt tokens · engine prefill 3228 ms             │
+│               queue 1026 ms · TTFT p50 4198 ms                       │
+│ Context       8192 (234 in / 418 out)                                │
+│ Prefix cache  0% hit (0/234) · warm                                  │
+│ Sampling      greedy (temp 0) · thinking off · chat                  │
+│ Streams       4 streams · 42.8 tok/s each · 144 tok/s aggregate      │
+│               TTFT p50 4198 ms p95 4312 ms · slots busy max ?        │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MEMORY   GPU0 [█████████░] 45.0/48.0 GiB                             │
-│          GPU1 [█████████░] 21.4/24.0 GiB                             │
-│          weights 50.2 | kv ? | compute ? GiB                         │
-│          Host placed 394.1 GiB (200.8 in RAM / 193.3 on disk)        │
-│          Host RSS 202.2 GiB (file 200.8 / anon 1.0)                  │
-│          Page faults 4.4 maj/token (1869 during decode)              │
+│ MEMORY   GPU0 [░░░░░░░░░░] 0.0/24.0 GiB                              │
+│          GPU1 [██████░░░░] 28.5/48.0 GiB                             │
+│          weights 26.8 | kv ? | compute ? GiB                         │
+│          Host placed 0.5 GiB (all in RAM)                            │
+│          Host RSS 2.0 GiB (file 0.7 / anon 1.3)                      │
+│          Page faults 0.0 maj/token (0 during decode)                 │
 ├──────────────────────────────────────────────────────────────────────┤
-│ HOST     GPU0 64°C 116 W · GPU1 54°C 144 W · throttled: no           │
-│          contended: no                                               │
-│          conditions changed: k10temp Tctl 66 → 79 °C                 │
+│ HOST     GPU0 40°C 29 of 420 W · GPU1 65°C 291 of 300 W              │
+│          throttled: no · contended: no                               │
+│          conditions changed: k10temp Tctl 40 → 46 °C                 │
 ├──────────────────────────────────────────────────────────────────────┤
-│ FLAGS    -ngl 99 -fa default -b 2048 -ub 512 -ctk default            │
-│          -ctv default -t 32                                          │
-│          -md DeepSeek-V4.1-Flash-Fp8-128x742M-MXFP4_MOE.tl37.gguf    │
-│          --draft-max 3                                               │
-│          -m /models/DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16… │
-│          --alias DeepSeek-V4.1-Flash -c 16384 --lazy-mode auto       │
-│          --spec-type draft-dspark -otd output_norm=CUDA0 --jinja     │
-│          --reasoning-budget 64 --host 127.0.0.1 --port 8001          │
-│          -ot blk\.[0-3]\.ffn_.*_exps=CUDA0 -ot blk\.6\.ffn_down_exp… │
+│ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk default -ctv default    │
+│          -t 32                                                       │
+│          -m /models/Qwen3.6-35B-A3B/Qwen3.6-35B-A3B-UD-Q6_K.gguf     │
+│          -c 32768 -np 4 --host 127.0.0.1 --port 8012                 │
 ├──────────────────────────────────────────────────────────────────────┤
-│ ! 3 caveats — cold run: weights arrived from disk while it decoded,  │
-│   4.4 maj faults/token · conditions_changed · run_cut_by_clock       │
+│ ! 3 caveats — engine commit c10fbbcc read from the checkout next to  │
+│   the binary, not from the binary · recorded · conditions_changed    │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │
 └──────────────────────────────────────────────────────────────────────┘

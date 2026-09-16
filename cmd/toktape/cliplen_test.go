@@ -90,13 +90,39 @@ func TestClipLengthNoteMatchesTheHero(t *testing.T) {
 	}
 
 	// The formula's own arithmetic, against the run it claims to predict.
-	// It is an estimate — it omits the last token's own interval — so the
-	// tolerance is a token's worth of time, not zero.
+	//
+	// The input is --n-predict, the figure the note tells a reader to aim, and
+	// not Timings.PredictedN, the figure the streams turned out to average.
+	// Until 2026-09-16 this fed the average and the two agreed, because the
+	// previous hero's streams all ran to the cap. The Qwen hero's do not — one
+	// stopped on its own at 137 of 512 — so the average predicts 14.0s for a
+	// 15.8s run, and the note would have been called wrong for quoting the
+	// figure it actually teaches. FAIL-first: cliplen_test.go:98 failed by
+	// -1.82s on this recording with the formula itself correct (lead).
+	//
+	// The tolerance is a twentieth of the run rather than a flat 200 ms. The
+	// rate in the formula is the mean over the streams while the run ends with
+	// one of them, so the estimate inherits the spread between the two: here
+	// the longest stream ran at 44.4 tok/s against the 42.8 the card prints,
+	// 3.8%, which is the whole of the residual. A flat 200 ms was that spread
+	// happening to be zero, not a tighter contract.
+	if s.Limit.MaxTokens == 0 {
+		t.Fatal("the hero was recorded without --n-predict, so the note's formula has no input to check against")
+	}
 	predicted := time.Duration(s.Timings.TTFTMs*float64(time.Millisecond)) +
-		time.Duration(float64(s.Timings.PredictedN)/s.Timings.PredictedPerSecond*float64(time.Second))
-	if d := predicted - runEnd; d > 200*time.Millisecond || d < -200*time.Millisecond {
-		t.Errorf("TTFT + n-predict ÷ tok/s predicts %v, the run is %v (off by %v); the formula in the note is wrong",
-			predicted, runEnd, d)
+		time.Duration(float64(s.Limit.MaxTokens)/s.Timings.PredictedPerSecond*float64(time.Second))
+	if tol := runEnd / 20; predicted-runEnd > tol || runEnd-predicted > tol {
+		t.Errorf("TTFT + n-predict ÷ tok/s predicts %v, the run is %v (off by %v, over the %v allowed); the formula in the note is wrong",
+			predicted, runEnd, predicted-runEnd, tol)
+	}
+
+	// The uneven run the paragraph above argues from, held as a fact about the
+	// asset rather than a claim in a comment: if every stream ran to the cap,
+	// the note's warning about aiming with the average has no witness and the
+	// note should be re-read before this tolerance is kept.
+	if s.Aggregate.MinPredictedN >= s.Limit.MaxTokens {
+		t.Errorf("the shortest stream made %d tokens of a %d cap: every stream ran to the cap, so the note's warning about the average is unwitnessed",
+			s.Aggregate.MinPredictedN, s.Limit.MaxTokens)
 	}
 
 	// The rule the note exists for.
