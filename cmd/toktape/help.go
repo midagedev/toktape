@@ -43,6 +43,11 @@ Careful: a run generates for twenty seconds by default
   is the only limit, and the run takes as long as that many tokens take on
   that machine. --for 0 turns the clock off without naming a cap.
 
+  A clock will not cut a stream out of its own measurement: while one is in
+  force the run waits until every live stream has ` + strconv.Itoa(tape.MinCutTokens) + ` tokens or has stopped on
+  its own, so --for 5s on a slow box ends later than it says. There is no flag
+  for that floor; the tape records it as limit.min_tokens.
+
 Careful: -n is tokens, not streams
   -n is --n-predict: tokens per stream, which is what llama-bench's -n means.
   The number of streams sent at once is --sessions N, and it has no short
