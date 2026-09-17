@@ -53,16 +53,15 @@ Clip length
       run seconds ≈ TTFT + --n-predict ÷ per-stream tok/s
 
   -n does not lengthen it: the streams run at once, and the run ends when the
-  last of them does. This repo's own hero is 4 streams at 42.8 tok/s with a
-  4.3s TTFT, recorded with --n-predict 512 and --for 90s. Three streams ran to
-  the 512; one stopped on its own at 137, so they averaged 418 tokens. The run
-  ended with the longest, 15.8s in, nowhere near the 90s budget — a 21.9s clip,
-  or 27.9s with --open.
+  last of them does. This repo's own hero is 4 streams of 512 tokens at
+  37.5 tok/s with a 4.5s TTFT — an 18.3s run, so a 24.3s clip, or 30.3s with
+  --open. It was recorded with --n-predict 512 and --for 90s, and the tokens
+  ended it: all four streams reached the cap well inside the budget.
 
-  Aim the formula with --n-predict, not with what the streams averaged: 512
-  tokens predicts 16.2s, and the 418 they actually averaged predicts 14.0s for
-  a run that took 15.8. A stream that stops early shortens no clip; it only
-  pulls the average below the one stream still writing.
+  Aim the formula with --n-predict rather than with the tokens a run averaged.
+  The two are the same number only when every stream reaches the cap, as these
+  four did. Let one stop early and the average falls while the run still ends
+  with the longest stream, so the average predicts a shorter clip than you get.
 
   Either flag is set when you record. --prefill-lead is the one that is not:
   it opens the clip that long before the first token rather than at the run's
@@ -70,8 +69,8 @@ Clip length
   clip is still 1:1. Nothing has to say so — the tile's clock is measured from
   the run's start, so a windowed clip opens on 1/90s instead of 0/90s. It
   replaces the intro, which is a screen for a run that has not started yet.
-  The hero is rendered with --prefill-lead 3s: its first token is 4.3s in, so
-  1.2s of waiting is cut and the clip is 25.7s rather than 27.9s. That cut is
+  The hero is rendered with --prefill-lead 3s: its first token is 4.5s in, so
+  1.5s of waiting is cut and the clip is 27.8s rather than 30.3s. That cut is
   small because this run's prefill is; the flag is worth reaching for on the
   runs where the first token is tens of seconds out, which is where a clip
   stops being one anybody watches to the end.

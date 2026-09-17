@@ -100,29 +100,30 @@ func TestClipLengthNoteMatchesTheHero(t *testing.T) {
 	// figure it actually teaches. FAIL-first: cliplen_test.go:98 failed by
 	// -1.82s on this recording with the formula itself correct (lead).
 	//
-	// The tolerance is a twentieth of the run rather than a flat 200 ms. The
-	// rate in the formula is the mean over the streams while the run ends with
-	// one of them, so the estimate inherits the spread between the two: here
-	// the longest stream ran at 44.4 tok/s against the 42.8 the card prints,
-	// 3.8%, which is the whole of the residual. A flat 200 ms was that spread
-	// happening to be zero, not a tighter contract.
+	// The tolerance follows the run's shape rather than being one number for
+	// both (2026-09-17, lead). A run where every stream reached the cap is the
+	// formula's own case and is held to a token's worth of time. A ragged one
+	// ends with its longest stream while the rate is a mean over all of them,
+	// so the estimate inherits the spread between the two and is held to a
+	// twentieth of the run.
+	//
+	// FAIL-first, from the two heroes this contract was written across: on the
+	// ragged 2026-09-16 recording (one stream stopped at 137 of 512) a flat
+	// 200 ms failed by -1.82s, and on this cap-bound one it passes with about
+	// 60 ms to spare. Holding the ragged case to 200 ms would fail a correct
+	// formula; holding this one to a twentieth would let a wrong one through.
 	if s.Limit.MaxTokens == 0 {
 		t.Fatal("the hero was recorded without --n-predict, so the note's formula has no input to check against")
 	}
 	predicted := time.Duration(s.Timings.TTFTMs*float64(time.Millisecond)) +
 		time.Duration(float64(s.Limit.MaxTokens)/s.Timings.PredictedPerSecond*float64(time.Second))
-	if tol := runEnd / 20; predicted-runEnd > tol || runEnd-predicted > tol {
-		t.Errorf("TTFT + n-predict ÷ tok/s predicts %v, the run is %v (off by %v, over the %v allowed); the formula in the note is wrong",
-			predicted, runEnd, predicted-runEnd, tol)
-	}
-
-	// The uneven run the paragraph above argues from, held as a fact about the
-	// asset rather than a claim in a comment: if every stream ran to the cap,
-	// the note's warning about aiming with the average has no witness and the
-	// note should be re-read before this tolerance is kept.
+	shape, tol := "ragged", runEnd/20
 	if s.Aggregate.MinPredictedN >= s.Limit.MaxTokens {
-		t.Errorf("the shortest stream made %d tokens of a %d cap: every stream ran to the cap, so the note's warning about the average is unwitnessed",
-			s.Aggregate.MinPredictedN, s.Limit.MaxTokens)
+		shape, tol = "cap-bound", 200*time.Millisecond
+	}
+	if predicted-runEnd > tol || runEnd-predicted > tol {
+		t.Errorf("TTFT + n-predict ÷ tok/s predicts %v, the %s run is %v (off by %v, over the %v allowed); the formula in the note is wrong",
+			predicted, shape, runEnd, predicted-runEnd, tol)
 	}
 
 	// The rule the note exists for.
