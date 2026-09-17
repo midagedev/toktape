@@ -102,39 +102,54 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **A server that is not llama.cpp is recorded as itself, and Windows gets
-    a binary.** Two things a reader could not do with v0.2.4.
+    **A rig with four GPUs fits on the screen, and every figure is printed
+    once.** On a four-card machine the headline rate — the reason the big
+    scoreboard exists — did not render at all.
 
-    An engine that names itself in `/props` is now stamped with the name it
-    gave, whatever that name is. Before, one engine was matched by hand and
-    every other one fell through to llama.cpp's rules: a mistral.rs server
-    that had said its name and its version in the one field that exists for
-    saying them printed `?` for ENGINE, and had its own argv run through
-    llama.cpp's flag grammar, so the FLAGS row named flags the run never had.
-    Attaching the next OpenAI-compatible engine costs no change here at all.
+    The right column's height was a function of the card count. PLACEMENT
+    grew a VRAM bar per device and RESOURCES a header and a graph per device,
+    so each card cost two rows and the layout paid for them out of whatever
+    was left. Measured on the README's recording at the 120x36 the clip is
+    drawn in: two cards kept the scoreboard by taking every resource graph
+    down to nothing, and three gave up the scoreboard instead.
 
-    A server that answers `/props` on another process's behalf — a shim in
-    front of an engine that speaks only the OpenAI API — can now name the pid
-    doing the work. toktape used to find the server by an argv holding the
-    model path, or by who held the listening socket, and both answer "the
-    process I am talking to", which for a shim is the shim. Memory, page
-    faults and the GPU processes counted as "not ours" then described the
-    proxy: eight measured takes on a machine held by a single lease all read
-    `contended: yes`, which is the one thing the quiet-machine protocol
-    exists to rule out.
+    The devices are one table now. A row per card carries that card's VRAM
+    bar, its bytes, its utilisation and its temperature, over a single graph
+    they share — the mean across the cards that reported a utilisation, so a
+    card nobody could read is left out of the mean rather than counted as
+    idle, and still prints `?` for what was not measured. The column grows one
+    row per card instead of two, and a four-card rig keeps the headline and
+    the graphs together.
 
-    **Windows.** `toktape_<version>_windows_amd64.zip` and an arm64 zip are
-    on this page. The view is macOS's — attach with `--url`, and the `/proc`
-    rows print `?` — and WSL2 still runs the Linux binary for the full one.
-    The binaries are cross-compiled and the merge gate builds them; nobody
-    has run one on Windows yet, so please say if something is wrong.
+    PLACEMENT is left with what the word means, where the model itself sits: a
+    card's used VRAM is a live nvidia-smi reading and was never a placement.
+    An offloaded run reads better for it — the host row and the VRAM row are
+    adjacent now, with nothing between them, so the balance is one glance.
 
-    The card also says when thinking-off was asked for and the server thought
-    anyway, `toktape render --help` says what canvas each output draws and
-    how to cut a window out of a clip, and the README's clip is a four-stream
-    Qwen run recorded with thinking genuinely off.
+    **The headline was on screen twice**, five rows apart and in two sizes:
+    the scoreboard and SPEED's first row drew the same number. The word that
+    row had and the board did not — decode against sample — moves onto the
+    board's unit line, and the row returns only on a screen too short for the
+    board, where it is the one place the figure appears. The per-stream mean
+    left the column too, since every stream's own tile already leads with it.
 
-    New since v0.1.0 or v0.2.1? The
+    **The card, the same rule.** Three figures were printed twice on it, and
+    the Streams row's whole first line was one of them. Each figure now
+    appears in the row whose label names what it is about: the decode rates
+    are Decode's, the prefill rates and where the wait went are Prefill's,
+    and on a concurrent run TTFT sits beside its own p95 in Streams. That took
+    `N × per-stream = aggregate` with it — and what the equation was standing
+    in for survives as words, because when the streams did not share a decode
+    window the row now says so: `4 streams · not all decoding at once`. It is
+    the card's first account of why four streams at 42.1 tok/s are not 144.
+
+    Nothing was re-recorded: the README's clip is the same run drawn through
+    the new column.
+
+    New since v0.2.4 or earlier? The
+    [v0.2.5 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.5)
+    cover engines that name themselves, a server that can name the process
+    doing the work, and the Windows zips; the
     [v0.2.2 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.2)
     describe recording a server that is not llama.cpp, and the
     [v0.2.0 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.0)
