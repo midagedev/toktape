@@ -32,13 +32,14 @@ Flags:
   --gif FILE       write an animated GIF
   --mp4 FILE       write an H.264 mp4 (needs ffmpeg on PATH)
   --cast FILE      write an asciicast v2 recording
-  --frames DIR     write the PNG frame sequence into DIR
+  --frames DIR     write the PNG frame sequence into DIR (20 px cells — see Canvas)
   --open           open on a shell prompt with the command being typed, before the screen
   --no-poster      do not put the result on the clip's first frame
   --prefill-lead D open this long before the first token instead of at the run's start
   --duration D     length of the clip (default: derived from the run)
   --fps N          frame rate (default 30)
-  --size WxH       terminal size in cells (default 156x38 for --mp4 and --frames, 120x36 for --gif and --cast)
+  --size WxH       terminal size in cells, not pixels (default 156x38 for
+                   --mp4/--frames, 120x36 for --gif/--cast; see Canvas)
   --out DIR        where to look for the newest run (default ~/.toktape/runs)
 
 Clip length

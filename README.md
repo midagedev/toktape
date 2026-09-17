@@ -306,7 +306,8 @@ file is named) besides the formats above, and `--copy` (also to the clipboard
 over OSC 52).
 
 **Render:** `--gif FILE`, `--mp4 FILE` (needs ffmpeg on `PATH`), `--cast FILE`
-(asciicast v2), `--frames DIR` (PNG sequence), `--duration`, `--fps`,
+(asciicast v2), `--frames DIR` (PNG sequence, drawn on a larger canvas than the GIF —
+`toktape help render` gives both sizes), `--duration`, `--fps`,
 `--size WxH`, `--open` (the command typed at a shell prompt in front of the
 run), `--prefill-lead D` (open the clip D before the first token, leaving the
 rest of the wait out of it — every frame that is in it is still 1:1, and the

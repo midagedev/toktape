@@ -295,7 +295,8 @@ Markdown 표입니다. `sql`은 `runs` 테이블이 없으면 만들고 실행�
 않으면 테이프 옆에 씁니다), `--copy`(OSC 52로 클립보드에도 복사).
 
 **render:** `--gif FILE`, `--mp4 FILE`(`PATH`에 ffmpeg 필요), `--cast FILE`
-(asciicast v2), `--frames DIR`(PNG 시퀀스), `--duration`, `--fps`,
+(asciicast v2), `--frames DIR`(PNG 시퀀스. GIF보다 큰 캔버스에 그려집니다 — 두 크기는
+`toktape help render`에 있습니다), `--duration`, `--fps`,
 `--size WxH`, `--open`(실행 앞에 셸 프롬프트에서 명령을 치는 장면을 붙입니다),
 `--prefill-lead D`(실행의 처음이 아니라 첫 토큰 D초 전에서 클립을 시작해,
 프리필을 기다린 나머지 시간을 클립 밖에 둡니다. 남은 프레임은 전부 그대로

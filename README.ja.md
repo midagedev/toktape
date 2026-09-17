@@ -305,7 +305,8 @@ speculative `n_max` の値ごとに 1 回ずつ流して同じテープに記録
 しなければテープの隣に書きます）、`--copy`（OSC 52 でクリップボードにもコピー）。
 
 **render:** `--gif FILE`、`--mp4 FILE`（`PATH` に ffmpeg が必要）、`--cast FILE`
-（asciicast v2）、`--frames DIR`（PNG シーケンス）、`--duration`、`--fps`、
+（asciicast v2）、`--frames DIR`（PNG シーケンス。GIF より大きなキャンバスに描かれます —
+両方のサイズは `toktape help render` にあります）、`--duration`、`--fps`、
 `--size WxH`、`--open`（実行の前に、シェルプロンプトでコマンドを打つ場面を
 付けます）、`--prefill-lead D`（実行の先頭ではなく最初のトークンの D 秒前から
 クリップを始め、プリフィルを待った残りをクリップの外に置きます。残ったフレーム
