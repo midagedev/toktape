@@ -33,11 +33,11 @@ toktape は、すでに起動している llama-server にアタッチし、1 �
 │               ≈ 125–230 GB/s, 16–30% of peak                         │
 │ Prefill       167 tok/s aggregate · 42.1 tok/s each                  │
 │               238 prompt tokens · engine prefill 5649 ms             │
-│               queue 56 ms · TTFT p50 5704 ms                         │
+│               queue 56 ms                                            │
 │ Context       8192 (238 in / 214 out)                                │
 │ Prefix cache  0% hit (0/238) · warm                                  │
 │ Sampling      greedy (temp 0) · thinking off · chat                  │
-│ Streams       4 streams · 42.1 tok/s each · 144 tok/s aggregate      │
+│ Streams       4 streams · not all decoding at once                   │
 │               TTFT p50 5704 ms p95 5707 ms · slots busy max ?        │
 ├──────────────────────────────────────────────────────────────────────┤
 │ MEMORY   GPU0 [██████░░░░] 28.5/48.0 GiB                             │
@@ -240,8 +240,12 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 - **contended。** 同じマシンの別プロセスは、人が試す大半の変更よりも大きく
   デコード速度を動かします。カードはロードアベレージと他の GPU プロセスを読み、
   実行にラベルを付けます。
-- **ストリーム。** ストリームあたりの速度 × N = 合計をカードにそのまま書き、TTFT の
-  p50・p95 と、同時にビジーだった最大スロット数を並べます。
+- **ストリーム。** 何本あったか、それぞれが最初のトークンを見たのはいつか
+  （TTFT p50・p95）、同時にビジーだった最大スロット数。速度は Decode 行のもので
+  ここには繰り返しません。ただし「ストリームあたり × N が本当に合計なのか」だけは
+  はっきり書きます。終わる時刻がばらけたストリームは、最後の一本しか残っていない
+  区間まで含めて合計を測ることになるので、その行は
+  `4 streams · not all decoding at once` と読めます。
 
 ## コマンド
 

@@ -33,9 +33,16 @@ func TestRoundsStreamsLineIsNotAnEquation(t *testing.T) {
 	if strings.Contains(joined, "=") {
 		t.Errorf("rounds Streams row is an equation:\n%s", joined)
 	}
-	for _, want := range []string{"4 streams per round", "14.4 tok/s each", "50.6 tok/s aggregate"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("rounds Streams row lacks %q:\n%s", want, joined)
+	if !strings.Contains(joined, "4 streams per round") {
+		t.Errorf("rounds Streams row lacks the per-round count:\n%s", joined)
+	}
+	// The rates left this row on 2026-09-17 (TTP-110): they are the Decode
+	// row's and were printed twice on every concurrent card. "per round"
+	// already says the streams were not all in one window, which is the thing
+	// the listed figures were standing in for.
+	for _, gone := range []string{"14.4", "50.6", "not all decoding at once"} {
+		if strings.Contains(joined, gone) {
+			t.Errorf("rounds Streams row still carries %q:\n%s", gone, joined)
 		}
 	}
 

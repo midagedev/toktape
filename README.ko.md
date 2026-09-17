@@ -32,11 +32,11 @@ toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.ta
 │               ≈ 125–230 GB/s, 16–30% of peak                         │
 │ Prefill       167 tok/s aggregate · 42.1 tok/s each                  │
 │               238 prompt tokens · engine prefill 5649 ms             │
-│               queue 56 ms · TTFT p50 5704 ms                         │
+│               queue 56 ms                                            │
 │ Context       8192 (238 in / 214 out)                                │
 │ Prefix cache  0% hit (0/238) · warm                                  │
 │ Sampling      greedy (temp 0) · thinking off · chat                  │
-│ Streams       4 streams · 42.1 tok/s each · 144 tok/s aggregate      │
+│ Streams       4 streams · not all decoding at once                   │
 │               TTFT p50 5704 ms p95 5707 ms · slots busy max ?        │
 ├──────────────────────────────────────────────────────────────────────┤
 │ MEMORY   GPU0 [██████░░░░] 28.5/48.0 GiB                             │
@@ -233,8 +233,11 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 - **contended.** 같은 장비의 다른 프로세스는 사람들이 시험하는 대부분의 변경보다
   디코드 속도를 더 크게 흔듭니다. 카드는 로드 애버리지와 다른 GPU 프로세스를
   읽어 실행에 라벨을 붙입니다.
-- **스트림.** 스트림당 속도 × N = 합계를 카드에 그대로 적고, TTFT p50·p95와
-  동시에 바빴던 최대 슬롯 수를 함께 둡니다.
+- **스트림.** 몇 개였는지, 각자 첫 토큰을 언제 봤는지(TTFT p50·p95), 동시에
+  바빴던 최대 슬롯 수. 속도는 Decode 줄의 것이고 여기에 다시 쓰지 않습니다.
+  대신 "스트림당 × N이 정말 합계인가"는 말로 적습니다. 끝나는 시점이 어긋난
+  스트림들은 마지막 한 개만 남은 구간까지 포함해 합계를 재게 되므로, 그 줄은
+  `4 streams · not all decoding at once`로 읽힙니다.
 
 ## 명령
 

@@ -11,16 +11,15 @@
 │               ≈ 265 GB/s from RAM per verify step, 80% of peak       │
 │ Prefill       2130 tok/s aggregate · 817 tok/s each                  │
 │               512 prompt tokens · engine prefill 470 ms              │
-│               queue 170 ms · TTFT p50 640 ms                         │
+│               queue 170 ms                                           │
 │ Draft         DSpark-0.6B-Q8_0.gguf · n_max 3,5                      │
 │               30% accepted (2248/7560)                               │
 │               1898 verify steps of 5.0 tokens                        │
 │ Context       16384 (512 in / 86 out)                                │
 │ Prefix cache  25% hit (128/512) · warm                               │
 │ Sampling      greedy (temp 0) · thinking off · /completion           │
-│ Streams       4 streams per round · 14.7 tok/s each                  │
-│               49.8 tok/s aggregate                                   │
-│               TTFT p50 640 ms p95 720 ms · slots busy max 4          │
+│ Streams       4 streams per round · TTFT p50 640 ms p95 720 ms       │
+│               slots busy max 4                                       │
 │ Prompts       12 rounds · 15.5 tok/s median (8.0–20.9)               │
 │               accepted 56% median (5–87%)                            │
 │               3·sql-1 19.3 tok/s 87%  ·  3·sql-2 18.4 tok/s 83%      │

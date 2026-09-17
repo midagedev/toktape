@@ -12,11 +12,11 @@
 │               ≈ 331 GB/s from RAM, 72% of peak                       │
 │ Prefill       496 tok/s aggregate · 172 tok/s each                   │
 │               512 prompt tokens · engine prefill 2233 ms             │
-│               queue 417 ms · TTFT p50 2650 ms                        │
+│               queue 417 ms                                           │
 │ Context       16384 (512 in / 248 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
-│ Streams       4 × 6.9 tok/s = 27.6 tok/s aggregate                   │
-│               TTFT p50 2650 ms p95 3100 ms · slots busy max 4        │
+│ Streams       4 streams · TTFT p50 2650 ms p95 3100 ms               │
+│               slots busy max 4                                       │
 ├──────────────────────────────────────────────────────────────────────┤
 │ MEMORY   GPU0 [██████████] 23.9/24.0 GiB                             │
 │          GPU1 [██████████] 23.6/24.0 GiB                             │

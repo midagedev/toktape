@@ -279,8 +279,10 @@ func (c *content) buildHero(s *tape.RunSummary) {
 			// No total is printed beside them on purpose: these two are means
 			// over the streams and the TTFT on the line below is a median, so
 			// a total here would be a third TTFT figure that does not equal
-			// either. The text card, which has room to label them, prints the
-			// median and the two means side by side.
+			// either. The text card prints the same two means on its Prefill
+			// row and its median once, in the Streams block — it used to print
+			// the median on both rows, which is what TTP-110 took out; this
+			// card never did.
 			sub1: joinParts(" · ",
 				fmt.Sprintf("%s per stream", formatRateUnit(t.PromptPerSecond)),
 				enginePrefillString(s), queueWaitString(s)),

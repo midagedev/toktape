@@ -32,11 +32,11 @@ stream or for eight at once.
 │               ≈ 125–230 GB/s, 16–30% of peak                         │
 │ Prefill       167 tok/s aggregate · 42.1 tok/s each                  │
 │               238 prompt tokens · engine prefill 5649 ms             │
-│               queue 56 ms · TTFT p50 5704 ms                         │
+│               queue 56 ms                                            │
 │ Context       8192 (238 in / 214 out)                                │
 │ Prefix cache  0% hit (0/238) · warm                                  │
 │ Sampling      greedy (temp 0) · thinking off · chat                  │
-│ Streams       4 streams · 42.1 tok/s each · 144 tok/s aggregate      │
+│ Streams       4 streams · not all decoding at once                   │
 │               TTFT p50 5704 ms p95 5707 ms · slots busy max ?        │
 ├──────────────────────────────────────────────────────────────────────┤
 │ MEMORY   GPU0 [██████░░░░] 28.5/48.0 GiB                             │
@@ -239,8 +239,12 @@ side by side. Each field is there because it settles an argument.
 - **contended.** Another harness on the box moves decode by more than most of
   the changes people test. The card reads the load average and the other GPU
   processes and labels the run.
-- **Streams.** Per-stream rate × N = aggregate, spelled out on the card, with
-  TTFT p50 and p95 and the most slots busy at once.
+- **Streams.** How many there were, when each of them saw its first token
+  (TTFT p50 and p95) and the most slots busy at once. The rates are on the
+  Decode row and are not repeated here — but whether N × per-stream really is
+  the aggregate is said out loud: streams that stopped at different times leave
+  the aggregate measured over a window whose tail held one of them, and the row
+  reads `4 streams · not all decoding at once`.
 
 ## Commands
 

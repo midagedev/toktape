@@ -40,10 +40,22 @@ func TestPrefillLeadsWithTheAggregateUnderConcurrency(t *testing.T) {
 	for _, want := range []string{
 		formatRateUnit(s.Aggregate.AggregatePromptPerSecond) + " aggregate",
 		formatRateUnit(s.Timings.PromptPerSecond) + " each",
-		"TTFT p50 " + formatMs(s.Aggregate.TTFTp50Ms),
 	} {
 		if !strings.Contains(row, want) {
 			t.Errorf("the Prefill row has no %q:\n%s", want, row)
+		}
+	}
+	// TTFT is not here on a concurrent run any more (TTP-110, 2026-09-17).
+	// What this row printed was Aggregate.TTFTp50Ms — a statistic over the
+	// streams wearing a prefill label — and the Streams block printed the same
+	// figure beside its own p95. It belongs there, with its spread. The row
+	// still decomposes the wait: engine prefill and queue are both on it.
+	if strings.Contains(row, "TTFT") {
+		t.Errorf("TTFT is the Streams block's on a concurrent run:\n%s", row)
+	}
+	for _, want := range []string{"engine prefill", "queue "} {
+		if !strings.Contains(row, want) {
+			t.Errorf("the Prefill row lost %q, which is where the wait went:\n%s", want, row)
 		}
 	}
 	// The aggregate is the first figure, not the mean.

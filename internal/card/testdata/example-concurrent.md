@@ -12,12 +12,12 @@
 │               ≈ 410 GB/s, 44% of peak                                │
 │ Prefill       2927 tok/s aggregate · 610 tok/s each                  │
 │               512 prompt tokens · engine prefill 630 ms              │
-│               queue 180 ms · TTFT p50 810 ms                         │
+│               queue 180 ms                                           │
 │ Context       16384 (512 in / 307 out)                               │
 │ Prefix cache  25% hit (128/512) · warm                               │
 │ Sampling      temp default · chat                                    │
-│ Streams       8 × 9.1 tok/s = 72.9 tok/s aggregate                   │
-│               TTFT p50 810 ms p95 1050 ms · slots busy max 8         │
+│ Streams       8 streams · TTFT p50 810 ms p95 1050 ms                │
+│               slots busy max 8                                       │
 ├──────────────────────────────────────────────────────────────────────┤
 │ MEMORY   GPU0 [██████████] 23.8/24.0 GiB                             │
 │          GPU1 [██████████] 22.8/24.0 GiB                             │

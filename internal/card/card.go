@@ -477,7 +477,6 @@ func prefillParts(s *tape.RunSummary, promptTotal int) []string {
 		promptTokensPart(s),
 		enginePrefillPart(s),
 		queueWaitPart(s),
-		"TTFT p50 "+formatMs(a.TTFTp50Ms),
 	)
 }
 
@@ -1055,54 +1054,64 @@ func streamsMultiply(a tape.AggregateTimings, n int) bool {
 // rate, allowed between two figures describing one run.
 const streamsIdentityTolerance = 0.02
 
-// streamLines renders the concurrent-run headline. It is two lines because the
-// contract's single line is ~95 columns and none of its figures may be dropped.
+// streamLines renders the concurrent-run headline: what is true of the streams
+// and nothing that is true of the rates.
+//
+// It used to open with "N × per-stream = aggregate", or — when that equation
+// would have been false — with the same three figures listed. Both forms
+// printed figures the Decode row above already carries, and on the hero card
+// the whole first line said nothing the reader had not read four lines
+// earlier: "144 tok/s aggregate · 42.1 tok/s each" up there and
+// "4 streams · 42.1 tok/s each · 144 tok/s aggregate" down here, off the same
+// two fields (TTP-110, user 2026-09-17: "중복정보 정리하자"). The rates are the
+// Decode row's; a reader who wants the product can take it from there.
+//
+// What is left is what only this block knows: how many streams there were, how
+// many failed, whether they actually overlapped, when each of them saw its
+// first token, and how many slots the server had to give them.
+//
+// The overlap clause is what the equation was really for. streamsMultiply
+// exists because on a ragged run — streams stopping at different times — the
+// aggregate is the run's tokens over a window whose tail holds one stream, so
+// N × per-stream is not it (the ExLlamaV3 two-stream take read 2 × 11.6
+// against a 19.4 aggregate). Printing the figures and letting the arithmetic
+// silently not work was never the reader's answer; the sentence is. TTP-108
+// is the fuller version of this, on the caveat lines.
 func streamLines(s *tape.RunSummary) []string {
 	a := s.Aggregate
 	n := a.Streams
 	if n == 0 {
 		n = s.Concurrency
 	}
-	first := []string{fmt.Sprintf("%d × %s = %s aggregate",
-		n, formatRateUnit(a.PerStreamPredictedPerSecond), formatRateUnit(a.AggregatePredictedPerSecond))}
+	sent, label := n, fmt.Sprintf("%d streams", n)
+	if s.Rounds > 1 {
+		sent, label = n*s.Rounds, fmt.Sprintf("%d streams per round", n)
+	}
+	parts := []string{label}
 	if a.StreamsFailed > 0 {
-		first[0] += fmt.Sprintf(" · %d failed", a.StreamsFailed)
+		parts = append(parts, fmt.Sprintf("%d of %d failed", a.StreamsFailed, sent))
 	}
-	// A multi-round run is not an equation (lead, 2026-09-13): its aggregate
-	// is weighted by how long each round decoded, so "4 × 14.4 = 50.6" would
-	// print false arithmetic. The three figures are listed instead, and
-	// failures count against every stream the run sent.
+	// A multi-round run is not one window either (lead, 2026-09-13): its
+	// aggregate is weighted by how long each round decoded. "per round" above
+	// already says the streams were not all in one window, so the clause would
+	// be saying it twice.
+	if s.Rounds <= 1 && !streamsMultiply(a, n) {
+		parts = append(parts, "not all decoding at once")
+	}
+	// TTFT is here rather than on the Prefill row for a run of several streams
+	// (TTP-110): what that row printed was a.TTFTp50Ms, a statistic over the
+	// streams wearing a prefill label, and the same figure opened this block's
+	// second line. It belongs beside its own p95. A single-stream run has no
+	// Streams block, so the Prefill row still carries its TTFT.
 	//
-	// Neither is a run whose streams stopped at different times (lead,
-	// 2026-09-15): the aggregate is the run's tokens over the run's decode
-	// window, and a window whose tail holds one stream divides by time the
-	// others were not in. The ExLlamaV3 two-stream take read 2 × 11.6 against
-	// a 19.4 aggregate for exactly that reason. Both figures are the run's,
-	// and the "×" between them is the part that is not.
-	if s.Rounds > 1 || !streamsMultiply(a, n) {
-		sent, label := n, fmt.Sprintf("%d streams", n)
-		if s.Rounds > 1 {
-			sent, label = n*s.Rounds, fmt.Sprintf("%d streams per round", n)
-		}
-		parts := []string{
-			label,
-			formatRateUnit(a.PerStreamPredictedPerSecond) + " each",
-			formatRateUnit(a.AggregatePredictedPerSecond) + " aggregate",
-		}
-		if a.StreamsFailed > 0 {
-			parts = append(parts, fmt.Sprintf("%d of %d failed", a.StreamsFailed, sent))
-		}
-		first = wrapJoin(parts, " · ", innerWidth-speedLabelW)
-	}
-	// The slots line wraps rather than truncating: on a server with fewer
-	// slots than streams the queue note is the part that explains the
-	// per-stream rate above it, so it is never the part that gets cut.
-	second := wrapJoin([]string{
+	// The line wraps rather than truncating: on a server with fewer slots than
+	// streams the queue note is the part that explains the per-stream rate
+	// above it, so it is never the part that gets cut.
+	parts = append(parts,
 		fmt.Sprintf("TTFT p50 %s p95 %s", formatMs(a.TTFTp50Ms), formatMs(a.TTFTp95Ms)),
-		"slots busy max " + formatInt(a.SlotsBusyMax),
-		queuedString(s),
-	}, " · ", innerWidth-speedLabelW)
-	return labelled("Streams", speedLabelW, append(first, second...))
+		"slots busy max "+formatInt(a.SlotsBusyMax),
+		queuedString(s))
+	return labelled("Streams", speedLabelW, wrapJoin(dropEmpty(parts...), " · ", innerWidth-speedLabelW))
 }
 
 func memorySection(s *tape.RunSummary) []string {

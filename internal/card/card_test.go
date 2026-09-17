@@ -249,11 +249,42 @@ func TestConcurrentAddsStreamsLine(t *testing.T) {
 		t.Error("a single-stream run must not print the Streams line")
 	}
 	out := Text(ExampleConcurrent())
-	for _, want := range []string{"Streams", "8 × 9.1 tok/s = 72.9 tok/s aggregate", "TTFT p50 810 ms p95 1050 ms", "slots busy max 8"} {
+	for _, want := range []string{"Streams", "8 streams", "TTFT p50 810 ms p95 1050 ms", "slots busy max 8"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("concurrent card is missing %q:\n%s", want, out)
 		}
 	}
+	// The rates are the Decode row's and appear once on the card (TTP-110,
+	// 2026-09-17). This row used to open "8 × 9.1 tok/s = 72.9 tok/s
+	// aggregate", off the same two fields Decode prints four lines up.
+	streams := rowBlock(t, out, "Streams")
+	for _, gone := range []string{"9.1", "72.9", "aggregate", "each"} {
+		if strings.Contains(streams, gone) {
+			t.Errorf("the Streams row repeats the Decode row's %q:\n%s", gone, streams)
+		}
+	}
+}
+
+// rowBlock is the labelled row and its wrapped continuation lines.
+func rowBlock(t *testing.T, card, label string) string {
+	t.Helper()
+	var out []string
+	for _, l := range strings.Split(card, "\n") {
+		body := strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(l), "│"), "│")
+		switch {
+		case strings.HasPrefix(strings.TrimSpace(body), label+" "):
+			out = append(out, body)
+		case len(out) > 0:
+			if strings.TrimSpace(body) == "" || !strings.HasPrefix(body, strings.Repeat(" ", speedLabelW)) {
+				return strings.Join(out, "\n")
+			}
+			out = append(out, body)
+		}
+	}
+	if len(out) == 0 {
+		t.Fatalf("no %s row on the card:\n%s", label, card)
+	}
+	return strings.Join(out, "\n")
 }
 
 func TestVersionFallsBackToPackageVar(t *testing.T) {
