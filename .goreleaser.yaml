@@ -102,23 +102,37 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **The card's caveats now say what its figures say.** Three sentences a
-    concurrent run could print were wrong about the run they described.
+    **A server that is not llama.cpp is recorded as itself, and Windows gets
+    a binary.** Two things a reader could not do with v0.2.4.
 
-    The client-versus-server warning judged the streams' own verdicts while
-    printing their mean, so a card could say "over the 2% tolerance" about two
-    figures 1.3% apart. It now judges the figures it prints, and says
-    separately how many streams the server's own number did not confirm.
+    An engine that names itself in `/props` is now stamped with the name it
+    gave, whatever that name is. Before, one engine was matched by hand and
+    every other one fell through to llama.cpp's rules: a mistral.rs server
+    that had said its name and its version in the one field that exists for
+    saying them printed `?` for ENGINE, and had its own argv run through
+    llama.cpp's flag grammar, so the FLAGS row named flags the run never had.
+    Attaching the next OpenAI-compatible engine costs no change here at all.
 
-    The Streams row stops writing `2 × 11.6 tok/s = 19.4 tok/s aggregate`.
-    Both figures are the run's — the streams finished ten seconds apart, so
-    the aggregate divides by a window whose tail holds one stream — and the
-    equation between them was the false part. The three figures are listed
-    instead whenever the product misses the aggregate by more than 2%.
+    A server that answers `/props` on another process's behalf — a shim in
+    front of an engine that speaks only the OpenAI API — can now name the pid
+    doing the work. toktape used to find the server by an argv holding the
+    model path, or by who held the listening socket, and both answer "the
+    process I am talking to", which for a shim is the shim. Memory, page
+    faults and the GPU processes counted as "not ours" then described the
+    proxy: eight measured takes on a machine held by a single lease all read
+    `contended: yes`, which is the one thing the quiet-machine protocol
+    exists to rule out.
 
-    A warning that fires twice is listed once with a count, and the caveat
-    about a server whose memory is summed over a process tree no longer
-    prints a process id onto a card people publish.
+    **Windows.** `toktape_<version>_windows_amd64.zip` and an arm64 zip are
+    on this page. The view is macOS's — attach with `--url`, and the `/proc`
+    rows print `?` — and WSL2 still runs the Linux binary for the full one.
+    The binaries are cross-compiled and the merge gate builds them; nobody
+    has run one on Windows yet, so please say if something is wrong.
+
+    The card also says when thinking-off was asked for and the server thought
+    anyway, `toktape render --help` says what canvas each output draws and
+    how to cut a window out of a clip, and the README's clip is a four-stream
+    Qwen run recorded with thinking genuinely off.
 
     New since v0.1.0 or v0.2.1? The
     [v0.2.2 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.2)
