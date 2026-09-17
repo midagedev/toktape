@@ -7,5 +7,6 @@ if [ -n "$gofmt_out" ]; then echo "gofmt: unformatted files:"; echo "$gofmt_out"
 go build ./...
 go vet ./...
 GOOS=linux GOARCH=amd64 go build ./...   # every package must cross-compile to the primary target
+GOOS=windows GOARCH=amd64 go build ./... # shipped since v0.2.5, so it is gated: procmon's !linux stubs carry it
 go test ./... -count=1
 echo "check: OK"

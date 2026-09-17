@@ -89,6 +89,10 @@ curl -fsSL https://raw.githubusercontent.com/midagedev/toktape/main/scripts/inst
 `file://` ディレクトリを指定してください。`sh` の後ろに `-s -- --dry-run` を
 付けると、何をするかだけを表示して実際にはインストールしません。
 
+**Windows。** リリースページに `toktape_<version>_windows_amd64.zip` と
+arm64 版の zip が並びます。`toktape.exe` を展開して `PATH` に置いてください。
+上のシェルスクリプトは POSIX 専用で、この zip は取得しません。
+
 **Go:**
 
 ```sh
@@ -111,7 +115,9 @@ go build -o toktape ./cmd/toktape
 ページフォールト、サーバーフラグの行は `/proc` から読みますが、これはサーバーが
 動いているホストにしかありません。macOS でもビルド・実行でき、`--url` で
 リモートサーバーにアタッチします。その場合 `/proc` の行は `?` になります。
-Windows は WSL2 で動作します。GPU の行は `nvidia-smi` から読みます。
+Windows は v0.2.5 から専用のバイナリを持ち、見えるものは macOS と同じです。
+`/proc` ビューまで必要なら WSL2 で Linux バイナリを使います。GPU の行は
+`nvidia-smi` から読みます。
 
 ## まず使ってみる
 
@@ -436,7 +442,7 @@ HTTP スロット、プレフィックスキャッシュの再利用、キュー
 | サーバー | llama-server（upstream llama.cpp）、ik_llama.cpp、`/props` に `engine` 情報を載せて返すサーバー |
 | Linux | 主要ターゲット、x86_64・arm64、`/proc` ビュー完備 |
 | macOS | ビルド・実行可、`--url` でアタッチ。`/proc` ビューがないためメモリ・フォールトの行は `?` |
-| Windows | WSL2 経由 |
+| Windows | 専用バイナリ、`--url` でアタッチ。`/proc` ビューなし。完全なビューは WSL2 の Linux バイナリ |
 | GPU | `nvidia-smi` 経由の NVIDIA |
 
 サーバーは llama.cpp でなくても構いません。エンジン自身が名乗るサーバー、

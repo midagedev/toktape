@@ -65,12 +65,20 @@ EOF
 }
 
 # detect_os maps uname -s onto the GOOS values goreleaser builds.
+#
+# Windows is built and released, but as a .zip, and this script unpacks tar.gz
+# with the tools a POSIX box already has. Rather than grow an unzip dependency
+# into a curl-pipe-sh installer, the MSYS/Cygwin cases name the asset and stop:
+# a Git Bash user reading "toktape ships no Windows binary" would be reading
+# something untrue.
 detect_os() {
 	os=$(uname -s | tr '[:upper:]' '[:lower:]')
 	case "$os" in
 	linux) printf 'linux' ;;
 	darwin) printf 'darwin' ;;
-	*) die "unsupported OS '$os'; toktape ships linux and darwin binaries. Build from source: go install github.com/$REPO/cmd/$BIN@latest" ;;
+	mingw* | msys* | cygwin*)
+		die "this installer unpacks tar.gz and Windows ships a zip. Download toktape_<version>_windows_$(detect_arch).zip from https://github.com/$REPO/releases/latest and put toktape.exe on your PATH — or run the installer inside WSL2, where the linux binary reads /proc" ;;
+	*) die "unsupported OS '$os'; toktape ships linux, darwin and windows binaries. Build from source: go install github.com/$REPO/cmd/$BIN@latest" ;;
 	esac
 }
 

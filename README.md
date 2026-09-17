@@ -88,6 +88,10 @@ release, and `TOKTAPE_BASE_URL` to a mirror or a `file://` directory for a
 box with no route to GitHub. Add `-s -- --dry-run` after `sh` to see what it
 would do.
 
+**Windows.** The release page carries `toktape_<version>_windows_amd64.zip`
+and an arm64 zip beside it; unpack `toktape.exe` anywhere on `PATH`. The
+shell script above is POSIX and does not fetch them.
+
 **Go:**
 
 ```sh
@@ -109,8 +113,9 @@ install.
 **Platforms.** Linux x86_64 and arm64 are the primary target: the memory,
 page-fault and flag rows are read from `/proc`, which only exists on the
 server's own host. macOS builds and runs, and attaches to a remote server
-with `--url`; the `/proc` rows print `?` there. Windows works through WSL2.
-GPU rows come from `nvidia-smi`.
+with `--url`; the `/proc` rows print `?` there. Windows has had a binary of
+its own since v0.2.5 and sees what macOS sees; WSL2 runs the Linux binary
+instead and keeps the `/proc` view. GPU rows come from `nvidia-smi`.
 
 ## Quick start
 
@@ -442,7 +447,7 @@ writes files under `~/.toktape`. There is no telemetry and no account.
 | Servers | llama-server (upstream llama.cpp), ik_llama.cpp, any server that answers `/props` with an `engine` object |
 | Linux | primary target, x86_64 and arm64, full `/proc` view |
 | macOS | builds and runs; attach with `--url`; no `/proc` view, so memory and fault rows are `?` |
-| Windows | through WSL2 |
+| Windows | own binary, `--url` attach, no `/proc` view; WSL2 runs the Linux binary for the full view |
 | GPU | NVIDIA through `nvidia-smi` |
 
 The server does not have to be llama.cpp. One that reports its own engine —

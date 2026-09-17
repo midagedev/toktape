@@ -1,8 +1,10 @@
 # GoReleaser v2 — https://goreleaser.com
 #
 # One static binary per platform, nothing to resolve at runtime. Linux is the
-# primary target (amd64 for workstations, arm64 for Jetson/Grace boxes) and
-# macOS is built so a laptop can attach to a remote llama-server with --url.
+# primary target (amd64 for workstations, arm64 for Jetson/Grace boxes); macOS
+# and Windows are built so a laptop can attach to a remote llama-server with
+# --url. Off Linux there is no procfs, so the memory and fault rows print "?":
+# the same reduced view on both, and the reason neither is the primary target.
 #
 # Cut a release by pushing a tag: `git tag v0.1.0 && git push origin v0.1.0`.
 # .github/workflows/release.yml then runs `goreleaser release --clean`.
@@ -30,6 +32,7 @@ builds:
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -41,6 +44,15 @@ archives:
       - toktape
     formats:
       - tar.gz
+    # Windows ships a .zip, the archive a Windows release asset is expected to
+    # be and the one Explorer opens with nothing installed. scripts/install.sh
+    # stays tar.gz-only and POSIX-only; it names this file rather than fetching
+    # it, so a Git Bash user is told where to go instead of being told the
+    # binary does not exist.
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     # Explicit, because the default template appends a conditional arch version
     # suffix. scripts/install.sh builds this exact string from uname, so the two
     # must be read together.

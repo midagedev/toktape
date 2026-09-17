@@ -88,6 +88,10 @@ GitHub에 나갈 수 없는 장비라면 `TOKTAPE_BASE_URL`에 미러나 `file:/
 디렉터리를 지정하면 됩니다. `sh` 뒤에 `-s -- --dry-run`을 붙이면 실제로 설치하지
 않고 무엇을 할지만 보여 줍니다.
 
+**Windows.** 릴리스 페이지에 `toktape_<version>_windows_amd64.zip`과 arm64
+zip이 함께 올라갑니다. `toktape.exe`를 풀어 `PATH`에 두면 됩니다. 위의 셸
+스크립트는 POSIX 전용이라 이 zip은 받지 않습니다.
+
 **Go:**
 
 ```sh
@@ -108,7 +112,9 @@ go build -o toktape ./cmd/toktape
 **플랫폼.** Linux x86_64·arm64가 기본 대상입니다. 메모리, 페이지 폴트, 서버
 플래그 행은 `/proc`에서 읽는데 이것은 서버가 도는 호스트에만 있습니다. macOS도
 빌드되고 실행되며 `--url`로 원격 서버에 붙습니다. 이때 `/proc` 행은 `?`로
-찍힙니다. Windows는 WSL2에서 동작합니다. GPU 행은 `nvidia-smi`에서 읽습니다.
+찍힙니다. Windows는 v0.2.5부터 자기 바이너리를 갖고, 보이는 것은 macOS와
+같습니다. `/proc` 뷰까지 필요하면 WSL2에서 Linux 바이너리를 쓰면 됩니다.
+GPU 행은 `nvidia-smi`에서 읽습니다.
 
 ## 바로 써 보기
 
@@ -423,7 +429,7 @@ HTTP 슬롯, 프리픽스 캐시 재사용, 대기열이 찬 상태의 TTFT, 스
 | 서버 | llama-server(upstream llama.cpp), ik_llama.cpp, `/props`에 `engine` 정보를 담아 답하는 서버 |
 | Linux | 기본 대상, x86_64·arm64, `/proc` 뷰 전체 |
 | macOS | 빌드·실행 가능, `--url`로 부착. `/proc` 뷰가 없어 메모리·폴트 행은 `?` |
-| Windows | WSL2를 통해 |
+| Windows | 자체 바이너리, `--url`로 부착. `/proc` 뷰는 없음. 전체 뷰는 WSL2의 Linux 바이너리 |
 | GPU | `nvidia-smi`를 통한 NVIDIA |
 
 서버가 llama.cpp일 필요는 없습니다. 자기 엔진을 스스로 보고하는 서버라면,
