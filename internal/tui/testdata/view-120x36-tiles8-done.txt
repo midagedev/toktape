@@ -1,36 +1,36 @@
 ┌─ toktape · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────┐
-│ stream 1/8                           done │ stream 2/8                           done │ SPEED ────────────────────── │
-│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 296/320 │ 9.1 tok/s  █▇▇███▇▇ ttft 690 ms · 301/320 │ decode            72.9 tok/s │
-│ rest while the first waits. Each token    │ 사용량을 나란히 보여 주는 이유도          │ prefill           2927 tok/s │
-│ therefore takes the sum of the two        │ 그것이다. 두 값이 어긋나면 설정이         │ ttft      810 ms · 25% cache │
-│ halves rather than the maximum, which     │ 생각과 다르게 잡혀 있다는 뜻이고,         │ 8 streams     9.1 tok/s each │
-│ is why adding a card raises the memory    │ 그때는 속도를 재기 전에 배치부터 고쳐야   │                              │
-│ you                                       │ 한다. 실제로 자리가 모자랄 때 손대는      │ PLACEMENT ────────────────── │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
-│ stream 3/8                           done │ stream 4/8                           done │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
-│ 9.1 tok/s  ▇▇█▇██▇▇ ttft 750 ms · 306/320 │ 9.1 tok/s  █▇███▇▇█ ttft 810 ms · 311/320 │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ a slot is doing that it competes with     │ preamble, send them to the same server    │      ▆ weights  ▆ kv  ▆ buf  │
-│ the sessions already generating. That     │ so they share the slot that holds it.     │                              │
-│ is why time to first token spreads out    │ And when you cannot avoid a change,       │ MEMORY ───────────────────── │
-│ as the slots fill, and why a burst of     │ make it late rather than early, because   │ rss       1.2G file     0.8G │
-│ arrivals makes ongoing streams            │ the cost is not the size                  │ virt     48.0G anon     0.4G │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ maj/tok                  0.0 │
-│ stream 5/8                           done │ stream 6/8                           done │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ 9.1 tok/s  ▇███▇▇██ ttft 870 ms · 316/320 │ 9.1 tok/s  ▇██▇▇█▇█ ttft 930 ms · 300/320 │                              │
-│ 가운데 값을 쓰고, 세 값이 서로 많이       │ are unpacked on the fly and multiplied    │ RESOURCES ───── contended no │
-│ 다르면 그 사실 자체를 기록하라.           │ at a higher precision, so the speed       │ CPU  0%  0.1 cores  load 3.1 │
-│ 흔들리는 측정은 평균을 낼 대상이 아니라   │ gain comes from moving fewer bytes        │                              │
-│ 원인을 찾아야 할 증상이다. 이 도구가      │ rather than from doing cheaper            │                              │
-│ 실행마다                                  │ multiplications. The                      │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁ │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ GPU0          3%  71°C  348W │
-│ stream 7/8 · thinking · cut               │ stream 8/8                           done │ ▆▅▅▅▄▇▆▆▅▅▄▄▆▆▄▄▁▁▂▂▂        │
-│ 9.1 tok/s  █▇██▇▇▇█ ttft 990 ms · 320/320 │ 9.1 tok/s  ██▇▇███▇ ttft 1.05 s · 310/320 │ █████████████████████▇▇▅▅▇   │
-│ wants an idle machine with one stream     │ on the card comes from, and it is why     │ ██████████████████████████▂▂ │
-│ on it. Their message says agents, which   │ the figure is absent rather than zero     │ GPU1          3%  67°C  318W │
-│ means concurrency, which means my whole   │ when a model is fully offloaded. The      │ ▄▄▃▃▅▅▅▄▄▃▃▅▅▄▃▂ ▂▁          │
-│ break even calculation is answering       │ counter that does matter during           │ █████████████████████▅▅▃▆▆   │
-│                                                                                       │ ██████████████████████████▂▂ │
-│ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card    │                              │
+│ stream 1/8                           done │ stream 2/8                           done │          ▀▀▀▀█ ▄▀▀▀▄   ▄▀▀▀▄ │
+│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 296/320 │ 9.1 tok/s  █▇▇███▇▇ ttft 690 ms · 301/320 │              █     █   █   █ │
+│ rest while the first waits. Each token    │ 사용량을 나란히 보여 주는 이유도          │             ▄▀ ▄▀▀▀▀   ▀▀▀▀█ │
+│ therefore takes the sum of the two        │ 그것이다. 두 값이 어긋나면 설정이         │            █   █           █ │
+│ halves rather than the maximum, which     │ 생각과 다르게 잡혀 있다는 뜻이고,         │            ▀   ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
+│ is why adding a card raises the memory    │ 그때는 속도를 재기 전에 배치부터 고쳐야   │                        tok/s │
+│ you                                       │ 한다. 실제로 자리가 모자랄 때 손대는      │                              │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ SPEED ────────────────────── │
+│ stream 3/8                           done │ stream 4/8                           done │ decode            72.9 tok/s │
+│ 9.1 tok/s  ▇▇█▇██▇▇ ttft 750 ms · 306/320 │ 9.1 tok/s  █▇███▇▇█ ttft 810 ms · 311/320 │ prefill           2927 tok/s │
+│ a slot is doing that it competes with     │ preamble, send them to the same server    │ ttft      810 ms · 25% cache │
+│ the sessions already generating. That     │ so they share the slot that holds it.     │ 8 streams     9.1 tok/s each │
+│ is why time to first token spreads out    │ And when you cannot avoid a change,       │                              │
+│ as the slots fill, and why a burst of     │ make it late rather than early, because   │ PLACEMENT ────────────────── │
+│ arrivals makes ongoing streams            │ the cost is not the size                  │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
+│ stream 5/8                           done │ stream 6/8                           done │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ 9.1 tok/s  ▇███▇▇██ ttft 870 ms · 316/320 │ 9.1 tok/s  ▇██▇▇█▇█ ttft 930 ms · 300/320 │      ▆ weights  ▆ kv  ▆ buf  │
+│ 가운데 값을 쓰고, 세 값이 서로 많이       │ are unpacked on the fly and multiplied    │                              │
+│ 다르면 그 사실 자체를 기록하라.           │ at a higher precision, so the speed       │ MEMORY ───────────────────── │
+│ 흔들리는 측정은 평균을 낼 대상이 아니라   │ gain comes from moving fewer bytes        │ rss       1.2G file     0.8G │
+│ 원인을 찾아야 할 증상이다. 이 도구가      │ rather than from doing cheaper            │ virt     48.0G anon     0.4G │
+│ 실행마다                                  │ multiplications. The                      │ maj/tok                  0.0 │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ stream 7/8 · thinking · cut               │ stream 8/8                           done │                              │
+│ 9.1 tok/s  █▇██▇▇▇█ ttft 990 ms · 320/320 │ 9.1 tok/s  ██▇▇███▇ ttft 1.05 s · 310/320 │ RESOURCES ───── contended no │
+│ wants an idle machine with one stream     │ on the card comes from, and it is why     │ CPU  0%  0.1 cores  load 3.1 │
+│ on it. Their message says agents, which   │ the figure is absent rather than zero     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ means concurrency, which means my whole   │ when a model is fully offloaded. The      │ GPU0          3%  71°C  348W │
+│ break even calculation is answering       │ counter that does matter during           │ ▇▇▇▇▇█▇▇▇▇▇▇█▇▇▇▆▆▆▆▆▅▅▅▅▅▁▁ │
+│                                                                                       │ GPU1          3%  67°C  318W │
+│ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card    │ ▇▇▇▆▇▇▇▇▇▇▆▇▇▇▆▆▆▆▆▆▆▅▅▄▅▅▁▁ │
 ├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ██▏▏▏▏▏▏▏▏▏▏▏█████▏▏▏▏▏▏▏▏▏▏▏█████▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏██▏▏  p50 116 ms  c card · p prompt · q quit │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

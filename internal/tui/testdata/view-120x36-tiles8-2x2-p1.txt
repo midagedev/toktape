@@ -1,36 +1,36 @@
 ┌─ toktape · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────┐
-│ stream 1/8                         answer │ stream 2/8                         answer │ SPEED ────────────────────── │
-│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 104/320 │ 9.1 tok/s  ██▇▇▇██▇ ttft 690 ms · 103/320 │ decode            72.8 tok/s │
-│         it                                │ 메모리다. 가중치는 모델을 올리는 순간     │ prefill           4880 tok/s │
-│         x = blk.ffn(x)                    │ 크기가 정해지고 그 뒤로는 변하지          │ ttft      810 ms · 25% cache │
-│     }                                     │ 않지만, KV 캐시는 슬롯마다 따로 잡히고    │ 8 streams     9.1 tok/s each │
-│     return argmax(m.head(x))              │ 컨텍스트 길이에 정비례해서 자란다.        │                              │
-│ }                                         │ 그래서 같은 모델을 같은 카드에 올려도     │ PLACEMENT ────────────────── │
-│ ```                                       │ 컨텍스트를 네 배로 늘리면 갑자기 자리가   │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│                                           │ 모자란다. 계산은 어렵지 않다. 레이어      │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-│ Nothing in there is clever, and that is   │ 수에 키와 값 두 벌을 곱하고, 거기에 KV    │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ exactly the point. A dense seventy        │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │      ▆ weights  ▆ kv  ▆ buf  │
-│ billion parameter model at Q4_K_M is      │ 수를 곱한 다음, 원소 하나가 몇            │                              │
-│ about forty two gigabytes of weights,     │ 바이트인지를 곱하면 된다. 팔십            │ MEMORY ───────────────────── │
-│ and every single one of those bytes is    │ 레이어짜리 칠십억 단위 모델이 만 육천     │ rss       1.2G file     0.8G │
-│ read again for every token you            │ 토큰을 잡으면 반정밀도로는 오             │ virt     48.0G anon     0.4G │
-│ generate. That one sentence explains▍     │ 기가바이트가 넘고,▍                       │ maj/tok                  0.0 │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ stream 3/8                         answer │ stream 4/8                         answer │                              │
-│ 9.1 tok/s  ██▇███▇▇ ttft 750 ms · 103/320 │ 9.1 tok/s  ██▇███▇▇ ttft 810 ms · 102/320 │ RESOURCES ───── contended no │
-│ most benchmarks print. Each session       │ value tensors it already computed for a   │ CPU  6%  1.9 cores  load 3.1 │
-│ gets slower and the server as a whole     │ slot, and when the next request arrives   │                              │
-│ gets faster, and both of those are the    │ it compares the new token sequence with   │                              │
-│ same fact seen from two ends. During      │ the old one from the beginning. Every     │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
-│ decoding the engine reads the entire      │ position that matches is reused. The      │ GPU0         90%  69°C  343W │
-│ set of weights to produce one token. If   │ first position that differs ends the      │ ▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆▅▅▄▄▆▆▅▅▅▄▇▆▆ │
-│ eight slots are busy it reads that same   │ reuse, and everything after it is         │ ████████████████████████████ │
-│ set once and produces eight tokens from   │ evaluated again, however small the        │ ████████████████████████████ │
-│ it, one for each sequence, because the    │ difference was. One extra space in your   │ GPU1         83%  65°C  313W │
-│ matrix multiply is batched across them.   │ system message, a timestamp you           │ ▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄▄▃▃▅▅▄▄▃▃▅▅▅▄ │
-│ The expensive part is amortised eight     │ helpfully injected, a tool list whose     │ ████████████████████████████ │
-│ ways. What is not amortised is the        │ order comes out of a map and therefore    │ ████████████████████████████ │
-│ attention step, where every sequence▍     │ changes between▍                          │                              │
+│ stream 1/8                         answer │ stream 2/8                         answer │          ▀▀▀▀█ ▄▀▀▀▄   ▄▀▀▀▄ │
+│ 9.1 tok/s  ██▇▇▇██▇ ttft 630 ms · 104/320 │ 9.1 tok/s  ██▇▇▇██▇ ttft 690 ms · 103/320 │              █     █   █   █ │
+│         it                                │ 메모리다. 가중치는 모델을 올리는 순간     │             ▄▀ ▄▀▀▀▀   █▀▀▀█ │
+│         x = blk.ffn(x)                    │ 크기가 정해지고 그 뒤로는 변하지          │            █   █       █   █ │
+│     }                                     │ 않지만, KV 캐시는 슬롯마다 따로 잡히고    │            ▀   ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
+│     return argmax(m.head(x))              │ 컨텍스트 길이에 정비례해서 자란다.        │                        tok/s │
+│ }                                         │ 그래서 같은 모델을 같은 카드에 올려도     │                              │
+│ ```                                       │ 컨텍스트를 네 배로 늘리면 갑자기 자리가   │ SPEED ────────────────────── │
+│                                           │ 모자란다. 계산은 어렵지 않다. 레이어      │ decode            72.8 tok/s │
+│ Nothing in there is clever, and that is   │ 수에 키와 값 두 벌을 곱하고, 거기에 KV    │ prefill           4880 tok/s │
+│ exactly the point. A dense seventy        │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │ ttft      810 ms · 25% cache │
+│ billion parameter model at Q4_K_M is      │ 수를 곱한 다음, 원소 하나가 몇            │ 8 streams     9.1 tok/s each │
+│ about forty two gigabytes of weights,     │ 바이트인지를 곱하면 된다. 팔십            │                              │
+│ and every single one of those bytes is    │ 레이어짜리 칠십억 단위 모델이 만 육천     │ PLACEMENT ────────────────── │
+│ read again for every token you            │ 토큰을 잡으면 반정밀도로는 오             │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
+│ generate. That one sentence explains▍     │ 기가바이트가 넘고,▍                       │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ stream 3/8                         answer │ stream 4/8                         answer │      ▆ weights  ▆ kv  ▆ buf  │
+│ 9.1 tok/s  ██▇███▇▇ ttft 750 ms · 103/320 │ 9.1 tok/s  ██▇███▇▇ ttft 810 ms · 102/320 │                              │
+│ most benchmarks print. Each session       │ value tensors it already computed for a   │ MEMORY ───────────────────── │
+│ gets slower and the server as a whole     │ slot, and when the next request arrives   │ rss       1.2G file     0.8G │
+│ gets faster, and both of those are the    │ it compares the new token sequence with   │ virt     48.0G anon     0.4G │
+│ same fact seen from two ends. During      │ the old one from the beginning. Every     │ maj/tok                  0.0 │
+│ decoding the engine reads the entire      │ position that matches is reused. The      │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ set of weights to produce one token. If   │ first position that differs ends the      │                              │
+│ eight slots are busy it reads that same   │ reuse, and everything after it is         │ RESOURCES ───── contended no │
+│ set once and produces eight tokens from   │ evaluated again, however small the        │ CPU  6%  1.9 cores  load 3.1 │
+│ it, one for each sequence, because the    │ difference was. One extra space in your   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ matrix multiply is batched across them.   │ system message, a timestamp you           │ GPU0         90%  69°C  343W │
+│ The expensive part is amortised eight     │ helpfully injected, a tool list whose     │ ▇▇▇▇▇▇█▇▇▇▇▇█▇▇▇▇▇▇█▇▇▇▇▇█▇▇ │
+│ ways. What is not amortised is the        │ order comes out of a map and therefore    │ GPU1         83%  65°C  313W │
+│ attention step, where every sequence▍     │ changes between▍                          │ ▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇ │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  page 1/2 · ←/→  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

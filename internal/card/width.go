@@ -18,6 +18,7 @@ package card
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mattn/go-runewidth"
 )
@@ -101,4 +102,52 @@ func repeat(r rune, n int) string {
 		return ""
 	}
 	return strings.Repeat(string(r), n)
+}
+
+// ClipANSI shortens s to at most w display columns, keeping every ANSI escape
+// sequence it passes so the styling that was in force still applies to what
+// survives, and closing with a reset when any escape was kept. Nothing is
+// appended in place of what was cut.
+//
+// It exists because truncate above strips the escapes: that is right for the
+// card, which emits none, and wrong for the TUI, which cuts styled lines when
+// the scoreboard's digits reach past the pane divider into the answer pane
+// (internal/tui/scoreboard.go). Width is measured with this package's cond, so
+// a cut lands on the same column the layout counted — a truncator with its own
+// width table would put the frame's right border one column out on Hangul.
+func ClipANSI(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if !strings.ContainsRune(s, 0x1b) {
+		if cond.StringWidth(s) <= w {
+			return s
+		}
+		return cond.Truncate(s, w, "")
+	}
+	var b strings.Builder
+	styled := false
+	rest, col := s, 0
+	for rest != "" {
+		if rest[0] == 0x1b {
+			if loc := ansiPattern.FindStringIndex(rest); loc != nil && loc[0] == 0 {
+				b.WriteString(rest[:loc[1]])
+				rest = rest[loc[1]:]
+				styled = true
+				continue
+			}
+		}
+		r, n := utf8.DecodeRuneInString(rest)
+		rw := cond.RuneWidth(r)
+		if col+rw > w {
+			break
+		}
+		b.WriteString(rest[:n])
+		rest = rest[n:]
+		col += rw
+	}
+	if styled {
+		b.WriteString("\x1b[0m")
+	}
+	return b.String()
 }

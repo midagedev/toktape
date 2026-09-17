@@ -58,8 +58,32 @@ func View(m Model, t time.Duration, w, h int) string {
 	split := m.Err == ""
 	var pane paneLayout
 	if split {
+		// The right column is two panels, not one. The scoreboard takes the
+		// top of it and is the only thing on the screen allowed to set its own
+		// width; the machine panel under it keeps the tabular width every
+		// figure in it is aligned to, and is built for the rows that are left
+		// so its resource graphs still choose a height that fits (TTP-39).
+		board, boardW := scoreboardRows(m, th, t, paneW-2)
+		boardH := len(board) + 1 // the blank row that parts the two panels
+		board = append(board, blankRow(boardW))
+		if !rightPaneFits(m, th, t, paneW-2, bodyH-boardH) {
+			// Not enough screen for both. The machine panel is the one that
+			// loses a whole section when it is squeezed, so the headline is
+			// the one that gives way (right.go).
+			board, boardW, boardH = nil, 0, 0
+		}
+		// Columns the board reaches past the pane divider into the answer
+		// pane. Zero at the width the default canvas was sized for; positive
+		// once the rate needs a fifth digit, which is the case the board was
+		// asked to grow leftward for rather than shrink into
+		// (user, 2026-09-17: "왼쪽으로 레이아웃을 침범하게 만들어줘").
+		notch := 0
+		if boardH > 0 {
+			notch = max(0, boardW-(paneW-2))
+		}
+
 		pane = leftPane(m, th, t, leftW-2, bodyH)
-		right := rightPane(m, th, t, paneW-2, bodyH)
+		right := rightPane(m, th, t, paneW-2, bodyH-boardH)
 		bar := th.paint(th.dim, "│")
 		for i := 0; i < bodyH; i++ {
 			row := pane.rows[i]
@@ -72,7 +96,30 @@ func View(m Model, t time.Duration, w, h int) string {
 				rb = th.paint(th.dim, "┤")
 				gutter = th.paint(th.dim, "─")
 			}
-			body = append(body, lb+gutter+row.text+gutter+rb+" "+right[i]+" "+bar)
+			text, cell := row.text, ""
+			if i < boardH {
+				cell = board[i]
+				// The divider moves with the board, so the answer pane loses
+				// exactly the columns the board gained and the frame is still
+				// w columns wide.
+				// pad after the clip: a cut that would land inside a wide
+				// rune stops one column short of the room it was given, and
+				// the frame's right border would move with it.
+				text = pad(clipANSI(text, leftW-2-notch), leftW-2-notch)
+				if notch > 0 && i == boardH-1 {
+					// The board's last row is the blank that parts the two
+					// panels, and where the wall steps back to the column the
+					// rest of the frame keeps it in. Drawn as the corner it
+					// is: up-and-right at the board's wall, left-and-down at
+					// the pane's.
+					step := th.paint(th.dim, "└"+repeat('─', notch-1)+"┐")
+					body = append(body, lb+gutter+text+gutter+step+" "+blankRow(paneW-2)+" "+bar)
+					continue
+				}
+			} else {
+				cell = right[i-boardH]
+			}
+			body = append(body, lb+gutter+text+gutter+rb+" "+cell+" "+bar)
 		}
 		switch m.Mode {
 		case ModePrompt:

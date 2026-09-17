@@ -314,3 +314,9 @@ func tail[T any](lines []T, n int) []T {
 	}
 	return lines[len(lines)-n:]
 }
+
+// clipANSI shortens s to at most w columns, keeping the escape sequences it
+// passes and closing with a reset. It is card.ClipANSI under the package's own
+// name, for the same reason width is card.Width: one width table, so a cut
+// lands on the column the layout counted.
+func clipANSI(s string, w int) string { return card.ClipANSI(s, w) }

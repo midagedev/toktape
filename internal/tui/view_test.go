@@ -295,17 +295,23 @@ func TestUnknownsPrintQuestionMark(t *testing.T) {
 // but View must still render a frame if a caller sets the mode early.
 //
 // 2026-09-14: the card mode is a modal over the live screen, not a screen of
-// its own, so the frame keeps the dashboard (the right pane's PLACEMENT title)
-// and carries the run's ID and the project, never the tape's local path. The
-// old assertions (the text card's VERIFIED footer and the path) failed on the
-// new frame first.
+// its own, so the frame keeps the dashboard (a right pane section title) and
+// carries the run's ID and the project, never the tape's local path. The old
+// assertions (the text card's VERIFIED footer and the path) failed on the new
+// frame first.
+//
+// 2026-09-17: the witness moved from PLACEMENT to RESOURCES. The scoreboard
+// took the pane's top rows, so PLACEMENT and SPEED now sit under the modal and
+// RESOURCES is the section that shows beneath it. The contract is unchanged —
+// the dashboard is still there behind the card — only which part of it the
+// modal leaves visible.
 func TestCardModeRenders(t *testing.T) {
 	m := goldenModel(t, doneAt)
 	m.Mode = ModeCard
 	frame := View(m, doneAt, 120, 36)
 	checkFrame(t, frame, 120, 36)
 	plain := card.StripANSI(frame)
-	for _, want := range []string{"PLACEMENT", "toktape · github.com/midagedev/toktape", m.Summary.ID, "tok/s"} {
+	for _, want := range []string{"RESOURCES", "toktape · github.com/midagedev/toktape", m.Summary.ID, "tok/s"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("card mode did not draw %q", want)
 		}

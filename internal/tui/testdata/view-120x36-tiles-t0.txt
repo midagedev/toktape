@@ -1,36 +1,36 @@
 ┌─ toktape · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────┐
-│ stream 1/4   prefill ████████████ 128/512 │ stream 2/4   prefill ████████████ 128/512 │ SPEED ────────────────────── │
-│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ decode               ? tok/s │
-│ ◐ waiting for the first token             │ ◐ waiting for the first token             │ prefill ◐            ? tok/s │
+│ stream 1/4   prefill ████████████ 128/512 │ stream 2/4   prefill ████████████ 128/512 │                        ▀▀▀▀▄ │
+│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │                            █ │
+│ ◐ waiting for the first token             │ ◐ waiting for the first token             │                          ▄▀  │
+│                                           │                                           │                              │
+│                                           │                                           │                          ▀   │
+│                                           │                                           │                        tok/s │
+│                                           │                                           │                              │
+│                                           │                                           │ SPEED ────────────────────── │
+│                                           │                                           │ decode               ? tok/s │
+│                                           │                                           │ prefill ◐            ? tok/s │
 │                                           │                                           │ ttft           ? · 25% cache │
 │                                           │                                           │ 4 streams       ? tok/s each │
 │                                           │                                           │                              │
 │                                           │                                           │ PLACEMENT ────────────────── │
 │                                           │                                           │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.5G │
 │                                           │                                           │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.5G │
-│                                           │                                           │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│                                           │                                           │      ▆ weights  ▆ kv  ▆ buf  │
-│                                           │                                           │                              │
-│                                           │                                           │ MEMORY ───────────────────── │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ stream 3/4   prefill ████████████ 128/512 │ stream 4/4   prefill ████████████ 128/512 │      ▆ weights  ▆ kv  ▆ buf  │
+│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │                              │
+│ ◐ waiting for the first token             │ ◐ waiting for the first token             │ MEMORY ───────────────────── │
 │                                           │                                           │ rss       1.2G file     0.8G │
 │                                           │                                           │ virt     48.0G anon     0.4G │
 │                                           │                                           │ maj/tok                  0.0 │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
-│ stream 3/4   prefill ████████████ 128/512 │ stream 4/4   prefill ████████████ 128/512 │                              │
-│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ RESOURCES ───── contended no │
-│ ◐ waiting for the first token             │ ◐ waiting for the first token             │ CPU     ?  ? cores  load 3.1 │
 │                                           │                                           │                              │
 │                                           │                                           │                              │
+│                                           │                                           │ RESOURCES ───── contended no │
+│                                           │                                           │ CPU     ?  ? cores  load 3.1 │
 │                                           │                                           │                              │
 │                                           │                                           │ GPU0        100%  68°C  340W │
 │                                           │                                           │                            █ │
-│                                           │                                           │                            █ │
-│                                           │                                           │                            █ │
 │                                           │                                           │ GPU1        100%  64°C  310W │
 │                                           │                                           │                            █ │
-│                                           │                                           │                            █ │
-│                                           │                                           │                            █ │
-│                                           │                                           │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency                                                                               p50 ?  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

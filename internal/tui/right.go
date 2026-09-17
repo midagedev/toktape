@@ -39,6 +39,18 @@ func rightPaneLines(m Model, th Theme, t time.Duration, cw, rows int) ([]string,
 	return out, h
 }
 
+// rightPaneFits reports whether the pane's own content still lands inside rows
+// once its graphs have given way as far as they go.
+//
+// The scoreboard above it asks: a headline is worth a resource graph, and it
+// is not worth a section title with nothing under it. On the shortest screen
+// the layout supports the board would cost RESOURCES its rows and leave the
+// heading hanging, so there the board is not drawn at all (view.go).
+func rightPaneFits(m Model, th Theme, t time.Duration, cw, rows int) bool {
+	lines, _ := rightPaneLines(m, th, t, cw, rows)
+	return len(lines) <= rows
+}
+
 // buildRightPane is the pane at resource graph height h, untruncated.
 func buildRightPane(m Model, th Theme, t time.Duration, cw, h int) []string {
 	var out []string
@@ -353,6 +365,57 @@ func majFaultsPerToken(m Model) float64 {
 	return float64(faults) / float64(n)
 }
 
+// decodeRates returns the aggregate decode rate as of clip time t and the
+// per-stream mean under it, eased between token arrivals.
+//
+// The decode rate is a step function of token arrivals, so the tween needs no
+// stored "previous value": the previous figure is the same reduction over one
+// token fewer, and the step time is that token's arrival.
+//
+// Once the run is over the server's own timings are the record and the
+// client-side reduction goes back to being the cross-check (CLAUDE.md). While
+// it is running the live count is all there is — and it must be the same
+// number the stream headers show. Before the second token of any stream there
+// is no count either, and the caller says so rather than reaching for the
+// summary.
+func decodeRates(m Model, t time.Duration) (agg, perStream float64) {
+	prevAgg, curAgg, since := m.decodeRateAt(t)
+	agg = ease(prevAgg, curAgg, since, t)
+	n := len(m.Streams)
+	if n < 1 {
+		n = 1
+	}
+	perStream = agg / float64(n)
+	if m.Done {
+		if r := m.Summary.Aggregate.PerStreamPredictedPerSecond; r > 0 {
+			perStream = r
+		}
+		if r := m.Summary.Aggregate.AggregatePredictedPerSecond; r > 0 {
+			agg = r
+		}
+	}
+	return agg, perStream
+}
+
+// headlineRate is the one figure the run is judged on, and reports whether it
+// has been measured yet.
+//
+// The box's rate, whichever the run is (2026-09-14, user: "개별 tps때문에
+// 병렬세션에서 좀 애매하게 느껴진다"): a one-stream run's rate is that
+// stream's, a run of several leads with the aggregate.
+//
+// SPEED's decode row and the scoreboard above it both read it here rather than
+// each reducing the tape themselves, so the small figure and the large one
+// can never disagree on the same frame (scoreboard.go).
+func headlineRate(m Model, t time.Duration) (float64, bool) {
+	agg, perStream := decodeRates(m, t)
+	rate := perStream
+	if m.Summary.Concurrency > 1 {
+		rate = agg
+	}
+	return rate, rate > 0
+}
+
 // speedRows separates the three speeds that community benchmarks keep mixing:
 // prefill, decode, and time to first token (docs/toktape-spec.ko.md §3 M3).
 func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
@@ -382,33 +445,7 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	// stream's own rate already.
 	many := m.Summary.Concurrency > 1
 
-	// The decode rate is a step function of token arrivals, so the tween needs
-	// no stored "previous value": the previous figure is the same reduction
-	// over one token fewer, and the step time is that token's arrival.
-	//
-	// The row leads the section (2026-09-15): the measured result comes first,
-	// and the prefill that produced it reads under it.
-	prevAgg, curAgg, since := m.decodeRateAt(t)
-	agg := ease(prevAgg, curAgg, since, t)
-	n := len(m.Streams)
-	if n < 1 {
-		n = 1
-	}
-	perStreamRate := agg / float64(n)
-	// Once the run is over the server's own timings are the record and the
-	// client-side reduction goes back to being the cross-check (CLAUDE.md).
-	// While it is running the live count is all there is — and it must be the
-	// same number the stream headers show. Before the second token of any
-	// stream there is no count either, and the row says so rather than
-	// reaching for the summary.
-	if m.Done {
-		if r := m.Summary.Aggregate.PerStreamPredictedPerSecond; r > 0 {
-			perStreamRate = r
-		}
-		if r := m.Summary.Aggregate.AggregatePredictedPerSecond; r > 0 {
-			agg = r
-		}
-	}
+	_, perStreamRate := decodeRates(m, t)
 	// Lesson 2, through the one predicate that owns it (TTP-74, 2026-09-14).
 	// This read Timings.DecodeLabel directly, which is the recorder's stored
 	// verdict; the card asks card.IsSample, which also checks the count. A
@@ -418,10 +455,7 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	if card.IsSample(&m.Summary) {
 		label = "sample"
 	}
-	lead := perStreamRate
-	if many {
-		lead = agg
-	}
+	lead, _ := headlineRate(m, t)
 	out = append(out, kvRow(th, cw, label, fmtRate(lead)+" tok/s", th.accentBold))
 
 	prefill := livePromptRate(m, many)

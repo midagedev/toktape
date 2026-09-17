@@ -167,6 +167,26 @@ func visibleRates(m Model, at time.Duration, w, h int) int {
 // figure and the unit that names it.
 func rateSpans(rows [][]pcell, y int) []span {
 	var out []span
+	// The scoreboard (2026-09-17). The right column's top panel draws the
+	// headline rate in the big face, and it is the same figure the decode row
+	// below it carries — both read headlineRate — so it is one more rate span
+	// rather than a new exception to the accent contract.
+	//
+	// Located structurally, like every other span here: the top bigRows rows
+	// of the right pane, admitted only when the row directly under the face
+	// carries the unit that says what those glyphs are. A face drawn anywhere
+	// else, or one with no unit under it, still fails.
+	//
+	// FAIL-first: with the condition on the unit row inverted, all four
+	// 120-column subtests fail on the board's glyphs.
+	// Row 0 is the frame's top border, so the face is rows 1..bigRows and the
+	// unit is the row after it.
+	if unit := bigRows + 1; y >= 1 && y <= bigRows && len(rows) > unit {
+		at := rightPaneStart(rows, len(rows[y]))
+		if strings.Trim(cellsFrom(rows[unit], at), "│ ") == scoreboardUnit {
+			out = append(out, span{from: at, to: len(rows[y])})
+		}
+	}
 	for _, seg := range segments(rows[y]) {
 		// A tile's stat line: the rate is the first thing inside the tile, and
 		// the row above it is that tile's own header.
@@ -891,4 +911,18 @@ func TestTheWriteHeadCarriesAFill(t *testing.T) {
 	if got, want := styleBG(bodyStyle(th, answer, bandFresh, classPlain)), styleHex(th.darkFill); got != want {
 		t.Errorf("the write head's fill is %s, want the theme's dark fill %s", got, want)
 	}
+}
+
+// cellsFrom is the text of a parsed row from column from to its end, skipping
+// the trailing half of a wide rune. Column indexed rather than byte sliced:
+// the answer pane to the left of the right pane is full of Hangul, where the
+// two do not agree.
+func cellsFrom(row []pcell, from int) string {
+	var b strings.Builder
+	for x := from; x < len(row); x++ {
+		if row[x].r != 0 {
+			b.WriteRune(row[x].r)
+		}
+	}
+	return b.String()
 }
