@@ -4,33 +4,33 @@
 │                                                        │ 자리가 모자란다. 계산은 어렵지 않다. 레이어 수에 키와   │                      ▄▀ ▄▀▀▀▀   █▀▀▀█ │
 │ Nothing in there is clever, and that is exactly the    │ 값 두 벌을 곱하고, 거기에 KV 헤드가 차지하는 채널       │                     █   █       █   █ │
 │ point. A dense seventy billion parameter model at      │ 수와 컨텍스트 토큰 수를 곱한 다음, 원소 하나가 몇       │                     ▀   ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
-│ Q4_K_M is about forty two gigabytes of weights, and    │ 바이트인지를 곱하면 된다. 팔십 레이어짜리 칠십억 단위   │                                 tok/s │
+│ Q4_K_M is about forty two gigabytes of weights, and    │ 바이트인지를 곱하면 된다. 팔십 레이어짜리 칠십억 단위   │                          decode tok/s │
 │ every single one of those bytes is read again for      │ 모델이 만 육천 토큰을 잡으면 반정밀도로는 오            │                                       │
 │ every token you generate. That one sentence explains▍  │ 기가바이트가 넘고,▍                                     │ SPEED ─────────────────────────────── │
-├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ decode                     72.8 tok/s │
-│ stream 3/8                                      answer │ stream 4/8                                       answer │ prefill                    4880 tok/s │
-│ 9.1 tok/s  ██▇▇█▇██▇▇▇██▇▇ ttft 750 ms · 103/320       │ 9.1 tok/s  ██▇▇█▇██▇▇▇██▇▇ ttft 810 ms · 102/320        │ ttft               810 ms · 25% cache │
-│ slots are busy it reads that same set once and         │ position that differs ends the reuse, and everything    │ 8 streams              9.1 tok/s each │
-│ produces eight tokens from it, one for each            │ after it is evaluated again, however small the          │                                       │
-│ sequence, because the matrix multiply is batched       │ difference was. One extra space in your system          │ PLACEMENT ─────────────────────────── │
-│ across them. The expensive part is amortised eight     │ message, a timestamp you helpfully injected, a tool     │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│ ways. What is not amortised is the attention step,     │ list whose order comes out of a map and therefore       │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-│ where every sequence▍                                  │ changes between▍                                        │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤      ▆ weights  ▆ kv  ▆ buf           │
-│ stream 5/8                                      answer │ stream 6/8                                       answer │                                       │
-│ 9.1 tok/s  █▇▇█▇██▇▇▇██▇▇▇ ttft 870 ms · 102/320       │ 9.1 tok/s  █▇▇█▇██▇▇▇██▇▇▇ ttft 930 ms · 101/320        │ MEMORY ────────────────────────────── │
-│ 평균과 다른 연산 프로세스 수를 같이 보라고 하면        │ the feed forward matrices that dominate the file size   │ rss           1.2G file          0.8G │
-│ 되는데, 화면에 이미 둘 다 있으니 어디를 보라고만       │ take the low bit width the name advertises. The         │ virt         48.0G anon          0.4G │
-│ 말하면 된다. 여기까지가                                │ embedding table and the output head are usually kept    │ maj/tok                           0.0 │
-│ ▸ answer                                               │ at a higher width, because an error there lands on      │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ prefill                    4880 tok/s │
+│ stream 3/8                                      answer │ stream 4/8                                       answer │ ttft               810 ms · 25% cache │
+│ 9.1 tok/s  ██▇▇█▇██▇▇▇██▇▇ ttft 750 ms · 103/320       │ 9.1 tok/s  ██▇▇█▇██▇▇▇██▇▇ ttft 810 ms · 102/320        │                                       │
+│ slots are busy it reads that same set once and         │ position that differs ends the reuse, and everything    │ PLACEMENT ─────────────────────────── │
+│ produces eight tokens from it, one for each            │ after it is evaluated again, however small the          │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ sequence, because the matrix multiply is batched       │ difference was. One extra space in your system          │      ▆ weights  ▆ kv  ▆ buf           │
+│ across them. The expensive part is amortised eight     │ message, a timestamp you helpfully injected, a tool     │                                       │
+│ ways. What is not amortised is the attention step,     │ list whose order comes out of a map and therefore       │ MEMORY ────────────────────────────── │
+│ where every sequence▍                                  │ changes between▍                                        │ rss           1.2G file          0.8G │
+├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ virt         48.0G anon          0.4G │
+│ stream 5/8                                      answer │ stream 6/8                                       answer │ maj/tok                           0.0 │
+│ 9.1 tok/s  █▇▇█▇██▇▇▇██▇▇▇ ttft 870 ms · 102/320       │ 9.1 tok/s  █▇▇█▇██▇▇▇██▇▇▇ ttft 930 ms · 101/320        │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ 평균과 다른 연산 프로세스 수를 같이 보라고 하면        │ the feed forward matrices that dominate the file size   │                                       │
+│ 되는데, 화면에 이미 둘 다 있으니 어디를 보라고만       │ take the low bit width the name advertises. The         │ RESOURCES ────────────── contended no │
+│ 말하면 된다. 여기까지가                                │ embedding table and the output head are usually kept    │ CPU           6%  1.9 cores  load 3.1 │
+│ ▸ answer                                               │ at a higher width, because an error there lands on      │                                       │
 │ 숫자를 재기 전에 기계가 조용한지부터 확인하는 습관이   │ every token rather than being averaged away inside a    │                                       │
-│ 결국 시간을 아껴 준다. 다른 프로세스가 같은 카드를▍    │ layer. That is why two files with the same label can▍   │ RESOURCES ────────────── contended no │
-├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ CPU           6%  1.9 cores  load 3.1 │
-│ stream 7/8 · thinking                                  │ stream 8/8                                       answer │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ 9.1 tok/s  ▇▇█▇██▇▇▇██▇▇▇█ ttft 990 ms · 101/320       │ 9.1 tok/s  ▇▇█▇██▇▇▇██▇▇▇█ ttft 1.05 s · 100/320        │ GPU0                  90%  69°C  343W │
-│ weights and a batch of four candidate tokens reads     │ touched, and they can leave again whenever the kernel   │ ▇▇█▇▇▇▇▇█▇▇▇▇▇▇█▇▇▇▇▇█▇▇▇▇▇▇█▇▇▇▇▇█▇▇ │
-│ them once. The draft costs whatever its own forward    │ needs the memory, because a clean file backed page      │ GPU1                  83%  65°C  313W │
-│ passes cost, one per proposed token. So for a draft    │ can be dropped and read back later. So the resident     │ ▆▇▇▇▇▇▆▇▇▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇ │
+│ 결국 시간을 아껴 준다. 다른 프로세스가 같은 카드를▍    │ layer. That is why two files with the same label can▍   │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+├────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆  22.9G  90% 69°C │
+│ stream 7/8 · thinking                                  │ stream 8/8                                       answer │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆  21.9G  83% 65°C │
+│ 9.1 tok/s  ▇▇█▇██▇▇▇██▇▇▇█ ttft 990 ms · 101/320       │ 9.1 tok/s  ▇▇█▇██▇▇▇██▇▇▇█ ttft 1.05 s · 100/320        │ ▄▅▆▅▅▄▄▅▆▅▅▄▄▄▅▆▅▅▄▄▅▆▅▅▄▄▄▅▆▅▅▄▄▅▆▅▅ │
+│ weights and a batch of four candidate tokens reads     │ touched, and they can leave again whenever the kernel   │ █████████████████████████████████████ │
+│ them once. The draft costs whatever its own forward    │ needs the memory, because a clean file backed page      │ █████████████████████████████████████ │
+│ passes cost, one per proposed token. So for a draft    │ can be dropped and read back later. So the resident     │                                       │
 │ that is a tenth the size, proposing four tokens        │ figure tells you what this process has touched          │                                       │
 │ costs about four tenths of a step plus the one step▍   │ recently and what the kernel has chosen to▍             │                                       │
 ├────────────────────────────────────────────────────────┴─────────────────────────────────────────────────────────┴───────────────────────────────────────┤

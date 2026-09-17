@@ -4,36 +4,36 @@
 │ which costs almost nothing because an            │ 나온 숫자로 캐시 크기를 다시 계산해 보라. 화면    │                  ▄▀ ▄▀▀▀▀   ▀▀▀▀█ │
 │ activation is a few kilobytes, and the second    │ 오른쪽의 메모리 칸이 그 계산과 실제 장치          │                 █   █           █ │
 │ card runs the rest while the first waits. Each   │ 사용량을 나란히 보여 주는 이유도 그것이다. 두     │                 ▀   ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
-│ token therefore takes the sum of the two         │ 값이 어긋나면 설정이 생각과 다르게 잡혀 있다는    │                             tok/s │
+│ token therefore takes the sum of the two         │ 값이 어긋나면 설정이 생각과 다르게 잡혀 있다는    │                      decode tok/s │
 │ halves rather than the maximum, which is why     │ 뜻이고, 그때는 속도를 재기 전에 배치부터 고쳐야   │                                   │
 │ adding a card raises the memory you              │ 한다. 실제로 자리가 모자랄 때 손대는              │ SPEED ─────────────────────────── │
-├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤ decode                 72.9 tok/s │
-│ stream 3/8                                  done │ stream 4/8                                   done │ prefill                2927 tok/s │
-│ 9.1 tok/s  ▇▇██▇▇█▇██▇▇ ttft 750 ms · 306/320    │ 9.1 tok/s  █▇██▇▇▇██▇▇▇ ttft 810 ms · 311/320     │ ttft           810 ms · 25% cache │
-│ has its own prompt to chew through before it     │ letting a hash map decide the order for you. If   │ 8 streams          9.1 tok/s each │
-│ can join the decode batch, and while a slot is   │ several agents share a preamble, send them to     │                                   │
-│ doing that it competes with the sessions         │ the same server so they share the slot that       │ PLACEMENT ─────────────────────── │
-│ already generating. That is why time to first    │ holds it. And when you cannot avoid a change,     │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
-│ token spreads out as the slots fill, and why a   │ make it late rather than early, because the       │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
-│ burst of arrivals makes ongoing streams          │ cost is not the size                              │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤      ▆ weights  ▆ kv  ▆ buf       │
-│ stream 5/8                                  done │ stream 6/8                                   done │                                   │
-│ 9.1 tok/s  ███▇▇███▇▇██ ttft 870 ms · 316/320    │ 9.1 tok/s  ██▇▇▇██▇▇█▇█ ttft 930 ms · 300/320     │ MEMORY ────────────────────────── │
-│ 두 배씩 차이 나는 이유가 대부분 여기에 있다.     │ people out. The first is that quantisation does   │ rss         1.2G file        0.8G │
-│ 마지막으로 한 번만 재지 말라. 같은 조건으로 세   │ not change the arithmetic the device does: the    │ virt       48.0G anon        0.4G │
-│ 번 돌려서 가운데 값을 쓰고, 세 값이 서로 많이    │ weights are unpacked on the fly and multiplied    │ maj/tok                       0.0 │
-│ 다르면 그 사실 자체를 기록하라. 흔들리는         │ at a higher precision, so the speed gain comes    │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤ prefill                2927 tok/s │
+│ stream 3/8                                  done │ stream 4/8                                   done │ ttft           810 ms · 25% cache │
+│ 9.1 tok/s  ▇▇██▇▇█▇██▇▇ ttft 750 ms · 306/320    │ 9.1 tok/s  █▇██▇▇▇██▇▇▇ ttft 810 ms · 311/320     │                                   │
+│ has its own prompt to chew through before it     │ letting a hash map decide the order for you. If   │ PLACEMENT ─────────────────────── │
+│ can join the decode batch, and while a slot is   │ several agents share a preamble, send them to     │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ doing that it competes with the sessions         │ the same server so they share the slot that       │      ▆ weights  ▆ kv  ▆ buf       │
+│ already generating. That is why time to first    │ holds it. And when you cannot avoid a change,     │                                   │
+│ token spreads out as the slots fill, and why a   │ make it late rather than early, because the       │ MEMORY ────────────────────────── │
+│ burst of arrivals makes ongoing streams          │ cost is not the size                              │ rss         1.2G file        0.8G │
+├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤ virt       48.0G anon        0.4G │
+│ stream 5/8                                  done │ stream 6/8                                   done │ maj/tok                       0.0 │
+│ 9.1 tok/s  ███▇▇███▇▇██ ttft 870 ms · 316/320    │ 9.1 tok/s  ██▇▇▇██▇▇█▇█ ttft 930 ms · 300/320     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ 두 배씩 차이 나는 이유가 대부분 여기에 있다.     │ people out. The first is that quantisation does   │                                   │
+│ 마지막으로 한 번만 재지 말라. 같은 조건으로 세   │ not change the arithmetic the device does: the    │ RESOURCES ────────── contended no │
+│ 번 돌려서 가운데 값을 쓰고, 세 값이 서로 많이    │ weights are unpacked on the fly and multiplied    │ CPU       0%  0.1 cores  load 3.1 │
+│ 다르면 그 사실 자체를 기록하라. 흔들리는         │ at a higher precision, so the speed gain comes    │                                   │
 │ 측정은 평균을 낼 대상이 아니라 원인을 찾아야     │ from moving fewer bytes rather than from doing    │                                   │
-│ 할 증상이다. 이 도구가 실행마다                  │ cheaper multiplications. The                      │ RESOURCES ────────── contended no │
-├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤ CPU       0%  0.1 cores  load 3.1 │
-│ stream 7/8 · thinking · cut                      │ stream 8/8                                   done │                                   │
-│ 9.1 tok/s  ██▇▇█▇██▇▇▇█ ttft 990 ms · 320/320    │ 9.1 tok/s  █▇▇███▇▇███▇ ttft 1.05 s · 310/320     │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁ │
-│ has already been spent on the other sequences.   │ touch. That is where the never loaded figure on   │ GPU0               3%  71°C  348W │
-│ The technique wants an idle machine with one     │ the card comes from, and it is why the figure     │ ▆▆▆▅▇▇▆▆▆▅▇▇▇▆▆▆▅▇▇▆▅▄▃▄▄▄▂▂▁▁▂   │
-│ stream on it. Their message says agents, which   │ is absent rather than zero when a model is        │ ███████████████████████████████▁▁ │
-│ means concurrency, which means my whole break    │ fully offloaded. The counter that does matter     │ GPU1               3%  67°C  318W │
-│ even calculation is answering                    │ during                                            │ ▅▅▅▆▆▆▅▅▅▆▆▆▅▅▅▅▆▆▆▅▄▃▄▃▃▃▁▁ ▁▁   │
-│                                                                                                      │ ███████████████████████████████▁▁ │
+│ 할 증상이다. 이 도구가 실행마다                  │ cheaper multiplications. The                      │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁ │
+├──────────────────────────────────────────────────┼───────────────────────────────────────────────────┤ GPU0 ▆▆▆▆▆▆▆▆▆▆▆  23.8G   3% 71°C │
+│ stream 7/8 · thinking · cut                      │ stream 8/8                                   done │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆  22.8G   3% 67°C │
+│ 9.1 tok/s  ██▇▇█▇██▇▇▇█ ttft 990 ms · 320/320    │ 9.1 tok/s  █▇▇███▇▇███▇ ttft 1.05 s · 310/320     │ ▄▄▄▅▆▅▅▄▄▅▆▅▅▄▄▄▅▆▅▄▃▁▂▂▁▁        │
+│ has already been spent on the other sequences.   │ touch. That is where the never loaded figure on   │ ██████████████████████████▆▆▄▅▆   │
+│ The technique wants an idle machine with one     │ the card comes from, and it is why the figure     │ ███████████████████████████████▂▂ │
+│ stream on it. Their message says agents, which   │ is absent rather than zero when a model is        │                                   │
+│ means concurrency, which means my whole break    │ fully offloaded. The counter that does matter     │                                   │
+│ even calculation is answering                    │ during                                            │                                   │
+│                                                                                                      │                                   │
 │ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card                   │                                   │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────┴───────────────────────────────────┤
 │ token latency ▏█████▏▏▏▏▏▏▏▏▏▏▏█████▏▏▏▏▏▏▏▏▏▏▏█████▏▏▏▏▏▏▏▏▏▏▏█████▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏██▏▏  p50 116 ms  c card · p prompt · q quit │

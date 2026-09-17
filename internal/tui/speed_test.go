@@ -7,9 +7,15 @@ import (
 )
 
 // speedPane is the SPEED section of a frame, as plain text.
+//
+// Built without the scoreboard (TTP-110, 2026-09-17), which is the shape that
+// still carries the headline row: with the board drawn the figure lives up
+// there and SPEED opens with prefill. The tests below are about what the
+// section prints before it has observed a thing, and that question is the same
+// either way — so they ask the variant that has every row.
 func speedPane(t *testing.T, m Model, at time.Duration) string {
 	t.Helper()
-	return strings.Join(speedRows(m, PlainTheme(), at, rightWidth(120)-2), "\n")
+	return strings.Join(speedRows(m, PlainTheme(), at, rightWidth(120)-2, false), "\n")
 }
 
 // 2026-09-13: fixing the leak below re-baselined six rows of the golden frames
@@ -28,7 +34,9 @@ func TestSpeedPanePrintsNothingItHasNotObserved(t *testing.T) {
 	m := ModelAt(ExampleTape(), 0)
 	pane := speedPane(t, m, 0)
 
-	for _, row := range []string{"prefill", "decode", "ttft", "streams"} {
+	// No "streams" row: the per-stream mean left the pane on 2026-09-17
+	// (TTP-110) because every tile already leads with its own stream's rate.
+	for _, row := range []string{"prefill", "decode", "ttft"} {
 		line := rowStarting(pane, row)
 		if line == "" {
 			t.Fatalf("the pane has no %q row:\n%s", row, pane)
@@ -82,7 +90,9 @@ func TestSpeedPaneFillsInAsFiguresBecomeObservable(t *testing.T) {
 	// summary's.
 	mid := ModelAt(tp, midRun)
 	pane = speedPane(t, mid, midRun)
-	for _, row := range []string{"prefill", "decode", "ttft", "streams"} {
+	// No "streams" row: the per-stream mean left the pane on 2026-09-17
+	// (TTP-110) because every tile already leads with its own stream's rate.
+	for _, row := range []string{"prefill", "decode", "ttft"} {
 		if line := rowStarting(pane, row); strings.Contains(line, unknown) {
 			t.Errorf("at %v the %q row is still %q", midRun, row, unknown)
 		}
@@ -98,10 +108,16 @@ func TestSpeedPaneFillsInAsFiguresBecomeObservable(t *testing.T) {
 	sum := tp.Summary
 	// 2026-09-14: a run of several streams leads with the aggregate prefill
 	// rate, not the per-stream Timings.PromptPerSecond (was 610 here, now
-	// 4880); the per-stream decode mean is the "each" row.
+	// 4880).
+	//
+	// 2026-09-17 (TTP-110): PerStreamPredictedPerSecond is no longer expected
+	// here. It was the "N streams … each" row, and that row is gone — the
+	// tiles carry each stream's own rate, so the pane restated on the right
+	// what the reader can read off the left. The aggregate, the prefill and
+	// the TTFT are unchanged, which is what keeps this from being a loosening:
+	// the figure is not missing, the row that repeated it is.
 	for _, want := range []string{
 		fmtRate(sum.Aggregate.AggregatePromptPerSecond),
-		fmtRate(sum.Aggregate.PerStreamPredictedPerSecond),
 		fmtRate(sum.Aggregate.AggregatePredictedPerSecond),
 		fmtMs(sum.Aggregate.TTFTp50Ms),
 	} {

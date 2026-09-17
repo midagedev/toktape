@@ -4,33 +4,33 @@
 │ exactly the point. A dense seventy        │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │             ▄▀ ▄▀▀▀▀   █▀▀▀█ │
 │ billion parameter model at Q4_K_M is      │ 수를 곱한 다음, 원소 하나가 몇            │            █   █       █   █ │
 │ about forty two gigabytes of weights,     │ 바이트인지를 곱하면 된다. 팔십            │            ▀   ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
-│ and every single one of those bytes is    │ 레이어짜리 칠십억 단위 모델이 만 육천     │                        tok/s │
+│ and every single one of those bytes is    │ 레이어짜리 칠십억 단위 모델이 만 육천     │                 decode tok/s │
 │ read again for every token you            │ 토큰을 잡으면 반정밀도로는 오             │                              │
 │ generate. That one sentence explains▍     │ 기가바이트가 넘고,▍                       │ SPEED ────────────────────── │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ decode            72.8 tok/s │
-│ stream 3/8                         answer │ stream 4/8                         answer │ prefill           4880 tok/s │
-│ 9.1 tok/s  ██▇███▇▇ ttft 750 ms · 103/320 │ 9.1 tok/s  ██▇███▇▇ ttft 810 ms · 102/320 │ ttft      810 ms · 25% cache │
-│ it, one for each sequence, because the    │ difference was. One extra space in your   │ 8 streams     9.1 tok/s each │
-│ matrix multiply is batched across them.   │ system message, a timestamp you           │                              │
-│ The expensive part is amortised eight     │ helpfully injected, a tool list whose     │ PLACEMENT ────────────────── │
-│ ways. What is not amortised is the        │ order comes out of a map and therefore    │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.9G │
-│ attention step, where every sequence▍     │ changes between▍                          │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.9G │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ stream 5/8                         answer │ stream 6/8                         answer │      ▆ weights  ▆ kv  ▆ buf  │
-│ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │                              │
-│ 여기까지가                                │ usually kept at a higher width, because   │ MEMORY ───────────────────── │
-│ ▸ answer                                  │ an error there lands on every token       │ rss       1.2G file     0.8G │
-│ 숫자를 재기 전에 기계가 조용한지부터      │ rather than being averaged away inside    │ virt     48.0G anon     0.4G │
-│ 확인하는 습관이 결국 시간을 아껴 준다.    │ a layer. That is why two files with the   │ maj/tok                  0.0 │
-│ 다른 프로세스가 같은 카드를▍              │ same label can▍                           │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ prefill           4880 tok/s │
+│ stream 3/8                         answer │ stream 4/8                         answer │ ttft      810 ms · 25% cache │
+│ 9.1 tok/s  ██▇███▇▇ ttft 750 ms · 103/320 │ 9.1 tok/s  ██▇███▇▇ ttft 810 ms · 102/320 │                              │
+│ it, one for each sequence, because the    │ difference was. One extra space in your   │ PLACEMENT ────────────────── │
+│ matrix multiply is batched across them.   │ system message, a timestamp you           │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ The expensive part is amortised eight     │ helpfully injected, a tool list whose     │      ▆ weights  ▆ kv  ▆ buf  │
+│ ways. What is not amortised is the        │ order comes out of a map and therefore    │                              │
+│ attention step, where every sequence▍     │ changes between▍                          │ MEMORY ───────────────────── │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ rss       1.2G file     0.8G │
+│ stream 5/8                         answer │ stream 6/8                         answer │ virt     48.0G anon     0.4G │
+│ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │ maj/tok                  0.0 │
+│ 여기까지가                                │ usually kept at a higher width, because   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ ▸ answer                                  │ an error there lands on every token       │                              │
+│ 숫자를 재기 전에 기계가 조용한지부터      │ rather than being averaged away inside    │ RESOURCES ───── contended no │
+│ 확인하는 습관이 결국 시간을 아껴 준다.    │ a layer. That is why two files with the   │ CPU  6%  1.9 cores  load 3.1 │
+│ 다른 프로세스가 같은 카드를▍              │ same label can▍                           │                              │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
-│ stream 7/8 · thinking                     │ stream 8/8                         answer │ RESOURCES ───── contended no │
-│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1.05 s · 100/320 │ CPU  6%  1.9 cores  load 3.1 │
-│ whatever its own forward passes cost,     │ because a clean file backed page can be   │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ one per proposed token. So for a draft    │ dropped and read back later. So the       │ GPU0         90%  69°C  343W │
-│ that is a tenth the size, proposing       │ resident figure tells you what this       │ ▇▇▇▇▇▇█▇▇▇▇▇█▇▇▇▇▇▇█▇▇▇▇▇█▇▇ │
-│ four tokens costs about four tenths of    │ process has touched recently and what     │ GPU1         83%  65°C  313W │
-│ a step plus the one step▍                 │ the kernel has chosen to▍                 │ ▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇ │
+│ stream 7/8 · thinking                     │ stream 8/8                         answer │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│ 9.1 tok/s  ▇███▇▇██ ttft 990 ms · 101/320 │ 9.1 tok/s  ▇███▇▇██ ttft 1.05 s · 100/320 │ GPU0 ▆▆▆▆▆▆  22.9G  90% 69°C │
+│ whatever its own forward passes cost,     │ because a clean file backed page can be   │ GPU1 ▆▆▆▆▆▆  21.9G  83% 65°C │
+│ one per proposed token. So for a draft    │ dropped and read back later. So the       │ ▅▅▄▄▄▅▆▅▅▄▄▅▆▅▅▄▄▄▅▆▅▅▄▄▅▆▅▅ │
+│ that is a tenth the size, proposing       │ resident figure tells you what this       │ ████████████████████████████ │
+│ four tokens costs about four tenths of    │ process has touched recently and what     │ ████████████████████████████ │
+│ a step plus the one step▍                 │ the kernel has chosen to▍                 │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏████▏▏▏▏▏▏▏▏▏▏▏▏███  p50 116 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

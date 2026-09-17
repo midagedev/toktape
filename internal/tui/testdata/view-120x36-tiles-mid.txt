@@ -4,33 +4,33 @@
 │                                           │ 수에 키와 값 두 벌을 곱하고, 거기에 KV    │          ▀▀▀▀▄ █   █   █   █ │
 │ Nothing in there is clever, and that is   │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │              █ █   █   █   █ │
 │ exactly the point. A dense seventy        │ 수를 곱한 다음, 원소 하나가 몇            │          ▀▀▀▀▀ ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
-│ billion parameter model at Q4_K_M is      │ 바이트인지를 곱하면 된다. 팔십            │                        tok/s │
+│ billion parameter model at Q4_K_M is      │ 바이트인지를 곱하면 된다. 팔십            │                 decode tok/s │
 │ about forty two gigabytes of weights,     │ 레이어짜리 칠십억 단위 모델이 만 육천     │                              │
 │ and every single one of those bytes is    │ 토큰을 잡으면 반정밀도로는 오             │ SPEED ────────────────────── │
-│ read again for every token you            │ 기가바이트가 넘고, 캐시 타입을 여덟       │ decode            50.0 tok/s │
-│ generate. That one sentence explains      │ 비트로 내리면 절반을 조금 넘는 수준으로   │ prefill           2440 tok/s │
-│ most of what you are seeing. Decoding     │ 줄어든다. 이 절약분이 그대로 가중치를     │ ttft      690 ms · 25% cache │
-│ is not compute bound on this rig. It is   │ 올릴 공간이 되기 때문에, 카드가 빠듯할    │ 4 streams    12.5 tok/s each │
-│ a memory bandwidth problem wearing a      │ 때 가장 먼저 건드릴 손잡이가 캐시         │                              │
-│ compute costume, and the arithmetic is    │ 타입이다. 품질 이야기가 나오면 대개       │ PLACEMENT ────────────────── │
-│ simple enough to do in your head. Take    │ 과장돼 있다. 키와 값을 여덟 비트로        │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.1G │
-│ the bytes the▍                            │ 저장하는 것은▍                            │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.1G │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ stream 3/4                         answer │ stream 4/4 · thinking                     │      ▆ weights  ▆ kv  ▆ buf  │
-│ 12.5 tok/s ▇▇███▇▇█ ttft 750 ms · 141/320 │ 12.5 tok/s ▇███▇▇██ ttft 810 ms · 141/320 │                              │
-│ total rises. Then the practical half,     │ most common mistake by a wide margin.     │ MEMORY ───────────────────── │
-│ which is that the right number depends    │ Second possibility: the prompt is         │ rss       1.2G file     0.8G │
-│ on whether a person or an agent is        │ stable but the serialisation is not.      │ virt     48.0G anon     0.4G │
-│ waiting. I should also mention the        │ Tool definitions coming out of a hash     │ maj/tok                  0.0 │
-│ prefill interference, because their       │ map land in a different order between     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ read again for every token you            │ 기가바이트가 넘고, 캐시 타입을 여덟       │ prefill           2440 tok/s │
+│ generate. That one sentence explains      │ 비트로 내리면 절반을 조금 넘는 수준으로   │ ttft      690 ms · 25% cache │
+│ most of what you are seeing. Decoding     │ 줄어든다. 이 절약분이 그대로 가중치를     │                              │
+│ is not compute bound on this rig. It is   │ 올릴 공간이 되기 때문에, 카드가 빠듯할    │ PLACEMENT ────────────────── │
+│ a memory bandwidth problem wearing a      │ 때 가장 먼저 건드릴 손잡이가 캐시         │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ compute costume, and the arithmetic is    │ 타입이다. 품질 이야기가 나오면 대개       │      ▆ weights  ▆ kv  ▆ buf  │
+│ simple enough to do in your head. Take    │ 과장돼 있다. 키와 값을 여덟 비트로        │                              │
+│ the bytes the▍                            │ 저장하는 것은▍                            │ MEMORY ───────────────────── │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ rss       1.2G file     0.8G │
+│ stream 3/4                         answer │ stream 4/4 · thinking                     │ virt     48.0G anon     0.4G │
+│ 12.5 tok/s ▇▇███▇▇█ ttft 750 ms · 141/320 │ 12.5 tok/s ▇███▇▇██ ttft 810 ms · 141/320 │ maj/tok                  0.0 │
+│ total rises. Then the practical half,     │ most common mistake by a wide margin.     │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ which is that the right number depends    │ Second possibility: the prompt is         │                              │
+│ on whether a person or an agent is        │ stable but the serialisation is not.      │ RESOURCES ───── contended no │
+│ waiting. I should also mention the        │ Tool definitions coming out of a hash     │ CPU  6%  1.9 cores  load 3.1 │
+│ prefill interference, because their       │ map land in a different order between     │                              │
 │ stutter complaint sounds like arrivals    │ processes, and nothing in their own       │                              │
-│ landing on a busy server rather than a    │ code looks like a change even though      │ RESOURCES ───── contended no │
-│ decoding problem. Keep it short and       │ the bytes differ. Third possibility:      │ CPU  6%  1.9 cores  load 3.1 │
-│ lead with the mechanism. One thing        │ the prompt and the serialisation are      │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ ▸ answer                                  │ both stable but the request went to a     │ GPU0         90%  69°C  344W │
-│ The number that changes when you send     │ different slot, so the cache that holds   │ ▇▇▇▇▇▇█▇▇▇▇▇█▇▇▇▇▇▇█▇▇▇▇▇█▇▇ │
-│ eight requests at once is not the one     │ the prefix belongs to another sequence    │ GPU1         83%  65°C  314W │
-│ most benchmarks print. Each▍              │ and this one starts▍                      │ ▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇▇▇▆▇▇▇▇▇▆▇▇▇▇ │
+│ landing on a busy server rather than a    │ code looks like a change even though      │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│ decoding problem. Keep it short and       │ the bytes differ. Third possibility:      │ GPU0 ▆▆▆▆▆▆  23.1G  90% 69°C │
+│ lead with the mechanism. One thing        │ the prompt and the serialisation are      │ GPU1 ▆▆▆▆▆▆  22.1G  83% 65°C │
+│ ▸ answer                                  │ both stable but the request went to a     │ ▅▅▄▄▄▅▆▅▅▄▄▅▆▅▅▄▄▄▅▆▅▅▄▄▅▆▅▅ │
+│ The number that changes when you send     │ different slot, so the cache that holds   │ ████████████████████████████ │
+│ eight requests at once is not the one     │ the prefix belongs to another sequence    │ ████████████████████████████ │
+│ most benchmarks print. Each▍              │ and this one starts▍                      │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏  p50 81 ms  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

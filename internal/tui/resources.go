@@ -12,9 +12,14 @@ import (
 )
 
 // The RESOURCES section (TTP-39, user 2026-09-13: "cpu(ram) gpu0 gpu1 각 리소스
-// 별로 스파크를 더 이쁘게 … 한 3줄로"): one header and one fixed-ceiling area
-// graph per resource, CPU first and then the GPUs, each under a header that
-// packs its figures on one line.
+// 별로 스파크를 더 이쁘게 … 한 3줄로"): the CPU under a header that packs its
+// figures on one line, then a fixed-ceiling area graph, then the devices.
+//
+// The devices are one table (TTP-110, 2026-09-17): a row each carrying that
+// card's VRAM bar, bytes, utilisation and temperature, over one graph they
+// share. It was a header and a graph per device, which made the section's
+// height a function of the card count — see gpuRow and the comment on the
+// shared graph in resourceRows.
 
 // utilCeiling is what a utilisation graph is scaled against. A per cent is a
 // per cent; the window's own maximum would draw a steady load as mountains.
@@ -371,27 +376,126 @@ func resourceRows(m Model, th Theme, t time.Duration, cw, h int) []string {
 	}))
 	graph(cpu)
 
-	for _, idx := range resourceGPUs(m, t) {
-		util := gpuUtilSeries(m, t, idx)
-		pct, temp, power := unknown, unknown, unknown
-		throttled := false
-		if cur != nil {
-			for _, g := range cur.GPUs {
-				if g.Index != idx {
-					continue
-				}
-				temp, power, throttled = tempStr(g.TempC), powerStr(g.PowerW), g.Throttled
+	idxs := resourceGPUs(m, t)
+	for _, idx := range idxs {
+		out = append(out, gpuRow(m, th, t, cw, idx))
+	}
+	// One graph for every card, not one each (TTP-110, user 2026-09-17:
+	// "gpu정보를 분산시키기 보다 좀더 그루핑 하는게 나을것 같다").
+	//
+	// The table above says what each card is doing now; this says what the box
+	// has been doing over the window, and it is the mean across the cards that
+	// reported a utilisation. A per-card graph each cost the pane two rows per
+	// device and, with the placement bars that also grew per device, was what
+	// pushed the scoreboard off a four-card screen entirely. A card out of step
+	// with the others still shows: the mean sits below the per-cent the table
+	// gives the busy one, and the table is right there.
+	graph(gpuMeanUtilSeries(m, t, idxs))
+	return out
+}
+
+// gpuRow is one card: how full it is, how hard it is working, how hot it got.
+//
+// The three readings live on one line because they are one card's story and a
+// reader compares cards down a column, not across two sections. The bar is the
+// VRAM the device reports in use against its capacity — the figure beside it
+// is exact, and the bar is there to answer "is this one about to run out" at a
+// glance, which is the question a multi-card rig is watched for.
+func gpuRow(m Model, th Theme, t time.Duration, cw, idx int) string {
+	cur, prev := m.sampleAt(t)
+	var total int64
+	for _, g := range m.Summary.Host.GPUs {
+		if g.Index == idx {
+			total = g.VRAMBytes
+		}
+	}
+	var used int64
+	if cur != nil {
+		used = gpuUsed(cur.GPUs, idx)
+	}
+	if used == 0 {
+		for _, g := range m.Summary.GPUsAtEnd {
+			if g.Index == idx {
+				used = g.UsedBytes
 			}
 		}
-		if util != nil {
-			pct = pctStr(lastOf(util))
+	}
+	// The first sample has nothing to ease from: a bar that grew out of zero
+	// would be an animation of a number nobody measured.
+	pu, since := used, time.Duration(0)
+	if prev != nil && cur != nil {
+		pu = gpuUsed(prev.GPUs, idx)
+		since = cur.T
+	}
+	eased := ease(float64(pu), float64(used), since, t)
+	frac := 0.0
+	if total > 0 {
+		frac = eased / float64(total)
+	}
+
+	pct, temp := unknown, unknown
+	throttled := false
+	if cur != nil {
+		for _, g := range cur.GPUs {
+			if g.Index == idx {
+				temp, throttled = tempStr(g.TempC), g.Throttled
+			}
 		}
-		out = append(out, resourceHeader(th, cw, fmt.Sprintf("GPU%d", idx), []headerFig{
-			{segs: []headerSeg{{th.text, pct}}},
-			{segs: []headerSeg{{styleFor(th, throttled), temp}}},
-			{segs: []headerSeg{{th.text, power}}, drop: 1},
-		}))
-		graph(util)
+	}
+	if u := gpuUtilSeries(m, t, idx); u != nil {
+		pct = pctStr(lastOf(u))
+	}
+
+	// 28 columns exactly at the width the clip is recorded in: the label, a
+	// bar, the bytes, then the two right-aligned readings. Narrower panes take
+	// it out of the bar, which is the only part of the row that degrades
+	// rather than disappears.
+	const labelW, bytesW, pctW, tempW = 5, 6, 5, 5
+	barW := max(1, cw-labelW-bytesW-pctW-tempW-1)
+	l := newLine(th, cw)
+	l.add(th.dim, pad(fmt.Sprintf("GPU%d", idx), labelW))
+	filled, empty := barCells(frac, barW)
+	l.add(th.accentMuted, filled)
+	l.add(th.darkFill, empty)
+	l.space(1)
+	l.add(th.text, padLeft(fmtG(int64(eased)), bytesW))
+	l.add(th.text, padLeft(pct, pctW))
+	l.add(styleFor(th, throttled), padLeft(temp, tempW))
+	return l.String()
+}
+
+// gpuMeanUtilSeries is the mean utilisation across the cards that reported one,
+// per sample. A device the tape never measured is left out of the mean rather
+// than counted as idle; nil when no device was measured at all, which is the
+// reading that draws no graph.
+func gpuMeanUtilSeries(m Model, t time.Duration, idxs []int) []float64 {
+	var series [][]float64
+	for _, idx := range idxs {
+		if s := gpuUtilSeries(m, t, idx); s != nil {
+			series = append(series, s)
+		}
+	}
+	if len(series) == 0 {
+		return nil
+	}
+	n := 0
+	for _, s := range series {
+		n = max(n, len(s))
+	}
+	out := make([]float64, n)
+	for i := range out {
+		sum, seen := 0.0, 0
+		for _, s := range series {
+			if i < len(s) && !math.IsNaN(s[i]) {
+				sum += s[i]
+				seen++
+			}
+		}
+		if seen == 0 {
+			out[i] = math.NaN()
+			continue
+		}
+		out[i] = sum / float64(seen)
 	}
 	return out
 }

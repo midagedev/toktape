@@ -300,18 +300,22 @@ func TestUnknownsPrintQuestionMark(t *testing.T) {
 // assertions (the text card's VERIFIED footer and the path) failed on the new
 // frame first.
 //
-// 2026-09-17: the witness moved from PLACEMENT to RESOURCES. The scoreboard
-// took the pane's top rows, so PLACEMENT and SPEED now sit under the modal and
-// RESOURCES is the section that shows beneath it. The contract is unchanged —
-// the dashboard is still there behind the card — only which part of it the
-// modal leaves visible.
+// 2026-09-17: the witness moved from PLACEMENT to RESOURCES, and then from the
+// RESOURCES heading to the device table under it (TTP-110). The scoreboard took
+// the pane's top rows, and regrouping the GPUs into one table shortened the
+// pane again, so what the modal now leaves visible at the foot of the column is
+// the per-device table itself. The contract is unchanged — the dashboard is
+// still there behind the card — only which part of it shows.
+//
+// FAIL-first: this list asked for "RESOURCES" and the new frame does not draw
+// the heading, which is how the move was found.
 func TestCardModeRenders(t *testing.T) {
 	m := goldenModel(t, doneAt)
 	m.Mode = ModeCard
 	frame := View(m, doneAt, 120, 36)
 	checkFrame(t, frame, 120, 36)
 	plain := card.StripANSI(frame)
-	for _, want := range []string{"RESOURCES", "toktape · github.com/midagedev/toktape", m.Summary.ID, "tok/s"} {
+	for _, want := range []string{"GPU0", "toktape · github.com/midagedev/toktape", m.Summary.ID, "tok/s"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("card mode did not draw %q", want)
 		}

@@ -104,6 +104,15 @@ func TestOnlyTheRateIsAccent(t *testing.T) {
 					lit++
 				}
 			}
+			// The headline is drawn in block glyphs when the scoreboard is
+			// up (TTP-110, 2026-09-17), so the loop above cannot see it:
+			// accentRuns keeps figure runes and the board's digits are not
+			// digits. It is still the pane's one lit rate — SPEED's row exists
+			// only when the board does not — and the contract is that the rate
+			// is lit, not which face draws it. So a lit board counts as one.
+			if boardIsLit(rows) {
+				lit++
+			}
 			// The gate has to be able to fail the other way too: a frame with
 			// nothing lit would pass the loop above, and would mean the
 			// hierarchy had been flattened rather than ordered.
@@ -139,10 +148,41 @@ func TestAccentIsReserved(t *testing.T) {
 	}
 }
 
+// boardIsLit reports whether the scoreboard is on this frame and its face
+// wears the accent: the row under the face names the unit, and at least one of
+// the face's rows carries an accent glyph. A board drawn in any other shade,
+// or a "?" board with no glyphs lit, is not counted — which is what makes the
+// t0 frame's expectation of nothing lit still fail if the face is painted.
+func boardIsLit(rows [][]pcell) bool {
+	unit := bigRows + 1
+	if len(rows) <= unit {
+		return false
+	}
+	at := rightPaneStart(rows, len(rows[unit]))
+	switch strings.Trim(cellsFrom(rows[unit], at), "│ ") {
+	case scoreboardUnit("decode"), scoreboardUnit("sample"):
+	default:
+		return false
+	}
+	// Only the right pane's columns: a tile's own lit rate sits on these same
+	// rows, and scanning the whole row would let the board go dark without the
+	// count noticing.
+	shades := accentShades()
+	for y := 1; y <= bigRows; y++ {
+		for _, c := range rows[y][min(at, len(rows[y])):] {
+			if c.r != 0 && c.r != ' ' && shades[c.fg] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // visibleRates is how many accent rate figures a frame must carry: one per
-// visible tile whose rate has been measured, plus the right pane's decode row,
-// plus its aggregate row when the run has more than one stream. A figure that
-// has not been measured prints "?" and carries no digits, so it is not counted.
+// visible tile whose rate has been measured, plus the right pane's headline —
+// the scoreboard when it is drawn and SPEED's decode row when it is not. A
+// figure that has not been measured prints "?" and carries no digits, so it is
+// not counted.
 func visibleRates(m Model, at time.Duration, w, h int) int {
 	g := m.Grid.resolve(w-2-1-rightWidth(w)-2, h-chromeH)
 	n := 0
@@ -155,8 +195,9 @@ func visibleRates(m Model, at time.Duration, w, h int) int {
 		}
 	}
 	// One right-pane figure whatever the stream count (2026-09-14): the
-	// decode row leads with the aggregate and the "N streams … each" row
-	// under it is the per-stream mean, demoted.
+	// headline leads with the aggregate. The per-stream mean that used to sit
+	// under it is gone — every tile carries its own stream's rate already
+	// (TTP-110, 2026-09-17) — so there was never a second figure to count.
 	if _, cur, _ := m.decodeRateAt(at); cur > 0 || m.Done {
 		n++
 	}
@@ -183,7 +224,7 @@ func rateSpans(rows [][]pcell, y int) []span {
 	// unit is the row after it.
 	if unit := bigRows + 1; y >= 1 && y <= bigRows && len(rows) > unit {
 		at := rightPaneStart(rows, len(rows[y]))
-		if strings.Trim(cellsFrom(rows[unit], at), "│ ") == scoreboardUnit {
+		if u := strings.Trim(cellsFrom(rows[unit], at), "│ "); u == scoreboardUnit("decode") || u == scoreboardUnit("sample") {
 			out = append(out, span{from: at, to: len(rows[y])})
 		}
 	}

@@ -41,8 +41,12 @@ func TestScoreboardDrawsTheDecodeFigure(t *testing.T) {
 				t.Errorf("board row %d is %q, want it to end in %q", i, got[i], row)
 			}
 		}
-		if u := strings.TrimSpace(got[bigRows]); u != scoreboardUnit {
-			t.Errorf("the row under the face is %q, want %q", u, scoreboardUnit)
+		// The word under the figure is the one SPEED's row used to carry
+		// (TTP-110, 2026-09-17), so a tape the card calls a sample must say
+		// "sample tok/s" here and nowhere else on the screen.
+		wantUnit := scoreboardUnit(rateLabel(m))
+		if u := strings.TrimSpace(got[bigRows]); u != wantUnit {
+			t.Errorf("the row under the face is %q, want %q", u, wantUnit)
 		}
 	}
 }

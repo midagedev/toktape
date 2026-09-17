@@ -4,33 +4,33 @@
 │ ◐ waiting for the first token             │ ◐ waiting for the first token             │                          ▄▀  │
 │                                           │                                           │                              │
 │                                           │                                           │                          ▀   │
-│                                           │                                           │                        tok/s │
+│                                           │                                           │                 decode tok/s │
 │                                           │                                           │                              │
 │                                           │                                           │ SPEED ────────────────────── │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ decode               ? tok/s │
-│ stream 3/8   prefill ████████████ 128/512 │ stream 4/8   prefill ████████████ 128/512 │ prefill ◐            ? tok/s │
-│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ ttft           ? · 25% cache │
-│ ◐ waiting for the first token             │ ◐ waiting for the first token             │ 8 streams       ? tok/s each │
-│                                           │                                           │                              │
-│                                           │                                           │ PLACEMENT ────────────────── │
-│                                           │                                           │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.5G │
-│                                           │                                           │ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   21.5G │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ stream 5/8   prefill ████████████ 128/512 │ stream 6/8   prefill ████████████ 128/512 │      ▆ weights  ▆ kv  ▆ buf  │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ prefill ◐            ? tok/s │
+│ stream 3/8   prefill ████████████ 128/512 │ stream 4/8   prefill ████████████ 128/512 │ ttft           ? · 25% cache │
 │ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │                              │
-│ ◐ waiting for the first token             │ ◐ waiting for the first token             │ MEMORY ───────────────────── │
-│                                           │                                           │ rss       1.2G file     0.8G │
-│                                           │                                           │ virt     48.0G anon     0.4G │
-│                                           │                                           │ maj/tok                  0.0 │
+│ ◐ waiting for the first token             │ ◐ waiting for the first token             │ PLACEMENT ────────────────── │
+│                                           │                                           │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│                                           │                                           │      ▆ weights  ▆ kv  ▆ buf  │
+│                                           │                                           │                              │
+│                                           │                                           │ MEMORY ───────────────────── │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ rss       1.2G file     0.8G │
+│ stream 5/8   prefill ████████████ 128/512 │ stream 6/8   prefill ████████████ 128/512 │ virt     48.0G anon     0.4G │
+│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ maj/tok                  0.0 │
+│ ◐ waiting for the first token             │ ◐ waiting for the first token             │                              │
+│                                           │                                           │                              │
+│                                           │                                           │ RESOURCES ───── contended no │
+│                                           │                                           │ CPU     ?  ? cores  load 3.1 │
 │                                           │                                           │                              │
 ├───────────────────────────────────────────┼───────────────────────────────────────────┤                              │
-│ stream 7/8   prefill ████████████ 128/512 │ stream 8/8   prefill ████████████ 128/512 │ RESOURCES ───── contended no │
-│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ CPU     ?  ? cores  load 3.1 │
-│ ◐ waiting for the first token             │ ◐ waiting for the first token             │                              │
-│                                           │                                           │ GPU0        100%  68°C  340W │
+│ stream 7/8   prefill ████████████ 128/512 │ stream 8/8   prefill ████████████ 128/512 │                              │
+│ ? tok/s             ttft ? · 0/320        │ ? tok/s             ttft ? · 0/320        │ GPU0 ▆▆▆▆▆▆  22.5G 100% 68°C │
+│ ◐ waiting for the first token             │ ◐ waiting for the first token             │ GPU1 ▆▆▆▆▆▆  21.5G 100% 64°C │
 │                                           │                                           │                            █ │
-│                                           │                                           │ GPU1        100%  64°C  310W │
 │                                           │                                           │                            █ │
+│                                           │                                           │                            █ │
+│                                           │                                           │                              │
 ├───────────────────────────────────────────┴───────────────────────────────────────────┴──────────────────────────────┤
 │ token latency                                                                               p50 ?  q quit · p prompt │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

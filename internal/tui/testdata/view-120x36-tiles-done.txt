@@ -4,33 +4,33 @@
 │ half of the network and the second        │ 여덟 몫으로 나뉘거나, 설정에 따라서는     │          ▀▀▀▀▄ █   █      █  │
 │ holds the upper half, so the two          │ 슬롯마다 전체 컨텍스트를 따로 잡는다.     │              █ █   █      █  │
 │ devices do not work at the same time.     │ 어느 쪽인지 모르면 메모리 계산이 여덟     │          ▀▀▀▀▀ ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
-│ The first one runs its layers while the   │ 배 틀린다. 실행 로그에 슬롯 하나가 몇     │                        tok/s │
+│ The first one runs its layers while the   │ 배 틀린다. 실행 로그에 슬롯 하나가 몇     │                 decode tok/s │
 │ second waits, then the activations        │ 토큰을 갖는지가 찍히니 그 줄을 먼저       │                              │
 │ cross the bus, which costs almost         │ 확인하고, 거기서 나온 숫자로 캐시         │ SPEED ────────────────────── │
-│ nothing because an activation is a few    │ 크기를 다시 계산해 보라. 화면 오른쪽의    │ decode            50.1 tok/s │
-│ kilobytes, and the second card runs the   │ 메모리 칸이 그 계산과 실제 장치           │ prefill           1897 tok/s │
-│ rest while the first waits. Each token    │ 사용량을 나란히 보여 주는 이유도          │ ttft      690 ms · 25% cache │
-│ therefore takes the sum of the two        │ 그것이다. 두 값이 어긋나면 설정이         │ 4 streams    12.5 tok/s each │
-│ halves rather than the maximum, which     │ 생각과 다르게 잡혀 있다는 뜻이고,         │                              │
-│ is why adding a card raises the memory    │ 그때는 속도를 재기 전에 배치부터 고쳐야   │ PLACEMENT ────────────────── │
-│ you                                       │ 한다. 실제로 자리가 모자랄 때 손대는      │ GPU0 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   23.8G │
-├───────────────────────────────────────────┼───────────────────────────────────────────┤ GPU1 ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   22.8G │
-│ stream 3/4                           done │ stream 4/4 · thinking · cut               │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
-│ 12.5 tok/s ▇▇█▇██▇▇ ttft 750 ms · 306/320 │ 12.5 tok/s █▇▇█▇██▇ ttft 810 ms · 320/320 │      ▆ weights  ▆ kv  ▆ buf  │
-│ demands. So the aggregate climbs          │ first two cases and mitigates the         │                              │
-│ steeply at first and then flattens,       │ third. I should be careful not to         │ MEMORY ───────────────────── │
-│ while each individual session decays      │ promise that reuse survives everything.   │ rss       1.2G file     0.8G │
-│ gently. Around eight concurrent streams   │ There are builds where a change to the    │ virt     48.0G anon     0.4G │
-│ a seventy billion parameter model on      │ sampling parameters does not invalidate   │ maj/tok                  0.0 │
-│ two consumer cards typically gives you    │ anything and builds where slot            │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ nothing because an activation is a few    │ 크기를 다시 계산해 보라. 화면 오른쪽의    │ prefill           1897 tok/s │
+│ kilobytes, and the second card runs the   │ 메모리 칸이 그 계산과 실제 장치           │ ttft      690 ms · 25% cache │
+│ rest while the first waits. Each token    │ 사용량을 나란히 보여 주는 이유도          │                              │
+│ therefore takes the sum of the two        │ 그것이다. 두 값이 어긋나면 설정이         │ PLACEMENT ────────────────── │
+│ halves rather than the maximum, which     │ 생각과 다르게 잡혀 있다는 뜻이고,         │ vram ▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆   46.6G │
+│ is why adding a card raises the memory    │ 그때는 속도를 재기 전에 배치부터 고쳐야   │      ▆ weights  ▆ kv  ▆ buf  │
+│ you                                       │ 한다. 실제로 자리가 모자랄 때 손대는      │                              │
+├───────────────────────────────────────────┼───────────────────────────────────────────┤ MEMORY ───────────────────── │
+│ stream 3/4                           done │ stream 4/4 · thinking · cut               │ rss       1.2G file     0.8G │
+│ 12.5 tok/s ▇▇█▇██▇▇ ttft 750 ms · 306/320 │ 12.5 tok/s █▇▇█▇██▇ ttft 810 ms · 320/320 │ virt     48.0G anon     0.4G │
+│ demands. So the aggregate climbs          │ first two cases and mitigates the         │ maj/tok                  0.0 │
+│ steeply at first and then flattens,       │ third. I should be careful not to         │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│ while each individual session decays      │ promise that reuse survives everything.   │                              │
+│ gently. Around eight concurrent streams   │ There are builds where a change to the    │ RESOURCES ───── contended no │
+│ a seventy billion parameter model on      │ sampling parameters does not invalidate   │ CPU  0%  0.1 cores  load 3.1 │
+│ two consumer cards typically gives you    │ anything and builds where slot            │                              │
 │ roughly half the single session speed     │ management differs, and quoting a rule    │                              │
-│ per session and about four times the      │ that does not hold on their version       │ RESOURCES ───── contended no │
-│ total throughput. Which of those two      │ would be worse than saying nothing.       │ CPU  0%  0.1 cores  load 3.1 │
-│ numbers matters depends entirely on       │ Better to describe what is certainly      │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
-│ what you are building. A person waiting   │ true everywhere: matching happens from    │ GPU0          3%  71°C  348W │
-│ for a reply                               │ the beginning,                            │ ▇▇▇▇▇█▇▇▇▇▇▇█▇▇▇▇▆▇▆▆▅▅▅▅▆▁▁ │
-│                                                                                       │ GPU1          3%  67°C  318W │
-│ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card    │ ▇▇▇▆▇▇▇▇▇▇▆▇▇▇▇▇▆▇▆▆▆▅▅▅▅▅▁▁ │
+│ per session and about four times the      │ that does not hold on their version       │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁ │
+│ total throughput. Which of those two      │ would be worse than saying nothing.       │ GPU0 ▆▆▆▆▆▆  23.8G   3% 71°C │
+│ numbers matters depends entirely on       │ Better to describe what is certainly      │ GPU1 ▆▆▆▆▆▆  22.8G   3% 67°C │
+│ what you are building. A person waiting   │ true everywhere: matching happens from    │ ▅▅▄▄▅▆▅▅▄▄▄▅▆▅▅▄▄▃▄▁▁        │
+│ for a reply                               │ the beginning,                            │ █████████████████████▆▆▅▆▇   │
+│                                                                                       │ ██████████████████████████▂▂ │
+│ ✓ tape saved ~/.toktape/runs/20260913-150210-qwen3.5-35b-a3b.tape — c for the card    │                              │
 ├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
 │ token latency ▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▏▋▋▏▏▏▏▊▊▏▏▍██▏▏▋▋▏▊▊█▋▏  p50 82 ms  c card · p prompt · q quit │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

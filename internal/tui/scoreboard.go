@@ -13,8 +13,11 @@ import (
 // thing on the screen. A clip posted to Twitter plays a few hundred pixels
 // wide, where a 13-px "148.7 tok/s" is a smudge and the reader has nothing to
 // take away (user, 2026-09-17: "실시간tps가 너무 작아서 읽히지 않거든"). The
-// number is the same one SPEED's decode row carries — headlineRate owns it, so
-// the two can never disagree — drawn five rows tall.
+// number comes from headlineRate, drawn five rows tall.
+//
+// It is the only place that figure appears while the board is up (TTP-110):
+// SPEED's decode row draws it when the screen is too short for the board, and
+// not otherwise.
 //
 // Five rows and not three, in the face the result modal already uses
 // (bigfigure.go). That file records the measurement: at three rows the modal's
@@ -23,8 +26,17 @@ import (
 // defect a second time. The face is shared rather than copied for the usual
 // reason — two faces are two things to keep in agreement.
 
-// scoreboardUnit is the label under the figure.
-const scoreboardUnit = "tok/s"
+// scoreboardUnit is the label under the figure: the unit, and the word that
+// says which of the three speeds this is.
+//
+// The word moved here from SPEED's first row (TTP-110, user 2026-09-17: "tps가
+// 두군디 같은 숫자가 보이는거"). The board and that row carried the same figure
+// from headlineRate five rows apart, which is not a disagreement — it is the
+// same sentence printed twice in two sizes, and the second one cost a row the
+// pane could not spare (see buildRightPane). What the row had and the board did
+// not was the word: whether the figure is a decode rate or a sample, which
+// card.IsSample decides. So the word comes up here and the row goes.
+func scoreboardUnit(label string) string { return label + " tok/s" }
 
 // scoreboardRows is the board's height: the face, and the unit under it.
 //
@@ -133,9 +145,10 @@ func scoreboardRows(m Model, th Theme, t time.Duration, cw int) ([]string, int) 
 		l.add(th.accentBold, row)
 		out = append(out, l.String())
 	}
+	unit := scoreboardUnit(rateLabel(m))
 	l := newLine(th, boardW)
-	l.space(boardW - width(scoreboardUnit))
-	l.add(th.dim, scoreboardUnit)
+	l.space(boardW - width(unit))
+	l.add(th.dim, unit)
 	return append(out, l.String()), boardW
 }
 

@@ -66,11 +66,12 @@ func View(m Model, t time.Duration, w, h int) string {
 		board, boardW := scoreboardRows(m, th, t, paneW-2)
 		boardH := len(board) + 1 // the blank row that parts the two panels
 		board = append(board, blankRow(boardW))
-		if !rightPaneFits(m, th, t, paneW-2, bodyH-boardH) {
+		boardDrawn := true
+		if !rightPaneFits(m, th, t, paneW-2, bodyH-boardH, true) {
 			// Not enough screen for both. The machine panel is the one that
 			// loses a whole section when it is squeezed, so the headline is
 			// the one that gives way (right.go).
-			board, boardW, boardH = nil, 0, 0
+			board, boardW, boardH, boardDrawn = nil, 0, 0, false
 		}
 		// Columns the board reaches past the pane divider into the answer
 		// pane. Zero at the width the default canvas was sized for; positive
@@ -83,7 +84,7 @@ func View(m Model, t time.Duration, w, h int) string {
 		}
 
 		pane = leftPane(m, th, t, leftW-2, bodyH)
-		right := rightPane(m, th, t, paneW-2, bodyH-boardH)
+		right := rightPane(m, th, t, paneW-2, bodyH-boardH, boardDrawn)
 		bar := th.paint(th.dim, "│")
 		for i := 0; i < bodyH; i++ {
 			row := pane.rows[i]

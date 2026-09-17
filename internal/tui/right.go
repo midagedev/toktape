@@ -17,8 +17,8 @@ import (
 // It always returns exactly rows lines of exactly cw columns. Sections are
 // ordered so the measured result leads (user, 2026-09-15): speed first, then
 // the machine that produced it — placement, memory, resources.
-func rightPane(m Model, th Theme, t time.Duration, cw, rows int) []string {
-	lines, _ := rightPaneLines(m, th, t, cw, rows)
+func rightPane(m Model, th Theme, t time.Duration, cw, rows int, boardDrawn bool) []string {
+	lines, _ := rightPaneLines(m, th, t, cw, rows, boardDrawn)
 	return fitRows(lines, strings.Repeat(" ", cw), rows)
 }
 
@@ -27,11 +27,11 @@ func rightPane(m Model, th Theme, t time.Duration, cw, rows int) []string {
 // its lines at every height; only the graphs give way, all resources alike,
 // from three rows down to none. The pane is built and measured rather than
 // sized from a table, so a section that grows a row moves the choice with it.
-func rightPaneLines(m Model, th Theme, t time.Duration, cw, rows int) ([]string, int) {
+func rightPaneLines(m Model, th Theme, t time.Duration, cw, rows int, boardDrawn bool) ([]string, int) {
 	var out []string
 	h := 0
 	for _, h = range resourceHeights {
-		out = buildRightPane(m, th, t, cw, h)
+		out = buildRightPane(m, th, t, cw, h, boardDrawn)
 		if len(out) <= rows {
 			break
 		}
@@ -46,13 +46,13 @@ func rightPaneLines(m Model, th Theme, t time.Duration, cw, rows int) ([]string,
 // is not worth a section title with nothing under it. On the shortest screen
 // the layout supports the board would cost RESOURCES its rows and leave the
 // heading hanging, so there the board is not drawn at all (view.go).
-func rightPaneFits(m Model, th Theme, t time.Duration, cw, rows int) bool {
-	lines, _ := rightPaneLines(m, th, t, cw, rows)
+func rightPaneFits(m Model, th Theme, t time.Duration, cw, rows int, boardDrawn bool) bool {
+	lines, _ := rightPaneLines(m, th, t, cw, rows, boardDrawn)
 	return len(lines) <= rows
 }
 
 // buildRightPane is the pane at resource graph height h, untruncated.
-func buildRightPane(m Model, th Theme, t time.Duration, cw, h int) []string {
+func buildRightPane(m Model, th Theme, t time.Duration, cw, h int, boardDrawn bool) []string {
 	var out []string
 	blank := strings.Repeat(" ", cw)
 	// A section title is dim small caps carrying a dim rule out to the panel
@@ -84,7 +84,7 @@ func buildRightPane(m Model, th Theme, t time.Duration, cw, h int) []string {
 	}
 
 	section("SPEED", "", th.dim)
-	out = append(out, speedRows(m, th, t, cw)...)
+	out = append(out, speedRows(m, th, t, cw, boardDrawn)...)
 	section("PLACEMENT", "", th.dim)
 	out = append(out, placementRows(m, th, t, cw)...)
 	section("MEMORY", "", th.dim)
@@ -123,30 +123,15 @@ func placementRows(m Model, th Theme, t time.Duration, cw int) []string {
 	var out []string
 	cur, prev := m.sampleAt(t)
 
-	gpus := m.Summary.Host.GPUs
-	for i, g := range gpus {
-		used, total := int64(0), g.VRAMBytes
-		if cur != nil {
-			used = gpuUsed(cur.GPUs, g.Index)
-		}
-		if used == 0 && len(m.Summary.GPUsAtEnd) > i {
-			used = m.Summary.GPUsAtEnd[i].UsedBytes
-		}
-		// The first sample has nothing to ease from: a bar that grew out of
-		// zero would be an animation of a number nobody measured.
-		pu, since := used, time.Duration(0)
-		if prev != nil {
-			pu = gpuUsed(prev.GPUs, g.Index)
-			since = cur.T
-		}
-		eased := ease(float64(pu), float64(used), since, t)
-		frac := 0.0
-		if total > 0 {
-			frac = eased / float64(total)
-		}
-		out = append(out, barRow(th, cw, fmt.Sprintf("GPU%d", g.Index), frac, fmtG(int64(eased)), th.accentMuted))
-	}
-
+	// The per-device bars are not here any more (TTP-110, user 2026-09-17:
+	// "gpu정보를 분산시키기 보다 좀더 그루핑 하는게 나을것 같다"). Four cards
+	// used to be listed twice on one screen — a VRAM bar each in this section
+	// and a utilisation block each in RESOURCES — so the reader assembled one
+	// card's picture from two places and the pane grew two rows per device.
+	// They are one table in RESOURCES now, and what is left here is what the
+	// word means: where the model itself sits. A card's used VRAM was never a
+	// placement anyway; it is a live nvidia-smi reading, which is the other
+	// section's subject.
 	out = append(out, hostRows(m, th, t, cw, cur, prev)...)
 
 	p := m.Summary.Placement
@@ -159,8 +144,8 @@ func placementRows(m Model, th Theme, t time.Duration, cw int) []string {
 		l := newLine(th, cw)
 		l.add(th.dim, pad("vram", labelW))
 		// Three shades descending, none of them the accent itself: the bar
-		// is a proportion, and the pane's lit figure is the decode row that
-		// leads the SPEED section above it (TTP-28). Weights is the largest
+		// is a proportion, and the pane's lit figure is the headline the
+		// scoreboard draws above it (TTP-28). Weights is the largest
 		// share and the lightest shade, so the bar reads in the same order as
 		// the legend under it.
 		l.add(th.accentMuted, segs[0])
@@ -416,9 +401,25 @@ func headlineRate(m Model, t time.Duration) (float64, bool) {
 	return rate, rate > 0
 }
 
+// rateLabel is the word for the headline figure: "decode", or "sample" when
+// the run generated too few tokens for the rate to be one.
+//
+// Lesson 2, through the one predicate that owns it (TTP-74, 2026-09-14). This
+// read Timings.DecodeLabel directly, which is the recorder's stored verdict;
+// the card asks card.IsSample, which also checks the count. A tape where the
+// two disagree would have been labelled "decode" here and "Sample" on the card
+// it is rendered into. The scoreboard and SPEED's fallback row both ask here,
+// so the word cannot differ between the two places it can appear.
+func rateLabel(m Model) string {
+	if card.IsSample(&m.Summary) {
+		return "sample"
+	}
+	return "decode"
+}
+
 // speedRows separates the three speeds that community benchmarks keep mixing:
 // prefill, decode, and time to first token (docs/toktape-spec.ko.md §3 M3).
-func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
+func speedRows(m Model, th Theme, t time.Duration, cw int, boardDrawn bool) []string {
 	var out []string
 
 	// Every figure in this pane is a client-side measurement while the run is
@@ -439,24 +440,24 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	// The box's rate, whichever the run is (2026-09-14, user: "개별 tps때문에
 	// 병렬세션에서 좀 애매하게 느껴진다"). A one-stream run's rate is that
 	// stream's; a run of several streams leads with the aggregate on both the
-	// prefill and the decode row, so the two rows are the same kind of figure
-	// (the confusion M3 exists to end, docs/toktape-spec.ko.md §3), and the
-	// per-stream mean is the "each" row under them. The tiles carry every
-	// stream's own rate already.
+	// prefill row and the headline, so the two are the same kind of figure
+	// (the confusion M3 exists to end, docs/toktape-spec.ko.md §3). The
+	// per-stream mean had a row of its own under them until 2026-09-17; the
+	// tiles carry every stream's own rate already, so it said nothing new.
 	many := m.Summary.Concurrency > 1
 
-	_, perStreamRate := decodeRates(m, t)
-	// Lesson 2, through the one predicate that owns it (TTP-74, 2026-09-14).
-	// This read Timings.DecodeLabel directly, which is the recorder's stored
-	// verdict; the card asks card.IsSample, which also checks the count. A
-	// tape where the two disagree would have been labelled "decode" here and
-	// "Sample" on the card it is rendered into.
-	label := "decode"
-	if card.IsSample(&m.Summary) {
-		label = "sample"
+	// The headline row, and only when the board above the pane is not drawn.
+	//
+	// The board carries this exact figure — headlineRate owns it, which is why
+	// the two could never disagree — and since TTP-110 it carries the word too
+	// (scoreboard.go). Printing it here as well put the same number on the
+	// screen twice, five rows apart, in two sizes (user, 2026-09-17: "tps가
+	// 두군디 같은 숫자가 보이는거"). On a screen too short for the board the row
+	// is the only place the figure appears, so it comes back.
+	if !boardDrawn {
+		lead, _ := headlineRate(m, t)
+		out = append(out, kvRow(th, cw, rateLabel(m), fmtRate(lead)+" tok/s", th.accentBold))
 	}
-	lead, _ := headlineRate(m, t)
-	out = append(out, kvRow(th, cw, label, fmtRate(lead)+" tok/s", th.accentBold))
 
 	prefill := livePromptRate(m, many)
 	if m.Done {
@@ -508,17 +509,15 @@ func speedRows(m Model, th Theme, t time.Duration, cw int) []string {
 	l.add(cacheSt, cacheTxt)
 	out = append(out, l.String())
 
-	if c := m.Summary.Concurrency; c > 1 {
-		// The per-stream mean, dim: the headline above it is the aggregate,
-		// and this row says what each stream saw of it.
-		l = newLine(th, cw)
-		l.add(th.dim, fmt.Sprintf("%d streams", c))
-		num, unit := fmtRate(perStreamRate), " tok/s each"
-		l.gapTo(width(num) + width(unit))
-		l.add(th.text, num)
-		l.add(th.dim, unit)
-		out = append(out, l.String())
-	}
+	// The per-stream mean used to have a row here, under the aggregate. It is
+	// gone (TTP-110, user 2026-09-17: "스트림별 tps는 각 창에 나오니 여기에는
+	// 통합 tps만 표시하고"): every tile in the answer pane already leads with
+	// its own stream's rate, so the row restated on the right what the reader
+	// can read off the left, and the mean of figures that are on screen
+	// individually is the least of them.
+	//
+	// The aggregate stays the headline whichever run it is — that is what
+	// headlineRate decides — so nothing about a one-stream run changed.
 
 	// The draft line (TTP-30, 2026-09-13): the pooled acceptance rate of the
 	// streams that have finished. Only the server's final timings object

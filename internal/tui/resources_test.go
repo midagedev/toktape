@@ -11,16 +11,27 @@ import (
 )
 
 // TestResourceGraphHeight pins the height the pane chooses at the sizes the
-// layout is designed around (TTP-39): three rows at the clip's 120x36 with
-// four and with eight streams, and whatever fits below that. It also pins the
-// rule behind the choice — the pane at that height is never cut by fitRows —
-// and that one row taller would have been.
+// layout is designed around (TTP-39): the tallest graph the layout offers,
+// everywhere, with the two-GPU example. It also pins the rule behind the
+// choice — the pane at that height is never cut by fitRows — and that one row
+// taller would have been, on any size that still has to choose.
+//
+// 2026-09-17 (TTP-110): the smallest supported screen, 100x30, moved from 1 to
+// 3. Three rows came back to it in one round — SPEED dropped the headline the
+// scoreboard already carries and the per-stream mean the tiles already carry,
+// and the two GPUs stopped being listed once in PLACEMENT and again here. The
+// expectation is re-derived, not loosened: every case wants the maximum the
+// layout offers, which is the strongest reading this test can pin, and the
+// subtest below still fails if a taller one would have fitted.
+//
+// FAIL-first: on the unedited source 100x30-n4 produced 1, and this table
+// reported "graph height 1, want 3".
 func TestResourceGraphHeight(t *testing.T) {
 	for _, c := range []struct {
 		w, h, n int
 		want    int
 	}{
-		{100, 30, 4, 1},
+		{100, 30, 4, 3},
 		{120, 36, 4, 3},
 		{120, 36, 8, 3},
 		{140, 40, 4, 3},
@@ -31,7 +42,7 @@ func TestResourceGraphHeight(t *testing.T) {
 			m := ModelAt(ExampleTapeN(c.n), midRun)
 			rows := c.h - chromeH
 			cw := rightWidth(c.w) - 2
-			lines, got := rightPaneLines(m, PlainTheme(), midRun, cw, rows)
+			lines, got := rightPaneLines(m, PlainTheme(), midRun, cw, rows, true)
 			if got != c.want {
 				t.Errorf("graph height %d, want %d", got, c.want)
 			}
@@ -39,7 +50,7 @@ func TestResourceGraphHeight(t *testing.T) {
 				t.Errorf("the pane is %d lines at height %d and has %d rows; fitRows would cut it", len(lines), got, rows)
 			}
 			if got < resourceHeights[0] {
-				if taller := buildRightPane(m, PlainTheme(), midRun, cw, got+1); len(taller) <= rows {
+				if taller := buildRightPane(m, PlainTheme(), midRun, cw, got+1, true); len(taller) <= rows {
 					t.Errorf("height %d fits in %d rows (%d lines) and was not chosen", got+1, rows, len(taller))
 				}
 			}
@@ -51,7 +62,7 @@ func TestResourceGraphHeight(t *testing.T) {
 // every line under it.
 func resourceBlock(t *testing.T, m Model, at time.Duration, h int) []string {
 	t.Helper()
-	lines := buildRightPane(m, PlainTheme(), at, rightWidth(120)-2, h)
+	lines := buildRightPane(m, PlainTheme(), at, rightWidth(120)-2, h, true)
 	for i, l := range lines {
 		if strings.HasPrefix(l, "RESOURCES") {
 			return lines[i:]
@@ -64,36 +75,53 @@ func resourceBlock(t *testing.T, m Model, at time.Duration, h int) []string {
 func TestResourceSection(t *testing.T) {
 	m := ModelAt(ExampleTapeN(4), midRun)
 	block := resourceBlock(t, m, midRun, 3)
-	// Title, then CPU, GPU0 and GPU1 each with a header and three graph rows.
-	if len(block) != 1+3*(1+3) {
-		t.Fatalf("RESOURCES is %d lines, want 13:\n%s", len(block), strings.Join(block, "\n"))
+	// Title, the CPU header and its three graph rows, one row per GPU, and the
+	// three rows of the graph the GPUs share (TTP-110, 2026-09-17). It was
+	// title plus a header and three graph rows for each of CPU, GPU0 and GPU1.
+	//
+	// FAIL-first: on the unedited source the section was 13 lines and this
+	// count reported it as such.
+	const gpus = 2
+	if want := 1 + (1 + 3) + gpus + 3; len(block) != want {
+		t.Fatalf("RESOURCES is %d lines, want %d:\n%s", len(block), want, strings.Join(block, "\n"))
 	}
 	if !strings.HasSuffix(block[0], " contended no") {
 		t.Errorf("the contended tag is not on the title line: %q", block[0])
 	}
-	for i, label := range []string{"CPU", "GPU0", "GPU1"} {
-		header := block[1+i*4]
-		if !strings.HasPrefix(header, label+" ") {
-			t.Errorf("resource %d header is %q, want it to start with %s", i, header, label)
-		}
-		if strings.Contains(header, "?") {
-			t.Errorf("%s: the example measures everything, and the header prints a ?: %q", label, header)
-		}
-		// Every graph row of a decoding GPU is lit at the bottom: a filled area,
-		// not scattered dots.
-		bottom := block[1+i*4+3]
-		if strings.TrimSpace(bottom) == "" {
-			t.Errorf("%s: the bottom graph row is empty at mid-run", label)
-		}
-	}
 	if !strings.Contains(block[1], "load 3.1") || !strings.Contains(block[1], " cores") {
 		t.Errorf("the CPU header lost the load average or the cores: %q", block[1])
 	}
+	if strings.TrimSpace(block[4]) == "" {
+		t.Error("the bottom row of the CPU graph is empty at mid-run")
+	}
+
+	// One row per card, and everything about that card on it: how full it is,
+	// how hard it is working, how hot it got. The example measures all three,
+	// so a "?" anywhere in the table is a reading that went missing.
+	for i, label := range []string{"GPU0", "GPU1"} {
+		row := block[5+i]
+		if !strings.HasPrefix(row, label+" ") {
+			t.Errorf("device row %d is %q, want it to start with %s", i, row, label)
+		}
+		if strings.Contains(row, "?") {
+			t.Errorf("%s: the example measures everything, and its row prints a ?: %q", label, row)
+		}
+		if !strings.Contains(row, "G") || !strings.Contains(row, "%") || !strings.Contains(row, "°C") {
+			t.Errorf("%s: the row lost one of its three readings: %q", label, row)
+		}
+	}
+
+	// The graph the cards share is lit at the bottom: a filled area, not
+	// scattered dots.
+	if bottom := block[len(block)-1]; strings.TrimSpace(bottom) == "" {
+		t.Error("the bottom row of the shared GPU graph is empty at mid-run")
+	}
 }
 
-// TestResourceNotObserved: a device whose utilisation was never read draws a
-// blank graph and prints ?, as does a CPU whose counter or thread count is
-// missing. Once a device has been seen, its zeros are measurements.
+// TestResourceNotObserved: a device whose utilisation was never read prints ?
+// in its row, as does a CPU whose counter or thread count is missing, and a
+// series nobody measured draws a blank graph. Once a device has been seen, its
+// zeros are measurements.
 func TestResourceNotObserved(t *testing.T) {
 	tp := ExampleTapeN(4)
 	for i := range tp.Samples {
@@ -106,16 +134,37 @@ func TestResourceNotObserved(t *testing.T) {
 	}
 	m := ModelAt(tp, midRun)
 	block := resourceBlock(t, m, midRun, 3)
-	cpu, gpu1 := block[1], block[9]
+	cpu, gpu1 := block[1], block[6]
 	if !strings.Contains(cpu, "CPU") || !strings.Contains(cpu, "?") {
 		t.Errorf("CPU without a counter: %q, want ? figures", cpu)
 	}
 	if !strings.HasPrefix(gpu1, "GPU1") || !strings.Contains(gpu1, "?") {
 		t.Errorf("GPU1 without utilisation: %q, want a ? percentage", gpu1)
 	}
-	for _, g := range append(block[2:5], block[10:13]...) {
+	for _, g := range block[2:5] {
 		if strings.TrimSpace(g) != "" {
 			t.Errorf("an unobserved series drew %q, want a blank row", g)
+		}
+	}
+	// GPU0 was still read, so the graph the cards share is the mean over the
+	// cards that reported one and is drawn (TTP-110, 2026-09-17). A card left
+	// out of that mean is not the same as a card counted as idle: counting
+	// GPU1's silence as 0 would halve the line.
+	if strings.TrimSpace(block[len(block)-1]) == "" {
+		t.Error("GPU0 was measured and the shared graph is blank")
+	}
+
+	// Nobody read any device: now there is no mean to draw.
+	tp = ExampleTapeN(4)
+	for i := range tp.Samples {
+		for j := range tp.Samples[i].GPUs {
+			tp.Samples[i].GPUs[j].UtilPct = 0
+		}
+	}
+	block = resourceBlock(t, ModelAt(tp, midRun), midRun, 3)
+	for _, g := range block[len(block)-3:] {
+		if strings.TrimSpace(g) != "" {
+			t.Errorf("no device was measured and the shared graph drew %q", g)
 		}
 	}
 
@@ -143,12 +192,13 @@ func TestResourceNotObserved(t *testing.T) {
 		t.Errorf("GPU0 at a measured 0: %q, want 0%%", block[5])
 	}
 	// The block style (the default since 2026-09-13) draws a measured zero as
-	// a ▁ baseline; in the plain theme the track above it is blank.
-	if strings.Trim(block[8], "▁ ") != "" || !strings.Contains(block[8], "▁") {
-		t.Errorf("GPU0's bottom row at a measured 0 is %q, want a baseline of ▁", block[8])
+	// a ▁ baseline; in the plain theme the track above it is blank. The rows
+	// are the shared graph's, the last three of the section (TTP-110).
+	if bottom := block[len(block)-1]; strings.Trim(bottom, "▁ ") != "" || !strings.Contains(bottom, "▁") {
+		t.Errorf("the shared graph's bottom row at a measured 0 is %q, want a baseline of ▁", bottom)
 	}
-	if strings.TrimSpace(block[6]) != "" {
-		t.Errorf("GPU0's upper rows at a measured 0 are %q, want blank", block[6])
+	if top := block[len(block)-3]; strings.TrimSpace(top) != "" {
+		t.Errorf("the shared graph's upper rows at a measured 0 are %q, want blank", top)
 	}
 }
 
@@ -274,16 +324,16 @@ func TestGraphRidgeOverBody(t *testing.T) {
 // rows per resource, in that order (resourceRows).
 func graphRowsOf(t *testing.T, lines []string, h int) []string {
 	t.Helper()
-	if h <= 0 || len(lines)%(h+1) != 0 {
-		t.Fatalf("%d lines is not a whole number of %d-row resources", len(lines), h+1)
+	// The section is the CPU header and its graph, then one row per device,
+	// then the graph those devices share (TTP-110, 2026-09-17). It used to be
+	// one header and one graph per resource, which is why this was a modulo:
+	// there is no repeating block any more, so the two graphs are taken from
+	// the ends.
+	if h <= 0 || len(lines) < 2*h+2 {
+		t.Fatalf("%d lines is not a CPU block, a device table and a shared graph at h=%d", len(lines), h)
 	}
-	var out []string
-	for i, l := range lines {
-		if i%(h+1) != 0 {
-			out = append(out, l)
-		}
-	}
-	return out
+	out := append([]string{}, lines[1:1+h]...)
+	return append(out, lines[len(lines)-h:]...)
 }
 
 // TestGraphTrackSpansTheWidth (TTP-43a, lead 2026-09-13).
@@ -354,7 +404,10 @@ func TestOneRowGraphIsNotAllRidge(t *testing.T) {
 	ridge := sgrPrefix(th, th.graphRidge)
 	m := ModelAt(ExampleTapeN(4), midRun)
 
-	// h = 1 is what 100x30 chooses (TestResourceGraphHeight).
+	// h = 1 is the height a pane too short for more falls to; every size in
+	// TestResourceGraphHeight now clears the tallest, so it is asked for here
+	// directly rather than reached through a screen size that no longer
+	// produces it (TTP-110, 2026-09-17).
 	one := graphRowsOf(t, resourceRows(m, th, midRun, rightWidth(100)-2, 1), 1)
 	lit := 0
 	for i, row := range one {
@@ -381,5 +434,125 @@ func TestOneRowGraphIsNotAllRidge(t *testing.T) {
 	}
 	if !found {
 		t.Error("no graph cell wears the ridge shade at h = 3")
+	}
+}
+
+// fourGPUTape is ExampleTapeN(4) on a four-card rig whose cards disagree: one
+// carrying most of the model and running hot, one barely touched, and one whose
+// utilisation nvidia-smi never reported.
+//
+// The disagreement is the point. A fixture that clones one card four times
+// makes every reduction below look right — a mean, a range, a "?" — because
+// there is nothing for them to get wrong.
+func fourGPUTape() *tape.Tape {
+	tp := ExampleTapeN(4)
+	cards := []struct {
+		used       int64
+		util, temp float64
+	}{
+		{44 << 30, 97, 78},
+		{31 << 30, 71, 72},
+		{18 << 30, 44, 63},
+		{9 << 30, 0, 61}, // nobody ever read this one's utilisation
+	}
+	var gpus []tape.GPUInfo
+	var atEnd []tape.GPUSample
+	for i, c := range cards {
+		gpus = append(gpus, tape.GPUInfo{Index: i, Name: "NVIDIA RTX A6000", VRAMBytes: 48 << 30})
+		atEnd = append(atEnd, tape.GPUSample{Index: i, UsedBytes: c.used, UtilPct: c.util, TempC: c.temp})
+	}
+	tp.Summary.Host.GPUs = gpus
+	tp.Summary.GPUsAtEnd = atEnd
+	for i := range tp.Samples {
+		var gs []tape.GPUSample
+		for j, c := range cards {
+			gs = append(gs, tape.GPUSample{Index: j, UsedBytes: c.used, UtilPct: c.util, TempC: c.temp})
+		}
+		tp.Samples[i].GPUs = gs
+	}
+	return tp
+}
+
+// TestFourGPUsKeepTheHeadlineAndTheGraphs is the gate for the defect that
+// started TTP-110 (user, 2026-09-17: "지금 배치에거는 gpu가 4개인상황을 표시
+// 못하는게 걸린다").
+//
+// The pane used to grow two rows per device — a VRAM bar in PLACEMENT and a
+// header plus a graph in RESOURCES — so its height was a function of the card
+// count, and the fit loop paid for the extra rows out of whatever was left.
+// FAIL-first, measured on the hero tape at this exact size before the change:
+// one and two cards kept the scoreboard, and three and four dropped it, so the
+// big figure the board exists for did not render at all on a four-card rig.
+// At two cards it kept the board by taking every resource graph to zero
+// instead, which is the same defect spending the other budget. Run against the
+// unedited source at 776a632, the assertion below reported
+//
+//	no scoreboard on a four-card frame: the row under the face is ""
+//
+// So both halves are asserted together: a four-card frame draws the board AND
+// still has a graph. Either one alone passes while the layout is broken.
+func TestFourGPUsKeepTheHeadlineAndTheGraphs(t *testing.T) {
+	m := ModelAt(fourGPUTape(), midRun)
+	m.TapePath = "~/.toktape/runs/" + m.Summary.ID + ".tape"
+	frame := View(m, midRun, 120, 36)
+	checkFrame(t, frame, 120, 36)
+
+	// The board: its unit row is the one that names it, and the face above it
+	// has to carry glyphs rather than blanks.
+	board := boardRows(t, frame)
+	if u := strings.TrimSpace(board[bigRows]); u != scoreboardUnit(rateLabel(m)) {
+		t.Fatalf("no scoreboard on a four-card frame: the row under the face is %q", u)
+	}
+	if strings.TrimSpace(strings.Join(board[:bigRows], "")) == "" {
+		t.Error("the scoreboard's face is blank on a four-card frame")
+	}
+
+	// Every card, once, in one table — and the figure that is not the same for
+	// all of them, so a fixture collapsed to one card would fail here.
+	block := resourceBlock(t, m, midRun, 3)
+	rows := map[string]string{}
+	for _, l := range block {
+		if f := strings.Fields(l); len(f) > 0 && strings.HasPrefix(f[0], "GPU") {
+			if _, dup := rows[f[0]]; dup {
+				t.Errorf("%s has two rows in RESOURCES", f[0])
+			}
+			rows[f[0]] = l
+		}
+	}
+	if len(rows) != 4 {
+		t.Fatalf("RESOURCES lists %d devices, want 4:\n%s", len(rows), strings.Join(block, "\n"))
+	}
+	for _, c := range []struct{ dev, want string }{
+		{"GPU0", "97%"}, {"GPU1", "71%"}, {"GPU2", "44%"},
+	} {
+		if !strings.Contains(rows[c.dev], c.want) {
+			t.Errorf("%s reads %q, want its own %s", c.dev, rows[c.dev], c.want)
+		}
+	}
+	// The card nobody read says so, and says it only about the utilisation:
+	// its VRAM and its temperature were measured.
+	if !strings.Contains(rows["GPU3"], unknown) || !strings.Contains(rows["GPU3"], "61°C") {
+		t.Errorf("GPU3 reads %q, want ? for the utilisation nobody read and its measured 61°C", rows["GPU3"])
+	}
+
+	// The graph the cards share is still drawn, and it is the mean over the
+	// three that reported: counting GPU3's silence as 0 would pull it down.
+	if got := strings.TrimSpace(block[len(block)-1]); got == "" {
+		t.Error("a four-card frame draws no shared GPU graph")
+	}
+	mean := lastOf(gpuMeanUtilSeries(m, midRun, []int{0, 1, 2, 3}))
+	if want := (97.0 + 71 + 44) / 3; mean < want-0.5 || mean > want+0.5 {
+		t.Errorf("the shared graph's newest value is %.1f, want %.1f — the unread card is in the mean", mean, want)
+	}
+
+	// PLACEMENT no longer carries the devices: that is what stopped the pane
+	// growing twice per card.
+	pane := strings.Join(buildRightPane(m, PlainTheme(), midRun, rightWidth(120)-2, 3, true), "\n")
+	placement := pane[strings.Index(pane, "PLACEMENT"):]
+	if i := strings.Index(placement, "MEMORY"); i > 0 {
+		placement = placement[:i]
+	}
+	if strings.Contains(placement, "GPU") {
+		t.Errorf("PLACEMENT lists devices again; they are one table in RESOURCES:\n%s", placement)
 	}
 }
