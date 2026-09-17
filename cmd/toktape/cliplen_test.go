@@ -93,37 +93,56 @@ func TestClipLengthNoteMatchesTheHero(t *testing.T) {
 	//
 	// The input is --n-predict, the figure the note tells a reader to aim, and
 	// not Timings.PredictedN, the figure the streams turned out to average.
-	// Until 2026-09-16 this fed the average and the two agreed, because the
-	// previous hero's streams all ran to the cap. The Qwen hero's do not — one
-	// stopped on its own at 137 of 512 — so the average predicts 14.0s for a
-	// 15.8s run, and the note would have been called wrong for quoting the
-	// figure it actually teaches. FAIL-first: cliplen_test.go:98 failed by
-	// -1.82s on this recording with the formula itself correct (lead).
+	// Aimed that way the formula answers the longest run those settings can
+	// produce, and the run's shape decides what that answer is worth:
 	//
-	// The tolerance follows the run's shape rather than being one number for
-	// both (2026-09-17, lead). A run where every stream reached the cap is the
-	// formula's own case and is held to a token's worth of time. A ragged one
-	// ends with its longest stream while the rate is a mean over all of them,
-	// so the estimate inherits the spread between the two and is held to a
-	// twentieth of the run.
+	//   cap-bound — every stream reached the cap, so the longest run is the
+	//   run and the answer is held to a token's worth of time.
 	//
-	// FAIL-first, from the two heroes this contract was written across: on the
-	// ragged 2026-09-16 recording (one stream stopped at 137 of 512) a flat
-	// 200 ms failed by -1.82s, and on this cap-bound one it passes with about
-	// 60 ms to spare. Holding the ragged case to 200 ms would fail a correct
-	// formula; holding this one to a twentieth would let a wrong one through.
+	//   ragged — streams stopped at EOS first, so the answer is an upper
+	//   bound, and an upper bound is the only correct thing for it to be: a
+	//   formula that predicted this hero's 11.6s from --n-predict 512 would be
+	//   telling a reader to size a budget that cuts the next run, whose
+	//   streams may well use the cap. The bound is checked, and under it the
+	//   lesson the note draws from the gap — that the tokens a run averaged
+	//   predict *less* than the run — is checked as its own inequality, so the
+	//   ragged branch asserts the note's claim and not merely that some number
+	//   is large.
+	//
+	// 2026-09-17, lead. This replaced a "twentieth of the run" tolerance
+	// written for the previous ragged hero (one stream stopped at 137 of 512,
+	// a 12% shortfall). The current one is ragged all the way through — 152 to
+	// 279 tokens against a 512 cap — and predicts 17.9s for an 11.6s run, 54%
+	// over. A tolerance wide enough for that would check nothing, which is the
+	// signal that the tolerance was never the right instrument here: what
+	// changes with the shape is the claim, not its precision.
+	//
+	// FAIL-first, both branches, on this recording: with the inequality
+	// reversed (predicted < runEnd) the bound fails by 6.24s, and with the
+	// average's inequality reversed it fails by 799ms.
 	if s.Limit.MaxTokens == 0 {
 		t.Fatal("the hero was recorded without --n-predict, so the note's formula has no input to check against")
 	}
-	predicted := time.Duration(s.Timings.TTFTMs*float64(time.Millisecond)) +
-		time.Duration(float64(s.Limit.MaxTokens)/s.Timings.PredictedPerSecond*float64(time.Second))
-	shape, tol := "ragged", runEnd/20
-	if s.Aggregate.MinPredictedN >= s.Limit.MaxTokens {
-		shape, tol = "cap-bound", 200*time.Millisecond
+	estimate := func(tokens int) time.Duration {
+		return time.Duration(s.Timings.TTFTMs*float64(time.Millisecond)) +
+			time.Duration(float64(tokens)/s.Timings.PredictedPerSecond*float64(time.Second))
 	}
-	if predicted-runEnd > tol || runEnd-predicted > tol {
-		t.Errorf("TTFT + n-predict ÷ tok/s predicts %v, the %s run is %v (off by %v, over the %v allowed); the formula in the note is wrong",
-			predicted, shape, runEnd, predicted-runEnd, tol)
+	predicted := estimate(s.Limit.MaxTokens)
+	if s.Aggregate.MinPredictedN >= s.Limit.MaxTokens {
+		const tol = 200 * time.Millisecond
+		if predicted-runEnd > tol || runEnd-predicted > tol {
+			t.Errorf("TTFT + n-predict ÷ tok/s predicts %v, the cap-bound run is %v (off by %v, over the %v allowed); the formula in the note is wrong",
+				predicted, runEnd, predicted-runEnd, tol)
+		}
+	} else {
+		if predicted < runEnd {
+			t.Errorf("TTFT + n-predict ÷ tok/s predicts %v for a ragged run of %v; the note calls it the length to size a budget by, and it came in under the run",
+				predicted, runEnd)
+		}
+		if avg := estimate(s.Timings.PredictedN); avg >= runEnd {
+			t.Errorf("the tokens the run averaged predict %v for a %v run; the note says the average comes in short, and here it does not",
+				avg, runEnd)
+		}
 	}
 
 	// The rule the note exists for.

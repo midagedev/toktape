@@ -17,11 +17,11 @@ toktape は、すでに起動している llama-server にアタッチし、1 �
 
 <p align="center"><img src="assets/hero.gif" width="800" alt="toktape recording four concurrent streams of a 35B sparse MoE, from the command being typed to the result"></p>
 
-<p align="center"><em>演出ではなく実際の実行です。Qwen3.6-35B-A3B UD-Q6_K、27.3 GiB のスパース MoE を RTX A6000 1 枚に丸ごと載せています。プロンプトにコマンドを打ち、サーバーを見つけてアタッチし、4 ストリームがそれぞれ別のコードレビュー課題に 37.5 tok/s、合計 149 tok/s で同時に答え、結果が出ます。クリップは最初のトークンの 3 秒前から始まります（<code>--prefill-lead 3s</code>）。プリフィルを待った残りの時間は、テープと、クリップが開いた時点ですでに画面に出ている時計のほうに残っています。見えているものはすべて 1:1 です。<code>assets/hero.tape</code> を <code>toktape render</code> と同じレンダラーで描き直したもので、下のカードは同じファイルから <code>toktape card assets/hero.tape</code> で出ます。</em></p>
+<p align="center"><em>演出ではなく実際の実行です。Qwen3.6-35B-A3B UD-Q6_K、27.3 GiB のスパース MoE を RTX A6000 1 枚に丸ごと載せています。プロンプトにコマンドを打ち、サーバーを見つけてアタッチし、4 ストリームがそれぞれ別のコードレビュー課題に 42.1 tok/s で同時に答え、結果が出ます。各ストリームはモデルが言い終えた時点で止まります。152 トークンから 279 トークンの間で、トークン上限に切られたストリームはありません。カードの合計値 144 tok/s が 42.1 の 4 倍にならないのも同じ理由です。合計はデコード区間の全体で測っていて、その区間の最後の 2 秒にはストリームが 1 本しか残っていません。クリップは最初のトークンの 3 秒前から始まります（<code>--prefill-lead 3s</code>）。プリフィルを待った残りの時間は、テープと、クリップが開いた時点ですでに画面に出ている時計のほうに残っています。見えているものはすべて 1:1 です。<code>assets/hero.tape</code> を <code>toktape render</code> と同じレンダラーで描き直したもので、下のカードは同じファイルから <code>toktape card assets/hero.tape</code> で出ます。</em></p>
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│ toktape v0.2.4               20260917-131004-qwen3-6-35b-a3b-ud-q6-k │
+│ toktape v0.2.4               20260917-144056-qwen3-6-35b-a3b-ud-q6-k │
 ├──────────────────────────────────────────────────────────────────────┤
 │ MODEL    Qwen3.6-35B-A3B-UD-Q6_K.gguf · UD-Q6_K · 27.3 GiB           │
 │ ENGINE   ik_llama.cpp c10fbbcc · linux 6.8.0-139-generic             │
@@ -29,29 +29,29 @@ toktape は、すでに起動している llama-server にアタッチし、1 �
 │ RIG      RTX A6000 48G · AMD Ryzen Threadripper PRO 5975WX 32-Cores  │
 │          252 GB DDR4-3600                                            │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decode        149 tok/s aggregate · 37.5 tok/s each                  │
-│               ≈ 111–205 GB/s, 14–27% of peak                         │
-│ Prefill       204 tok/s aggregate · 77.6 tok/s each                  │
-│               234 prompt tokens · engine prefill 3357 ms             │
-│               queue 1174 ms · TTFT p50 4475 ms                       │
-│ Context       2048 (234 in / 512 out)                                │
-│ Prefix cache  0% hit (0/234) · warm                                  │
+│ Decode        144 tok/s aggregate · 42.1 tok/s each                  │
+│               ≈ 125–230 GB/s, 16–30% of peak                         │
+│ Prefill       167 tok/s aggregate · 42.1 tok/s each                  │
+│               238 prompt tokens · engine prefill 5649 ms             │
+│               queue 56 ms · TTFT p50 5704 ms                         │
+│ Context       8192 (238 in / 214 out)                                │
+│ Prefix cache  0% hit (0/238) · warm                                  │
 │ Sampling      greedy (temp 0) · thinking off · chat                  │
-│ Streams       4 × 37.5 tok/s = 149 tok/s aggregate                   │
-│               TTFT p50 4475 ms p95 4587 ms · slots busy max ?        │
+│ Streams       4 streams · 42.1 tok/s each · 144 tok/s aggregate      │
+│               TTFT p50 5704 ms p95 5707 ms · slots busy max ?        │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MEMORY   GPU0 [██████░░░░] 28.1/48.0 GiB                             │
+│ MEMORY   GPU0 [██████░░░░] 28.5/48.0 GiB                             │
 │          weights 26.8 | kv ? | compute ? GiB                         │
 │          Host placed 0.5 GiB (all in RAM)                            │
-│          Host RSS 2.0 GiB (file 0.7 / anon 1.3)                      │
+│          Host RSS 1.9 GiB (file 0.7 / anon 1.1)                      │
 │          Page faults 0.0 maj/token (0 during decode)                 │
 ├──────────────────────────────────────────────────────────────────────┤
-│ HOST     GPU0 73°C 293 of 300 W · throttled: no · contended: no      │
+│ HOST     GPU0 68°C 281 of 300 W · throttled: no · contended: no      │
 ├──────────────────────────────────────────────────────────────────────┤
 │ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk default -ctv default    │
 │          -t 32                                                       │
 │          -m /models/Qwen3.6-35B-A3B/Qwen3.6-35B-A3B-UD-Q6_K.gguf     │
-│          -c 8192 -np 4 --host 127.0.0.1 --port 8012                  │
+│          -c 32768 --jinja -np 4 --jinja --host 127.0.0.1 --port 8012 │
 ├──────────────────────────────────────────────────────────────────────┤
 │ ! engine commit c10fbbcc read from the checkout next to the binary,  │
 │   not from the binary                                                │

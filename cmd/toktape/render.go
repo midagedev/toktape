@@ -54,27 +54,30 @@ Clip length
       run seconds ≈ TTFT + --n-predict ÷ per-stream tok/s
 
   -n does not lengthen it: the streams run at once, and the run ends when the
-  last of them does. This repo's own hero is 4 streams of 512 tokens at
-  37.5 tok/s with a 4.5s TTFT — an 18.3s run, so a 24.3s clip, or 30.3s with
-  --open. It was recorded with --n-predict 512 and --for 90s, and the tokens
-  ended it: all four streams reached the cap well inside the budget.
+  last of them does. This repo's own hero is 4 streams at 42.1 tok/s with a
+  5.7s TTFT, recorded with --n-predict 512 and --for 90s. Put those in and the
+  formula answers 17.9s. The run was 11.6s — so a 17.7s clip, or 23.7s with
+  --open — because neither the cap nor the clock ended it: every stream
+  stopped when the model had finished, between 152 and 279 tokens.
 
-  Aim the formula with --n-predict rather than with the tokens a run averaged.
-  The two are the same number only when every stream reaches the cap, as these
-  four did. Let one stop early and the average falls while the run still ends
-  with the longest stream, so the average predicts a shorter clip than you get.
+  That gap is the formula working, not failing. Aimed with --n-predict it
+  answers the longest run those settings can produce, which is the length the
+  budget has to cover, and a run that stops early comes in under it. Aim it
+  instead with the tokens a run averaged and it answers less than the run: the
+  average falls with every stream that stops early while the run still ends
+  with the longest one. Here the average is 214 tokens, which predicts 10.8s
+  for an 11.6s run.
 
   Either flag is set when you record. --prefill-lead is the one that is not:
   it opens the clip that long before the first token rather than at the run's
   start, so the wait for prefill is left out while every frame that is in the
   clip is still 1:1. Nothing has to say so — the tile's clock is measured from
-  the run's start, so a windowed clip opens on 1/90s instead of 0/90s. It
+  the run's start, so the windowed hero opens on 2/90s instead of 0/90s. It
   replaces the intro, which is a screen for a run that has not started yet.
-  The hero is rendered with --prefill-lead 3s: its first token is 4.5s in, so
-  1.5s of waiting is cut and the clip is 27.8s rather than 30.3s. That cut is
-  small because this run's prefill is; the flag is worth reaching for on the
-  runs where the first token is tens of seconds out, which is where a clip
-  stops being one anybody watches to the end.
+  The hero is rendered with --prefill-lead 3s: its first token is 5.7s in, so
+  2.7s of waiting is cut and the clip is 20.0s rather than 23.7s. The flag is
+  worth reaching for on the runs where the first token is tens of seconds out,
+  which is where a clip stops being one anybody watches to the end.
 
   --duration is the dishonest one: it compresses or stretches the same run
   into the time you name, and a viewer then cannot tell whether a stream

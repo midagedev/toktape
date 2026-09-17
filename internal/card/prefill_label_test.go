@@ -43,13 +43,14 @@ func TestPrefillLabel(t *testing.T) {
 		s    *tape.RunSummary
 		want string
 	}{
-		// 4 streams, PromptN 234 (the per-stream mean), aggregate 204 — the
-		// run whose unlabelled "204 tok/s" is what this label exists to
-		// qualify. Re-pinned 2026-09-16 for the Qwen four-stream recording and
-		// again 2026-09-17 when it was re-cut on a released build (lead): the
-		// figures travel with the asset, which is why this case reads the tape
-		// instead of restating it.
-		{"hero run", &hero.Summary, "pp234 × 4 · 204 tok/s"},
+		// 4 streams, PromptN 238 (the per-stream mean), aggregate 167 — the
+		// run whose unlabelled "167 tok/s" is what this label exists to
+		// qualify. Re-pinned 2026-09-16 for the Qwen four-stream recording,
+		// again 2026-09-17 when it was re-cut on a released build, and again
+		// the same day when it was re-recorded with --jinja so thinking was
+		// really off (TTP-106). The figures travel with the asset, which is
+		// why this case reads the tape instead of restating it.
+		{"hero run", &hero.Summary, "pp238 × 4 · 167 tok/s"},
 		{"single stream", Example(), "pp384 · 610 tok/s"},
 		{"eight streams", ExampleConcurrent(), "pp384 × 8 · 2927 tok/s"},
 	} {
@@ -102,7 +103,7 @@ func TestTTFTPercentiles(t *testing.T) {
 		p50, p95 string
 		pair     bool
 	}{
-		{"hero run", &hero.Summary, "4.47 s", "4.59 s", true},
+		{"hero run", &hero.Summary, "5.70 s", "5.71 s", true},
 		{"percentiles that render alike", alike, "10.8 s", "10.8 s", false},
 		{"eight streams", ExampleConcurrent(), "810 ms", "1.05 s", true},
 		{"single stream", Example(), "630 ms", "", false},
