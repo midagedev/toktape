@@ -209,6 +209,21 @@ type EngineProps struct {
 	// and NMax the most tokens drafted per step. Both verbatim, both optional
 	// (2026-09-15).
 	Draft *EngineDraft `json:"draft,omitempty"`
+	// ServerPID is the process doing the work, declared by the server itself
+	// and optional (TTP-107, 2026-09-17).
+	//
+	// It exists because a proxy can answer /props truthfully and still be the
+	// wrong subject. toktape finds the server by the model path in an argv, or
+	// failing that by who holds the listening socket, and both answers name
+	// the process it is talking to — which for a shim is the shim. Every
+	// figure taken from a pid then describes the proxy: memory, page faults,
+	// and the GPU processes that are "not ours", which is how eight mistral.rs
+	// takes on an idle box all read "contended: yes".
+	//
+	// A server that fronts another process declares that process here. A
+	// llama-server does not need to: its own argv names the model, which is
+	// how it has always been found.
+	ServerPID int `json:"server_pid,omitempty"`
 }
 
 // EngineDraft is the engine block's speculative-decoding identity. It fills
@@ -265,6 +280,16 @@ func (p *Props) EngineName() string {
 		return ""
 	}
 	return p.Engine.Name
+}
+
+// ServerPID is the pid the engine object declared, or 0 when the body
+// declared none. Zero and negative are both "none": a pid is a positive
+// number, and a body that sends 0 has said nothing rather than named init.
+func (p *Props) ServerPID() int {
+	if p == nil || p.Engine == nil || p.Engine.ServerPID <= 0 {
+		return 0
+	}
+	return p.Engine.ServerPID
 }
 
 // Props reads GET /props.

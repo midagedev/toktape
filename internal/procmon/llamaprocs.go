@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -91,6 +92,27 @@ func IsLlamaComm(comm string) bool {
 	return strings.HasPrefix(strings.TrimSpace(comm), llamaCommPrefix)
 }
 
+// HasProc reports whether <fsRoot>/proc is a directory that can be read. It
+// is the question to ask before blaming a pid for not being there: off Linux,
+// and on a tree that holds no procfs, no pid is there and that says nothing
+// about the pid.
+func HasProc(fsRoot string) bool {
+	fi, err := os.Stat(procPath(fsRoot))
+	return err == nil && fi.IsDir()
+}
+
+// Exists reports whether <fsRoot>/proc/<pid> is there — the cheapest question
+// this package can ask about a process, and the one to ask about a pid that
+// arrived from outside rather than from a scan of this very tree. A pid that
+// is not positive is not a pid and is false without looking.
+func Exists(fsRoot string, pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	fi, err := os.Stat(filepath.Join(procPath(fsRoot), strconv.Itoa(pid)))
+	return err == nil && fi.IsDir()
+}
+
 // LlamaProcs lists every live llama-* process under <fsRoot>/proc, ordered by
 // PID, with its age at this moment. See LlamaProcsAt.
 func LlamaProcs(fsRoot string, selfPID int, bootTime time.Time, clkTck int64) ([]tape.LlamaProc, error) {
@@ -106,9 +128,17 @@ func LlamaProcs(fsRoot string, selfPID int, bootTime time.Time, clkTck int64) ([
 // not ours to read) and is skipped; stat's comm is deliberately not a
 // fallback, so a tree without comm files lists nothing rather than guessing.
 //
-// Attached is set for selfPID, the server the run measured. AgeSec is
-// now - (bootTime + starttime/clkTck), clamped at 0; it stays 0 (unknown)
-// when bootTime is zero or clkTck is not positive.
+// Attached is set for selfPID, the server the run measured — and selfPID is
+// listed whatever its comm says (TTP-107, 2026-09-17). The witness's job is to
+// say what was running beside the run, and a list that silently omits the
+// subject itself answers "which process were these figures taken from?" with
+// nothing whenever the server is not llama.cpp: eight mistral.rs takes carried
+// an empty list while their ik pairs from the same sweep carried
+// {comm: "llama-server", attached: true}. It cannot manufacture contention,
+// because gpu.Witnessed counts only the entries that are not Attached.
+//
+// AgeSec is now - (bootTime + starttime/clkTck), clamped at 0; it stays 0
+// (unknown) when bootTime is zero or clkTck is not positive.
 //
 // The only error is an unreadable <fsRoot>/proc directory: then nothing was
 // scanned and an empty list would be a false "no other process".
@@ -135,7 +165,7 @@ func LlamaProcsAt(fsRoot string, selfPID int, bootTime time.Time, clkTck int64, 
 			continue // exited between readdir and read, or unreadable
 		}
 		comm := strings.TrimSpace(string(data))
-		if !IsLlamaComm(comm) {
+		if !IsLlamaComm(comm) && pid != selfPID {
 			continue
 		}
 		p := tape.LlamaProc{PID: pid, Comm: comm, Attached: pid == selfPID}

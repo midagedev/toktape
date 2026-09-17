@@ -409,7 +409,28 @@ func (r *run) collectProcess() {
 		}
 	}
 	pid := 0
-	if r.props.ModelPath != "" {
+	// A declared pid outranks both searches below (TTP-107, 2026-09-17).
+	//
+	// Both of them name the process toktape is talking to — an argv that holds
+	// the model path, or the holder of the listening socket — and for a server
+	// that fronts another process that is the front. Every figure a pid
+	// produces then describes the proxy: memory, page faults, and the GPU
+	// processes counted as "not ours", which is how eight mistral.rs takes on
+	// a box under a single lease all read "contended: yes" while their ik
+	// pairs from the same sweep read "contended: no".
+	//
+	// A pid this host cannot see is not trusted quietly: the run says so and
+	// searches anyway, because a wrong subject and a missing one are different
+	// failures and only one of them is silent.
+	if declared := r.props.ServerPID(); declared > 0 {
+		switch {
+		case procmon.Exists(r.opts.FSRoot, declared):
+			pid = declared
+		case r.pidReadable():
+			r.warn("server declared pid %d, which is not running here; searching for it instead", declared)
+		}
+	}
+	if pid == 0 && r.props.ModelPath != "" {
 		if p, err := procmon.FindPID(r.opts.FSRoot, r.props.ModelPath); err == nil {
 			pid = p
 		}
@@ -482,6 +503,16 @@ func (r *run) collectProcess() {
 // match, because the model path is the surer identification when there is
 // one (2026-09-15, ExLlamaV3).
 func (r *run) findPIDByURLPort() (int, error) {
+	port, err := r.loopbackPort()
+	if err != nil {
+		return 0, err
+	}
+	return procmon.FindPIDByPort(r.opts.FSRoot, port)
+}
+
+// loopbackPort is the server URL's port when the server runs on this host,
+// and an error saying why not otherwise.
+func (r *run) loopbackPort() (int, error) {
 	u, err := url.Parse(r.client.BaseURL())
 	if err != nil {
 		return 0, err
@@ -495,7 +526,21 @@ func (r *run) findPIDByURLPort() (int, error) {
 	if err != nil || port <= 0 {
 		return 0, fmt.Errorf("recorder: no port in %s", r.client.BaseURL())
 	}
-	return procmon.FindPIDByPort(r.opts.FSRoot, port)
+	return port, nil
+}
+
+// pidReadable reports whether this run could have looked a process up at all:
+// the server has to be on this host, and this host has to have a procfs to
+// look in. It is what separates "the server named a pid that is not there"
+// from "the server named a pid I was never in a position to see" — a remote
+// attach, or any macOS or Windows run (TTP-107, 2026-09-17). The first is
+// worth a line on the card; the second is not the declaration's fault, and a
+// run with no /proc already says once that it found no pid.
+func (r *run) pidReadable() bool {
+	if _, err := r.loopbackPort(); err != nil {
+		return false
+	}
+	return procmon.HasProc(r.opts.FSRoot)
 }
 
 // collectHost reads the hardware line and opens the GPU backend.

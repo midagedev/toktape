@@ -453,9 +453,13 @@ writes files under `~/.toktape`. There is no telemetry and no account.
 The server does not have to be llama.cpp. One that reports its own engine —
 its name and version, the model's format and shape, and which bytes sit on
 which device — is recorded from that report, with no GGUF opened and no
-command line parsed. [exl3-serve](https://github.com/midagedev/exl3-serve)
-does that for ExLlamaV3: it presents one EXL3 model on the llama-server
-surface toktape already speaks, so an EXL3 model records unchanged.
+command line parsed. A server that answers for another process — a shim in
+front of an engine that speaks only the OpenAI API — names that process's pid
+in the same report, so the memory, page-fault and contention rows describe
+the server and not the proxy in front of it.
+[exl3-serve](https://github.com/midagedev/exl3-serve) does that for
+ExLlamaV3: it presents one EXL3 model on the llama-server surface toktape
+already speaks, so an EXL3 model records unchanged.
 
 Roadmap: a macOS collector without sudo, an Ollama offload card from
 `/api/ps`, and `toktape ab URL1 URL2` — two servers, one prompt, side by

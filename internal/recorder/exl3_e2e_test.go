@@ -561,6 +561,129 @@ func TestRecordNamedEngineEndToEnd(t *testing.T) {
 	}
 }
 
+// TestRecordDeclaredServerPID: a shim answers /props on another process's
+// behalf, and says so (TTP-107, 2026-09-17).
+//
+// The fixture is the shape rig-log measured: the thing holding the listening
+// socket is the shim (pid 8821 and its worker 8822, 100000 kB between them),
+// and the server actually doing the work is pid 9000 — 70000 kB, parented to
+// init, no socket of its own, so neither of the recorder's two searches can
+// reach it. Both searches answer "the process I am talking to", which for a
+// shim is the shim, and then memory, page faults and the GPU processes counted
+// as "not ours" all describe the proxy: eight mistral.rs takes on a box under
+// a single lease read "contended: yes" while their ik pairs read "contended:
+// no".
+//
+// FAIL-first, 2026-09-17: on the unedited recorder this run attached to 8821
+// and read 102400000 bytes — the shim's tree — where the server it measured
+// holds 71680000.
+func TestRecordDeclaredServerPID(t *testing.T) {
+	const modelDir = "/models/Mistral-Small-4.1"
+	srv := exl3Server(t, `{
+	  "model_path": "`+modelDir+`", "chat_template": "", "total_slots": 4,
+	  "default_generation_settings": {"n_ctx": 8192},
+	  "engine": {"name": "mistral.rs", "version": "0.9.3", "server_pid": 9000,
+	             "args": ["--quant", "q4k", "--device", "cuda:0"]}
+	}`)
+	root := exl3ProcTree(t, modelDir, exl3ServerPort(t, srv))
+	// The server the shim fronts: outside the shim's tree, so a tree sampler
+	// pointed at the shim would never see it and one pointed here sums it
+	// alone.
+	writeExl3PID(t, root, 9000, 1, 70000, 5, 50, 500, 50, "mistralrs\x00--port\x0058507\x00", "")
+	if err := os.WriteFile(filepath.Join(root, "proc", "9000", "comm"), []byte("mistralrs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tp, err := recorder.Record(context.Background(), recorder.Options{
+		BaseURL:        srv.URL,
+		Concurrency:    1,
+		MaxTokens:      256,
+		SampleInterval: 10 * time.Millisecond,
+		FSRoot:         root,
+		GPU:            fakeGPU(t),
+		Clock:          fixedClock{time.Date(2026, 9, 17, 9, 0, 0, 0, time.UTC)},
+		Version:        "0.1.0-test",
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	s := tp.Summary
+
+	if s.Server.PID != 9000 {
+		t.Errorf("Server.PID = %d, want the declared 9000, not the socket's holder", s.Server.PID)
+	}
+	if want := int64(70000) * 1024; s.Memory.AtEnd.RSSBytes != want {
+		t.Errorf("AtEnd.RSSBytes = %d, want %d — the declared server, not the shim's tree", s.Memory.AtEnd.RSSBytes, want)
+	}
+	// A pid the server named and this host can see is not a caveat.
+	if warnsAbout(s.Warnings, "declared pid") {
+		t.Errorf("a declared pid that is running here warned anyway: %q", s.Warnings)
+	}
+
+	// A declared pid this host cannot see is reported and searched past. A
+	// wrong subject and a missing one are different failures, and the silent
+	// one is the failure this ticket is about.
+	t.Run("a pid nothing holds is said out loud, not trusted", func(t *testing.T) {
+		gone := exl3Server(t, `{
+		  "model_path": "`+modelDir+`", "chat_template": "", "total_slots": 4,
+		  "default_generation_settings": {"n_ctx": 8192},
+		  "engine": {"name": "mistral.rs", "version": "0.9.3", "server_pid": 31337,
+		             "args": ["--quant", "q4k"]}
+		}`)
+		tp, err := recorder.Record(context.Background(), recorder.Options{
+			BaseURL:        gone.URL,
+			Concurrency:    1,
+			MaxTokens:      256,
+			SampleInterval: 10 * time.Millisecond,
+			FSRoot:         exl3ProcTree(t, modelDir, exl3ServerPort(t, gone)),
+			GPU:            fakeGPU(t),
+			Clock:          fixedClock{time.Date(2026, 9, 17, 9, 0, 0, 0, time.UTC)},
+			Version:        "0.1.0-test",
+		})
+		if err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+		s := tp.Summary
+		if !warnsAbout(s.Warnings, "server declared pid 31337, which is not running here") {
+			t.Errorf("Warnings do not name the pid that was not there: %q", s.Warnings)
+		}
+		if s.Server.PID != 8821 {
+			t.Errorf("Server.PID = %d, want the search's answer 8821 after the declaration failed", s.Server.PID)
+		}
+	})
+
+	// A tree with no procfs is every macOS and Windows run, and the `--url`
+	// attach the README sends those readers to. No pid is visible there, which
+	// says nothing about the pid the server named — the run already says once
+	// that it found no pid, and a second line accusing the server of naming a
+	// process that is not running would be a caveat about the wrong thing.
+	//
+	// FAIL-first, 2026-09-17: written without the readability gate, this case
+	// produced `server declared pid 9000, which is not running here` on every
+	// remote attach.
+	t.Run("a tree with no procfs blames nobody", func(t *testing.T) {
+		tp, err := recorder.Record(context.Background(), recorder.Options{
+			BaseURL:        srv.URL,
+			Concurrency:    1,
+			MaxTokens:      256,
+			SampleInterval: 10 * time.Millisecond,
+			FSRoot:         t.TempDir(),
+			GPU:            fakeGPU(t),
+			Clock:          fixedClock{time.Date(2026, 9, 17, 9, 0, 0, 0, time.UTC)},
+			Version:        "0.1.0-test",
+		})
+		if err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+		if warnsAbout(tp.Summary.Warnings, "declared pid") {
+			t.Errorf("a run with no /proc blamed the declaration: %q", tp.Summary.Warnings)
+		}
+		if !warnsAbout(tp.Summary.Warnings, "pid not found") {
+			t.Errorf("the run does not say it found no pid at all: %q", tp.Summary.Warnings)
+		}
+	})
+}
+
 // TestRecordTreeOnlyForEngine: the same two-process tree under a llama.cpp
 // run reads the parent alone. The tree sum is the engine's shape, not the
 // recorder's default, and a llama-server whose children exist must not have

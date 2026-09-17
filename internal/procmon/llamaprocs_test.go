@@ -158,4 +158,82 @@ func TestLlamaProcsAt(t *testing.T) {
 			t.Error("LlamaProcs over an empty tree: want an error")
 		}
 	})
+	// TTP-107, 2026-09-17: the server the run measured is listed whatever its
+	// comm says. Pid 999 in this fixture is bash, standing in for an engine
+	// whose comm is not a llama.cpp name ("mistralrs"): before this it was
+	// filtered out, and the witness of a mistral.rs take then said nothing
+	// about the process its own figures came from, while the ik take from the
+	// same sweep carried {comm: "llama-server", attached: true}.
+	//
+	// FAIL-first on the unedited source: LlamaProcsAt(busyRoot, 999, ...)
+	// returned the two llama processes only, neither of them Attached.
+	t.Run("the attached server is listed whatever its comm is", func(t *testing.T) {
+		got, err := procmon.LlamaProcsAt(busyRoot, 999, boot, procmon.ClockTicks, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 3 {
+			t.Fatalf("LlamaProcsAt(self 999) = %+v, want the two llama processes and pid 999", got)
+		}
+		var self tape.LlamaProc
+		for _, p := range got {
+			if p.PID == 999 {
+				self = p
+			}
+		}
+		if self.PID != 999 || !self.Attached || self.Comm != "bash" {
+			t.Errorf("pid 999 = %+v, want it listed, Attached, under its own comm", self)
+		}
+		// It must not become contention: gpu.Witnessed counts only entries
+		// that are not Attached, so the two llama processes are still the
+		// only foreign ones and a non-llama server does not flag itself.
+		foreign := 0
+		for _, p := range got {
+			if !p.Attached {
+				foreign++
+			}
+		}
+		if foreign != 2 {
+			t.Errorf("foreign processes = %d, want 2 (the attached one is never foreign)", foreign)
+		}
+	})
+}
+
+// TestExists: the check the recorder asks about a pid that arrived from
+// outside — declared by the server in /props rather than found by scanning
+// this tree (TTP-107, 2026-09-17). A declared pid that is not here must be
+// reported and searched for, not trusted, so the question has to be cheap and
+// have no false positives.
+func TestExists(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		root string
+		pid  int
+		want bool
+	}{
+		{"a process in the tree", busyRoot, 1234, true},
+		{"a pid nothing holds", busyRoot, 31337, false},
+		{"zero is not a pid", busyRoot, 0, false},
+		{"a negative pid is not a pid", busyRoot, -1, false},
+		{"no /proc at all", t.TempDir(), 1234, false},
+	} {
+		if got := procmon.Exists(c.root, c.pid); got != c.want {
+			t.Errorf("%s: Exists(%q, %d) = %v, want %v", c.name, c.root, c.pid, got, c.want)
+		}
+	}
+}
+
+// TestHasProc: the question to ask before blaming a pid for being absent.
+// Off Linux, and on any tree without a procfs, no pid is there — and that is
+// a fact about the tree, not about the pid a server declared (TTP-107,
+// 2026-09-17). Without this the recorder put "server declared pid N, which is
+// not running here" on every macOS and Windows run and on every --url attach
+// to another host, which is exactly the reader the platform table sends here.
+func TestHasProc(t *testing.T) {
+	if !procmon.HasProc(busyRoot) {
+		t.Errorf("HasProc(%q) = false, want true", busyRoot)
+	}
+	if empty := t.TempDir(); procmon.HasProc(empty) {
+		t.Errorf("HasProc(%q) = true, want false", empty)
+	}
 }

@@ -165,3 +165,43 @@ func TestPropsEngineDecode(t *testing.T) {
 		t.Errorf("Engine = %+v, want nil with no engine key", bare.Engine)
 	}
 }
+
+// TestPropsServerPID: the pid a server declares for the process doing the work
+// (TTP-107, 2026-09-17). A proxy can answer /props truthfully and still be the
+// wrong subject to measure, and this is the only field in which it can say so.
+//
+// Zero is not a declaration. A body that sends 0, or a negative number, has
+// said nothing — the accessor must not hand the recorder a pid to go and stat,
+// because "process 0" and "process -1" are not processes and a found-by-luck
+// answer there would be the worst kind of wrong subject.
+//
+// FAIL-first, 2026-09-17: the field did not exist, so a body declaring it
+// decoded to nothing and ServerPID was undefined.
+func TestPropsServerPID(t *testing.T) {
+	declared := decodeProps(t, `{"model_path":"/m.gguf",
+	  "engine":{"name":"mistral.rs","version":"0.9.3","server_pid":8821}}`)
+	if declared.Engine == nil || declared.Engine.ServerPID != 8821 {
+		t.Fatalf("Engine = %+v, want server_pid 8821 decoded", declared.Engine)
+	}
+	if got := declared.ServerPID(); got != 8821 {
+		t.Errorf("ServerPID = %d, want 8821", got)
+	}
+	for _, c := range []struct {
+		name string
+		body string
+	}{
+		{"an engine that declares none", `{"engine":{"name":"mistral.rs"}}`},
+		{"an explicit zero says nothing", `{"engine":{"name":"mistral.rs","server_pid":0}}`},
+		{"a negative pid is not a pid", `{"engine":{"name":"mistral.rs","server_pid":-1}}`},
+		{"no engine object at all", `{"model_path":"/m.gguf","build_info":"b4321"}`},
+	} {
+		if got := decodeProps(t, c.body).ServerPID(); got != 0 {
+			t.Errorf("%s: ServerPID = %d, want 0", c.name, got)
+		}
+	}
+	// A nil Props is what a body that never arrived looks like.
+	var none *Props
+	if got := none.ServerPID(); got != 0 {
+		t.Errorf("(*Props)(nil).ServerPID = %d, want 0", got)
+	}
+}
