@@ -495,6 +495,72 @@ func TestRecordExLlamaV3PIDByPort(t *testing.T) {
 	}
 }
 
+// TestRecordNamedEngineEndToEnd: the engine paths under a second engine
+// (TTP-105, 2026-09-17): mistral.rs 0.9.3 behind a llama-server-protocol shim,
+// whose /props body has no build_info and nothing but the engine object to
+// name it. The name the engine gave is the kind, its version is the build,
+// its args are the flags with llama.cpp's grammar never run over them, and
+// the process tree — not one pid — is what the sampler reads.
+//
+// FAIL-first, 2026-09-17: on the unedited recorder this run stamped the kind
+// "unknown", parsed the shim's python argv as llama.cpp's flags, and read the
+// listener alone (`Kind = "unknown", want "mistral.rs"` below).
+func TestRecordNamedEngineEndToEnd(t *testing.T) {
+	const modelDir = "/models/Mistral-Small-4.1"
+	props := `{
+	  "model_path": "` + modelDir + `", "chat_template": "", "total_slots": 4,
+	  "default_generation_settings": {"n_ctx": 8192},
+	  "engine": {"name": "mistral.rs", "version": "0.9.3",
+	             "args": ["--quant", "q4k", "--device", "cuda:0"]}
+	}`
+	srv := exl3Server(t, props)
+	tp, err := recorder.Record(context.Background(), recorder.Options{
+		BaseURL:        srv.URL,
+		Concurrency:    1,
+		MaxTokens:      256,
+		SampleInterval: 10 * time.Millisecond,
+		FSRoot:         exl3ProcTree(t, modelDir, exl3ServerPort(t, srv)),
+		GPU:            fakeGPU(t),
+		Clock:          fixedClock{time.Date(2026, 9, 17, 9, 0, 0, 0, time.UTC)},
+		Version:        "0.1.0-test",
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	s := tp.Summary
+
+	// The engine object is the record.
+	if got, want := s.Server.Kind, tape.ServerKind("mistral.rs"); got != want {
+		t.Errorf("Kind = %q, want %q", got, want)
+	}
+	if s.Server.Build != "0.9.3" || s.Server.Commit != "" {
+		t.Errorf("Build, Commit = %q, %q; want 0.9.3 and no commit", s.Server.Build, s.Server.Commit)
+	}
+	// The flags: the engine's argv verbatim, never llama.cpp's grammar.
+	wantArgs := []string{"--quant", "q4k", "--device", "cuda:0"}
+	if len(s.Server.Flags.Other) != len(wantArgs) {
+		t.Fatalf("Flags.Other = %q, want %q", s.Server.Flags.Other, wantArgs)
+	}
+	for i, a := range wantArgs {
+		if s.Server.Flags.Other[i] != a {
+			t.Errorf("Flags.Other[%d] = %q, want %q", i, s.Server.Flags.Other[i], a)
+		}
+	}
+	if s.Server.Flags.FlashAttn != "" || s.Server.Flags.NGL != "" {
+		t.Errorf("engine flags were parsed as llama.cpp's: %+v", s.Server.Flags)
+	}
+	if len(s.Server.Args) == 0 || s.Server.Args[0] != "python" {
+		t.Errorf("Server.Args = %q, want the shim's own argv verbatim", s.Server.Args)
+	}
+	// The two processes: a named engine sums the tree (openSampler doc).
+	if want := int64(100000) * 1024; s.Memory.AtEnd.RSSBytes != want {
+		t.Errorf("AtEnd.RSSBytes = %d, want the tree sum %d", s.Memory.AtEnd.RSSBytes, want)
+	}
+	if !warnsAbout(s.Warnings, "memory, faults and CPU summed over the server and its 1 child process") {
+		t.Errorf("Warnings lack the tree warning: %q", s.Warnings)
+	}
+}
+
 // TestRecordTreeOnlyForEngine: the same two-process tree under a llama.cpp
 // run reads the parent alone. The tree sum is the engine's shape, not the
 // recorder's default, and a llama-server whose children exist must not have

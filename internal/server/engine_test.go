@@ -52,8 +52,9 @@ func decodeProps(t *testing.T, body string) *Props {
 // TestDetectKindEngineBlock: the engine object names the engine outright, and
 // it is read before the ik markers and the build_info key — those scan every
 // value in the body, and an engine block full of user-chosen paths must not be
-// mistaken for one of them. An engine that is not exllamav3 changes nothing:
-// detection falls through to the rules that ran before any engine existed.
+// mistaken for one of them. Any name an engine gives is its kind (TTP-105,
+// 2026-09-17); only an absent or blank name falls through to the rules that
+// ran before any engine existed.
 func TestDetectKindEngineBlock(t *testing.T) {
 	cases := []struct {
 		name string
@@ -63,9 +64,19 @@ func TestDetectKindEngineBlock(t *testing.T) {
 		{"the contract body", enginePropsJSON, tape.ServerExLlamaV3},
 		{"engine wins over a build_info key", `{"build_info":"b4321-abcdef12","engine":{"name":"exllamav3"}}`, tape.ServerExLlamaV3},
 		{"engine wins over an ik marker elsewhere", `{"system_info":"ik_llama.cpp","engine":{"name":"exllamav3"}}`, tape.ServerExLlamaV3},
-		{"another engine name keeps the old rules", `{"build_info":"b4321-abcdef12","engine":{"name":"other","version":"9"}}`, tape.ServerLlamaCPP},
-		{"another engine name with no other signal stays unknown", `{"model_path":"/m.gguf","engine":{"name":"other"}}`, tape.ServerUnknown},
+		// 2026-09-17, TTP-105: the two cases this replaces pinned the
+		// fall-through this round removed ("other" stayed llama-server or
+		// unknown); both were rerun against the pre-change source, where they
+		// failed with `DetectKind = "llama-server", want "other"` and
+		// `DetectKind = "unknown", want "other"` — quoted in the round's
+		// report.
+		{"another engine's name is its kind, over a build_info key", `{"build_info":"b4321-abcdef12","engine":{"name":"other","version":"9"}}`, tape.ServerKind("other")},
+		{"another engine's name is its kind, nothing else needed", `{"model_path":"/m.gguf","engine":{"name":"other"}}`, tape.ServerKind("other")},
+		{"the name is lowercased", `{"engine":{"name":"Mistral.rs"}}`, tape.ServerKind("mistral.rs")},
+		{"padding around a name is trimmed", `{"build_info":"b4321","engine":{"name":" ExLlamaV3 "}}`, tape.ServerExLlamaV3},
 		{"an engine object with no name is not an engine claim", `{"engine":{"version":"1.0"}}`, tape.ServerUnknown},
+		{"a whitespace-only name is not a name: build_info rules run", `{"build_info":"b4321","engine":{"name":"  "}}`, tape.ServerLlamaCPP},
+		{"a whitespace-only name is not a name: ik markers run", `{"system_info":"ik_llama.cpp","engine":{"name":" "}}`, tape.ServerIKLlama},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,6 +84,29 @@ func TestDetectKindEngineBlock(t *testing.T) {
 				t.Errorf("DetectKind = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestDetectKindMistralRS: the measured body of a real mistral.rs 0.9.3 run
+// behind rig-log's llama-server shim (TTP-105, 2026-09-17). It has no
+// build_info key and no ik marker, so the engine object is the only place its
+// name exists — and the one field that exists for saying it.
+//
+// FAIL-first, 2026-09-17: DetectKind on the unedited source returned
+// "unknown" (`DetectKind(mistral.rs /props) = "unknown", want "mistral.rs"`),
+// and the card printed "?" for ENGINE and llama.cpp flags for a run that
+// never had them.
+func TestDetectKindMistralRS(t *testing.T) {
+	body := `{"model_path": "/models/Mistral-Small-4.1", "chat_template": "", "total_slots": 4,
+	          "default_generation_settings": {"n_ctx": 8192},
+	          "engine": {"name": "mistral.rs", "version": "0.9.3",
+	                     "args": ["--quant", "q4k", "--device", "cuda:0"]}}`
+	p := decodeProps(t, body)
+	if got, want := DetectKind(p), tape.ServerKind("mistral.rs"); got != want {
+		t.Errorf("DetectKind(mistral.rs /props) = %q, want %q", got, want)
+	}
+	if k := DetectKind(p); !k.SelfDeclared() {
+		t.Errorf("ServerKind(%q).SelfDeclared() = false, want true", k)
 	}
 }
 

@@ -1310,12 +1310,14 @@ func GPUThrottled(g tape.GPUSample) bool {
 }
 
 // LlamaCPPFlags reports whether srv's flags are llama.cpp's. Everything that
-// prints a flag branches on this one predicate: an ExLlamaV3 run's argv is the
-// engine's own (-gs, -mcs, ...), and rendering it through the llama.cpp token
+// prints a flag branches on this one predicate: a self-declared engine's
+// (tape.ServerKind.SelfDeclared) argv is its own — an ExLlamaV3 run's is the
+// engine's (-gs, -mcs, ...), and rendering it through the llama.cpp token
 // set would print five "?"-shaped holes where named flags should be and teach
-// flags the run never had (2026-09-15, ExLlamaV3). Every known kind keeps its
-// flags — the question is what the argv means, not whether it was read.
-func LlamaCPPFlags(srv tape.ServerInfo) bool { return srv.Kind != tape.ServerExLlamaV3 }
+// flags the run never had (2026-09-15; generalised to every named engine
+// 2026-09-17, TTP-105). Every known kind keeps its flags — the question is
+// what the argv means, not whether it was read.
+func LlamaCPPFlags(srv tape.ServerInfo) bool { return !srv.Kind.SelfDeclared() }
 
 // flagsSection renders the flag line.
 //

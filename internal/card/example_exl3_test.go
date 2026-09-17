@@ -121,6 +121,21 @@ func TestLlamaCPPFlagsPredicate(t *testing.T) {
 	if !LlamaCPPFlags(unknownsSummary().Server) {
 		t.Error("LlamaCPPFlags(unknown) = false, want true")
 	}
+	// The rule is about any engine that named itself, not one product
+	// (TTP-105, 2026-09-17). FAIL-first: "mistral.rs" answered true on the
+	// unedited predicate.
+	for k, want := range map[tape.ServerKind]bool{
+		tape.ServerLlamaCPP:  true,
+		tape.ServerIKLlama:   true,
+		tape.ServerUnknown:   true,
+		"":                   true,
+		tape.ServerExLlamaV3: false,
+		"mistral.rs":         false,
+	} {
+		if got := LlamaCPPFlags(tape.ServerInfo{Kind: k}); got != want {
+			t.Errorf("LlamaCPPFlags(%q) = %v, want %v", k, got, want)
+		}
+	}
 }
 
 // TestExplainEnginePlacement: the --explain listing an engine run leads with.

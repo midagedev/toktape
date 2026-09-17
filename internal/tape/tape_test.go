@@ -63,6 +63,28 @@ func TestDecodeRejectsNewerSchema(t *testing.T) {
 	}
 }
 
+// TestServerKindSelfDeclared: the closed llama.cpp set against everything
+// else. The predicate is what "the engine named itself in /props" means at
+// every recorder and card branch that cares (TTP-105, 2026-09-17): a kind
+// outside the set is a name an engine gave — exllamav3 included — and a tape
+// recorded before the predicate existed answers it correctly, because the
+// set was already closed then.
+func TestServerKindSelfDeclared(t *testing.T) {
+	cases := map[ServerKind]bool{
+		"":                       false,
+		ServerUnknown:            false,
+		ServerLlamaCPP:           false,
+		ServerIKLlama:            false,
+		ServerExLlamaV3:          true,
+		ServerKind("mistral.rs"): true,
+	}
+	for k, want := range cases {
+		if got := k.SelfDeclared(); got != want {
+			t.Errorf("ServerKind(%q).SelfDeclared() = %v, want %v", k, got, want)
+		}
+	}
+}
+
 func TestSlugFromModel(t *testing.T) {
 	cases := map[string]string{
 		"/models/Qwen3.5-35B-A3B-UD-Q4_K_M.gguf":   "qwen3-5-35b-a3b-ud-q4-k",

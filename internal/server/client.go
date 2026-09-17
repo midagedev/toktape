@@ -420,8 +420,9 @@ func hasIKMarker(s string) bool {
 // ik_llama.cpp serves the same routes as llama-server, so no field
 // distinguishes them by contract. The rules, in order:
 //
-//   - an engine object naming exllamav3 is tape.ServerExLlamaV3 (2026-09-15):
-//     the engine said what it is, in the one field that exists for saying it;
+//   - an engine object that names an engine is that name, lowercased
+//     (2026-09-15; generalised beyond exllamav3 2026-09-17, TTP-105): the
+//     engine said what it is, in the one field that exists for saying it;
 //   - an ik marker anywhere in the response or the Server header is
 //     tape.ServerIKLlama;
 //   - a build_info key, with any value, is tape.ServerLlamaCPP — mainline
@@ -431,8 +432,7 @@ func hasIKMarker(s string) bool {
 //
 // The engine rule comes first because the two under it scan every value in the
 // body for a marker, and an engine object is full of user-chosen paths and
-// version strings that must not be mistaken for either. An engine object
-// naming anything else leaves detection exactly as it was.
+// version strings that must not be mistaken for either.
 //
 // The last rule is measured (TTP-33, 2026-09-13): a real ik_llama.cpp
 // 7b79b229 /props has no build_info and no marker outside model_path and
@@ -442,8 +442,8 @@ func DetectKind(p *Props) tape.ServerKind {
 	if p == nil {
 		return tape.ServerUnknown
 	}
-	if p.EngineName() == "exllamav3" {
-		return tape.ServerExLlamaV3
+	if name := strings.TrimSpace(p.EngineName()); name != "" {
+		return tape.ServerKind(strings.ToLower(name))
 	}
 	hay := strings.ToLower(p.BuildInfo)
 	for k, v := range p.Raw {
@@ -475,9 +475,9 @@ func DetectKind(p *Props) tape.ServerKind {
 // same name. Only argv[0] is read: later arguments are user text (a model under
 // an ik_llama.cpp directory names no engine).
 func RefineKind(k tape.ServerKind, exe string, argv []string) tape.ServerKind {
-	if k == tape.ServerIKLlama || k == tape.ServerExLlamaV3 {
-		// An engine block's kind is stamped from engine.name and nothing else
-		// (tape.ServerExLlamaV3 doc); the process cannot outvote it.
+	if k == tape.ServerIKLlama || k.SelfDeclared() {
+		// An engine block's kind is the name the engine gave
+		// (tape.ServerKind.SelfDeclared doc); the process cannot outvote it.
 		return k
 	}
 	hay := strings.ToLower(exe)

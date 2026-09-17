@@ -107,6 +107,10 @@ func TestRefineKind(t *testing.T) {
 		// kind is stamped from /props' engine.name and nothing else.
 		{"engine kind survives an ik-looking exe", tape.ServerExLlamaV3, "/src/ik_llama.cpp/build/bin/llama-server", nil, tape.ServerExLlamaV3},
 		{"engine kind survives a python argv", tape.ServerExLlamaV3, "/opt/venv/bin/python", []string{"python", "-m", "exllamav3.server"}, tape.ServerExLlamaV3},
+		// Any engine that named itself, not only exllamav3 (TTP-105,
+		// 2026-09-17). FAIL-first: this case on the unedited source returned
+		// "ik_llama.cpp".
+		{"a named engine survives an ik-looking exe", "mistral.rs", "/src/ik_llama.cpp/build/bin/llama-server", nil, "mistral.rs"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

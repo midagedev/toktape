@@ -175,6 +175,28 @@ const (
 	ServerUnknown   ServerKind = "unknown"
 )
 
+// SelfDeclared reports whether k was taken from a /props engine object — the
+// engine named itself, in the one field that exists for saying so.
+//
+// The llama.cpp family is a closed set: mainline is ServerLlamaCPP, ik is
+// ServerIKLlama, and a server that answered /props without saying what it is
+// is ServerUnknown. Any other kind is a name an engine gave, which is why
+// this is a test on the set rather than a flag: a tape recorded before this
+// method existed answers it correctly, because "exllamav3" was already the
+// engine's own name and was already outside the set.
+//
+// What follows from a true answer is all one fact — the engine, not the
+// process and not llama.cpp's conventions, is the record: its version is the
+// build with no commit to name, its args are flags.Other verbatim, and
+// server.ParseFlags must not be run over them (2026-09-17, TTP-105).
+func (k ServerKind) SelfDeclared() bool {
+	switch k {
+	case "", ServerUnknown, ServerLlamaCPP, ServerIKLlama:
+		return false
+	}
+	return true
+}
+
 // ServerInfo is what /props, the process command line and the build report.
 type ServerInfo struct {
 	Kind    ServerKind  `json:"kind"`

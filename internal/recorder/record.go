@@ -185,11 +185,11 @@ func (r *run) attach(ctx context.Context) error {
 			r.client, r.props = c, props
 			r.kind = server.DetectKind(props)
 			r.build, r.commit = server.BuildFromProps(props.BuildInfo)
-			// An engine block's version is its build, verbatim, with no
-			// commit to name: exllamav3's "1.5.0" is not a bNNNN counter and
-			// the engine object is the record over any build_info a shim
-			// keeps (2026-09-15, ExLlamaV3).
-			if props.EngineName() == "exllamav3" {
+			// An engine that named itself reports its build in its version,
+			// verbatim, with no commit to name: an engine version is not a
+			// bNNNN counter, and the engine object is the record over any
+			// build_info a shim keeps (2026-09-15).
+			if props.Engine != nil && r.kind.SelfDeclared() {
 				r.build, r.commit = props.Engine.Version, ""
 			}
 			r.emit(Event{Kind: EventDiscovered, Stream: -1, Message: c.BaseURL()})
@@ -395,10 +395,11 @@ func (r *run) collectEngineModel() {
 // PID search so a run whose process was never found still has them: the
 // engine object is the record, and server.ParseFlags — which knows
 // llama.cpp's argument starters — would misread every engine flag
-// (2026-09-15, ExLlamaV3). The process's real argv is still recorded
-// verbatim whenever the pid is found; it is simply not parsed.
+// (2026-09-15; any engine that named itself, TTP-105 2026-09-17). The
+// process's real argv is still recorded verbatim whenever the pid is found;
+// it is simply not parsed.
 func (r *run) collectProcess() {
-	if r.kind == tape.ServerExLlamaV3 && r.props.Engine != nil {
+	if r.kind.SelfDeclared() && r.props.Engine != nil {
 		r.flags = tape.ServerFlags{Other: r.props.Engine.Args}
 		if d := r.props.Engine.Draft; d != nil {
 			r.flags.DraftModel = d.Model
@@ -433,16 +434,16 @@ func (r *run) collectProcess() {
 	args, err := procmon.Args(r.opts.FSRoot, pid)
 	if err != nil {
 		// For llama.cpp the argv is where every flag comes from, so losing it
-		// loses the flags. An engine run already has its flags from the
-		// engine block; only the verbatim argv line is missing here.
-		if r.kind == tape.ServerExLlamaV3 {
+		// loses the flags. An engine that named itself already has its flags
+		// from the engine block; only the verbatim argv line is missing here.
+		if r.kind.SelfDeclared() {
 			r.warn("argv of pid %d unreadable", pid)
 		} else {
 			r.warn("argv of pid %d unreadable, server flags unknown", pid)
 		}
 	} else {
 		r.args = args
-		if r.kind != tape.ServerExLlamaV3 {
+		if !r.kind.SelfDeclared() {
 			r.flags = server.ParseFlags(args)
 		}
 	}
@@ -792,18 +793,24 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 // returns the function that closes it again. The sampler is nil, and the
 // closer a no-op, when there is no /proc view.
 //
-// An engine run watches the whole process tree (2026-09-15, ExLlamaV3): the
-// engine is two processes — the CPU expert work runs in a multiprocessing
-// child of the port listener — and a single-pid sampler would attribute the
-// child's faults to nobody. llama-server and ik keep the single-process
-// sampler byte-for-byte.
+// An engine that named itself watches the whole process tree (2026-09-15,
+// ExLlamaV3; any self-declared engine, TTP-105 2026-09-17). A tree sampler
+// over a single-process server sums exactly that one process, so it is never
+// a worse number than the single-pid sampler, only a slower one; and where
+// the pid that was found fronts the real work — a multiprocessing engine,
+// or a shim holding the port — the tree is the only sampler that sees the
+// work at all. llama-server and ik are not self-declared and keep the
+// single-process sampler byte-for-byte; that measured path does not move.
+// This does not close TTP-107: a shim's tree is still not the server's tree
+// when the server is not its child, and the fix for that is the server
+// declaring its own pid.
 func (r *run) openSampler() (procmon.FaultSampler, func()) {
 	if r.pid <= 0 {
 		return nil, func() {}
 	}
 	var s procmon.FaultSampler
 	var err error
-	if r.kind == tape.ServerExLlamaV3 {
+	if r.kind.SelfDeclared() {
 		s, err = procmon.NewTreeSamplerAt(r.opts.FSRoot, r.pid)
 	} else {
 		s, err = procmon.NewSamplerAt(r.opts.FSRoot, r.pid)
@@ -855,7 +862,7 @@ func (r *run) startSampling(ctx context.Context, st *state) func() {
 		pollSlot: r.props.TotalSlots > 0,
 		// Engine runs sum the process tree (openSampler doc); every other
 		// kind reads one pid, as they always have.
-		tree: r.kind == tape.ServerExLlamaV3,
+		tree: r.kind.SelfDeclared(),
 	}
 	go func() {
 		defer close(done)
