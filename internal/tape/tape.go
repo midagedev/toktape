@@ -671,6 +671,24 @@ type SamplingSummary struct {
 	Temperature *float64 `json:"temperature,omitempty"`
 	Thinking    string   `json:"thinking,omitempty"` // "off" | "" (the server decided)
 	Endpoint    string   `json:"endpoint,omitempty"` // EndpointCompletion; "" and EndpointChat are chat
+	// ThoughtAnyway counts the answered streams whose output opened a
+	// thinking block although Thinking says "off" (TTP-106, 2026-09-17).
+	//
+	// The request is not the outcome. llama-server drops a request's
+	// chat_template_kwargs unless it was started with --jinja, and says
+	// nothing: the switch is accepted, ignored, and the only witness left is
+	// the run's own first tokens. A card that reads Thinking alone then
+	// prints "thinking off" over a clip in which every stream reasons.
+	//
+	// It is counted at record time because the card reads this summary and
+	// never Tape.Requests, where the token text lives — the same rule that
+	// freezes the placement classification.
+	//
+	// Only a positive count asserts anything. Zero means "none seen", which
+	// on a tape written before this field cannot be told from "never looked"
+	// (TTP-103), so the row and the caveat speak when this is above zero and
+	// stay silent otherwise.
+	ThoughtAnyway int `json:"thought_anyway,omitempty"`
 }
 
 // LimitSummary is what was allowed to end the generation, and what did

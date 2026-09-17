@@ -94,6 +94,14 @@ const (
 	// CodeClientDisagrees: the client-side rate and the server's own differ by
 	// more than tape.RateTolerance (lesson 1).
 	CodeClientDisagrees = "client_disagrees_with_server"
+	// CodeThinkingIgnored: the request asked for thinking off and the run
+	// reasoned anyway (TTP-106, 2026-09-17). llama-server drops a request's
+	// chat_template_kwargs unless it was started with --jinja, and reports
+	// nothing, so the switch is accepted and ignored. The rates stay true —
+	// what is not true is the run: the tokens measured are reasoning, and a
+	// card that printed the request alone said "thinking off" over a clip in
+	// which every stream visibly thought.
+	CodeThinkingIgnored = "thinking_ignored"
 	// CodeRecorded: a free-text caveat the recorder wrote into the tape. Its
 	// Text is the recorder's words, verbatim.
 	CodeRecorded = "recorded"
@@ -195,11 +203,12 @@ var caveatRank = map[string]int{
 	CodeColdCache:             7,
 	CodeShortPromptForPrefill: 8,
 	CodeClientDisagrees:       9,
-	CodeRecorded:              10,
-	CodeMachineContended:      11,
-	CodeConditionsChanged:     12,
-	CodeRunCutByClock:         13,
-	CodeNoProcView:            14,
+	CodeThinkingIgnored:       10,
+	CodeRecorded:              11,
+	CodeMachineContended:      12,
+	CodeConditionsChanged:     13,
+	CodeRunCutByClock:         14,
+	CodeNoProcView:            15,
 }
 
 // MinPrefillPromptTokens is tape.MinPrefillPromptTokens, re-exported so this
@@ -507,6 +516,13 @@ func Caveats(s *tape.RunSummary) []Caveat {
 	}
 	if text := clientDisagreesText(s); text != "" {
 		add(CodeClientDisagrees, SeverityRun, text)
+	}
+	if n := s.Sampling.ThoughtAnyway; n > 0 {
+		// Only the positive case speaks: a zero is "none seen", which on a
+		// tape older than the field cannot be told from "never looked".
+		add(CodeThinkingIgnored, SeverityRun, fmt.Sprintf(
+			"thinking off was asked for and %d of %d streams thought anyway: the server dropped the switch, so this run reasoned",
+			n, streamsSent(s)))
 	}
 	for _, w := range s.Warnings {
 		if strings.TrimSpace(w) == "" {

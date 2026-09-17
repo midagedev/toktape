@@ -39,6 +39,10 @@ type Sampling struct {
 	// raw path, anything else (including "", a tape older than the field) for
 	// chat.
 	Endpoint string
+	// ThoughtAnyway is how many answered streams opened a thinking block
+	// after the request asked for thinking off. Above zero it contradicts
+	// Thinking, and the row says so rather than repeating the request.
+	ThoughtAnyway int
 }
 
 // samplingParts is the Sampling row of the speed section: the parts a caller
@@ -69,9 +73,10 @@ func samplingParts(s *tape.RunSummary) []string {
 // correctly here.
 func samplingOf(s *tape.RunSummary) Sampling {
 	out := Sampling{
-		Temp:     s.Sampling.Temperature,
-		Thinking: s.Sampling.Thinking,
-		Endpoint: s.Sampling.Endpoint,
+		Temp:          s.Sampling.Temperature,
+		Thinking:      s.Sampling.Thinking,
+		Endpoint:      s.Sampling.Endpoint,
+		ThoughtAnyway: s.Sampling.ThoughtAnyway,
 	}
 	if out.Thinking == "" {
 		if v, ok := s.Template.TemplateKwargs["enable_thinking"]; ok && v == "false" {
@@ -91,7 +96,21 @@ func samplingOf(s *tape.RunSummary) Sampling {
 func samplingRow(sm Sampling) []string {
 	parts := []string{samplingTemp(sm.Temp)}
 	if sm.Thinking == "off" {
-		parts = append(parts, "thinking off")
+		// What was asked, and — when the run's own output disagrees — that it
+		// was not honoured. Printing the request alone over a run that
+		// visibly reasoned is the card saying something the clip beside it
+		// contradicts (TTP-106).
+		//
+		// "(ignored)" and not a sentence: with the widest temperature and the
+		// raw path this row already fills the 54 columns the speed section's
+		// gutter leaves it (TestSamplingRowFits), and a row that overflows is
+		// wrapped or truncated. The sentence is the caveat's job, and the
+		// caveat has the whole width of the card.
+		if sm.ThoughtAnyway > 0 {
+			parts = append(parts, "thinking off (ignored)")
+		} else {
+			parts = append(parts, "thinking off")
+		}
 	}
 	parts = append(parts, samplingEndpoint(sm.Endpoint))
 	return parts

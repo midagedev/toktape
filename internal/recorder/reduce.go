@@ -406,12 +406,52 @@ func samplingOf(recs []tape.RequestRecord) tape.SamplingSummary {
 	}
 	p := recs[0].Prompt
 	out := tape.SamplingSummary{Thinking: p.Thinking, Endpoint: p.Endpoint}
+	// The request is not the outcome (TTP-106, 2026-09-17). A server that
+	// drops the switch reports nothing about having dropped it, so the run's
+	// own first tokens are the only witness left. It is counted here because
+	// the card reads this summary and never the token text.
+	if out.Thinking == "off" {
+		out.ThoughtAnyway = thoughtAnyway(recs)
+	}
 	if v, ok := p.Params["temperature"]; ok {
 		if f, ok := floatOf(v); ok {
 			out.Temperature = &f
 		}
 	}
 	return out
+}
+
+// thoughtAnyway counts the answered streams whose output opens a thinking
+// block.
+//
+// Only the opening counts. A reasoning model emits its tag as the very first
+// thing it writes, whereas a "<think>" further into an answer is the model
+// quoting one — and a run is not evidence that a switch was ignored because
+// the model mentioned thinking.
+func thoughtAnyway(recs []tape.RequestRecord) int {
+	n := 0
+	for _, r := range recs {
+		var b strings.Builder
+		for _, tk := range r.Tokens {
+			b.WriteString(tk.Text)
+			if b.Len() >= 32 {
+				break
+			}
+		}
+		if opensThinking(b.String()) {
+			n++
+		}
+	}
+	return n
+}
+
+// opensThinking reports whether text opens a reasoning block. The tags are the
+// ones the engines this tool records actually emit; an unknown tag is no
+// evidence rather than a guess, which is the direction this field must err in
+// — it only ever speaks to contradict.
+func opensThinking(s string) bool {
+	s = strings.TrimLeft(s, " \t\r\n")
+	return strings.HasPrefix(s, "<think>") || strings.HasPrefix(s, "<thinking>")
 }
 
 // floatOf reads a number out of a params value. The params are JSON-shaped —

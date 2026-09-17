@@ -144,6 +144,18 @@ func caveatCases() []caveatCase {
 		code:   CodeClientDisagrees,
 		mutate: func(s *tape.RunSummary) { s.Timings.ClientAgreesWithServer = false },
 	}, {
+		// TTP-106: thinking off was sent and the streams reasoned anyway,
+		// which is what llama-server does with chat_template_kwargs when it
+		// was started without --jinja. The count is the recorder's, taken at
+		// record time because the card never reads Tape.Requests.
+		code: CodeThinkingIgnored,
+		mutate: func(s *tape.RunSummary) {
+			s.Sampling.Thinking = "off"
+			s.Sampling.ThoughtAnyway = s.Concurrency
+		},
+		onCard:  "thinking off (ignored)",
+		notCard: "thinking off ·",
+	}, {
 		code:   CodeRecorded,
 		mutate: func(s *tape.RunSummary) { s.Warnings = []string{"the -ot rule was dropped"} },
 		onCard: "the -ot rule was dropped",
@@ -632,10 +644,18 @@ func TestStreamsNotConcurrentRanksDirectlyUnderStreamsFailed(t *testing.T) {
 	// compared named in the sentence — and it qualifies the same memory
 	// block: a bandwidth over the bus that carried it means the active split
 	// is wrong, so the placement story and the rate disagree about one run.
+	//
+	// thinking_ignored entered at rank 10 (TTP-106, 2026-09-17), directly
+	// under client_disagrees and above recorded: it qualifies every figure on
+	// the card at once — a run that reasoned when reasoning was switched off
+	// is not the run the SAMPLING row describes — but it is a disagreement
+	// between what was asked for and what happened, which is the family
+	// client_disagrees opens, not a failure of the measurement itself.
 	want := []string{
 		CodeStreamsFailed, CodeStreamsNotConcurrent, CodePlacementContradicted,
 		CodeBandwidthOverCeiling, CodeAnswerCut, CodeShortGeneration,
 		CodeShortStream, CodeColdCache, CodeShortPromptForPrefill, CodeClientDisagrees,
+		CodeThinkingIgnored,
 		CodeRecorded, CodeMachineContended, CodeConditionsChanged, CodeRunCutByClock,
 		CodeNoProcView,
 	}
@@ -643,5 +663,40 @@ func TestStreamsNotConcurrentRanksDirectlyUnderStreamsFailed(t *testing.T) {
 		if caveatRank[c] != i {
 			t.Errorf("caveatRank[%s] = %d, want %d", c, caveatRank[c], i)
 		}
+	}
+}
+
+// TestThinkingIgnoredNeedsAPositiveCount: a zero raises nothing, because a run
+// where no stream reasoned and a tape written before the recorder counted are
+// the same bytes — `thought_anyway` is omitempty, so "measured zero" and "never
+// measured" serialise identically (TTP-103). Only a positive count asserts
+// anything, and the card must not qualify a run on a field it cannot read.
+//
+// FAIL-first: with the predicate written as `s.Sampling.Thinking == "off" &&
+// s.Sampling.ThoughtAnyway >= 0`, every tape that ever asked for thinking off
+// carries the caveat, and both subtests below fail.
+func TestThinkingIgnoredNeedsAPositiveCount(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		n    int
+		want bool
+	}{
+		{"no stream reasoned, or the tape predates the count", 0, false},
+		{"one stream of four reasoned", 1, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := clean(t)
+			s.Sampling.Thinking = "off"
+			s.Sampling.ThoughtAnyway = tc.n
+			got := false
+			for _, c := range Caveats(s) {
+				if c.Code == CodeThinkingIgnored {
+					got = true
+				}
+			}
+			if got != tc.want {
+				t.Errorf("thought_anyway %d raises the caveat = %v, want %v", tc.n, got, tc.want)
+			}
+		})
 	}
 }

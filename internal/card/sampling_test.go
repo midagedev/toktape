@@ -41,6 +41,20 @@ func TestSamplingRow(t *testing.T) {
 		name: "thinking left to the server",
 		in:   Sampling{Temp: tempOf(0.8), Thinking: "", Endpoint: tape.EndpointChat},
 		want: "temp 0.8 · chat",
+	}, {
+		// TTP-106: the switch was sent and the run reasoned anyway, which is
+		// what llama-server does with chat_template_kwargs when it was started
+		// without --jinja. The row says what happened, not what was asked.
+		name: "thinking off, and the server thought anyway",
+		in:   Sampling{Temp: tempOf(0), Thinking: "off", ThoughtAnyway: 4, Endpoint: tape.EndpointChat},
+		want: "greedy (temp 0) · thinking off (ignored) · chat",
+	}, {
+		// Only a positive count asserts anything: a zero is both "no stream
+		// reasoned" and "this tape predates the field", and they serialise
+		// identically (TTP-103).
+		name: "thinking off on a tape older than the count",
+		in:   Sampling{Temp: tempOf(0), Thinking: "off", ThoughtAnyway: 0, Endpoint: tape.EndpointChat},
+		want: "greedy (temp 0) · thinking off · chat",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := strings.Join(samplingRow(tc.in), " · ")
@@ -57,7 +71,7 @@ func TestSamplingRow(t *testing.T) {
 // leave the reader unable to tell which path recorded the rate.
 func TestSamplingRowFits(t *testing.T) {
 	avail := innerWidth - speedLabelW
-	widest := Sampling{Temp: tempOf(0), Thinking: "off", Endpoint: tape.EndpointCompletion}
+	widest := Sampling{Temp: tempOf(0), Thinking: "off", ThoughtAnyway: 8, Endpoint: tape.EndpointCompletion}
 	got := strings.Join(samplingRow(widest), " · ")
 	if w := Width(got); w > avail {
 		t.Fatalf("row %q is %d columns, the gutter leaves %d", got, w, avail)

@@ -75,6 +75,8 @@ func ExplainCaveats(s *tape.RunSummary) string {
 			formatRate(t.PredictedPerSecond), formatRate(t.ClientPredictedPerSecond),
 			t.ClientAgreesWithServer, s.Aggregate.DisagreeingStreams, answeredStreams(s),
 			formatPct(tape.RateTolerance))},
+		{CodeThinkingIgnored, fmt.Sprintf("thinking requested %q, %d of %d streams opened a thinking block",
+			s.Sampling.Thinking, s.Sampling.ThoughtAnyway, streamsSent(s))},
 		{CodeRecorded, fmt.Sprintf("%d recorded warning(s)", len(s.Warnings))},
 		{CodeMachineContended, fmt.Sprintf("contended %v, %d reason(s), loadavg1 %s",
 			s.Contention.Contended, len(s.Contention.Reasons), formatFloat1(s.Contention.LoadAvg1))},
