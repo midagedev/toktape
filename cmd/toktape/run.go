@@ -69,6 +69,9 @@ Record flags:
   --no-think            ask a reasoning model not to think (chat only)
   --think-budget N      cap a reasoning model's thinking at N tokens (chat only)
   --endpoint NAME       chat (templated) or completion (prompt sent verbatim)
+  --engine-kind NAME    server protocol: auto (default), llama or openai (any
+                        OpenAI-compatible server via /v1/models; client-timed)
+  --engine TEXT         name that engine, e.g. "vLLM 0.11" (a claim)
   --param key=value     extra request parameter, repeatable (JSON value if valid)
   --ram-gbs N           host memory bandwidth in GB/s, as you state it
   --ram-gbs-measured N  the same, as STREAM measured it (the tape says which)

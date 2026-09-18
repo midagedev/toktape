@@ -128,6 +128,18 @@ type Options struct {
 	// prompts, so which path recorded a rate is part of the result and not an
 	// implementation detail.
 	Endpoint string
+	// EngineKind chooses the protocol to attach with (TTP-99, 2026-09-19):
+	// "auto" (the default) tries /props first and falls back to /v1/models
+	// on ErrNoProps only; "llama" is today's path exactly; "openai" skips
+	// /props and attaches to anything that answers GET /v1/models with 200
+	// — vLLM, SGLang, TabbyAPI, LM Studio, mlx-lm and the rest. "" means
+	// "auto".
+	EngineKind string
+	// EngineClaim is what the user said the engine is (`--engine "vLLM
+	// 0.11"`) on a ServerOpenAI server, which does not say. A claim, not an
+	// observation: it is recorded into ServerInfo.EngineClaim and every
+	// surface prints it with that word, and it is ignored on any other kind.
+	EngineClaim string
 	// SampleInterval is how often a tape.RunSample is taken. 0 means
 	// tape.DefaultSampleInterval.
 	SampleInterval time.Duration

@@ -26,20 +26,24 @@ type run struct {
 	warnings []string
 	client   *server.Client
 
-	props    *server.Props
-	kind     tape.ServerKind
-	build    string // from /props (attach)
-	commit   string // from /props, else the ik checkout (collectProcess, TTP-33)
-	model    tape.ModelInfo
-	tensors  []placement.Tensor
-	pid      int
-	args     []string
-	flags    tape.ServerFlags
-	host     tape.HostInfo
-	gpus     gpu.Collector
-	ownGPU   bool
-	place    tape.PlacementSummary
-	template tape.TemplateInfo
+	props  *server.Props
+	kind   tape.ServerKind
+	build  string // from /props (attach)
+	commit string // from /props, else the ik checkout (collectProcess, TTP-33)
+	// openaiModel is the first /v1/models id the server listed (TTP-99): the
+	// model name the server itself gave, which fills ModelInfo.FileName and
+	// defaults the requests' model. "" when the server listed nothing.
+	openaiModel string
+	model       tape.ModelInfo
+	tensors     []placement.Tensor
+	pid         int
+	args        []string
+	flags       tape.ServerFlags
+	host        tape.HostInfo
+	gpus        gpu.Collector
+	ownGPU      bool
+	place       tape.PlacementSummary
+	template    tape.TemplateInfo
 	// roundNames are the names of the rounds that were actually sent, in
 	// order; nil in a single-round run (TTP-31).
 	roundNames []string
@@ -66,6 +70,11 @@ type run struct {
 // one of them — it is a run, and the tape says the clock ended it (TTP-76).
 func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	opts = opts.normalize()
+	switch opts.EngineKind {
+	case "", "auto", "llama", "openai":
+	default:
+		return nil, fmt.Errorf("recorder: --engine-kind %q: use auto, llama or openai", opts.EngineKind)
+	}
 	// The one place the "what may end this generation" table is read, and
 	// before anything is built from the options: the resolved cap is what
 	// every request carries from here down, so no later step has to ask the
@@ -98,6 +107,11 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	}
 
 	reqs := buildRequests(opts, r.model.ActiveBytesPerToken)
+	if shaped, err := r.shapeOpenAIRequests(reqs); err != nil {
+		return nil, err
+	} else {
+		reqs = shaped
+	}
 	r.promptSet = promptSetOf(reqs)
 	r.collectTemplate(ctx, reqs)
 	r.emitAttached()
@@ -160,6 +174,9 @@ func (r *run) emitAttached() {
 		Limit: r.limit,
 	}
 	s.Server.Build, s.Server.Commit = r.build, r.commit
+	if r.kind == tape.ServerOpenAI {
+		s.Server.EngineClaim = r.opts.EngineClaim
+	}
 	r.emit(Event{Kind: EventAttached, Stream: -1, Summary: s})
 }
 
@@ -189,14 +206,19 @@ func (r *run) attach(ctx context.Context) error {
 		c, props, err := r.probe(ctx)
 		if err == nil {
 			r.client, r.props = c, props
-			r.kind = server.DetectKind(props)
-			r.build, r.commit = server.BuildFromProps(props.BuildInfo)
-			// An engine that named itself reports its build in its version,
-			// verbatim, with no commit to name: an engine version is not a
-			// bNNNN counter, and the engine object is the record over any
-			// build_info a shim keeps (2026-09-15).
-			if props.Engine != nil && r.kind.SelfDeclared() {
-				r.build, r.commit = props.Engine.Version, ""
+			// probeOpenAI already stamped r.kind: an empty synthesized Props
+			// would DetectKind as ServerUnknown, and there is no build to
+			// split — the build stays "" and prints "?".
+			if r.kind != tape.ServerOpenAI {
+				r.kind = server.DetectKind(props)
+				r.build, r.commit = server.BuildFromProps(props.BuildInfo)
+				// An engine that named itself reports its build in its version,
+				// verbatim, with no commit to name: an engine version is not a
+				// bNNNN counter, and the engine object is the record over any
+				// build_info a shim keeps (2026-09-15).
+				if props.Engine != nil && r.kind.SelfDeclared() {
+					r.build, r.commit = props.Engine.Version, ""
+				}
 			}
 			r.emit(Event{Kind: EventDiscovered, Stream: -1, Message: c.BaseURL()})
 			r.emit(Event{Kind: EventProps, Stream: -1, Message: r.build})
@@ -272,6 +294,11 @@ func (e *SlotsError) Is(target error) bool { return target == ErrMoreSessionsTha
 // unknown and not zero: there is no limit to enforce, so nothing is refused
 // (the repo's first rule — never act on a figure that was not observed).
 func (r *run) checkSlots() error {
+	// An OpenAI-compatible server numbers no slots (TTP-99): TotalSlots 0 is
+	// unknown, never a limit, so no run is refused on it.
+	if r.kind == tape.ServerOpenAI {
+		return nil
+	}
 	slots := r.props.TotalSlots
 	if slots <= 0 || r.opts.Concurrency <= slots {
 		return nil
@@ -279,11 +306,37 @@ func (r *run) checkSlots() error {
 	return &SlotsError{Sessions: r.opts.Concurrency, Slots: slots, URL: r.client.BaseURL()}
 }
 
+// shapeOpenAIRequests adapts built requests to an OpenAI-compatible server
+// (TTP-99): the protocol selects the minimal body, and the model defaults to
+// the first /v1/models id when the user gave none — these servers require
+// one. The raw /completion path is refused: it is llama-server's own
+// endpoint, and an OpenAI-compatible server has /v1/chat/completions only.
+// On any other kind the requests pass through untouched.
+func (r *run) shapeOpenAIRequests(reqs []server.StreamRequest) ([]server.StreamRequest, error) {
+	if r.kind != tape.ServerOpenAI {
+		return reqs, nil
+	}
+	for i := range reqs {
+		if reqs[i].IsCompletion() {
+			return nil, errors.New("--endpoint completion is llama-server's raw endpoint; an OpenAI-compatible server has /v1/chat/completions only")
+		}
+		reqs[i].Protocol = tape.ServerOpenAI
+		if reqs[i].Model == "" {
+			reqs[i].Model = r.openaiModel
+		}
+	}
+	return reqs, nil
+}
+
 // probe is one attach attempt: discovery when no URL was given, then /props.
 //
 // Discovery is redone on every attempt rather than once, because a server that
 // opens its port late is found by scanning the candidates again — re-polling a
 // URL that discovery never produced would wait forever on nothing.
+//
+// The engine kind selects the gate (TTP-99): "llama" is /props exactly;
+// "openai" skips /props and "auto" tries /props first and falls back to
+// /v1/models on ErrNoProps only — never on a refusal, never while loading.
 func (r *run) probe(ctx context.Context) (*server.Client, *server.Props, error) {
 	c := server.New(r.opts.BaseURL)
 	if r.opts.BaseURL == "" {
@@ -293,11 +346,32 @@ func (r *run) probe(ctx context.Context) (*server.Client, *server.Props, error) 
 		}
 		c = c.WithBaseURL(url)
 	}
+	if r.opts.EngineKind == "openai" {
+		return r.probeOpenAI(ctx, c)
+	}
 	props, err := c.Props(ctx)
 	if err != nil {
+		if (r.opts.EngineKind == "" || r.opts.EngineKind == "auto") && errors.Is(err, server.ErrNoProps) {
+			return r.probeOpenAI(ctx, c)
+		}
 		return nil, nil, err
 	}
 	return c, props, nil
+}
+
+// probeOpenAI attaches the generic OpenAI-compatible mode (TTP-99):
+// /v1/models is the gate. The stored Props is synthesized so nothing else
+// nil-derefs — Raw empty, Engine nil, TotalSlots 0, which is slots unknown
+// and never a limit — and r.kind is stamped here, because an empty Props
+// would DetectKind as ServerUnknown.
+func (r *run) probeOpenAI(ctx context.Context, c *server.Client) (*server.Client, *server.Props, error) {
+	models, err := c.Models(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	r.kind = tape.ServerOpenAI
+	r.openaiModel = models.FirstID()
+	return c, &server.Props{}, nil
 }
 
 // waitReason says whether err is worth waiting out, and which sentence the CLI
@@ -383,6 +457,14 @@ func (r *run) collectModelShape() {
 		r.collectEngineModel()
 		return
 	}
+	// An OpenAI-compatible server names its model in /v1/models and nothing
+	// else (TTP-99): the first id is an observation, so it fills FileName —
+	// but not Path (never observed) and not Repo (a bare id proves no cache
+	// layout). No header is opened and no warning is printed about one.
+	if !r.kind.SpeaksLlamaProtocol() {
+		r.model = tape.ModelInfo{FileName: r.openaiModel}
+		return
+	}
 	path := r.props.ModelPath
 	if path == "" {
 		r.warn("server did not report model_path, model shape unknown")
@@ -462,6 +544,16 @@ func (r *run) collectEngineModel() {
 // process's real argv is still recorded verbatim whenever the pid is found;
 // it is simply not parsed.
 func (r *run) collectProcess() {
+	// An OpenAI-compatible server has no model_path in any argv to find it
+	// by (TTP-99), and guessing a pid from a listening socket would name a
+	// process nobody proved is the server. PID 0, no argv, zero flags — and
+	// the card omits the flags block on this kind.
+	if !r.kind.SpeaksLlamaProtocol() {
+		r.pid, r.args, r.flags = 0, nil, tape.ServerFlags{}
+		r.warn("pid not found: no memory, page faults or flags")
+		r.emit(Event{Kind: EventPIDNotFound, Stream: -1})
+		return
+	}
 	if r.kind.SelfDeclared() && r.props.Engine != nil {
 		r.flags = tape.ServerFlags{Other: r.props.Engine.Args}
 		if d := r.props.Engine.Draft; d != nil {
@@ -648,6 +740,12 @@ func (r *run) collectPlacement() {
 		r.place = r.enginePlacement()
 		return
 	}
+	// An OpenAI-compatible server reports no model shape to replay over
+	// (TTP-99): the placement is unknown rather than guessed.
+	if !r.kind.SpeaksLlamaProtocol() {
+		r.place = tape.PlacementSummary{Source: placement.SourceUnknown}
+		return
+	}
 	if len(r.tensors) == 0 {
 		r.place = tape.PlacementSummary{Source: placement.SourceUnknown}
 		return
@@ -804,6 +902,12 @@ func humanBytes(b int64) string {
 // every stream is fetched so the record carries it; the run's TemplateInfo
 // describes the first stream.
 func (r *run) collectTemplate(ctx context.Context, reqs []server.StreamRequest) {
+	// An OpenAI-compatible server has no /apply-template (TTP-99): the chat
+	// template is the server's own business, so the run records none and
+	// asks for none. RenderedPrompt stays "" — unknown, never a guess.
+	if !r.kind.SpeaksLlamaProtocol() {
+		return
+	}
 	r.template.ChatTemplate = r.props.ChatTemplate
 	if len(reqs) == 0 {
 		return

@@ -520,6 +520,15 @@ the server and not the proxy in front of it.
 ExLlamaV3: it presents one EXL3 model on the llama-server surface toktape
 already speaks, so an EXL3 model records unchanged.
 
+Any other OpenAI-compatible server — vLLM, SGLang, TabbyAPI, LM Studio and
+the rest — records in a generic mode: `toktape --engine-kind openai` (or
+nothing, since auto-detection tries `/props` first and falls back to
+`/v1/models`) attaches to whatever answers `/v1/models`. Such a server
+reports no timings, so the recorder's own clock is the record and the card
+says `client-timed` beside the decode rate; compare only with other
+client-timed runs. There are no slots and no flags block, and `--engine`
+names the engine as a claim the card prints with that word.
+
 Roadmap: a macOS collector without sudo, an Ollama offload card from
 `/api/ps`, and `toktape ab URL1 URL2` — two servers, one prompt, side by
 side.

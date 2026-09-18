@@ -45,7 +45,12 @@ func Text(s *tape.RunSummary) string {
 		speedSection(s),
 		memorySection(s),
 		hostSection(s),
-		flagsSection(s),
+	}
+	// flagsSection is nil for a generic OpenAI-compatible server (TTP-99):
+	// an empty section would still print its separator, so the block is
+	// dropped from the list rather than rendered empty.
+	if fs := flagsSection(s); len(fs) > 0 {
+		sections = append(sections, fs)
 	}
 	if w := warningSection(s); len(w) > 0 {
 		sections = append(sections, w)
@@ -241,6 +246,16 @@ func identitySection(s *tape.RunSummary) []string {
 }
 
 func engineString(srv tape.ServerInfo) string {
+	// A generic OpenAI-compatible server names its protocol, not its engine
+	// (TTP-99): the kind is what was observed, and the user's --engine text
+	// is a claim printed with that word — never copied into Kind, Build or
+	// Commit. Without a claim there is nothing to name after "openai".
+	if srv.Kind == tape.ServerOpenAI {
+		if claim := strings.TrimSpace(srv.EngineClaim); claim != "" {
+			return "openai · claim: " + claim
+		}
+		return "openai · " + unknown
+	}
 	kind := string(srv.Kind)
 	if kind == "" || srv.Kind == tape.ServerUnknown {
 		kind = unknown
@@ -406,12 +421,24 @@ func speedSection(s *tape.RunSummary) []string {
 func decodeParts(s *tape.RunSummary) []string {
 	t := s.Timings
 	var parts []string
-	if s.Concurrency > 1 && s.Aggregate.AggregatePredictedPerSecond > 0 {
+	// An uncounted run prints "?" in place of the rate (TTP-99): the chunk
+	// count beside it is not a token count, so no figure may stand where a
+	// rate does. Bare "?" rather than "? tok/s" — the unit belongs to a
+	// number that was measured.
+	if t.PredictedNSource == "chunks" {
+		parts = append(parts, unknown)
+	} else if s.Concurrency > 1 && s.Aggregate.AggregatePredictedPerSecond > 0 {
 		parts = append(parts,
 			formatRateUnit(s.Aggregate.AggregatePredictedPerSecond)+" aggregate",
 			formatRateUnit(t.PredictedPerSecond)+" each")
 	} else {
 		parts = append(parts, formatRateUnit(t.PredictedPerSecond))
+	}
+	// A client-timed run names its clock beside the headline (TTP-99): after
+	// the rate, before the bandwidth, as its own part so it survives wrapping
+	// beside the figure it qualifies.
+	if t.Source == "client" {
+		parts = append(parts, "client-timed")
 	}
 	if bw := bandwidthString(s); bw != "" {
 		parts = append(parts, bw)
@@ -1324,9 +1351,13 @@ func GPUThrottled(g tape.GPUSample) bool {
 // engine's (-gs, -mcs, ...), and rendering it through the llama.cpp token
 // set would print five "?"-shaped holes where named flags should be and teach
 // flags the run never had (2026-09-15; generalised to every named engine
-// 2026-09-17, TTP-105). Every known kind keeps its flags — the question is
-// what the argv means, not whether it was read.
-func LlamaCPPFlags(srv tape.ServerInfo) bool { return !srv.Kind.SelfDeclared() }
+// 2026-09-17, TTP-105). A generic OpenAI-compatible server (TTP-99) has no
+// argv at all — nothing llama-shaped was ever run over it — so it is false
+// there too. Every known kind keeps its flags — the question is what the
+// argv means, not whether it was read.
+func LlamaCPPFlags(srv tape.ServerInfo) bool {
+	return srv.Kind.SpeaksLlamaProtocol() && !srv.Kind.SelfDeclared()
+}
 
 // flagsSection renders the flag line.
 //
@@ -1341,6 +1372,13 @@ func LlamaCPPFlags(srv tape.ServerInfo) bool { return !srv.Kind.SelfDeclared() }
 // element per string the engine reported, joined with single spaces the way it
 // would be retyped. "?" when the engine named no arguments at all.
 func flagsSection(s *tape.RunSummary) []string {
+	// A generic OpenAI-compatible server's flags block is omitted entirely
+	// (TTP-99): PID 0, no argv, zero flags — neither the llama.cpp row (five
+	// "?" that teach flags the run never had) nor the engine's verbatim argv
+	// (there is none) says anything true. Text drops the section; see below.
+	if s.Server.Kind == tape.ServerOpenAI {
+		return nil
+	}
 	if !LlamaCPPFlags(s.Server) {
 		args := s.Server.Flags.Other
 		if len(args) == 0 {

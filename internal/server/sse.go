@@ -233,8 +233,14 @@ type recorder struct {
 	reasoningN int
 	cached     int
 	sawCached  bool
-	errMsg     string
-	done       bool
+	// usage is the final chunk's stream_options.include_usage object, when
+	// the server sent one. It is the token count on a server that reports no
+	// timings (TTP-99): usage.completion_tokens becomes PredictedN with
+	// PredictedNSource "usage", and its absence means chunks are counted
+	// instead — never tokens.
+	usage  *chunkUsage
+	errMsg string
+	done   bool
 	// last is the arrival of the most recent event, used to synthesise a time
 	// for events that carry no timings of their own.
 	last time.Duration
@@ -315,6 +321,15 @@ func (r *recorder) apply(c *streamChunk, t time.Duration) {
 		r.cached = u.PromptTokensDetails.CachedTokens
 		r.sawCached = true
 	}
+	// The last usage object wins: usage arrives on the final chunk, and a
+	// repeated one can only be the server restating it. A negative
+	// completion count is kept and refused at finish — it is a malformed
+	// figure, not a count, and finish is the one place that decides what
+	// PredictedN becomes.
+	if c.Usage != nil {
+		u := *c.Usage
+		r.usage = &u
+	}
 	for i := range c.Choices {
 		ch := &c.Choices[i]
 		if ch.FinishReason != nil && *ch.FinishReason != "" {
@@ -382,6 +397,24 @@ func (r *recorder) finish(sentAt time.Time, activeBytesPerToken int64) (*tape.Re
 		// stream_options.include_usage reports the same figure as timings.cache_n
 		// on builds that do not fill the latter.
 		rec.Timings.CacheN = r.cached
+	}
+	// No timings object arrived: the server does not report its own figures,
+	// so the recorder's clock is the record (TTP-99). Source "client" says
+	// so, and Reduce — which branches on exactly this — derives the rates
+	// from the client timeline instead of falling back silently. The token
+	// count is the final chunk's usage.completion_tokens ("usage"); without
+	// it the chunk count is kept with PredictedNSource "chunks", and lesson
+	// 1 holds: chunks are not tokens, so no rate is derived from them.
+	// A zero or negative completion count is no usage figure at all.
+	if !r.sawTimings {
+		rec.Timings.Source = "client"
+		if r.usage != nil && r.usage.CompletionTokens > 0 {
+			rec.Timings.PredictedN = r.usage.CompletionTokens
+			rec.Timings.PredictedNSource = "usage"
+		} else {
+			rec.Timings.PredictedN = len(rec.Tokens)
+			rec.Timings.PredictedNSource = "chunks"
+		}
 	}
 	rec.Timings = Reduce(rec, sentAt, activeBytesPerToken)
 	rec.Cache = CacheVerdict(rec.Timings, 0, rec.Timings.PredictedN)

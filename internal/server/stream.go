@@ -59,6 +59,15 @@ type StreamRequest struct {
 	// inference like that is right until the day another caller builds the
 	// requests, and then it is silently wrong on a field search groups by.
 	Set string
+	// Protocol is the server this request is shaped for. "" (or any kind
+	// that speaks the llama protocol) builds today's body; tape.ServerOpenAI
+	// builds the generic OpenAI-compatible one (TTP-99): only model,
+	// messages, stream, stream_options.include_usage, max_tokens when set,
+	// and Params. timings_per_token and return_progress are left off —
+	// strict vLLM builds reject unknown top-level fields with 400, and
+	// neither field is worth that risk where no timings object exists to
+	// fill anyway.
+	Protocol tape.ServerKind
 }
 
 // SentMaxTokens is the generation cap this request will actually carry.
@@ -147,10 +156,36 @@ func (r StreamRequest) Body() map[string]any {
 	if r.IsCompletion() {
 		return r.completionBody()
 	}
+	if r.Protocol == tape.ServerOpenAI {
+		return r.openaiBody()
+	}
 	body := map[string]any{
 		"timings_per_token": true,
 		"return_progress":   true,
 		"stream_options":    map[string]any{"include_usage": true},
+	}
+	if r.Model != "" {
+		body["model"] = r.Model
+	}
+	if r.MaxTokens > 0 {
+		body["max_tokens"] = r.MaxTokens
+	}
+	for k, v := range r.Params {
+		body[k] = v
+	}
+	body["messages"] = r.Messages
+	body["stream"] = true
+	return body
+}
+
+// openaiBody is the request body for a generic OpenAI-compatible server
+// (TTP-99): model, messages, stream, stream_options.include_usage, max_tokens
+// when set, and Params — and nothing llama-shaped. model is required by these
+// servers; the recorder defaults it to the first /v1/models id when the user
+// gave none, so an empty Model here means a server that listed nothing.
+func (r StreamRequest) openaiBody() map[string]any {
+	body := map[string]any{
+		"stream_options": map[string]any{"include_usage": true},
 	}
 	if r.Model != "" {
 		body["model"] = r.Model

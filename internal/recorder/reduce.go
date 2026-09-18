@@ -43,6 +43,10 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 	} else {
 		agg = server.Aggregate(recs)
 	}
+	// server.Aggregate reads the records' own figures; the client-timed
+	// corrections below are the recorder's, because they depend on the run's
+	// mode rather than on the streams alone.
+	fixClientAggregate(recs, &agg)
 	agg.SlotsBusyMax = slotsBusyMax(samples)
 
 	mem := procmon.Summarize(samples, timeline, st.firstTokenIndex())
@@ -101,6 +105,12 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		Warnings:  r.warnings,
 	}
 	summary.Server.Build, summary.Server.Commit = r.build, r.commit
+	// The user's word about the engine, kept only where the server did not
+	// name one itself (TTP-99): on a ServerOpenAI run it is the claim every
+	// surface prints as one, everywhere else it is ignored.
+	if r.kind == tape.ServerOpenAI {
+		summary.Server.EngineClaim = r.opts.EngineClaim
+	}
 	if st.perRound > 0 {
 		// A --spec-n-max sweep groups its rounds by the value each was sent
 		// with (TTP-35). It is filled here, not after Record returns, so the
@@ -138,6 +148,11 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 	var (
 		out tape.TimingsSummary
 		n   float64
+		// allClient is whether every averaged stream was client-timed, and
+		// anyChunks whether any of them counted chunks instead of tokens
+		// (TTP-99): one uncounted stream poisons the run-level headline too.
+		allClient = true
+		anyChunks = false
 	)
 	// The draft figures are pooled rather than averaged (tape.TimingsSummary,
 	// TTP-30): accepted over drafted is a ratio, and the run's acceptance rate
@@ -152,6 +167,12 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 			continue
 		}
 		n++
+		if t.Source != "client" {
+			allClient = false
+		}
+		if t.PredictedNSource == "chunks" {
+			anyChunks = true
+		}
 		out.PromptN += t.PromptN
 		out.CacheN += t.CacheN
 		out.PredictedN += t.PredictedN
@@ -217,7 +238,62 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 	if out.PredictedN >= tape.MinDecodeTokens {
 		out.DecodeLabel = "decode"
 	}
+	// The client-timed provenance travels to run level with the figures
+	// (TTP-99): a run of client-timed streams is Source "client", and one
+	// uncounted stream poisons the run-level decode headline to "?" — its
+	// chunk count must not average into a token rate. Agreement is forced
+	// false on a client run: the means are two readings of one clock, and
+	// calling that agreement would claim a server confirmed them.
+	if n > 0 && allClient {
+		out.Source = "client"
+		out.ClientAgreesWithServer = false
+		if anyChunks {
+			out.PredictedNSource = "chunks"
+			out.PredictedPerSecond = 0
+			out.ClientPredictedPerSecond = 0
+			out.DecodeLabel = "sample"
+			out.EffectiveBandwidthBytesPerSec = 0
+		} else {
+			out.PredictedNSource = "usage"
+		}
+	}
 	return out
+}
+
+// fixClientAggregate adjusts an aggregate server.Aggregate formed, for the
+// client-timed mode (TTP-99). It reads the same answered population
+// Aggregate does — streams with no error and at least one token:
+//
+//   - DisagreeingStreams is recounted without client-timed streams: their
+//     rate is the recorder's own clock, so there is no server figure to
+//     disagree with. On a run with no client-timed stream the recount is
+//     identical to Aggregate's, by construction.
+//   - One uncounted stream (PredictedNSource "chunks") poisons the aggregate
+//     rate to 0: its PredictedN is a chunk count, and a rate over the summed
+//     total would print chunks as if they were tokens.
+func fixClientAggregate(recs []tape.RequestRecord, agg *tape.AggregateTimings) {
+	d := 0
+	poisoned := false
+	for i := range recs {
+		r := &recs[i]
+		if r.Error != "" || len(r.Tokens) == 0 {
+			continue
+		}
+		t := r.Timings
+		if t.Source == "client" {
+			if t.PredictedNSource == "chunks" {
+				poisoned = true
+			}
+			continue
+		}
+		if t.PredictedPerSecond > 0 && t.ClientPredictedPerSecond > 0 && !t.ClientAgreesWithServer {
+			d++
+		}
+	}
+	agg.DisagreeingStreams = d
+	if poisoned {
+		agg.AggregatePredictedPerSecond = 0
+	}
 }
 
 // slotsBusyMax is the highest busy-slot count any sample saw.

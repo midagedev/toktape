@@ -413,3 +413,130 @@ func deviceNamesOf(p tape.PlacementSummary) []string {
 	}
 	return out
 }
+
+// TestRepresentativeTimingsCarriesClientProvenance (TTP-99, 2026-09-19).
+//
+// A run of client-timed streams is Source "client" at run level, and one
+// uncounted stream poisons the run-level headline: its chunk count must not
+// average into a token rate, and the means must not agree with each other —
+// they are two readings of one clock, and calling that agreement would claim
+// a server confirmed them.
+func TestRepresentativeTimingsCarriesClientProvenance(t *testing.T) {
+	usage := func(n int, rate float64) tape.RequestRecord {
+		return tape.RequestRecord{Timings: tape.TimingsSummary{
+			Source: "client", PredictedNSource: "usage",
+			PredictedN:               n,
+			PredictedPerSecond:       rate,
+			ClientPredictedPerSecond: rate,
+			TTFTMs:                   120,
+		}}
+	}
+	chunks := func(n int) tape.RequestRecord {
+		return tape.RequestRecord{Timings: tape.TimingsSummary{
+			Source: "client", PredictedNSource: "chunks", PredictedN: n,
+			DecodeLabel: "sample",
+		}}
+	}
+
+	t.Run("all usage streams stay client", func(t *testing.T) {
+		got := representativeTimings([]tape.RequestRecord{usage(40, 50), usage(44, 52)})
+		if got.Source != "client" || got.PredictedNSource != "usage" {
+			t.Errorf("got %q/%q, want client/usage", got.Source, got.PredictedNSource)
+		}
+		if got.ClientAgreesWithServer {
+			t.Error("ClientAgreesWithServer = true, want false (nothing to agree with)")
+		}
+		if got.PredictedPerSecond <= 0 {
+			t.Errorf("PredictedPerSecond = %v, want the mean client rate", got.PredictedPerSecond)
+		}
+	})
+
+	t.Run("one uncounted stream poisons the headline", func(t *testing.T) {
+		// FAIL-first: without the poison the mean averaged 40 usage tokens
+		// with 6 chunks and printed a rate over the mix.
+		got := representativeTimings([]tape.RequestRecord{usage(40, 50), chunks(6)})
+		if got.PredictedNSource != "chunks" {
+			t.Errorf("PredictedNSource = %q, want chunks", got.PredictedNSource)
+		}
+		if got.PredictedPerSecond != 0 || got.ClientPredictedPerSecond != 0 {
+			t.Errorf("rates = %v/%v, want 0/0", got.PredictedPerSecond, got.ClientPredictedPerSecond)
+		}
+		if got.DecodeLabel != "sample" {
+			t.Errorf("DecodeLabel = %q, want sample", got.DecodeLabel)
+		}
+	})
+
+	t.Run("a server-timed run is untouched", func(t *testing.T) {
+		got := representativeTimings([]tape.RequestRecord{usage(40, 50), {
+			Timings: tape.TimingsSummary{PredictedN: 40, PredictedPerSecond: 50},
+		}})
+		if got.Source != "" || got.PredictedNSource != "" {
+			t.Errorf("got %q/%q, want empty/empty", got.Source, got.PredictedNSource)
+		}
+	})
+}
+
+// TestFixClientAggregate (TTP-99, 2026-09-19): the recorder-side correction
+// over server.Aggregate's figures.
+func TestFixClientAggregate(t *testing.T) {
+	answered := func(tim tape.TimingsSummary) tape.RequestRecord {
+		return tape.RequestRecord{
+			Tokens:  []tape.TokenEvent{{T: 0}, {T: 1}},
+			Timings: tim,
+		}
+	}
+
+	t.Run("client usage streams never disagree", func(t *testing.T) {
+		recs := []tape.RequestRecord{
+			answered(tape.TimingsSummary{Source: "client", PredictedNSource: "usage",
+				PredictedN: 40, PredictedPerSecond: 50, ClientPredictedPerSecond: 50}),
+		}
+		agg := server.Aggregate(recs)
+		if agg.DisagreeingStreams != 1 {
+			t.Fatalf("server.Aggregate disagrees = %d, want 1 (the guard lives recorder-side)", agg.DisagreeingStreams)
+		}
+		fixClientAggregate(recs, &agg)
+		// FAIL-first: without the recount a usage run carried
+		// DisagreeingStreams 1 — one clock disagreeing with itself.
+		if agg.DisagreeingStreams != 0 {
+			t.Errorf("DisagreeingStreams = %d, want 0", agg.DisagreeingStreams)
+		}
+		if agg.AggregatePredictedPerSecond <= 0 {
+			t.Errorf("aggregate rate = %v, want it kept (usage counts are tokens)", agg.AggregatePredictedPerSecond)
+		}
+	})
+
+	t.Run("one chunks stream poisons the aggregate rate", func(t *testing.T) {
+		recs := []tape.RequestRecord{
+			answered(tape.TimingsSummary{Source: "client", PredictedNSource: "usage",
+				PredictedN: 40, PredictedPerSecond: 50, ClientPredictedPerSecond: 50}),
+			answered(tape.TimingsSummary{Source: "client", PredictedNSource: "chunks",
+				PredictedN: 6, DecodeLabel: "sample"}),
+		}
+		agg := server.Aggregate(recs)
+		if agg.AggregatePredictedPerSecond <= 0 {
+			t.Fatalf("precondition: uncorrected aggregate rate = %v, want >0", agg.AggregatePredictedPerSecond)
+		}
+		fixClientAggregate(recs, &agg)
+		// FAIL-first: without the poison the aggregate read 46 tokens over
+		// the window — 6 of them chunks — as a decode rate.
+		if agg.AggregatePredictedPerSecond != 0 {
+			t.Errorf("AggregatePredictedPerSecond = %v, want 0", agg.AggregatePredictedPerSecond)
+		}
+	})
+
+	t.Run("a server-timed run is byte-identical", func(t *testing.T) {
+		recs := []tape.RequestRecord{
+			answered(tape.TimingsSummary{PredictedN: 40, PredictedPerSecond: 50,
+				ClientPredictedPerSecond: 51, ClientAgreesWithServer: true}),
+			answered(tape.TimingsSummary{PredictedN: 44, PredictedPerSecond: 52,
+				ClientPredictedPerSecond: 40, ClientAgreesWithServer: false}),
+		}
+		want := server.Aggregate(recs)
+		got := want
+		fixClientAggregate(recs, &got)
+		if got != want {
+			t.Errorf("fix moved a server-timed aggregate:\n%+v\n%+v", want, got)
+		}
+	})
+}

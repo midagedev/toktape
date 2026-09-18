@@ -100,6 +100,23 @@ func Reduce(rec *tape.RequestRecord, sentAt time.Time, activeBytesPerToken int64
 		out.ClientAgreesWithServer = RatesAgree(out.ClientPredictedPerSecond, out.PredictedPerSecond)
 	}
 
+	// A client-timed stream (TTP-99): the server reported no timings, so the
+	// recorder's clock is the record and Source says so. The server path
+	// below is never entered for it — not the label, not the silent client
+	// fallback — because neither was measured against a server figure.
+	//
+	// The token count is the final chunk's usage.completion_tokens
+	// (PredictedNSource "usage"), recalibrated over the observed window:
+	// the usage count, not the chunk count, over last-minus-first chunk.
+	// Without a usage figure (PredictedNSource "chunks") the chunk count is
+	// kept and no rate is derived at all — chunks are not tokens (lesson 1).
+	// TTFT and the ITL percentiles are still measured: they are per-chunk
+	// latencies and TTFT, honestly labelled. There is nothing to agree with,
+	// so ClientAgreesWithServer stays false.
+	if out.Source == "client" {
+		return reduceClientTimed(out, toks, activeBytesPerToken)
+	}
+
 	// Label from the server's token count, falling back to what we saw, so a
 	// long stream from a build without timings is not mislabelled "sample".
 	n := out.PredictedN
@@ -117,6 +134,41 @@ func Reduce(rec *tape.RequestRecord, sentAt time.Time, activeBytesPerToken int64
 	}
 	if activeBytesPerToken > 0 && rate > 0 {
 		out.EffectiveBandwidthBytesPerSec = int64(float64(activeBytesPerToken) * rate)
+	}
+	return out
+}
+
+// reduceClientTimed completes a client-timed summary: out already carries
+// TTFT, the per-chunk ITL percentiles, ReasoningN and the client prompt
+// figure from Reduce's shared head, plus the PredictedN/PredictedNSource
+// finish() set. It sets the label, the recalibrated rates and the bandwidth,
+// and nothing else.
+func reduceClientTimed(out tape.TimingsSummary, toks []tape.TokenEvent, activeBytesPerToken int64) tape.TimingsSummary {
+	out.PromptPerSecond = 0 // TTFT is not a prefill measurement
+	out.ClientAgreesWithServer = false
+	out.PredictedPerSecond = 0
+	out.ClientPredictedPerSecond = 0
+	out.EffectiveBandwidthBytesPerSec = 0
+	if out.PredictedNSource == "usage" && out.PredictedN > 0 {
+		out.DecodeLabel = "sample"
+		if out.PredictedN >= tape.MinDecodeTokens {
+			out.DecodeLabel = "decode"
+		}
+		if len(toks) >= 2 {
+			if window := toks[len(toks)-1].T - toks[0].T; window > 0 && out.PredictedN > 1 {
+				rate := float64(out.PredictedN-1) / window.Seconds()
+				out.ClientPredictedPerSecond = rate
+				out.PredictedPerSecond = rate
+			}
+		}
+	} else {
+		// No usage figure: the chunk count is not a token count.
+		out.PredictedN = len(toks)
+		out.PredictedNSource = "chunks"
+		out.DecodeLabel = "sample"
+	}
+	if out.PredictedPerSecond > 0 && activeBytesPerToken > 0 {
+		out.EffectiveBandwidthBytesPerSec = int64(float64(activeBytesPerToken) * out.PredictedPerSecond)
 	}
 	return out
 }

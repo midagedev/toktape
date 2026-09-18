@@ -94,6 +94,16 @@ const (
 	// CodeClientDisagrees: the client-side rate and the server's own differ by
 	// more than tape.RateTolerance (lesson 1).
 	CodeClientDisagrees = "client_disagrees_with_server"
+	// CodeClientTimed: the server reported no timings, so every rate here is
+	// the recorder's clock over the stream — not the engine's own count
+	// (TTP-99, 2026-09-19). Severity run: the figures are what they say, but
+	// a client-timed run compares only with other client-timed runs.
+	CodeClientTimed = "client_timed"
+	// CodeTokensUncounted: the server sent no usage figure, so the counted
+	// chunks are not a token count and no decode rate is printed (TTP-99,
+	// 2026-09-19). Severity run: the headline is absent, not wrong, but a
+	// run without a decode figure compares with nothing on it.
+	CodeTokensUncounted = "tokens_uncounted"
 	// CodeThinkingIgnored: the request asked for thinking off and the run
 	// reasoned anyway (TTP-106, 2026-09-17). llama-server drops a request's
 	// chat_template_kwargs unless it was started with --jinja, and reports
@@ -192,6 +202,13 @@ const (
 // between the two clocks, the recorder's own caveats, a contended or drifting
 // box, a run the clock cut. Each leaves every figure a real reading; what they
 // cost is comparability with the next card. The last is a missing view.
+//
+// client_timed and tokens_uncounted sit directly under client_disagrees
+// (TTP-99, 2026-09-19): they are the same family — what the two clocks can
+// and cannot say — one step further out. A client-timed run has only one
+// clock, so there is nothing to disagree with, only a narrower comparison
+// set; an uncounted run has no decode figure at all, which costs more than a
+// narrow set and so ranks under it.
 var caveatRank = map[string]int{
 	CodeStreamsFailed:         0,
 	CodeStreamsNotConcurrent:  1,
@@ -203,12 +220,14 @@ var caveatRank = map[string]int{
 	CodeColdCache:             7,
 	CodeShortPromptForPrefill: 8,
 	CodeClientDisagrees:       9,
-	CodeThinkingIgnored:       10,
-	CodeRecorded:              11,
-	CodeMachineContended:      12,
-	CodeConditionsChanged:     13,
-	CodeRunCutByClock:         14,
-	CodeNoProcView:            15,
+	CodeClientTimed:           10,
+	CodeTokensUncounted:       11,
+	CodeThinkingIgnored:       12,
+	CodeRecorded:              13,
+	CodeMachineContended:      14,
+	CodeConditionsChanged:     15,
+	CodeRunCutByClock:         16,
+	CodeNoProcView:            17,
 }
 
 // MinPrefillPromptTokens is tape.MinPrefillPromptTokens, re-exported so this
@@ -394,13 +413,30 @@ func promptTokensPart(s *tape.RunSummary) string {
 //
 // ClientAgreesWithServer is false on a summary where neither rate was ever
 // measured, which is not a disagreement — it is two absences. Both rates have
-// to be present for the flag to be a reading.
+// to be present for the flag to be a reading. A client-timed run (TTP-99)
+// never disagrees either: its rate IS the client clock, so there is no
+// server figure to differ from, even though both rate fields are set.
 func clientDisagrees(s *tape.RunSummary) bool {
 	t := s.Timings
+	if t.Source == "client" {
+		return false
+	}
 	if t.PredictedPerSecond <= 0 || t.ClientPredictedPerSecond <= 0 {
 		return false
 	}
 	return !t.ClientAgreesWithServer
+}
+
+// clientTimed reports whether the run's headline rates are the recorder's own
+// clock: the server reported no timings (TTP-99).
+func clientTimed(s *tape.RunSummary) bool {
+	return s != nil && s.Timings.Source == "client"
+}
+
+// tokensUncounted reports whether the run counted stream chunks instead of
+// tokens: the server sent no usage figure (TTP-99), so no decode rate exists.
+func tokensUncounted(s *tape.RunSummary) bool {
+	return s != nil && s.Timings.PredictedNSource == "chunks"
 }
 
 // clientDisagreesText is the sentence for CodeClientDisagrees, which is two
@@ -496,12 +532,15 @@ func Caveats(s *tape.RunSummary) []Caveat {
 	if w := answerCutWarning(s); w != "" {
 		add(CodeAnswerCut, SeverityFigure, w)
 	}
-	if isSample(s) {
+	// An uncounted run stands aside from both shortness caveats (TTP-99):
+	// their sentences count tokens, and chunks are not tokens —
+	// tokens_uncounted below says what the count is.
+	if isSample(s) && !tokensUncounted(s) {
 		add(CodeShortGeneration, SeverityFigure, fmt.Sprintf(
 			"short generation: %s tokens is a sample, not a decode rate (under %d)",
 			formatInt(s.Timings.PredictedN), tape.MinDecodeTokens))
 	}
-	if shortStream(s) {
+	if shortStream(s) && !tokensUncounted(s) {
 		add(CodeShortStream, SeverityFigure, shortStreamText(s))
 	}
 	if s.Cache.Label == tape.CacheCold {
@@ -516,6 +555,15 @@ func Caveats(s *tape.RunSummary) []Caveat {
 	}
 	if text := clientDisagreesText(s); text != "" {
 		add(CodeClientDisagrees, SeverityRun, text)
+	}
+	if clientTimed(s) {
+		add(CodeClientTimed, SeverityRun,
+			"client-timed: the server reported no timings, so every rate here is the recorder's clock over the stream — not the engine's own count; compare only with other client-timed runs")
+	}
+	if tokensUncounted(s) {
+		add(CodeTokensUncounted, SeverityRun, fmt.Sprintf(
+			"tokens uncounted: the server sent no usage figure, so the %s stream chunks are not a token count and no decode rate is printed",
+			formatInt(s.Timings.PredictedN)))
 	}
 	if n := s.Sampling.ThoughtAnyway; n > 0 {
 		// Only the positive case speaks: a zero is "none seen", which on a

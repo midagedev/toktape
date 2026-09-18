@@ -57,6 +57,16 @@ Careful: -n is tokens, not streams
   because the streams past the slots measure queue wait, not concurrency.
   Both refusals are exit 1 with a hint that names the flag to use.
 
+Any OpenAI-compatible server, not just llama-server
+  --engine-kind openai attaches to whatever answers GET /v1/models with 200
+  (vLLM, SGLang, TabbyAPI, LM Studio, ...); auto (the default) tries /props
+  first and falls back to /v1/models only when /props answers 404/405.
+  Such a server reports no timings, so the recorder's own clock is the
+  record: the card says client-timed beside the decode rate, there are no
+  slots and no flags block, and --engine TEXT (e.g. "vLLM 0.11") names the
+  engine as a claim, printed with that word. --endpoint completion is
+  llama-server's raw endpoint and is refused with --engine-kind openai.
+
 Careful: one invocation can block for ten minutes
   --wait defaults to 10m, because a server loading a 450 GB model is the case
   worth waiting for. That is longer than most harnesses' command timeout. A

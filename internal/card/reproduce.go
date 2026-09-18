@@ -40,6 +40,13 @@ func Reproduce(s *tape.RunSummary) string {
 
 	b.WriteString("Recorded with:\n\n")
 	fmt.Fprintf(&b, "    %s\n\n", recordCommand(s))
+	// A generic OpenAI-compatible server's engine is the user's claim, not
+	// an argv toktape ever saw (TTP-99): it travels as a comment, never as
+	// a flag the next run would re-ask for.
+	if s.Server.Kind == tape.ServerOpenAI && strings.TrimSpace(s.Server.EngineClaim) != "" {
+		fmt.Fprintf(&b, "    # engine claim: %s (record with --engine %q)\n\n",
+			strings.TrimSpace(s.Server.EngineClaim), strings.TrimSpace(s.Server.EngineClaim))
+	}
 
 	if s.ID != "" {
 		fmt.Fprintf(&b, "Tape: `%s` (attach it and anyone can `toktape play` it)\n", s.ID+tape.Ext)
@@ -69,6 +76,13 @@ func recordCommand(s *tape.RunSummary) string {
 	parts := []string{"toktape"}
 	if u := strings.TrimSpace(s.Server.URL); u != "" {
 		parts = append(parts, "--url", u)
+	}
+	// A generic OpenAI-compatible run re-attaches only in its own mode
+	// (TTP-99): without the flag the next invocation would try /props first,
+	// which is a detour that still lands, but the command should say what
+	// the run was.
+	if s.Server.Kind == tape.ServerOpenAI {
+		parts = append(parts, "--engine-kind", "openai")
 	}
 	// Concurrency 1 is the default; printing "--sessions 1" would suggest the
 	// run was configured when it was not.

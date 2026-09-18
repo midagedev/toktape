@@ -137,6 +137,8 @@ type recordFlags struct {
 	noThink        *bool
 	thinkBudget    *int
 	endpoint       *string
+	engineKind     *string
+	engine         *string
 	params         *repeatedFlag
 	ramGBs         *float64
 	ramGBsMeasured *float64
@@ -199,6 +201,12 @@ func declareRecordFlags(fs *flag.FlagSet) *recordFlags {
 	// answer.
 	f.thinkBudget = fs.Int("think-budget", 0, "cap a reasoning model's thinking at N tokens (chat only)")
 	f.endpoint = fs.String("endpoint", tape.EndpointChat, "chat (templated) or completion (the prompt sent verbatim)")
+	// The generic OpenAI-compatible mode (TTP-99): which protocol to attach
+	// with, and what the user says the engine is on a server that does not
+	// say. The claim never fills kind, build or commit — every surface
+	// prints it with that word.
+	f.engineKind = fs.String("engine-kind", "auto", "server protocol: auto, llama or openai")
+	f.engine = fs.String("engine", "", "name the engine on an OpenAI-compatible server, e.g. \"vLLM 0.11\" (a claim)")
 	fs.Var(f.params, "param", "extra request parameter as key=value; repeatable")
 	// The host's memory bandwidth (TTP-45). On Linux the machine cannot be
 	// asked — see hostRAMOverride — so the operator may state it.
@@ -284,6 +292,20 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 		return c.usagef("toktape record: %v", err)
 	}
 
+	// The generic OpenAI-compatible mode (TTP-99): which protocol to speak,
+	// and what the user says the engine is on a server that does not say.
+	switch *f.engineKind {
+	case "auto", "llama", "openai":
+	default:
+		return c.usagef("toktape record: --engine-kind %s: use auto, llama or openai", *f.engineKind)
+	}
+	if *f.engine != "" && *f.engineKind == "llama" {
+		return c.usagef("toktape record: --engine names the engine, but a llama-server names itself; use it with --engine-kind openai (or auto)")
+	}
+	if sampling.endpoint == tape.EndpointCompletion && *f.engineKind == "openai" {
+		return c.usagef("toktape record: --endpoint completion is llama-server's raw endpoint; an OpenAI-compatible server has /v1/chat/completions only")
+	}
+
 	hostRAM, err := hostRAMOverride(fs, ramFlags{
 		gbs:         *f.ramGBs,
 		gbsMeasured: *f.ramGBsMeasured,
@@ -304,6 +326,8 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 		MaxTokens:    *f.nPredict,
 		Params:       sampling.params,
 		Endpoint:     sampling.endpoint,
+		EngineKind:   *f.engineKind,
+		EngineClaim:  *f.engine,
 		Version:      version,
 		WaitForModel: waitBudget(fs, *f.wait),
 		// Waiting for a server that is not listening yet is only done when
@@ -787,6 +811,10 @@ func headerLine(s *tape.RunSummary) string {
 	parts := []string{fmt.Sprintf("→ %s at %s", kind, s.Server.URL)}
 	if s.Server.Build != "" {
 		parts[0] += " (" + s.Server.Build + ")"
+	} else if s.Server.Kind == tape.ServerOpenAI {
+		// A generic OpenAI-compatible server reports no build (TTP-99):
+		// the line says "?" rather than leaving the version out.
+		parts[0] += " (?)"
 	}
 
 	// The model is card.ModelNameQuant — the model that ran, with the quant

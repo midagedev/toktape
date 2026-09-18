@@ -304,6 +304,15 @@ func (p *Props) ServerPID() int {
 // only by whether /health is ok.
 func (c *Client) Props(ctx context.Context) (*Props, error) {
 	body, hdr, status, err := c.getRaw(ctx, "/props")
+	// 404/405 is not "nothing is serving there": something answered, and its
+	// answer says it is not the llama-server protocol (TTP-99). It is still
+	// ErrUnreachable — every existing errors.Is keeps holding — but under
+	// ErrNoProps, so the generic OpenAI-compatible mode can try /v1/models
+	// on exactly this candidate and no other failure shape.
+	if err == nil && noPropsStatus(status) {
+		return nil, fmt.Errorf("%w: %s: /props answered HTTP %d: %s",
+			ErrNoProps, c.baseURL, status, clip(strings.TrimSpace(string(body)), 200))
+	}
 	health := 0
 	if err != nil && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
 		health = c.healthStatus(ctx)
@@ -663,6 +672,7 @@ func (c *Client) Discover(ctx context.Context, candidates []string) (string, err
 	order = append(order, candidates...)
 
 	var firstErr, loadingErr error
+	var noProps []string
 	for _, raw := range order {
 		u := NormalizeBaseURL(raw)
 		if u == "" || seen[u] {
@@ -682,12 +692,26 @@ func (c *Client) Discover(ctx context.Context, candidates []string) (string, err
 			if loadingErr == nil && (errors.Is(err, ErrLoading) || errors.Is(err, ErrBusy)) {
 				loadingErr = err
 			}
+			// A candidate that answered 404/405 on /props may still be an
+			// OpenAI-compatible server (TTP-99). It is collected for the
+			// second pass below rather than tried now, so a /props server
+			// listed anywhere still wins over a /v1/models one.
+			if errors.Is(err, ErrNoProps) {
+				noProps = append(noProps, u)
+			}
 			continue
 		}
 		return u, nil
 	}
 	if loadingErr != nil {
 		return "", fmt.Errorf("server: discover: %w", loadingErr)
+	}
+	// Second pass, in candidate order: the first candidate that 404'd /props
+	// and answers /v1/models is found.
+	for _, u := range noProps {
+		if _, err := c.WithBaseURL(u).Models(ctx); err == nil {
+			return u, nil
+		}
 	}
 	if firstErr == nil {
 		return "", fmt.Errorf("%w: server: discover: no candidates to probe", ErrUnreachable)

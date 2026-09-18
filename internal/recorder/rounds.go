@@ -89,6 +89,13 @@ func roundPrefill(rr []tape.RequestRecord) (promptN int, perSecond float64) {
 // recordRounds is Record from the first request on, for a multi-round run.
 func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 	rounds := roundRequests(r.opts, r.model.ActiveBytesPerToken)
+	for k := range rounds {
+		if shaped, err := r.shapeOpenAIRequests(rounds[k]); err != nil {
+			return nil, err
+		} else {
+			rounds[k] = shaped
+		}
+	}
 	if len(rounds) > 0 {
 		r.promptSet = promptSetOf(rounds[0])
 	}
@@ -349,6 +356,7 @@ func reduceRounds(recs []tape.RequestRecord, names []string, streams int) (tape.
 	per := make([]tape.RoundSummary, len(names))
 	for k, rr := range byRound {
 		a := server.Aggregate(rr)
+		fixClientAggregate(rr, &a)
 		wallMs += a.WallMs
 		// The run's peak is the lowest per-round peak above zero: one serial
 		// round already makes the aggregate a queue, and 0 when no round had
@@ -407,6 +415,10 @@ func reduceRounds(recs []tape.RequestRecord, names []string, streams int) (tape.
 	if promptSec > 0 {
 		agg.AggregatePromptPerSecond = float64(promptToks) / promptSec
 	}
+	// The recombined rate sums per-round totals, which may mix chunk counts
+	// in — so the correction is re-applied over every record (idempotent),
+	// not only over the rounds' own already-corrected rates.
+	fixClientAggregate(recs, &agg)
 
 	if len(names) < 2 {
 		return agg, nil, nil

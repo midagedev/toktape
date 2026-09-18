@@ -685,3 +685,182 @@ func TestRecordVerbRawRefusesAConversation(t *testing.T) {
 		t.Errorf("exit %d, stderr %q, want a usage error naming round 2", code, stderr)
 	}
 }
+
+// openaiCLIServer is a generic OpenAI-compatible fake for the record verb:
+// 404 on /props and /slots, a one-model /v1/models listing, and a chat route
+// that streams nTokens one-word deltas with a final usage chunk and records
+// every body it received.
+func openaiCLIServer(t *testing.T, nTokens, usageTokens int) (*httptest.Server, func() []map[string]any) {
+	t.Helper()
+	var mu sync.Mutex
+	var bodies []map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/props", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/slots", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"cli-model","object":"model"}]}`))
+	})
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		bodies = append(bodies, body)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		emit := func(payload string) {
+			_, _ = w.Write([]byte("data: " + payload + "\n\n"))
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		for i := 0; i < nTokens; i++ {
+			emit(`{"choices":[{"index":0,"delta":{"content":"w"}}]}`)
+		}
+		emit(`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":` + itoa(usageTokens) + `}}`)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv, func() []map[string]any {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]map[string]any(nil), bodies...)
+	}
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		b[i] = '-'
+	}
+	return string(b[i:])
+}
+
+// TestRecordVerbEngineKindFlags: --engine-kind values, --engine with llama,
+// and the completion refusal on openai (TTP-99).
+func TestRecordVerbEngineKindFlags(t *testing.T) {
+	hermetic(t)
+	srv, _ := openaiCLIServer(t, 40, 40)
+	out := t.TempDir()
+
+	// An unknown kind is a usage error, not a silent auto.
+	// FAIL-first: the recorder accepted any string and behaved as auto.
+	if code, _, stderr := exec(t, "--url", srv.URL, "--out", out, "--engine-kind", "vllm"); code != exitUsage {
+		t.Errorf("exit %d, want %d\n%s", code, exitUsage, stderr)
+	}
+
+	// --engine with --engine-kind llama: a llama-server names itself.
+	if code, _, stderr := exec(t, "--url", srv.URL, "--out", out,
+		"--engine-kind", "llama", "--engine", "vLLM 0.11"); code != exitUsage {
+		t.Errorf("exit %d, want %d\n%s", code, exitUsage, stderr)
+	} else if !strings.Contains(stderr, "--engine") {
+		t.Errorf("the rejection does not name --engine:\n%s", stderr)
+	}
+
+	// --endpoint completion with --engine-kind openai is refused before any
+	// request is sent.
+	if code, _, stderr := exec(t, "--url", srv.URL, "--out", out,
+		"--engine-kind", "openai", "--endpoint", "completion"); code != exitUsage {
+		t.Errorf("exit %d, want %d\n%s", code, exitUsage, stderr)
+	} else if !strings.Contains(stderr, "/v1/chat/completions") {
+		t.Errorf("the refusal does not name the OpenAI route:\n%s", stderr)
+	}
+
+	// Both flags are documented in the record usage text.
+	if code, help, _ := exec(t, "record", "--help"); code != exitOK {
+		t.Fatalf("record --help exit %d", code)
+	} else if !strings.Contains(help, "--engine-kind") || !strings.Contains(help, "--engine TEXT") {
+		t.Errorf("record --help documents neither flag:\n%s", help)
+	}
+}
+
+// TestRecordVerbOpenAIEndToEnd: the record verb against a non-llama server —
+// the tape's kind and claim, the wire without llama fields, and the card's
+// client-timed label on stdout.
+func TestRecordVerbOpenAIEndToEnd(t *testing.T) {
+	hermetic(t)
+	srv, bodies := openaiCLIServer(t, 40, 40)
+	out := t.TempDir()
+
+	code, stdout, stderr := exec(t,
+		"--url", srv.URL, "--out", out, "--quiet",
+		"--engine-kind", "openai", "--engine", "vLLM 0.11",
+		"--prompt", "Say hi.", "--n-predict", "64")
+	if code != exitOK {
+		t.Fatalf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	sent := bodies()
+	if len(sent) != 1 {
+		t.Fatalf("got %d requests, want 1", len(sent))
+	}
+	for _, k := range []string{"timings_per_token", "return_progress"} {
+		if _, ok := sent[0][k]; ok {
+			t.Errorf("the wire carries %q: %v", k, sent[0])
+		}
+	}
+	if sent[0]["model"] != "cli-model" {
+		t.Errorf("wire model = %v, want the /v1/models id", sent[0]["model"])
+	}
+
+	tapes, err := filepath.Glob(filepath.Join(out, "*"+tape.Ext))
+	if err != nil || len(tapes) != 1 {
+		t.Fatalf("run files = %v (err %v), want one tape", tapes, err)
+	}
+	tp, err := tape.Read(tapes[0])
+	if err != nil {
+		t.Fatalf("read tape: %v", err)
+	}
+	if tp.Summary.Server.Kind != tape.ServerOpenAI {
+		t.Errorf("Kind = %q, want openai", tp.Summary.Server.Kind)
+	}
+	if tp.Summary.Server.EngineClaim != "vLLM 0.11" {
+		t.Errorf("EngineClaim = %q, want the claim", tp.Summary.Server.EngineClaim)
+	}
+	if tp.Summary.Timings.Source != "client" || tp.Summary.Timings.PredictedNSource != "usage" {
+		t.Errorf("Source = %q/%q, want client/usage",
+			tp.Summary.Timings.Source, tp.Summary.Timings.PredictedNSource)
+	}
+	if !strings.Contains(stdout, "client-timed") {
+		t.Errorf("the printed card lacks client-timed:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "openai · claim: vLLM 0.11") {
+		t.Errorf("the printed card lacks the claim engine line:\n%s", stdout)
+	}
+}
+
+// TestHeaderLineOpenAI: the attach line prints openai for the kind and ? for
+// the build a generic server never reports.
+func TestHeaderLineOpenAI(t *testing.T) {
+	got := headerLine(&tape.RunSummary{
+		Server: tape.ServerInfo{Kind: tape.ServerOpenAI, URL: "http://127.0.0.1:8000"},
+	})
+	if !strings.Contains(got, "openai") {
+		t.Errorf("headerLine = %q, want the openai kind", got)
+	}
+	if !strings.Contains(got, "(?)") {
+		t.Errorf("headerLine = %q, want ? for the unreported build", got)
+	}
+}

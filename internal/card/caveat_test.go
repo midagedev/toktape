@@ -144,6 +144,20 @@ func caveatCases() []caveatCase {
 		code:   CodeClientDisagrees,
 		mutate: func(s *tape.RunSummary) { s.Timings.ClientAgreesWithServer = false },
 	}, {
+		// TTP-99: the server reported no timings, so the recorder's clock is
+		// the record. Flipping Source alone must raise exactly this: the
+		// clientDisagrees guard stands aside for a run with one clock.
+		code:   CodeClientTimed,
+		mutate: func(s *tape.RunSummary) { s.Timings.Source = "client" },
+		onCard: "client-timed",
+	}, {
+		// TTP-99: the server sent no usage figure, so chunks were counted.
+		// The count is not a token count; the shortness caveats stand aside
+		// (their sentences count tokens), so exactly this fires.
+		code:   CodeTokensUncounted,
+		mutate: func(s *tape.RunSummary) { s.Timings.PredictedNSource = "chunks" },
+		onCard: "tokens uncounted",
+	}, {
 		// TTP-106: thinking off was sent and the streams reasoned anyway,
 		// which is what llama-server does with chat_template_kwargs when it
 		// was started without --jinja. The count is the recorder's, taken at
@@ -302,7 +316,14 @@ func TestTheCaveatLineIsALineAndNotAWall(t *testing.T) {
 		}
 	}
 	if n := len(rest) - maxCaveatCodesListed; n > 0 {
-		if want := fmt.Sprintf("+%d more", n); !strings.Contains(joined, want) {
+		// Compared wrap-insensitively (2026-09-19, TTP-99): "+N more" is two
+		// words, so the card may wrap between them — and with the longer
+		// code list it does ("· +6" / "  more"). The gutter then puts three
+		// spaces where the sentence has one. hasWrapped normalises the same
+		// way for sentences; FAIL-first: joining the raw block fails now
+		// that the combined fixture wraps there.
+		flat := strings.Join(strings.Fields(joined), " ")
+		if want := fmt.Sprintf("+%d more", n); !strings.Contains(flat, want) {
 			t.Errorf("the line does not say %q:\n%s", want, joined)
 		}
 	}
@@ -655,6 +676,7 @@ func TestStreamsNotConcurrentRanksDirectlyUnderStreamsFailed(t *testing.T) {
 		CodeStreamsFailed, CodeStreamsNotConcurrent, CodePlacementContradicted,
 		CodeBandwidthOverCeiling, CodeAnswerCut, CodeShortGeneration,
 		CodeShortStream, CodeColdCache, CodeShortPromptForPrefill, CodeClientDisagrees,
+		CodeClientTimed, CodeTokensUncounted,
 		CodeThinkingIgnored,
 		CodeRecorded, CodeMachineContended, CodeConditionsChanged, CodeRunCutByClock,
 		CodeNoProcView,

@@ -43,18 +43,32 @@ func LlamaBenchTable(s *tape.RunSummary) string {
 		fa = flagValue(s.Server.Flags.FlashAttn, argvObserved(s.Server))
 	}
 
+	// A client-timed run's tg figure is the recorder's clock, not the
+	// engine's own count (TTP-99): the row carries a "*" and the footnote
+	// says so, so the table stays pastable without silently equating the two
+	// clocks.
+	clientTimed := s.Timings.Source == "client"
+
 	var b strings.Builder
 	b.WriteString("| model | size | params | backend | ngl | fa | test | t/s |\n")
 	b.WriteString("| --- | ---: | ---: | --- | ---: | --- | --- | ---: |\n")
 	for _, r := range []struct {
 		test string
 		rate float64
+		star bool
 	}{
-		{"pp" + benchCount(s.Timings.PromptN), s.Timings.PromptPerSecond},
-		{"tg" + benchCount(s.Timings.PredictedN), s.Timings.PredictedPerSecond},
+		{"pp" + benchCount(s.Timings.PromptN), s.Timings.PromptPerSecond, false},
+		{"tg" + benchCount(s.Timings.PredictedN), s.Timings.PredictedPerSecond, clientTimed},
 	} {
+		cell := benchRate(r.rate)
+		if r.star {
+			cell += " *"
+		}
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | %s |\n",
-			model, size, params, backend, ngl, fa, r.test, benchRate(r.rate))
+			model, size, params, backend, ngl, fa, r.test, cell)
+	}
+	if clientTimed {
+		b.WriteString("\n* client-timed\n")
 	}
 	// Above one stream both counts are per-stream means (TTP-83, 2026-09-14).
 	// In llama-bench tg<N> is the tokens a test generated, and a mean of 10
