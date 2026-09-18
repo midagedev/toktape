@@ -17,6 +17,7 @@ import { deleteRun } from "./del.js";
 import { fail, json, publicBase } from "./http.js";
 import { serveCard, serveRunJSON, serveRunPage, serveTape } from "./run.js";
 import { searchAPI, searchPage } from "./search.js";
+import { robots, sitemap } from "./seo.js";
 import { uploadRun } from "./upload.js";
 
 // Both extensions are served: `.toktape` is where the format is going
@@ -60,6 +61,8 @@ export default {
     // The front page is the search: the thing a visitor came for is other
     // people's runs, not an explanation of the service.
     if (path === "/") return searchPage(request, env);
+    if (path === "/robots.txt") return robots(publicBase(request, env));
+    if (path === "/sitemap.xml") return sitemap(env, publicBase(request, env));
     return fail(404, "no such path on this service");
   },
 };

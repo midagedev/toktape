@@ -10,7 +10,7 @@
 // a door — the id is the secret (§9.3).
 
 import { fail, json } from "./http.js";
-import { esc, fmt, layout } from "./page.js";
+import { esc, fmt, head, layout } from "./page.js";
 
 export async function serveTape(id, env) {
   const row = await env.DB.prepare("SELECT tape_key, tape_ext FROM runs WHERE id = ?")
@@ -130,23 +130,26 @@ function runPage(row, idx, base) {
     ["ttft p50", idx.ttft_p50_ms, "ms"],
   ];
 
+  const pageURL = `${base}/r/${row.id}`;
   return layout({
-    title: `${title} — toktape`,
+    title: `${shareTitle(idx, title)} — toktape`,
+    // The preview is the card. Its title leads with the figure, because the
+    // figure is what the post is about and X truncates a title after two
+    // lines on a phone; the description carries the rest of the sentence.
     // og:image is absolute, because a crawler does not resolve a relative
     // one — and it is emitted only when there really is a card, so a link
-    // never promises a preview that 404s.
-    meta: `<meta property="og:title" content="${esc(title)}">
-<meta property="og:description" content="${esc(summaryLine(idx))}">
-<meta property="og:type" content="website">
-<meta property="og:url" content="${esc(base)}/r/${esc(row.id)}">${
-      row.card_key
-        ? `
-<meta property="og:image" content="${esc(base)}/r/${esc(row.id)}.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="675">
-<meta name="twitter:card" content="summary_large_image">`
-        : ""
-    }`,
+    // never promises a preview that 404s. An unlisted run asks the index to
+    // leave it out, in the head as well as in the header (§9.3).
+    meta: head({
+      title: shareTitle(idx, title),
+      description: shareDescription(idx, row),
+      url: pageURL,
+      image: row.card_key ? `${pageURL}.png` : "",
+      imageAlt: row.card_key ? `The toktape card for this run: ${summaryLine(idx)}` : "",
+      imageWidth: 1200,
+      imageHeight: 675,
+      noindex: row.private === 1,
+    }),
     style: PAGE_STYLE,
     body: `<div class="stage" data-tape="/r/${esc(row.id)}${esc(row.tape_ext)}">
 ${
@@ -313,6 +316,37 @@ function caveatBlock(idx) {
   return `<div class="caveats"><b>! ${idx.caveat_count} caveat${
     idx.caveat_count === 1 ? "" : "s"
   }</b> — ${codes}. The card that comes with this record spells each one out.</div>`;
+}
+
+// The preview's first line: the figure, then the model. "196 tok/s ·
+// Qwen2.5-7B-Instruct Q3_K_M" is a sentence a thread reader can act on;
+// the file name alone was not.
+function shareTitle(idx, fallback) {
+  const parts = [];
+  if (idx.decode_per_sec) parts.push(`${fmt(idx.decode_per_sec)} tok/s`);
+  parts.push(idx.model_id || idx.model_raw || fallback);
+  if (idx.quant_raw && !(idx.model_id || "").includes(idx.quant_raw)) parts.push(idx.quant_raw);
+  return parts.join(" · ");
+}
+
+// The preview's second line: where and how, then what the reader can do
+// with it. Every figure is the index row's, printed the way the card prints
+// it, and an unobserved one is left out rather than printed as a zero.
+function shareDescription(idx, row) {
+  const parts = [];
+  if (idx.sessions) parts.push(`${idx.sessions} concurrent stream${idx.sessions === 1 ? "" : "s"}`);
+  if (idx.gpu_id) parts.push(`on ${idx.gpu_count > 1 ? `${idx.gpu_count}× ` : ""}${idx.gpu_id}`);
+  else if (idx.gpus_raw && idx.gpus_raw.length) parts.push(`on ${idx.gpus_raw.join(" / ")}`);
+  const engine = [idx.engine_kind, idx.engine_version].filter(Boolean).join(" ");
+  if (engine) parts.push(`with ${engine}`);
+  const figures = [];
+  if (idx.prefill_per_sec) figures.push(`prefill ${fmt(idx.prefill_per_sec)} tok/s`);
+  if (idx.ttft_p50_ms) figures.push(`ttft p50 ${fmt(idx.ttft_p50_ms)} ms`);
+  if (idx.caveat_count) figures.push(`${idx.caveat_count} caveat${idx.caveat_count === 1 ? "" : "s"}`);
+  let s = parts.join(" ");
+  if (figures.length) s += (s ? " · " : "") + figures.join(" · ");
+  s += (s ? ". " : "") + "Replay the run in the browser, read the transcript, or download the record.";
+  return s;
 }
 
 function summaryLine(idx) {

@@ -14,8 +14,8 @@
 // Two scopes: everything public, and — with a journal token — mine, which is
 // the outward half of the local ledger (§9.2).
 
-import { fail, json } from "./http.js";
-import { esc, fmt, layout } from "./page.js";
+import { fail, json, publicBase } from "./http.js";
+import { esc, fmt, head, layout } from "./page.js";
 import { sha256Hex } from "./ids.js";
 
 const PAGE_SIZE = 30;
@@ -73,6 +73,15 @@ export async function searchPage(request, env) {
   return new Response(
     layout({
       title: "toktape — published runs",
+      // The front page is a search, and a filtered search is the same page:
+      // the canonical is the bare front page so a crawler indexes it once,
+      // and the run pages carry the model names into the index themselves.
+      meta: head({
+        title: "toktape — published LLM inference runs",
+        description:
+          "Recorded llama.cpp and vLLM runs with their tok/s, the card that qualifies each figure, and a replay in the browser. Search by model, quant, GPU and engine.",
+        url: `${publicBase(request, env)}/`,
+      }),
       style: PAGE_STYLE,
       body: `
 ${filterForm(url, facets)}

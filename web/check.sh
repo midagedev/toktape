@@ -36,6 +36,11 @@ cleanup() {
 trap cleanup EXIT
 
 say() { printf '\n== %s\n' "$1"; }
+# curl piped straight into grep -q is a race: grep exits on the first match,
+# curl gets SIGPIPE writing the rest, and pipefail reads that as a failed
+# check (2026-09-18: host.js grew past one buffer and "is not served"
+# started firing on a file that was served). So a body is fetched to a
+# file and the file is grepped.
 die() { printf 'web/check.sh: %s\n' "$1" >&2; exit 1; }
 
 say "building the client"
@@ -62,7 +67,7 @@ for _ in $(seq 1 60); do
   kill -0 "$dev_pid" 2>/dev/null || { cat "$work/dev.log"; die "wrangler dev exited"; }
   sleep 1
 done
-curl -fsS "$base/healthz" | grep -q '"live":true' ||
+curl -fsS "$base/healthz" >"$work/fetched" && grep -q '"live":true' "$work/fetched" ||
   { cat "$work/dev.log"; die "the dev server never answered /healthz"; }
 
 say "publish"
@@ -110,6 +115,19 @@ grep -q '<title>' "$work/page.html" || die "/r/<id> is not a page"
 # An og:image must be absolute or a crawler will not fetch it.
 grep -q "og:image\" content=\"$base/r/$id.png" "$work/page.html" ||
   { grep -o 'og:image[^>]*' "$work/page.html"; die "the page has no absolute og:image"; }
+# What X, Slack and a search engine each read: the twitter pair beside the
+# og pair, a title that leads with the figure, a description, a canonical.
+# One missing tag renders as a bare link with no error anywhere.
+for tag in 'name="twitter:card" content="summary_large_image"' 'name="twitter:image" content="'"$base/r/$id"'.png"' \
+  'property="og:image:alt"' 'name="twitter:title"' 'name="description"' 'rel="canonical" href="'"$base/r/$id"'"' \
+  'property="og:site_name" content="toktape"'; do
+  grep -q "$tag" "$work/page.html" || die "the page's head lacks $tag"
+done
+grep -q '<meta property="og:title" content="[0-9.]* tok/s · ' "$work/page.html" ||
+  { grep -o 'og:title[^>]*' "$work/page.html"; die "the share title does not lead with the figure"; }
+grep -q 'content="noindex"' "$work/page.html" && die "a public run asks not to be indexed"
+curl -fsS "$base/robots.txt" >"$work/fetched" && grep -q "^Sitemap: $base/sitemap.xml" "$work/fetched" || die "robots.txt does not name the sitemap"
+curl -fsS "$base/sitemap.xml" >"$work/fetched" && grep -q "<loc>$base/r/$id</loc>" "$work/fetched" || die "the sitemap does not list the run"
 curl -fsS "$base/r/$id.json" >"$work/row.json"
 grep -q '"schema": *1' "$work/row.json" || { cat "$work/row.json"; die "the index row is not there"; }
 
@@ -137,8 +155,8 @@ grep -q 'src="/player/host.js"' "$work/page.html" || die "the page does not load
 ctype=$(curl -fsS -o "$work/player.wasm" -w '%{content_type}' "$base/player/toktape.wasm")
 case "$ctype" in application/wasm*) ;; *) die "the wasm is served as $ctype" ;; esac
 [ "$(wc -c <"$work/player.wasm")" -gt 1000000 ] || die "what came back from /player/toktape.wasm is too small to be the player"
-curl -fsS "$base/player/wasm_exec.js" | grep -q 'globalThis.Go' || die "wasm_exec.js is not served"
-curl -fsS "$base/player/host.js" | grep -q 'data-tape' || die "host.js is not served"
+curl -fsS "$base/player/wasm_exec.js" >"$work/fetched" && grep -q 'globalThis.Go' "$work/fetched" || die "wasm_exec.js is not served"
+curl -fsS "$base/player/host.js" >"$work/fetched" && grep -q 'data-tape' "$work/fetched" || die "host.js is not served"
 # A path under /player/ that is not an asset falls through to the Worker
 # rather than into the asset handler's own 404, so a stale asset directory
 # cannot swallow a route this code owns.
@@ -155,19 +173,19 @@ grep -q '"caveat_count"' "$work/list.json" || die "a listing row dropped its cav
 curl -fsS "$base/api/v1/runs?sort=decode_per_sec" >"$work/sorted.json"
 cmp -s "$work/list.json" "$work/sorted.json" || die "a sort parameter changed the listing"
 # A filter on a normalised axis, and the raw fallback beside it.
-curl -fsS "$base/api/v1/runs?engine=ik_llama.cpp" | grep -q "\"id\":\"$id\"" ||
+curl -fsS "$base/api/v1/runs?engine=ik_llama.cpp" >"$work/fetched" && grep -q "\"id\":\"$id\"" "$work/fetched" ||
   die "filtering by engine dropped the run"
-curl -fsS "$base/api/v1/runs?engine=vllm" | grep -q "\"runs\":\[\]" ||
+curl -fsS "$base/api/v1/runs?engine=vllm" >"$work/fetched" && grep -q "\"runs\":\[\]" "$work/fetched" ||
   die "filtering by an engine nothing ran returned rows"
-curl -fsS "$base/api/v1/runs?q=Qwen3.6" | grep -q "\"id\":\"$id\"" ||
+curl -fsS "$base/api/v1/runs?q=Qwen3.6" >"$work/fetched" && grep -q "\"id\":\"$id\"" "$work/fetched" ||
   die "free text did not fall back to the name as recorded"
-curl -fsS "$base/" | grep -q 'ik_llama.cpp' || die "the front page does not list the run"
+curl -fsS "$base/" >"$work/fetched" && grep -q 'ik_llama.cpp' "$work/fetched" || die "the front page does not list the run"
 # Each listed run carries its stage, so a phone can play it in place.
-curl -fsS "$base/" | grep -q 'class="stage feed" href="/r/'"$id"'" data-tape="/r/'"$id"'.tape"' ||
+curl -fsS "$base/" >"$work/fetched" && grep -q 'class="stage feed" href="/r/'"$id"'" data-tape="/r/'"$id"'.tape"' "$work/fetched" ||
   die "the front page row does not carry the run for the feed"
-curl -fsS "$base/" | grep -q 'src="/player/host.js"' || die "the front page does not load the player"
+curl -fsS "$base/" >"$work/fetched" && grep -q 'src="/player/host.js"' "$work/fetched" || die "the front page does not load the player"
 # A filter in the URL shows in its box even when it matches nothing.
-curl -fsS "$base/?engine=vllm" | grep -q '<option value="vllm" selected>vllm (0)</option>' ||
+curl -fsS "$base/?engine=vllm" >"$work/fetched" && grep -q '<option value="vllm" selected>vllm (0)</option>' "$work/fetched" ||
   die "a filter that matched nothing vanished from its dropdown"
 code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?scope=mine")
 [ "$code" = "401" ] || { cat "$work/body"; die "the journal scope answered without a token (got $code)"; }
@@ -177,8 +195,11 @@ HOME="$work/home" "$work/toktape" publish "$repo/assets/hero.tape" --url "$base"
   >"$work/receipt2" 2>"$work/publish2.err" ||
   { cat "$work/publish2.err"; die "a private publish failed"; }
 pid2="$(tr -d '\r\n' <"$work/receipt2")"; pid2="${pid2##*/}"
-curl -fsS "$base/api/v1/runs" | grep -q "$pid2" && die "a --private run is in the listing"
-curl -fsS "$base/r/$pid2" | grep -q 'unlisted' || die "the private run's page does not say it is unlisted"
+curl -fsS "$base/api/v1/runs" >"$work/fetched" && grep -q "$pid2" "$work/fetched" && die "a --private run is in the listing"
+curl -fsS "$base/r/$pid2" >"$work/fetched" && grep -q 'unlisted' "$work/fetched" || die "the private run's page does not say it is unlisted"
+curl -fsS "$base/r/$pid2" >"$work/fetched" && grep -q '<meta name="robots" content="noindex">' "$work/fetched" ||
+  die "the private run's page does not ask to stay out of the index"
+curl -fsS "$base/sitemap.xml" >"$work/fetched" && grep -q "$pid2" "$work/fetched" && die "a --private run is in the sitemap"
 
 say "refusals"
 code=$(curl -s -o "$work/body" -w '%{http_code}' -X POST "$base/api/v1/runs" \
