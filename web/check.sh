@@ -175,11 +175,12 @@ grep -q '<link rel="icon" type="image/png" sizes="64x64" href="/favicon.png">' "
 grep -q '<img class="figure sleep" src="/mascot-sleep.webp"' "$work/page.html" || die "the run page has no sleeping figure"
 curl -fsS "$base/" >"$work/front.html"
 grep -q '<img class="figure peek" src="/mascot-peek.webp"' "$work/front.html" || die "the front page has no peeking figure"
+grep -q '<img class="figure wave" src="/mascot-wave.webp"' "$work/front.html" || die "the front page has no waving figure"
 for f in favicon.png apple-touch-icon.png; do
   ctype=$(curl -fsS -o "$work/asset" -w '%{content_type}' "$base/$f")
   case "$ctype" in image/png*) ;; *) die "$f is served as $ctype" ;; esac
 done
-for f in mascot-peek.webp mascot-sleep.webp mascot-sit.webp; do
+for f in mascot-peek.webp mascot-sleep.webp mascot-sit.webp mascot-wave.webp; do
   ctype=$(curl -fsS -o "$work/asset" -w '%{content_type}' "$base/$f")
   case "$ctype" in image/webp*) ;; *) die "$f is served as $ctype" ;; esac
   [ "$(head -c 4 "$work/asset")" = "RIFF" ] || die "what came back from /$f is not a WebP"

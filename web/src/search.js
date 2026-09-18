@@ -101,7 +101,7 @@ ${q.rows.map((r) => resultRow(r, url)).join("\n")}`;
         url: `${publicBase(request, env)}/`,
       }),
       style: PAGE_STYLE,
-      figure: "peek",
+      figure: ["peek", "wave"],
       body: `
 ${filterForm(url, facets)}
 ${active}

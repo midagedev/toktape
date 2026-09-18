@@ -32,6 +32,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
   user-select: none; display: block; }
 .figure.peek { width: 11rem; }
 .figure.sleep { width: 15rem; bottom: 1.25rem; opacity: .92; }
+/* Waving hello from the top-right corner of the front page (user,
+   2026-09-19: "메인화면 우상단에도"). */
+.figure.wave { width: 10rem; top: 1.5rem; bottom: auto; }
 /* Without a margin to sit in (a phone, a narrow window) she moves to the
    foot of the page instead — in the flow, after the footer, so she never
    covers a card and is still there when the reader reaches the end. */
@@ -39,6 +42,11 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
   .figure { position: static; margin: 1rem auto 0; }
   .figure.peek { display: block; width: 9rem; margin-bottom: -.5rem; }
   .figure.sleep { display: block; width: 12rem; margin-bottom: 1.5rem; }
+  /* The wave stays a corner figure on a phone: small, beside the brand row,
+     which leaves it room on the right so the tagline wraps under the name
+     rather than behind her. */
+  .figure.wave { position: absolute; top: .5rem; right: 1rem; width: 4.25rem; margin: 0; z-index: 0; }
+  .brand { padding-right: 5rem; flex-wrap: wrap; margin-bottom: 2.75rem; }
 }
 /* The empty state gets her in person: sitting with the tape, above the line
    that says there is nothing here yet. */
@@ -98,6 +106,7 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #1b1f26;
 export const FIGURES = {
   peek: `<img class="figure peek" src="/mascot-peek.webp" alt="" aria-hidden="true">`,
   sleep: `<img class="figure sleep" src="/mascot-sleep.webp" alt="" aria-hidden="true">`,
+  wave: `<img class="figure wave" src="/mascot-wave.webp" alt="" aria-hidden="true">`,
 };
 export const EMPTY_FIGURE = `<img class="empty-figure" src="/mascot-sit.webp" alt="" aria-hidden="true">`;
 
@@ -142,9 +151,10 @@ export function head({ title, description, url, image, imageAlt, imageWidth, ima
   return tags.join("\n");
 }
 
-// figure names the pose that sits in this page's margin ("peek" on the front
-// page, "sleep" on a run page), or nothing.
+// figure names the pose (or poses) in this page's margins: "peek" and
+// "wave" on the front page, "sleep" on a run page, nothing on the rest.
 export function layout({ title, meta = "", style = "", body, figure }) {
+  const figures = [].concat(figure || []).map((f) => FIGURES[f] || "").join("");
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -158,7 +168,7 @@ ${meta}
 </head><body><main>
 <div class="brand"><a href="/"><img class="mascot" src="/mascot.png" width="36" height="36" alt="toktape mascot: a mint-haired chibi in headphones"></a><a href="/">toktape</a><span>the record, not a recording of it</span></div>
 ${body}
-</main>${FIGURES[figure] || ""}</body></html>
+</main>${figures}</body></html>
 `;
 }
 

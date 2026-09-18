@@ -21,6 +21,7 @@ originals stay in the session scratchpad under `mascot/`.
 | `mascot-sit.webp` | sitting, hugging a glowing cassette | 8 | the front page's empty state |
 | `mascot-peek.webp` | peeking over an edge, head and hands | 5 | the front page's bottom-right margin (≥78rem wide) |
 | `mascot-sleep.webp` | asleep on a cassette | 12 | a run page's bottom-right margin (≥78rem wide) |
+| `mascot-wave.webp` | standing, waving, cassette in the other hand | 30 | the front page's top-right corner (small beside the brand row on a phone) |
 
 Post-processing (PIL, in the lead's session): the model's ground colours were
 sampled at the border and flood-filled to alpha through the sticker outline,
