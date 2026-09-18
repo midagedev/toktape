@@ -89,6 +89,9 @@ func roundPrefill(rr []tape.RequestRecord) (promptN int, perSecond float64) {
 // recordRounds is Record from the first request on, for a multi-round run.
 func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 	rounds := roundRequests(r.opts, r.model.ActiveBytesPerToken)
+	if len(rounds) > 0 {
+		r.promptSet = promptSetOf(rounds[0])
+	}
 
 	// The template is fetched for every stream of every round, in one pass,
 	// so every record carries its rendered prompt and one warning covers the

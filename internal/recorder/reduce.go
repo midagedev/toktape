@@ -82,6 +82,7 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		Placement:   r.place,
 		Memory:      mem,
 		Concurrency: concurrency,
+		PromptSet:   r.promptSet,
 		Timings:     timings,
 		Aggregate:   agg,
 		Rounds:      rounds,

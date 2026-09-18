@@ -311,3 +311,17 @@ func TestIndexOfModelIdentity(t *testing.T) {
 		})
 	}
 }
+
+// The prompt set is passed through, never re-derived: it decides what a run is
+// comparable with, and a second opinion here would be a second owner of it.
+func TestIndexOfPromptSet(t *testing.T) {
+	idx := IndexOf(&tape.Tape{Summary: tape.RunSummary{PromptSet: "prompts@v1"}})
+	if idx.PromptSet != "prompts@v1" {
+		t.Errorf("PromptSet = %q, want prompts@v1", idx.PromptSet)
+	}
+	// A run on the user's own prompts is not in a comparison set, and the row
+	// must say that rather than name one it did not run.
+	if got := IndexOf(&tape.Tape{}).PromptSet; got != "" {
+		t.Errorf("PromptSet = %q on a tape that named none, want \"\"", got)
+	}
+}

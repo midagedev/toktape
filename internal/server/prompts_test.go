@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -206,5 +208,65 @@ func TestStreamRequestBodyParamsCannotBreakTheStream(t *testing.T) {
 	}
 	if body["temperature"] != 0.7 {
 		t.Errorf("temperature = %v, want 0.7", body["temperature"])
+	}
+}
+
+// promptSetHash is sha256 over the built-in prompts, NUL-joined in order.
+//
+// It exists to keep one promise the id makes: two tapes carrying
+// prompts@v1 did the same work. Nothing else enforces it — the id is a
+// constant and a prompt is a string, and the day someone fixes a typo in one
+// of them, every tape already published under that id becomes a claim about
+// a set that no longer exists.
+//
+// So when this fails, the set changed. Decide which happened and do the
+// matching thing:
+//
+//   - a released set changed -> bump PromptSetID, then update this hash
+//   - the set has never shipped in a release -> update this hash alone,
+//     because there is no tape in the world carrying the old contents
+//
+// Updating the hash to make the test pass, without asking that question, is
+// the one move this gate exists to prevent.
+const promptSetHash = "886ccba10bf1c336c00f95d65aab0cfd98d1fdbc9946a334e883ebec9afd3c49"
+
+func TestDefaultPromptsMatchTheirID(t *testing.T) {
+	sum := sha256.Sum256([]byte(strings.Join(defaultPrompts, "\x00")))
+	if got := hex.EncodeToString(sum[:]); got != promptSetHash {
+		t.Errorf("the built-in set hashes to %s, not %s: the prompts changed.\n"+
+			"%s is stamped on every tape this set records, so a reader is entitled to\n"+
+			"assume two tapes carrying it ran the same prompts. See promptSetHash above\n"+
+			"for which of the two things to do.", got, promptSetHash, PromptSetID)
+	}
+}
+
+// TestDefaultPromptsCarryTheSetID: the set stamps its own requests, so a
+// caller that did not go through DefaultPrompts cannot be mistaken for one
+// that did.
+func TestDefaultPromptsCarryTheSetID(t *testing.T) {
+	// Past the end of the set too: a numbered repetition is still this set's
+	// work, sent because the run asked for more streams than there are
+	// prompts, and a run of 20 streams is no less comparable for it.
+	for i, req := range DefaultPrompts(len(defaultPrompts) + 4) {
+		if req.Set != PromptSetID {
+			t.Errorf("prompt %d carries Set %q, want %q", i, req.Set, PromptSetID)
+		}
+	}
+	if (StreamRequest{}).Set != "" {
+		t.Error("a request nobody stamped carries a set")
+	}
+}
+
+// TestPromptSetNeverReachesTheWire: Set says what the run can be compared
+// against, which is the tape's question, not the server's.
+func TestPromptSetNeverReachesTheWire(t *testing.T) {
+	body := DefaultPrompts(1)[0].Body()
+	for k, v := range body {
+		if s, ok := v.(string); ok && s == PromptSetID {
+			t.Errorf("body[%q] = %q: the set id went over the wire", k, s)
+		}
+	}
+	if _, ok := body["set"]; ok {
+		t.Error(`body carries a "set" key`)
 	}
 }

@@ -367,6 +367,22 @@ func (o Options) Sessions() int {
 	return o.normalize().Concurrency
 }
 
+// promptSetOf is the set every one of these requests came from, or "" when
+// they did not all come from one. A mixed batch has no comparison set, and
+// the honest answer for it is the same as for a user's own prompts (TTP-112).
+func promptSetOf(reqs []server.StreamRequest) string {
+	if len(reqs) == 0 {
+		return ""
+	}
+	set := reqs[0].Set
+	for _, r := range reqs[1:] {
+		if r.Set != set {
+			return ""
+		}
+	}
+	return set
+}
+
 // buildRequests returns exactly Concurrency requests. Supplied prompts are
 // cycled to fill the count and copied so that per-stream fields (the
 // rendered prompt) cannot alias across streams.

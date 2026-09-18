@@ -51,6 +51,10 @@ type run struct {
 	// ended something, and is what the tape's LimitSummary.CutAt carries.
 	limit tape.LimitSummary
 	cutAt time.Duration
+	// promptSet is the published set every request came from, "" when they
+	// did not all come from one (TTP-112). Read where the requests are built
+	// because that is the only place that knows.
+	promptSet string
 }
 
 // Record performs one run end to end: attach, collect the static picture,
@@ -94,6 +98,7 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	}
 
 	reqs := buildRequests(opts, r.model.ActiveBytesPerToken)
+	r.promptSet = promptSetOf(reqs)
 	r.collectTemplate(ctx, reqs)
 	r.emitAttached()
 

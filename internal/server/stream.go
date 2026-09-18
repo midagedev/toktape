@@ -47,6 +47,18 @@ type StreamRequest struct {
 	// will see it. It is ignored on the chat path, where Messages are the
 	// request and the template decides what the model sees.
 	Prompt string
+	// Set names the published prompt set this request came from
+	// (server.PromptSetID), and is empty for a prompt the user supplied. It
+	// never reaches the wire — Body assembles the request field by field —
+	// because it says nothing about what to generate. It says what the run
+	// can be compared against, which is the tape's question, and the tape
+	// carries it as RunSummary.PromptSet (TTP-112).
+	//
+	// The set stamps its own requests rather than the recorder inferring "no
+	// --prompts was given, so it must have been the built-in set": an
+	// inference like that is right until the day another caller builds the
+	// requests, and then it is silently wrong on a field search groups by.
+	Set string
 }
 
 // SentMaxTokens is the generation cap this request will actually carry.

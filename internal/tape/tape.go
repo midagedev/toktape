@@ -150,6 +150,15 @@ type RunSummary struct {
 	Limit     LimitSummary `json:"limit,omitempty"`
 	GPUsAtEnd []GPUSample  `json:"gpus_at_end,omitempty"`
 
+	// PromptSet is the published prompt set every stream of this run came
+	// from (server.PromptSetID, "prompts@v1"), and "" when any of them did
+	// not — a user's own prompts, or a mix (TTP-112).
+	//
+	// It is what makes a comparison set possible without a leaderboard: two
+	// runs are comparable when they did the same work, and nothing else in
+	// the tape says whether they did. Empty is not a defect; it means this
+	// run is not in a comparison set, which is the truth about most runs.
+	PromptSet string `json:"prompt_set,omitempty"`
 	// Tag and Note label the experiment this run belongs to (`--tag ngl=40
 	// --note "fa on"`). They are the user's words, recorded so the run ledger
 	// (`toktape log`) can group a sweep; empty when not given.

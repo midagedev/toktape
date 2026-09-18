@@ -97,6 +97,10 @@ func IndexOf(t *tape.Tape) Index {
 		OS:       s.Host.OS,
 		RAMBytes: s.Host.RAMBytes,
 		Sessions: s.Concurrency,
+		// Passed through, never re-derived: the set stamps its own id and the
+		// recorder only copies it, so a second opinion here would be a second
+		// owner of the one field that decides what a run is comparable with.
+		PromptSet: s.PromptSet,
 	}
 	// ModelRaw falls back to general.name when no file name was recorded —
 	// the raw field always carries what was observed, even though a
@@ -134,9 +138,6 @@ func IndexOf(t *tape.Tape) Index {
 		// keeps it empty and search falls back to gpus_raw.
 		idx.GPUID = gpuIDs[0]
 	}
-
-	// PromptSet stays "" until TTP-112 stamps the standard prompt set's id
-	// ("prompts@v1") into the tape; it will come from that field.
 
 	// The rate choice is the one the rest of the repo already makes: above
 	// one stream the figure is the server-wide aggregate, at one stream the

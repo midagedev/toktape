@@ -383,6 +383,17 @@ func ChunkLines(text string, max int) []string {
 Use table-driven cases for empty input, a trailing newline, no newline at all, a line of exactly max bytes, a line longer than max, a max of zero or less, and multi-byte UTF-8. Add property tests that joining the chunks gives back the input and that no chunk exceeds max unless it is one line. For each case, state what the code does today and where it contradicts its doc comment.`,
 }
 
+// PromptSetID names this set, and every request DefaultPrompts returns
+// carries it (StreamRequest.Set). Two records carrying one id must have done
+// the same work, so the id changes whenever the prompts do — prompts_test.go
+// holds a hash of the set and fails when they drift apart, which is the only
+// thing that keeps the promise true.
+//
+// The version tracks what a release shipped, not what main holds: a set that
+// has never been in a release has nothing to be compared against yet, and
+// bumping it before then would spend a version on nobody's tape.
+const PromptSetID = "prompts@v1"
+
 // DefaultPrompts returns n distinct chat requests in a deterministic order, so
 // two runs on the same rig send the same work. n <= 0 yields nil.
 //
@@ -408,6 +419,7 @@ func DefaultPrompts(n int) []StreamRequest {
 		}
 		out = append(out, StreamRequest{
 			Messages: []tape.Message{{Role: "user", Content: text}},
+			Set:      PromptSetID,
 		})
 	}
 	return out
