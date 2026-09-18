@@ -229,12 +229,8 @@ func runHelp(c *cli, args []string) int {
 		fmt.Fprint(c.stdout, usageText)
 	case helpTopics[topic] != nil:
 		fmt.Fprint(c.stdout, helpTopics[topic]())
-	case topic == "render":
-		// The one verb with a usage block of its own; the main text gives it
-		// a single line.
-		fmt.Fprint(c.stdout, renderUsage)
 	case verbs[topic]:
-		fmt.Fprint(c.stdout, usageText)
+		fmt.Fprint(c.stdout, usageFor(topic))
 	default:
 		return c.fail(failure{
 			code: exitUsage,
@@ -243,6 +239,19 @@ func runHelp(c *cli, args []string) int {
 		})
 	}
 	return exitOK
+}
+
+// usageFor is the one place a verb's name becomes its usage text, so `help
+// <verb>`, `<verb> --help` and a rejected `<verb>` invocation print the same
+// bytes and cannot drift (TTP-92: render had a block of its own that only
+// `help render` reached, while `render --help` printed the top-level text).
+// Most verbs are documented in the main text; render has a block of its own
+// because the main text gives it one line.
+func usageFor(verb string) string {
+	if verb == "render" {
+		return renderUsage
+	}
+	return usageText
 }
 
 // topicNames is the topic list, in a stable order.

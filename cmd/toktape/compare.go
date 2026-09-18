@@ -12,7 +12,7 @@ func runCompare(c *cli, args []string) int {
 	fs := newFlagSet("compare")
 	files, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("compare", usageText, args, err)
+		return c.badFlags("compare", usageFor("compare"), args, err)
 	}
 	if len(files) != 2 {
 		return c.usageTextf(usageText, "toktape compare: expected two tape files")

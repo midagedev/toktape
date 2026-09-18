@@ -56,7 +56,7 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 	f := declarePublishFlags(fs)
 	files, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("publish", usageText, args, err)
+		return c.badFlags("publish", usageFor("publish"), args, err)
 	}
 	format, refused := outputFor("publish", *f.output)
 	c.json = format.isJSON()

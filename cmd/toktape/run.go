@@ -221,6 +221,12 @@ func splitVerb(args []string) (verb string, rest []string) {
 	}
 	for _, a := range args {
 		if a == "-h" || a == "--help" || a == "help" {
+			// `toktape render --help` asks about render, not about toktape
+			// (TTP-92): the verb it was typed after is the topic, so both
+			// spellings resolve through runHelp to the same text.
+			if len(args) > 0 && verbs[args[0]] {
+				return "help", args[:1]
+			}
 			return "help", nil
 		}
 	}

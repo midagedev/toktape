@@ -31,7 +31,7 @@ func runLog(c *cli, args []string) int {
 	f := declareLogFlags(fs)
 	extra, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("log", usageText, args, err)
+		return c.badFlags("log", usageFor("log"), args, err)
 	}
 	format, refused := outputFor("log", *f.output)
 	c.json = format.isJSON()
