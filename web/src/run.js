@@ -111,7 +111,7 @@ function runPage(row, idx, base) {
     ["model", idx.model_raw || "?"],
     ["model id", withSource(idx.model_id, idx.model_id_source)],
     ["repo", idx.repo || "—"],
-    ["quantisation", idx.quant_raw ? `${idx.quant_raw}${idx.quant_bits ? ` · ${idx.quant_bits} bit` : ""}` : "?"],
+    ["quantisation", idx.quant_raw ? `${idx.quant_raw}${idx.quant_bits ? ` · ${bits(idx.quant_bits)} bit` : ""}` : "?"],
     ["engine", [idx.engine_kind, idx.engine_version].filter(Boolean).join(" ") || "?"],
     ["host", [idx.os, idx.host_class].filter(Boolean).join(" · ") || "?"],
     ["gpus", idx.gpus_raw && idx.gpus_raw.length ? idx.gpus_raw.join(" / ") : "—"],
@@ -153,16 +153,16 @@ ${
       row.card_key
         ? `<img class="card" src="/r/${esc(row.id)}.png" width="1200" height="675"
      alt="The toktape card for this run: ${esc(summaryLine(idx))}">`
-        : `<div class="card nocard"></div>`
+        : `<div class="card nocard"><span>published without a card — the run itself is still here</span></div>`
     }
 <button class="replay" type="button">▶ Replay</button>
 <pre class="screen"></pre>
-<p class="status" hidden></p>
 <div class="controls">
   <button class="toggle" type="button">Pause</button>
   <input class="scrub" type="range" min="0" max="0" value="0" step="1" aria-label="position">
   <span class="clock num">0:00 / 0:00</span>
 </div>
+<p class="status" hidden></p>
 </div>
 <h1>${esc(title)}</h1>
 <p class="sub">${esc(summaryLine(idx))}${row.private === 1 ? " · unlisted" : ""}</p>
@@ -184,12 +184,14 @@ ${rows.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v mono">${esc
 ${caveatBlock(idx)}
 
 <footer>
-<a href="/r/${esc(row.id)}${esc(row.tape_ext)}">Download the record</a> · ${row.tape_bytes} bytes ·
-published ${esc(row.created_at)}<br>
+<a href="/r/${esc(row.id)}${esc(row.tape_ext)}">Download the record</a> · ${kb(row.tape_bytes)} ·
+published ${esc(when(row.created_at))}<br>
 The record is the original: everything on this page was derived from it before
 it was uploaded, Replay draws it again in your browser with the same renderer
 the terminal uses, and <code>toktape card ${esc(row.id)}${esc(row.tape_ext)}</code>
-draws the card from the same file.
+draws the card from the same file.<br>
+Your own: <code>toktape record</code> against a running llama-server, then
+<code>toktape publish</code>. No flags to learn.
 </footer>
 <script src="/player/wasm_exec.js"></script>
 <script src="/player/host.js"></script>`,
@@ -202,14 +204,16 @@ const PAGE_STYLE = `
 .stage { position: relative; margin: 0 0 2rem; }
 .card { width: 100%; height: auto; display: block; border-radius: 8px;
   border: 1px solid #1b1f26; }
-.nocard { aspect-ratio: 16 / 9; background: #0a0c10; }
+.nocard { aspect-ratio: 16 / 9; background: #0a0c10; display: flex;
+  align-items: flex-end; justify-content: center; padding-bottom: 1.2rem;
+  color: #4d545f; font-size: .8rem; }
 /* Replay sits on the card the way a play button sits on a poster: the card
    is the still, the run is the motion, and one click swaps them. */
 .replay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   font: 600 1rem/1 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
   color: #eef1f5; background: rgba(14, 16, 20, .82); border: 1px solid #3a4150;
   border-radius: 999px; padding: .85rem 1.5rem; cursor: pointer;
-  backdrop-filter: blur(4px); letter-spacing: .01em; }
+  backdrop-filter: blur(4px); letter-spacing: .01em; white-space: nowrap; }
 .replay:hover { background: rgba(30, 34, 42, .92); border-color: #7aa2f7; }
 .replay:disabled { opacity: .6; cursor: default; }
 /* The terminal, sized by host.js so 120 columns fill the stage; the height
@@ -219,8 +223,9 @@ const PAGE_STYLE = `
   border: 1px solid #1b1f26; color: #e6e2d8;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre; cursor: pointer; user-select: none; }
-.status { position: absolute; left: 0; right: 0; bottom: 3.2rem; text-align: center;
-  margin: 0; font-size: .85rem; color: #d7dae0; text-shadow: 0 1px 3px #000; }
+/* Progress is written into the button itself; this line under the stage
+   is for what went wrong, in the player's own words. */
+.status { margin: .6rem 0 0; font-size: .85rem; color: #e0b64a; }
 .controls { display: none; align-items: center; gap: .8rem; margin-top: .6rem;
   font-size: .8rem; color: #7d848f; }
 .controls .toggle { font: inherit; color: #d7dae0; background: #161a21;
@@ -269,6 +274,25 @@ function summaryLine(idx) {
   if (idx.quant_raw) parts.push(idx.quant_raw);
   if (idx.gpu_id) parts.push(idx.gpu_count > 1 ? `${idx.gpu_count}× ${idx.gpu_id}` : idx.gpu_id);
   return parts.join(" · ") || "a recorded run";
+}
+
+// Bits per weight as the card would print it: two decimals at most, and a
+// figure like 6.5625 (a real UD-Q6_K measurement) does not pretend to four.
+function bits(b) {
+  return Number(b).toFixed(2).replace(/\.?0+$/, "");
+}
+
+function kb(n) {
+  if (!n) return "? bytes";
+  return n < 1024 ? `${n} bytes` : `${(n / 1024).toFixed(1)} KB`;
+}
+
+// The upload time to the minute, in UTC, because that is what the server
+// recorded. The tape's own recorded_at is a different clock and stays in
+// the table above with its offset (TTP-120).
+function when(iso) {
+  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(String(iso));
+  return m ? `${m[1]} ${m[2]} UTC` : String(iso);
 }
 
 function withSource(id, source) {

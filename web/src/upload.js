@@ -109,6 +109,15 @@ export async function uploadRun(request, env) {
     );
   }
 
+  // A run has a model, or it is not a run. The client always sends
+  // model_raw (the name as the server reported it), so its absence means
+  // the index is not one the client derived — and a row without it lists
+  // as "a run · ? tok/s", which is exactly what the check.sh rate-limit
+  // probes put in a local listing before this check existed (2026-09-18).
+  if (typeof idx.model_raw !== "string" || idx.model_raw.trim() === "") {
+    return fail(400, "the index carries no model_raw; a run without a model name is not indexed");
+  }
+
   // The card the link previews as. Optional, because a run published by an
   // older client has none and a page without a preview is better than a
   // refusal — but checked when it is there, because an image served as

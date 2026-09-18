@@ -283,6 +283,12 @@ function caveatChip(r) {
 function filterForm(url, facets) {
   const sel = (name, label, rows) => {
     const current = url.searchParams.get(name) || "";
+    // A filter that is in the URL is in the box, even when nothing matches
+    // it: a <select> whose value is not among its options shows the first
+    // one, so `?engine=vllm` over a listing with no vllm runs looked like
+    // "any engine" with an empty result and no visible reason (2026-09-18,
+    // seen on the page). The count says 0, which is the reason.
+    if (current && !rows.some((o) => o.v === current)) rows = [{ v: current, n: 0 }, ...rows];
     if (!rows.length) return "";
     return `<select name="${name}"><option value="">${esc(label)}</option>${rows
       .map(

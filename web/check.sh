@@ -146,6 +146,9 @@ curl -fsS "$base/api/v1/runs?engine=vllm" | grep -q "\"runs\":\[\]" ||
 curl -fsS "$base/api/v1/runs?q=Qwen3.6" | grep -q "\"id\":\"$id\"" ||
   die "free text did not fall back to the name as recorded"
 curl -fsS "$base/" | grep -q 'ik_llama.cpp' || die "the front page does not list the run"
+# A filter in the URL shows in its box even when it matches nothing.
+curl -fsS "$base/?engine=vllm" | grep -q '<option value="vllm" selected>vllm (0)</option>' ||
+  die "a filter that matched nothing vanished from its dropdown"
 code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?scope=mine")
 [ "$code" = "401" ] || { cat "$work/body"; die "the journal scope answered without a token (got $code)"; }
 
@@ -167,6 +170,13 @@ code=$(curl -s -o "$work/body" -w '%{http_code}' -X POST "$base/api/v1/runs" \
   -F 'tape=@'"$work/downloaded.tape"';filename=run.tape' -F 'index={"schema":99}')
 [ "$code" = "400" ] || { cat "$work/body"; die "an unknown index schema was not refused (got $code)"; }
 grep -q 'schema 1' "$work/body" || { cat "$work/body"; die "the refusal does not name the schema"; }
+# An index with the right schema and no model is not a run. Before this
+# check the rate-limit probes below listed as "a run · ? tok/s".
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X POST "$base/api/v1/runs" \
+  -H "CF-Connecting-IP: 203.0.113.8" \
+  -F 'tape=@'"$work/downloaded.tape"';filename=run.tape' -F 'index={"schema":1}')
+[ "$code" = "400" ] || { cat "$work/body"; die "an index with no model was not refused (got $code)"; }
+grep -q 'model_raw' "$work/body" || { cat "$work/body"; die "the refusal does not name the missing field"; }
 code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/r/aaaaaaaaaaaaaaaaaaaa.json")
 [ "$code" = "404" ] || { cat "$work/body"; die "an id that does not exist was not a 404 (got $code)"; }
 
@@ -200,7 +210,7 @@ limited=no
 for _ in $(seq 1 9); do
   code=$(curl -s -o "$work/body" -w '%{http_code}' -X POST "$base/api/v1/runs" \
     -H "CF-Connecting-IP: 203.0.113.9" \
-    -F 'tape=@'"$work/downloaded.tape"';filename=run.tape' -F 'index={"schema":1}')
+    -F 'tape=@'"$work/downloaded.tape"';filename=run.tape' -F 'index={"schema":1,"model_raw":"rate-limit probe"}')
   if [ "$code" = "429" ]; then limited=yes; break; fi
 done
 [ "$limited" = yes ] || die "nine anonymous uploads in a row were all accepted"

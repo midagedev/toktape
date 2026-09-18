@@ -49,18 +49,23 @@
   let lastPaintAt = -1;
   let raf = 0;
 
+  const label = button.textContent;
   button.addEventListener("click", () => {
     button.disabled = true;
+    say("");
     start().catch((err) => {
       button.disabled = false;
+      button.textContent = label;
       say(err.message || String(err));
     });
   });
 
   async function start() {
-    say("loading the player…");
+    // Progress goes on the button the reader just pressed, where their eye
+    // already is, rather than as a caption over the card.
+    button.textContent = "loading the player…";
     if (!api) api = await loadWasm();
-    say("fetching the record…");
+    button.textContent = "fetching the record…";
     const res = await fetch(tapeURL);
     if (!res.ok) throw new Error(`the record did not download (${res.status})`);
     const bytes = new Uint8Array(await res.arrayBuffer());
@@ -71,7 +76,6 @@
     stage.classList.add("live");
     scrub.max = String(durationMs);
     fitFont();
-    say("");
     seek(0);
     play();
   }
