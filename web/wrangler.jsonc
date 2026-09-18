@@ -1,0 +1,23 @@
+{
+  // The toktape hub: where a published run lives (docs/toktape-spec.ko.md §9).
+  //
+  // The Worker never parses a tape. The Go client derives a versioned index
+  // row next to the schema and uploads it beside the record, so knowledge of
+  // the tape's shape has exactly one owner — see the doc block on
+  // publish.Client in internal/publish/client.go, which is the contract this
+  // implements.
+  "name": "toktape-hub",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-18",
+  "observability": { "enabled": true },
+  "routes": [
+    {
+      // A custom domain, not a route: the Worker owns the whole hostname and
+      // Cloudflare manages the DNS record for it. midagedev.com has a
+      // wildcard A record, so without an explicit record this name would
+      // resolve to an unrelated host; the custom domain is what overrides it.
+      "pattern": "tape.midagedev.com",
+      "custom_domain": true
+    }
+  ]
+}
