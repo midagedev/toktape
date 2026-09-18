@@ -55,6 +55,17 @@ func PublicView(t *tape.Tape, policy TextPolicy) *tape.Tape {
 	}
 	s.Server.URL = portOnly(s.Server.URL)
 	s.Server.Args = sanitiseArgs(s.Server.Args)
+	// The parsed flags, which are a second copy of the same argv and the one
+	// the card actually prints. `Other` holds whole flag-and-value strings
+	// verbatim ("-m /home/k/models/…"), so it is shortened word by word the
+	// way a warning is. Missing this is what put a publisher's model path
+	// into the share card — the one artifact that cannot be taken back once
+	// it is posted (2026-09-18).
+	s.Server.Flags.Other = sanitiseEach(s.Server.Flags.Other)
+	// Documented as a base name already, and shortened anyway: sanitiseToken
+	// leaves a base name alone, so this costs nothing and stops depending on
+	// every engine's parser having got it right.
+	s.Server.Flags.DraftModel = sanitiseToken(s.Server.Flags.DraftModel)
 	// The file name and the variant directory are the model's identity and
 	// stay; everything in front of them is the publisher's disk.
 	s.Model.Path = ""

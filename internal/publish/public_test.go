@@ -1,8 +1,10 @@
 package publish
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -249,5 +251,82 @@ func TestPublicViewOnTheHeroTape(t *testing.T) {
 	}
 	if IndexOf(out).ModelRaw == "" {
 		t.Error("the published index lost the model's name along with its path")
+	}
+}
+
+// TestNoPlaceSurvivesAnywhereInTheSummary walks every string in the published
+// summary and fails on anything still shaped like a path.
+//
+// It exists because the field-by-field tests above only cover the fields
+// somebody remembered. The defect that prompted it was exactly that: §9.3's
+// table names `server.args`, and the recorder also keeps `server.flags.other`
+// — the verbatim flags the card prints — which nothing sanitised. The
+// publisher's model path travelled inside it and, worse, was drawn into the
+// share card, which is the artifact most likely to be posted somewhere it
+// cannot be taken back (found 2026-09-18, while looking at a rendered page).
+//
+// So the assertion is structural: a new string field on RunSummary is covered
+// by this the day it is added, without anyone thinking of it. Requests are out
+// of scope — the prompts and the generated text are the user's own words and
+// §9.3 says they travel verbatim — and the two fields below are exempt for the
+// same reason.
+func TestNoPlaceSurvivesAnywhereInTheSummary(t *testing.T) {
+	// The user's own words, kept verbatim by §9.3's table.
+	exempt := map[string]bool{".Tag": true, ".Note": true}
+
+	in := fullTape()
+	in.Summary.Server.Flags.Other = []string{
+		"-m /home/k/models/Qwen3-0.6B/Qwen3-0.6B-Q8_0.gguf",
+		"--mmproj ~/models/mmproj.gguf",
+	}
+	in.Summary.Server.Flags.DraftModel = "/home/k/models/draft/Qwen3-0.6B-Q4_0.gguf"
+
+	out := PublicView(in, WithText)
+	walkStrings(reflect.ValueOf(out.Summary), "", func(path, s string) {
+		if exempt[path] {
+			return
+		}
+		for _, word := range strings.Fields(s) {
+			if looksLikeAPlace(word) {
+				t.Errorf("summary%s still carries a path: %q\n  in: %q", path, word, s)
+			}
+		}
+	})
+}
+
+// looksLikeAPlace is §9.3's own rule, read back: a token that names a place
+// is absolute, home-relative, or written with backslashes.
+func looksLikeAPlace(word string) bool {
+	if eq := strings.IndexByte(word, '='); eq > 0 && strings.HasPrefix(word, "-") {
+		word = word[eq+1:]
+	}
+	word = strings.TrimRight(word, ".,;:")
+	return strings.HasPrefix(word, "/") || strings.HasPrefix(word, "~/") || strings.Contains(word, `\`)
+}
+
+func walkStrings(v reflect.Value, path string, fn func(path, s string)) {
+	switch v.Kind() {
+	case reflect.String:
+		if s := v.String(); s != "" {
+			fn(path, s)
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).IsExported() {
+				walkStrings(v.Field(i), path+"."+v.Type().Field(i).Name, fn)
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			walkStrings(v.Index(i), fmt.Sprintf("%s[%d]", path, i), fn)
+		}
+	case reflect.Map:
+		for _, k := range v.MapKeys() {
+			walkStrings(v.MapIndex(k), fmt.Sprintf("%s[%v]", path, k.Interface()), fn)
+		}
+	case reflect.Ptr, reflect.Interface:
+		if !v.IsNil() {
+			walkStrings(v.Elem(), path, fn)
+		}
 	}
 }
