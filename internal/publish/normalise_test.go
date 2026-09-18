@@ -1,6 +1,10 @@
 package publish
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/midagedev/toktape/internal/tape"
+)
 
 // Every table has at least one case that must NOT normalise. Those are the
 // cases that matter: a normaliser that never refuses is the defect this
@@ -105,5 +109,61 @@ func TestHostClass(t *testing.T) {
 		if got := HostClass(tt.in); got != tt.want {
 			t.Errorf("HostClass(%v) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+// TestModelID is the reconciliation the measurement of 2026-09-18 asked for:
+// two quantizers of one model, disagreeing about how much of the naming
+// convention they fold into general.basename, have to land on one id.
+func TestModelID(t *testing.T) {
+	cases := []struct {
+		name                   string
+		base, size, fine, want string
+	}{{
+		name: "unsloth: the size is already in the base name",
+		base: "Qwen3-0.6B", size: "0.6B", want: "qwen3-0.6b",
+	}, {
+		name: "bartowski: the same model, the size appended",
+		base: "Qwen3", size: "0.6B", want: "qwen3-0.6b",
+	}, {
+		name: "and the fine-tune reconciles the same way",
+		base: "Qwen3-0.6B-Instruct", size: "0.6B", fine: "Instruct", want: "qwen3-0.6b-instruct",
+	}, {
+		name: "its counterpart, assembled in the convention's order",
+		base: "Qwen3", size: "0.6B", fine: "Instruct", want: "qwen3-0.6b-instruct",
+	}, {
+		name: "a MoE label is one component run, matched as a whole",
+		base: "Qwen3-30B-A3B-Instruct-2507", size: "30B-A3B", want: "qwen3-30b-a3b-instruct-2507",
+	}, {
+		// The parser hands base names back with hyphens as spaces.
+		name: "spaces become hyphens",
+		base: "gpt oss", size: "20b", want: "gpt-oss-20b",
+	}, {
+		name: "a version's dot survives",
+		base: "Meta Llama 3.1", size: "8B", want: "meta-llama-3.1-8b",
+	}, {
+		name: "a size that only looks contained is still appended",
+		base: "Qwen3-10.6B", size: "0.6B", want: "qwen3-10.6b-0.6b",
+	}, {
+		name: "an org-prefixed base name from a file name",
+		base: "Qwen_Qwen3", size: "0.6B", want: "qwen-qwen3-0.6b",
+	}, {
+		name: "no base name, no id: search falls back to the raw string",
+		base: "", size: "0.6B", want: "",
+	}, {
+		name: "a base name of nothing but punctuation is not a name",
+		base: "--", size: "0.6B", want: "",
+	}, {
+		name: "a size label nobody recorded is simply absent",
+		base: "Qwen3", size: "", want: "qwen3",
+	}}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := tape.ModelInfo{BaseName: c.base, SizeLabel: c.size, FineTune: c.fine}
+			if got := ModelID(m); got != c.want {
+				t.Errorf("ModelID(%q, %q, %q) = %q, want %q", c.base, c.size, c.fine, got, c.want)
+			}
+		})
 	}
 }

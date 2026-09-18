@@ -25,7 +25,10 @@ func TestIndexOfSingleStream(t *testing.T) {
 		RecordedAt:     time.Date(2026, 9, 13, 14, 25, 30, 0, time.UTC),
 
 		ModelRaw: "DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
-		// ModelID: empty until TTP-119 gives it a source (see index.go).
+		// ModelID: empty. The card's fixture carries no naming-convention
+		// fields, and the id is assembled from those alone — never from the
+		// file name sitting right there (TTP-119). TestIndexOfModelIdentity
+		// covers the tapes that do carry them.
 		Params:    70553706496,
 		QuantRaw:  "Q4_K_M",
 		QuantID:   "q4_k_m",
@@ -161,8 +164,11 @@ func TestIndexOfFallbacks(t *testing.T) {
 	if idx.ModelRaw != "R1 Distill Llama 70B" {
 		t.Errorf("ModelRaw = %q, want the general.name when no file name was recorded", idx.ModelRaw)
 	}
+	// A general.name is not a file name and carries no convention, so there
+	// is nothing to assemble an id out of. The raw string above is what
+	// search has, and that is the honest amount.
 	if idx.ModelID != "" {
-		t.Errorf("ModelID = %q, want \"\" until TTP-119 gives the id a source", idx.ModelID)
+		t.Errorf("ModelID = %q, want \"\" for a model with no naming-convention fields", idx.ModelID)
 	}
 	if !idx.MoE {
 		t.Errorf("MoE = false, want true (128 experts)")
@@ -197,7 +203,8 @@ func TestIndexJSONRoundTrip(t *testing.T) {
 		t.Fatalf("marshal sparse: %v", err)
 	}
 	absent := []string{
-		"toktape_version", "model_raw", "model_id", "model_dir", "params", "moe",
+		"toktape_version", "repo", "model_raw", "model_id", "model_id_source",
+		"model_dir", "params", "moe",
 		"quant_raw", "quant_id", "quant_bits", "engine_kind", "engine_version",
 		"os", "gpus_raw", "gpu_id", "gpu_count", "vram_bytes", "ram_bytes",
 		"host_class", "sessions", "prompt_set", "decode_per_sec",
@@ -231,5 +238,76 @@ func TestIndexJSONRoundTrip(t *testing.T) {
 		// The raw beside the normalised: on a mix the id travels with its
 		// bits empty and the exact sub-type still readable.
 		t.Errorf("quant_raw missing beside quant_id in %s", string(b))
+	}
+}
+
+// TestIndexOfModelIdentity covers the two facets the row carries for "which
+// model": the exact repo when a tape proved one, and the convention's slug
+// otherwise. They are independent — a run can have either, both or neither.
+func TestIndexOfModelIdentity(t *testing.T) {
+	cases := []struct {
+		name  string
+		model tape.ModelInfo
+
+		repo, id, source string
+	}{{
+		name: "a file from a Hugging Face cache: both facets",
+		model: tape.ModelInfo{
+			FileName: "Qwen3-0.6B-UD-Q6_K_XL.gguf",
+			Repo:     "unsloth/Qwen3-0.6B-GGUF", RepoSource: "hf-cache",
+			BaseName: "Qwen3-0.6B", SizeLabel: "0.6B", NameSource: "gguf",
+		},
+		repo: "unsloth/Qwen3-0.6B-GGUF", id: "qwen3-0.6b", source: "gguf",
+	}, {
+		name: "the same model from a plain directory: the slug alone",
+		model: tape.ModelInfo{
+			FileName: "Qwen_Qwen3-0.6B-Q4_K_M.gguf",
+			BaseName: "Qwen3", SizeLabel: "0.6B", NameSource: "gguf",
+		},
+		id: "qwen3-0.6b", source: "gguf",
+	}, {
+		// The --url case: no header was readable, so the name is all there is.
+		name: "an id read out of a file name says so",
+		model: tape.ModelInfo{
+			FileName: "Qwen3-0.6B-Q8_0.gguf",
+			BaseName: "Qwen3", SizeLabel: "0.6B", NameSource: "filename",
+		},
+		id: "qwen3-0.6b", source: "filename",
+	}, {
+		// An exl3 model has no GGUF and no convention, but its directory can
+		// still sit under a snapshot.
+		name: "a non-GGUF engine: the repo without a slug",
+		model: tape.ModelInfo{
+			FileName: "Llama-3.1-8B-exl3", Format: "exl3",
+			Repo: "turboderp/Llama-3.1-8B-exl3", RepoSource: "hf-cache",
+		},
+		repo: "turboderp/Llama-3.1-8B-exl3",
+	}, {
+		// The guard that matters: a repo with nothing behind it was guessed,
+		// and the search reads this field as exact.
+		name: "a repo with no source never reaches the row",
+		model: tape.ModelInfo{
+			FileName: "Qwen3-0.6B-Q8_0.gguf",
+			Repo:     "unsloth/Qwen3-0.6B-GGUF",
+		},
+	}}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			idx := IndexOf(&tape.Tape{Summary: tape.RunSummary{Model: c.model}})
+			if idx.Repo != c.repo {
+				t.Errorf("Repo = %q, want %q", idx.Repo, c.repo)
+			}
+			if idx.ModelID != c.id {
+				t.Errorf("ModelID = %q, want %q", idx.ModelID, c.id)
+			}
+			if idx.ModelIDSource != c.source {
+				t.Errorf("ModelIDSource = %q, want %q", idx.ModelIDSource, c.source)
+			}
+			// The raw string is always there for search to fall back on.
+			if idx.ModelRaw != c.model.FileName {
+				t.Errorf("ModelRaw = %q, want %q", idx.ModelRaw, c.model.FileName)
+			}
+		})
 	}
 }

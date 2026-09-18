@@ -28,14 +28,25 @@ type Index struct {
 	RecordedAt     time.Time `json:"recorded_at"`
 
 	// What ran. Every normalised field has its raw input beside it.
-	ModelRaw  string  `json:"model_raw,omitempty"`
-	ModelID   string  `json:"model_id,omitempty"`
-	ModelDir  string  `json:"model_dir,omitempty"`
-	Params    int64   `json:"params,omitempty"`
-	MoE       bool    `json:"moe,omitempty"`
-	QuantRaw  string  `json:"quant_raw,omitempty"`
-	QuantID   string  `json:"quant_id,omitempty"`
-	QuantBits float64 `json:"quant_bits,omitempty"`
+	//
+	// Repo and ModelID are two facets, not two attempts at one answer
+	// (TTP-119). Repo is the exact Hugging Face repository, present only when
+	// the tape proved it, and it answers "whose build of this" — the search
+	// never carries an unproven one, which is why no source travels with it
+	// here. ModelID is the naming convention's slug and answers "which model",
+	// across every publisher who shipped it. Collapsing them into one field
+	// would make the id mean different things in different rows, and an id
+	// that does that cannot be searched on.
+	Repo          string  `json:"repo,omitempty"`
+	ModelRaw      string  `json:"model_raw,omitempty"`
+	ModelID       string  `json:"model_id,omitempty"`
+	ModelIDSource string  `json:"model_id_source,omitempty"` // "gguf" | "filename"
+	ModelDir      string  `json:"model_dir,omitempty"`
+	Params        int64   `json:"params,omitempty"`
+	MoE           bool    `json:"moe,omitempty"`
+	QuantRaw      string  `json:"quant_raw,omitempty"`
+	QuantID       string  `json:"quant_id,omitempty"`
+	QuantBits     float64 `json:"quant_bits,omitempty"`
 
 	EngineKind    string `json:"engine_kind,omitempty"`
 	EngineVersion string `json:"engine_version,omitempty"`
@@ -93,16 +104,21 @@ func IndexOf(t *tape.Tape) Index {
 	if idx.ModelRaw == "" {
 		idx.ModelRaw = s.Model.Name
 	}
-	// ModelID stays empty until TTP-119. A first pass derived it by
-	// lower-casing the file name and stripping a quant tail, which invents
-	// a vocabulary nobody else uses (user, 2026-09-18: "정규화는 뭔가
-	// 허깅페이스 중심이 되어야 하지 않나"). Measured that day: an HF repo id
-	// cannot be read out of a GGUF — unsloth writes only its org in
-	// general.repo_url and bartowski writes nothing — but general.basename
-	// and general.size_label are there, and they are the upstream naming
-	// convention, with an exact repo id recoverable from an HF cache path.
-	// TTP-119 records those; the id then comes from them, with its source
-	// beside it. Empty is the honest value until it does.
+	// The repo only when the tape proved it. RepoSource is what says so; a
+	// repo id with no source behind it was guessed, and a guess must never
+	// reach a field the search treats as exact.
+	if s.Model.RepoSource != "" {
+		idx.Repo = s.Model.Repo
+	}
+	// The source travels with the id because the two are not equally strong:
+	// "gguf" was read out of the header, "filename" out of a name, and a name
+	// carries no fine-tune (the quantisation sits where one would be, which
+	// is why internal/placement/gguf refuses to read one from a name). An
+	// id that came from a name can therefore merge two fine-tunes of a model,
+	// and a consumer that must not do that has the field to tell it.
+	if idx.ModelID = ModelID(s.Model); idx.ModelID != "" {
+		idx.ModelIDSource = s.Model.NameSource
+	}
 	idx.QuantID, idx.QuantBits = QuantID(s.Model.Quant)
 
 	idx.GPUsRaw = make([]string, len(s.Host.GPUs))

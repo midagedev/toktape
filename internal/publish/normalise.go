@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/midagedev/toktape/internal/placement"
+	"github.com/midagedev/toktape/internal/tape"
 )
 
 // The normalisers behind the index's *_id fields. One rule governs all of
@@ -122,6 +123,66 @@ var vendorNoise = map[string]bool{
 	"nvidia":      true,
 	"geforce":     true,
 	"corporation": true,
+}
+
+// ModelID assembles the model's search id from the GGUF naming convention
+// the tape recorded (ggml docs/gguf.md, TTP-119): base name, size label and
+// fine-tune, in the convention's own order, lower-cased and hyphenated.
+//
+// The only rule that is ours is the skip, and it exists because quantizers
+// disagree about how much of the convention they fold into general.basename.
+// Measured 2026-09-18 on one model: unsloth's basename is "Qwen3-0.6B" and
+// bartowski's is "Qwen3", with both writing size label "0.6B". A part the
+// basename already carries is therefore not appended again, and both land on
+// "qwen3-0.6b" — the same id for the same model from two publishers, which is
+// the whole point of having one.
+//
+// It is a slug, not a name: a model whose fields are empty — every non-GGUF
+// engine, and every file whose name is outside the convention — gets "" and
+// search falls back to the raw file name beside it.
+func ModelID(m tape.ModelInfo) string {
+	base := slug(m.BaseName)
+	if base == "" {
+		return ""
+	}
+	for _, part := range []string{slug(m.SizeLabel), slug(m.FineTune)} {
+		if part != "" && !hasComponent(base, part) {
+			base += "-" + part
+		}
+	}
+	return base
+}
+
+// hasComponent reports whether want appears in s as a whole run of
+// hyphen-separated components, so "qwen3-0.6b" carries "0.6b" but
+// "qwen3-10.6b" does not.
+func hasComponent(s, want string) bool {
+	return s == want ||
+		strings.HasPrefix(s, want+"-") ||
+		strings.HasSuffix(s, "-"+want) ||
+		strings.Contains(s, "-"+want+"-")
+}
+
+// slug lower-cases a naming-convention part and reduces it to [a-z0-9.],
+// with every other run becoming a single "-". The dot survives because it is
+// a version's own punctuation ("Meta Llama 3.1", "0.6B"), and the parser
+// hands base names back with their hyphens as spaces, which is what puts
+// "gpt oss" back together as "gpt-oss".
+func slug(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' {
+			if dash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			dash = false
+			b.WriteRune(r)
+			continue
+		}
+		dash = true
+	}
+	return b.String()
 }
 
 // GPUID normalises a GPU name to its model id: vendor noise dropped,
