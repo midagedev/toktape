@@ -15,9 +15,14 @@ main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
 a { color: #7aa2f7; text-decoration: none; }
 a:hover { text-decoration: underline; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
-.brand { display: flex; align-items: baseline; gap: .6rem; margin-bottom: 2rem; }
+.brand { display: flex; align-items: center; gap: .6rem; margin-bottom: 2rem; }
 .brand a { color: #eef1f5; font-weight: 600; letter-spacing: -.01em; }
 .brand span { color: #6b727d; font-size: .8rem; }
+/* The mascot: a small round avatar, the way a profile picture sits beside a
+   name. Its PNG carries the page's own ground (#0e1014) so the circle needs
+   no matting; the 1px ring is the card's border colour. */
+.brand .mascot { width: 2.25rem; height: 2.25rem; border-radius: 50%; flex: none;
+  border: 1px solid #1b1f26; background: #0e1014; }
 h1 { font-size: 1.35rem; margin: 0 0 .25rem; font-weight: 600; letter-spacing: -.01em;
   word-break: break-word; }
 .sub { color: #7d848f; font-size: .875rem; margin: 0 0 2.25rem; }
@@ -119,7 +124,7 @@ export function layout({ title, meta = "", style = "", body }) {
 ${meta}
 <style>${STYLE}${style}</style>
 </head><body><main>
-<div class="brand"><a href="/">toktape</a><span>the record, not a recording of it</span></div>
+<div class="brand"><a href="/"><img class="mascot" src="/mascot.png" width="36" height="36" alt="toktape mascot: a mint-haired chibi in headphones"></a><a href="/">toktape</a><span>the record, not a recording of it</span></div>
 ${body}
 </main></body></html>
 `;

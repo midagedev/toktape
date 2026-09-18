@@ -36,6 +36,10 @@ version="$(cd "$repo" && git describe --tags --always --dirty 2>/dev/null || ech
 rm -rf dist
 mkdir -p "$out"
 cp host.js "$out/host.js"
+# web/static holds the few committed files the site serves as-is (the
+# mascot, and its provenance note); they ship from dist/ root so a page can
+# reference /mascot.png and the Worker never sees the request.
+cp ../static/*.png dist/
 GOOS=js GOARCH=wasm go build \
   -ldflags "-s -w -X main.version=$version" \
   -o "$out/toktape.wasm" .

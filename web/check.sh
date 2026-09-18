@@ -157,6 +157,16 @@ case "$ctype" in application/wasm*) ;; *) die "the wasm is served as $ctype" ;; 
 [ "$(wc -c <"$work/player.wasm")" -gt 1000000 ] || die "what came back from /player/toktape.wasm is too small to be the player"
 curl -fsS "$base/player/wasm_exec.js" >"$work/fetched" && grep -q 'globalThis.Go' "$work/fetched" || die "wasm_exec.js is not served"
 curl -fsS "$base/player/host.js" >"$work/fetched" && grep -q 'data-tape' "$work/fetched" || die "host.js is not served"
+
+say "the mascot"
+# Every page carries the avatar in its brand row, and the file it points at
+# is a real PNG from web/static, copied into dist/ by build.sh — so a build
+# that forgets the copy step fails here and not on the live site.
+grep -q '<img class="mascot" src="/mascot.png"' "$work/page.html" || die "the run page has no mascot in the brand row"
+ctype=$(curl -fsS -o "$work/mascot.png" -w '%{content_type}' "$base/mascot.png")
+case "$ctype" in image/png*) ;; *) die "the mascot is served as $ctype" ;; esac
+[ "$(head -c 4 "$work/mascot.png" | od -An -tx1 | tr -d ' ')" = "89504e47" ] || die "what came back from /mascot.png is not a PNG"
+[ "$(wc -c <"$work/mascot.png")" -gt 10000 ] || die "the mascot is too small to be the image"
 # A path under /player/ that is not an asset falls through to the Worker
 # rather than into the asset handler's own 404, so a stale asset directory
 # cannot swallow a route this code owns.
