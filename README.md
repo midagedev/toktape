@@ -257,6 +257,7 @@ side by side. Each field is there because it settles an argument.
 | `ls` | list recorded runs | `toktape ls` |
 | `log` | the experiment ledger of every run | `toktape log --sort decode` |
 | `compare` | diff two runs, metrics and flags | `toktape compare a.tape b.tape` |
+| `publish` | upload a run and print its link | `toktape publish <tape>` |
 | `version` | print the version | `toktape version` |
 
 **How long a run is.** A recording ends on the clock: twenty seconds by
@@ -393,6 +394,42 @@ substitute — it squeezes a run you already have into the time you name.
 Nothing is compressed unless you ask for it that way: a clip that sped a run
 up to fit a limit would be lying about the one number the page is about. The
 same tape always renders the same clip.
+
+## Publish
+
+A tape is small enough to hand over whole — the hero is 25 KB — and a page
+that has the tape can draw everything else from it. That is what
+[tape.midagedev.com](https://tape.midagedev.com) does: `toktape publish`
+uploads the run and prints its link, and the link is the card, the run
+replayed in the browser, the transcript, the mp4 and the record itself.
+
+```sh
+toktape publish ~/.toktape/runs/<id>.tape --dry-run
+toktape publish ~/.toktape/runs/<id>.tape
+```
+
+`--dry-run` prints, field by field, exactly what would go up, and uploads
+nothing. Read it once: a published run is **public** and carries **its text**
+— the prompts and what the model wrote — by default, because a rate without
+the text it was measured on is half a claim. The first real publish asks you
+to confirm that, once. `--private` keeps a run out of the search (the link
+still works and is the only way in); `--no-text` uploads the run without the
+prompts and the answers; both can be made the default in
+`~/.toktape/config.toml`.
+
+Hostnames and absolute paths are removed whatever the visibility is — the
+server's argv keeps its flags and loses its paths, the model keeps its file
+name and loses its directory — and the same view is what the card at the top
+of the page is drawn from, so nothing the JSON forgets is painted back in
+pixels. The offset on the recording's timestamp is left as it was; whether it
+should be is still an open question.
+
+Every anonymous upload prints a **delete token** once. It is the only key to
+that upload and is not saved anywhere; with it, `DELETE /api/v1/runs/<id>`
+takes the run and its card down. The service itself never opens a tape: the
+figures on its pages are the index row the client derived next to the
+schema, and everything richer is the same renderer this binary uses,
+compiled to WebAssembly and run in your browser.
 
 ## How it measures
 
