@@ -46,7 +46,8 @@ npx wrangler d1 migrations apply toktape --local >"$work/migrate.log" 2>&1 ||
   { cat "$work/migrate.log"; die "migrations failed"; }
 
 say "wrangler dev on $base"
-npx wrangler dev --port "$port" --inspector-port 0 --var "PUBLIC_BASE_URL:$base" \
+npx wrangler dev --port "$port" --inspector-port 0 \
+  --var "PUBLIC_BASE_URL:$base" --var "RATE_SALT:local-harness-salt" \
   >"$work/dev.log" 2>&1 &
 dev_pid=$!
 for _ in $(seq 1 60); do
@@ -162,8 +163,12 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "$base/r/$id.tape")
 [ "$code" = "404" ] || die "a deleted run's record is still served (got $code)"
 
 say "the anonymous limit"
-# Six a minute; the seventh is refused. If this ever stops being enforced
-# locally the check fails here rather than in production.
+# Six a minute; the seventh is refused.
+#
+# This is the check that caught Cloudflare's rate-limiting binding doing
+# nothing in production while passing here, so it is also the reason the
+# counter now lives in D1: the same code path runs in both places and the
+# same probe below works against either.
 #
 # Under its own address: the counter outlives a `wrangler dev` process, so a
 # loop that spends the budget on the same key would refuse the *next* run's

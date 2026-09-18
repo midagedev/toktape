@@ -53,5 +53,17 @@ hand-written curl of what we believe the client sends would be this side
 grading its own homework.
 
 `migrations/` is the D1 schema, applied to the local database first and to the
-remote one only as part of a deploy, which is outward-facing. Deploying uses
-the scoped token `toktape-hub-deploy`, never the account's global API key.
+remote one only as part of a deploy, which is outward-facing. **Migrations go
+first**: deploying code that inserts into a table the remote database does not
+have yet is a window where every upload fails. Deploying uses the scoped token
+`toktape-hub-deploy`, never the account's global API key.
+
+The Worker needs one secret, `RATE_SALT` (`wrangler secret put RATE_SALT`, 32
+random bytes). Without it anonymous uploads are refused rather than served
+unlimited. It salts the per-address hash the upload counter is keyed on, so
+that nothing here has to store an address: an unsalted hash of an IPv4 address
+is reversible by enumeration, and this service strips the place a run happened
+out of every tape it publishes.
+
+Cloudflare's rate-limiting binding was tried first and measured not to count
+in production — see `src/ratelimit.js`.

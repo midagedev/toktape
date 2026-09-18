@@ -15,6 +15,7 @@
 
 import { fail, json, publicBase } from "./http.js";
 import { newDeleteToken, newRunID, sha256Hex } from "./ids.js";
+import { allowAnonymousUpload } from "./ratelimit.js";
 import { INDEX_COLUMNS, SUPPORTED_INDEX_SCHEMA, columnValues } from "./row.js";
 
 // A tape is tens of kilobytes — the hero is 25 KB on disk, 55 KB for a long
@@ -51,20 +52,8 @@ export async function uploadRun(request, env) {
   // not the bytes. Anonymous only: a journal token was issued by us and is
   // revocable, which is a better answer to abuse than a counter.
   if (!owner) {
-    if (!env.ANON_UPLOADS) {
-      // Closed beats unlimited. A deploy that lost the binding would
-      // otherwise serve an anonymous endpoint with no limit at all, and
-      // nothing about it would look wrong.
-      return fail(503, "this deployment has no upload limit configured and will not take anonymous uploads");
-    }
-    const { success } = await env.ANON_UPLOADS.limit({ key: request.headers.get("CF-Connecting-IP") || "unknown" });
-    if (!success) {
-      return fail(
-        429,
-        "six uploads a minute is the limit for an address with no token; wait a minute, or publish with a journal token",
-        { "Retry-After": "60" },
-      );
-    }
+    const verdict = await allowAnonymousUpload(request, env);
+    if (!verdict.ok) return fail(verdict.status, verdict.why, verdict.headers || {});
   }
 
   let form;
