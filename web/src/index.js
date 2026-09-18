@@ -1,62 +1,69 @@
-// The toktape hub, before it does anything.
+// The toktape hub (docs/toktape-spec.ko.md §9).
 //
-// This exists so that tape.midagedev.com resolves to something we control:
-// midagedev.com carries a wildcard A record, so until a Worker claims this
-// hostname it silently resolves to an unrelated host, and a client that
-// published to it would be uploading somebody's run to a stranger. Refusing
-// is the honest state, and refusing with the right status is what makes the
-// refusal legible to `toktape publish`, which quotes a server's own words.
+// tape.midagedev.com hosts the record, not pixels: a published run is the
+// same structured file `toktape record` wrote, so a card, a GIF and a cast
+// can all still be drawn from it. The measured argument for that is in §9.1
+// — one hero clip is 55 KB as a record, 4.1 MB as a GIF, and only one of
+// those two can be turned back into the other.
 //
-// The real service is TTP-115: R2 for the records, D1 for the index rows,
-// POST /api/v1/runs to upload, /r/<id> to read one back, and the search.
-// Its contract is the doc block on publish.Client in
-// internal/publish/client.go — the Worker is written against that, never the
-// other way round, because the client derives the index next to the schema
-// and this side never parses a tape.
+// **The Worker never parses a tape.** The Go client derives a versioned
+// index row next to the schema and uploads it beside the record, so
+// knowledge of the tape's shape has exactly one owner. The upload contract
+// is the doc block on publish.Client in internal/publish/client.go and the
+// request body internal/publish/client_test.go parses; this side is written
+// against those, never the other way round.
 
-const NOT_LIVE =
-  "toktape hub is not live yet.\n" +
-  "The service that will live here is described in docs/toktape-spec.ko.md section 9.\n" +
-  "https://github.com/midagedev/toktape\n";
+import { fail, json, text } from "./http.js";
+import { serveRunJSON, serveRunPage, serveTape } from "./run.js";
+import { uploadRun } from "./upload.js";
+
+// Both extensions are served: `.toktape` is where the format is going
+// (§9.7), `.tape` is what today's client uploads under, and a run is served
+// back as whichever it arrived as.
+const TAPE_SUFFIX = /^\/r\/([a-z0-9]{8,64})(\.toktape|\.tape)$/;
+const RUN_JSON = /^\/r\/([a-z0-9]{8,64})\.json$/;
+const RUN_PAGE = /^\/r\/([a-z0-9]{8,64})$/;
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
+    const path = url.pathname;
 
-    // A health check that answers before anything else exists, so "is the
-    // hostname ours" and "is the service up" are separate questions.
-    if (url.pathname === "/healthz") {
-      return json({ ok: true, service: "toktape-hub", live: false });
+    // "Is the hostname ours" and "is the service up" are separate questions,
+    // so this answers before anything that needs a binding.
+    if (path === "/healthz") {
+      return json({ ok: true, service: "toktape-hub", live: true });
     }
 
-    // The upload path answers 503 rather than 404: 404 would tell a client it
-    // had the wrong address, and it does not. The body is what the client
-    // prints, so it is a sentence a person can act on.
-    if (url.pathname === "/api/v1/runs") {
-      return json(
-        { error: "toktape hub is not accepting uploads yet" },
-        503,
-        { "Retry-After": "86400" },
-      );
+    if (path === "/api/v1/runs") {
+      if (request.method !== "POST") {
+        return fail(405, "a run is published with POST", { Allow: "POST" });
+      }
+      return uploadRun(request, env);
     }
 
-    return new Response(NOT_LIVE, {
-      status: 503,
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-store",
-      },
-    });
+    let m;
+    if ((m = TAPE_SUFFIX.exec(path))) return serveTape(m[1], env);
+    if ((m = RUN_JSON.exec(path))) return serveRunJSON(m[1], env);
+    if ((m = RUN_PAGE.exec(path))) return serveRunPage(m[1], env);
+
+    if (path === "/") return text(INDEX_TEXT);
+    return fail(404, "no such path on this service");
   },
 };
 
-function json(body, status = 200, extra = {}) {
-  return new Response(JSON.stringify(body) + "\n", {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-      ...extra,
-    },
-  });
-}
+// The front page is text until there is a search to put on it (§9.4). A
+// holding page that pretended to be the product would be the one thing this
+// repo's whole design argues against.
+const INDEX_TEXT = `toktape hub
+
+Publishing a run:
+
+    toktape publish <run.tape>
+    toktape publish <run.tape> --dry-run    # what would be sent, and nothing is
+
+The record is what is hosted — not a GIF of it — so the card, the clip and
+the numbers are all still derivable from what you get back.
+
+https://github.com/midagedev/toktape
+`;

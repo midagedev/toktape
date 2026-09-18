@@ -8,8 +8,23 @@
   // implements.
   "name": "toktape-hub",
   "main": "src/index.js",
-  "compatibility_date": "2026-09-18",
+  // The newest date the pinned workerd actually implements (1.20260917.1).
+  // A date the local runtime cannot serve makes `wrangler dev` refuse to
+  // start, which would mean the gate never runs against the runtime the
+  // deploy uses — the one thing a local harness exists to avoid.
+  "compatibility_date": "2026-09-17",
   "observability": { "enabled": true },
+
+  "vars": {
+    // The service's own name, and what a receipt's link is built from.
+    //
+    // Not derived from the request: `wrangler dev` simulates the configured
+    // route, so a request to the dev server arrives claiming to be
+    // tape.midagedev.com and a derived link would send a developer's own
+    // publish to production. It is declared here and overridden with
+    // `--var` where the service is not the one at this address.
+    "PUBLIC_BASE_URL": "https://tape.midagedev.com"
+  },
   "routes": [
     {
       // A custom domain, not a route: the Worker owns the whole hostname and
