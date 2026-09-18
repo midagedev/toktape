@@ -190,8 +190,19 @@
     return out;
   }
 
+  // The renderer laid the frame out in terminal cells, where a Hangul or CJK
+  // character is exactly two cells wide. A browser's monospace font does
+  // not promise that — the fallback face it picks for those characters has
+  // its own advance — so a line with Korean in it came out wider than its
+  // 120 columns and pushed the right-hand panels off the stage (seen on a
+  // DeepSeek run answering in Korean, 2026-09-18). Each wide character is
+  // therefore boxed to two cells of the ASCII face, which is what the
+  // renderer assumed.
+  const WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|[\u{1F300}-\u{1F64F}\u{1F900}-\u{1F9FF}\u{20000}-\u{3FFFD}]/gu;
   function escapeHTML(s) {
-    return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+    return s
+      .replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c])
+      .replace(WIDE, (c) => `<b class="w">${c}</b>`);
   }
 
   // The frame is COLS columns wide whatever the screen is, so the font is

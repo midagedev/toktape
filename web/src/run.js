@@ -223,6 +223,10 @@ const PAGE_STYLE = `
   border: 1px solid #1b1f26; color: #e6e2d8;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre; cursor: pointer; user-select: none; }
+/* A wide (CJK, Hangul, emoji) character occupies exactly two cells, as the
+   renderer assumed when it laid the line out; see host.js. */
+.screen .w { display: inline-block; width: 2ch; font-weight: inherit;
+  text-align: center; overflow: hidden; vertical-align: bottom; }
 /* Progress is written into the button itself; this line under the stage
    is for what went wrong, in the player's own words. */
 .status { margin: .6rem 0 0; font-size: .85rem; color: #e0b64a; }
