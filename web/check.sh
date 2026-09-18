@@ -90,12 +90,41 @@ curl -fsS "$base/r/$id" | grep -q '<title>' || die "/r/<id> is not a page"
 curl -fsS "$base/r/$id.json" >"$work/row.json"
 grep -q '"schema": *1' "$work/row.json" || { cat "$work/row.json"; die "the index row is not there"; }
 
+say "the search"
+curl -fsS "$base/api/v1/runs" >"$work/list.json"
+grep -q "\"id\":\"$id\"" "$work/list.json" || { cat "$work/list.json"; die "the run is not in the listing"; }
+# Every row carries the qualification the card prints (§9.4).
+grep -q '"caveat_count"' "$work/list.json" || die "a listing row dropped its caveat count"
+# There is no sort parameter and asking for one changes nothing: newest
+# first is the only order, by decision, and this is where that is enforced.
+curl -fsS "$base/api/v1/runs?sort=decode_per_sec" >"$work/sorted.json"
+cmp -s "$work/list.json" "$work/sorted.json" || die "a sort parameter changed the listing"
+# A filter on a normalised axis, and the raw fallback beside it.
+curl -fsS "$base/api/v1/runs?engine=ik_llama.cpp" | grep -q "\"id\":\"$id\"" ||
+  die "filtering by engine dropped the run"
+curl -fsS "$base/api/v1/runs?engine=vllm" | grep -q "\"runs\":\[\]" ||
+  die "filtering by an engine nothing ran returned rows"
+curl -fsS "$base/api/v1/runs?q=Qwen3.6" | grep -q "\"id\":\"$id\"" ||
+  die "free text did not fall back to the name as recorded"
+curl -fsS "$base/" | grep -q 'ik_llama.cpp' || die "the front page does not list the run"
+code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?scope=mine")
+[ "$code" = "401" ] || { cat "$work/body"; die "the journal scope answered without a token (got $code)"; }
+
+say "unlisted means unlisted"
+HOME="$work/home" "$work/toktape" publish "$repo/assets/hero.tape" --url "$base" --private \
+  >"$work/receipt2" 2>"$work/publish2.err" ||
+  { cat "$work/publish2.err"; die "a private publish failed"; }
+pid2="$(tr -d '\r\n' <"$work/receipt2")"; pid2="${pid2##*/}"
+curl -fsS "$base/api/v1/runs" | grep -q "$pid2" && die "a --private run is in the listing"
+curl -fsS "$base/r/$pid2" | grep -q 'unlisted' || die "the private run's page does not say it is unlisted"
+
 say "refusals"
 code=$(curl -s -o "$work/body" -w '%{http_code}' -X POST "$base/api/v1/runs" \
   -H 'Authorization: Bearer tk_not_a_token' -F 'tape=@'"$work/downloaded.tape"';filename=run.tape' \
   -F 'index={"schema":1}')
 [ "$code" = "401" ] || { cat "$work/body"; die "an unknown token was not refused (got $code)"; }
 code=$(curl -s -o "$work/body" -w '%{http_code}' -X POST "$base/api/v1/runs" \
+  -H "CF-Connecting-IP: 203.0.113.8" \
   -F 'tape=@'"$work/downloaded.tape"';filename=run.tape' -F 'index={"schema":99}')
 [ "$code" = "400" ] || { cat "$work/body"; die "an unknown index schema was not refused (got $code)"; }
 grep -q 'schema 1' "$work/body" || { cat "$work/body"; die "the refusal does not name the schema"; }
@@ -120,9 +149,14 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "$base/r/$id.tape")
 say "the anonymous limit"
 # Six a minute; the seventh is refused. If this ever stops being enforced
 # locally the check fails here rather than in production.
+#
+# Under its own address: the counter outlives a `wrangler dev` process, so a
+# loop that spends the budget on the same key would refuse the *next* run's
+# publish and make this gate fail for a reason that is not a defect.
 limited=no
 for _ in $(seq 1 9); do
   code=$(curl -s -o "$work/body" -w '%{http_code}' -X POST "$base/api/v1/runs" \
+    -H "CF-Connecting-IP: 203.0.113.9" \
     -F 'tape=@'"$work/downloaded.tape"';filename=run.tape' -F 'index={"schema":1}')
   if [ "$code" = "429" ]; then limited=yes; break; fi
 done

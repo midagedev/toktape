@@ -14,8 +14,9 @@
 // against those, never the other way round.
 
 import { deleteRun } from "./del.js";
-import { fail, json, text } from "./http.js";
+import { fail, json } from "./http.js";
 import { serveRunJSON, serveRunPage, serveTape } from "./run.js";
+import { searchAPI, searchPage } from "./search.js";
 import { uploadRun } from "./upload.js";
 
 // Both extensions are served: `.toktape` is where the format is going
@@ -38,10 +39,9 @@ export default {
     }
 
     if (path === "/api/v1/runs") {
-      if (request.method !== "POST") {
-        return fail(405, "a run is published with POST", { Allow: "POST" });
-      }
-      return uploadRun(request, env);
+      if (request.method === "POST") return uploadRun(request, env);
+      if (request.method === "GET") return searchAPI(request, env);
+      return fail(405, "a run is published with POST and the listing is a GET", { Allow: "GET, POST" });
     }
 
     let m;
@@ -55,23 +55,9 @@ export default {
     if ((m = RUN_JSON.exec(path))) return serveRunJSON(m[1], env);
     if ((m = RUN_PAGE.exec(path))) return serveRunPage(m[1], env);
 
-    if (path === "/") return text(INDEX_TEXT);
+    // The front page is the search: the thing a visitor came for is other
+    // people's runs, not an explanation of the service.
+    if (path === "/") return searchPage(request, env);
     return fail(404, "no such path on this service");
   },
 };
-
-// The front page is text until there is a search to put on it (§9.4). A
-// holding page that pretended to be the product would be the one thing this
-// repo's whole design argues against.
-const INDEX_TEXT = `toktape hub
-
-Publishing a run:
-
-    toktape publish <run.tape>
-    toktape publish <run.tape> --dry-run    # what would be sent, and nothing is
-
-The record is what is hosted — not a GIF of it — so the card, the clip and
-the numbers are all still derivable from what you get back.
-
-https://github.com/midagedev/toktape
-`;

@@ -10,6 +10,7 @@
 // a door — the id is the secret (§9.3).
 
 import { fail, json } from "./http.js";
+import { esc, fmt, layout } from "./page.js";
 
 export async function serveTape(id, env) {
   const row = await env.DB.prepare("SELECT tape_key, tape_ext FROM runs WHERE id = ?")
@@ -90,7 +91,11 @@ function runPage(row, idx) {
     ["gpus", idx.gpus_raw && idx.gpus_raw.length ? idx.gpus_raw.join(" / ") : "—"],
     ["streams", idx.sessions ? String(idx.sessions) : "?"],
     ["prompt set", idx.prompt_set || "not in a comparison set"],
-    ["recorded", idx.recorded_at || "?"],
+    // The offset is left on, deliberately: whether recorded_at should be
+    // normalised to UTC is still open (TTP-120), and hiding the offset while
+    // the question is open would answer it by accident. Only the fractional
+    // seconds go, which no reader of this row wanted.
+    ["recorded", idx.recorded_at ? String(idx.recorded_at).replace(/\.\d+/, "") : "?"],
     ["toktape", idx.toktape_version || "?"],
   ];
   const figures = [
@@ -99,55 +104,28 @@ function runPage(row, idx) {
     ["ttft p50", idx.ttft_p50_ms, "ms"],
   ];
 
-  return `<!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)} — toktape</title>
-<meta property="og:title" content="${esc(title)}">
+  return layout({
+    title: `${title} — toktape`,
+    meta: `<meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(summaryLine(idx))}">
-<meta property="og:type" content="website">
-<style>
-:root { color-scheme: dark; }
-body { margin: 0; background: #0e1014; color: #d7dae0;
-  font: 15px/1.6 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
-main { max-width: 46rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
-h1 { font-size: 1.4rem; margin: 0 0 .25rem; font-weight: 600; letter-spacing: -.01em; }
-.sub { color: #7d848f; font-size: .875rem; margin: 0 0 2.5rem; }
-.figures { display: flex; flex-wrap: wrap; gap: 2.5rem; margin: 0 0 2.5rem; }
-.figure .n { font: 600 1.9rem/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #eef1f5; font-variant-numeric: tabular-nums; }
-.figure .u { color: #7d848f; font-size: .8rem; margin-left: .3rem; }
-.figure .k { color: #7d848f; font-size: .75rem; text-transform: uppercase;
-  letter-spacing: .08em; margin-bottom: .35rem; }
-table { border-collapse: collapse; width: 100%; font-size: .9rem; }
-td { padding: .45rem 0; border-bottom: 1px solid #1b1f26; vertical-align: top; }
-td.k { color: #7d848f; width: 9.5rem; white-space: nowrap; }
-td.v { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-word; }
-.caveats { margin: 2rem 0 0; padding: .9rem 1.1rem; border: 1px solid #3a2f16;
-  background: #1a160c; border-radius: 6px; font-size: .875rem; }
-.caveats b { color: #e0b64a; font-weight: 600; }
-.caveats code { color: #b9a06a; }
-footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #1b1f26;
-  font-size: .85rem; color: #7d848f; }
-a { color: #7aa2f7; }
-</style>
-</head><body><main>
+<meta property="og:type" content="website">`,
+    style: PAGE_STYLE,
+    body: `
 <h1>${esc(title)}</h1>
 <p class="sub">${esc(summaryLine(idx))}${row.private === 1 ? " · unlisted" : ""}</p>
 
 <div class="figures">
 ${figures
   .map(
-    ([k, v, u]) => `<div class="figure"><div class="k">${esc(k)}</div><div class="n">${
-      v ? fmt(v) : "?"
-    }<span class="u">${esc(u)}</span></div></div>`,
+    ([k, v, u]) => `<div class="figure"><div class="k">${esc(k)}</div><div class="n num">${fmt(
+      v,
+    )}<span class="u">${esc(u)}</span></div></div>`,
   )
   .join("\n")}
 </div>
 
 <table>
-${rows.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join("\n")}
+${rows.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v mono">${esc(v)}</td></tr>`).join("\n")}
 </table>
 
 ${caveatBlock(idx)}
@@ -155,12 +133,33 @@ ${caveatBlock(idx)}
 <footer>
 <a href="/r/${esc(row.id)}${esc(row.tape_ext)}">Download the record</a> · ${row.tape_bytes} bytes ·
 published ${esc(row.created_at)}<br>
-The record is the original. <code>toktape card ${esc(row.id)}${esc(row.tape_ext)}</code> draws
-the card from it, and everything on this page was derived from it before it was uploaded.
-</footer>
-</main></body></html>
-`;
+The record is the original: everything on this page was derived from it before
+it was uploaded, and <code>toktape card ${esc(row.id)}${esc(row.tape_ext)}</code>
+draws the card from the same file.
+</footer>`,
+  });
 }
+
+const PAGE_STYLE = `
+.figures { display: flex; flex-wrap: wrap; gap: 2.5rem; margin: 0 0 2.5rem; }
+.figure .n { font: 600 1.9rem/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #eef1f5; }
+.figure .u { color: #6b727d; font-size: .8rem; margin-left: .3rem; }
+.figure .k { color: #6b727d; font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .09em; margin-bottom: .35rem; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+td { padding: .45rem 0; border-bottom: 1px solid #1b1f26; vertical-align: top; }
+td.k { color: #7d848f; width: 9.5rem; white-space: nowrap; }
+@media (max-width: 30rem) {
+  td.k { width: 6.5rem; white-space: normal; }
+  .figures { gap: 1.5rem; }
+}
+td.v { word-break: break-word; }
+.caveats { margin: 2rem 0 0; padding: .9rem 1.1rem; border: 1px solid #3a2f16;
+  background: #1a160c; border-radius: 6px; font-size: .875rem; }
+.caveats b { color: #e0b64a; font-weight: 600; }
+.caveats code { color: #b9a06a; }
+`;
 
 function caveatBlock(idx) {
   if (!idx.caveat_count) return "";
@@ -187,26 +186,13 @@ function withSource(id, source) {
   return source ? `${id} (from the ${source})` : id;
 }
 
-function fmt(n) {
-  return n >= 100 ? n.toFixed(0) : n.toFixed(1);
-}
-
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[c]);
-}
-
 function notFoundPage() {
-  return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Not found — toktape</title>
-<style>body{margin:0;background:#0e1014;color:#d7dae0;font:15px/1.6 ui-sans-serif,-apple-system,sans-serif}
-main{max-width:34rem;margin:0 auto;padding:5rem 1.25rem}a{color:#7aa2f7}</style>
-</head><body><main><h1>No run with that id</h1>
-<p>Either the link is wrong or the run was deleted. A deleted run is gone —
-the delete token is the only key to a one-off upload and it takes the record
-with it.</p>
-<p><a href="https://github.com/midagedev/toktape">toktape</a></p>
-</main></body></html>
-`;
+  return layout({
+    title: "Not found — toktape",
+    body: `<h1>No run with that id</h1>
+<p class="sub">Either the link is wrong, or the run was deleted. A deleted run
+is gone: the delete token is the only key to a one-off upload and it takes the
+record with it.</p>
+<p><a href="/">Published runs</a></p>`,
+  });
 }
