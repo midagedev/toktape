@@ -28,6 +28,12 @@ const (
 	// exitStreams because "this box has no encoder" and "the server answered
 	// nothing" are different things for a wrapper script to branch on.
 	exitUnavailable = 4
+	// exitPublish: nothing was published. The service refused the upload, it
+	// could not be reached, or the first-publish question was answered no. It
+	// is separate from exitUnreachable because "the publishing service did
+	// not answer" and "no llama-server answered" are different problems with
+	// different fixes, and a wrapper script has to tell them apart.
+	exitPublish = 5
 )
 
 const usageText = `toktape — the black-box tape for local LLM serving
@@ -41,6 +47,7 @@ Usage:
   toktape ls [--out DIR]          list recorded runs
   toktape log [--out DIR]         the experiment ledger of every run
   toktape compare <a> <b>         diff two runs
+  toktape publish <tape> [flags]  upload a run and print its link
   toktape version                 print the version
   toktape help agents             the contract a script or coding agent needs
 
@@ -91,6 +98,18 @@ Card flags:
   --copy                also copy the output to the clipboard (OSC 52)
   --explain             why the card says what it says, on stderr as well
 
+Publish flags:
+  --dry-run             print what would be uploaded and upload nothing. A run
+                        is public and carries its text by default, and this
+                        lists field by field what that means for this tape
+  --private             keep the run out of the search (the link still works)
+  --no-text, --with-text  with or without the prompts and the generated text,
+                        over publish_text in ~/.toktape/config.toml
+  --yes                 take the first-publish warning as read
+  --url URL             the service to publish to
+
+  Hostnames and absolute paths are removed whatever the visibility is.
+
 Examples:
   # One stream against a server toktape finds itself, for 20s. No flags.
   toktape
@@ -126,6 +145,8 @@ Exit codes:
   2  unreachable  no server answered, or one never finished loading
   3  streams      the server answered and every stream failed
   4  unavailable  this machine lacks something the output needs (ffmpeg)
+  5  publish      nothing was published: the service refused or was not
+                  reached, or the first-publish question was answered no
 
 With -o json or -o jsonl every outcome is one JSON object on stdout: the run
 summary on success, {"error":{"code":...}} on failure, code being the name
@@ -166,6 +187,8 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		return runLog(c, rest)
 	case "compare":
 		return runCompare(c, rest)
+	case "publish":
+		return runPublish(ctx, c, rest)
 	default:
 		c.json = jsonRequested(args)
 		return c.usageTextf(usageText, "toktape: unknown command %q", verb)
@@ -176,7 +199,7 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 // `toktape` and `toktape --url ...` both record.
 var verbs = map[string]bool{
 	"record": true, "card": true, "play": true, "render": true,
-	"ls": true, "log": true, "compare": true, "version": true,
+	"ls": true, "log": true, "compare": true, "publish": true, "version": true,
 }
 
 // splitVerb picks the verb out of the argument list.

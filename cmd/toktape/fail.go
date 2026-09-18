@@ -64,6 +64,7 @@ var exitCodeNames = map[int]string{
 	exitUnreachable: "unreachable",
 	exitStreams:     "streams",
 	exitUnavailable: "unavailable",
+	exitPublish:     "publish",
 }
 
 // errorReport is the JSON object a failed invocation prints under -o json or

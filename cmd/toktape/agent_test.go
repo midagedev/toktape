@@ -38,6 +38,7 @@ var wantExitCodes = map[int]string{
 	2: "unreachable",
 	3: "streams",
 	4: "unavailable",
+	5: "publish",
 }
 
 var helpExitLine = regexp.MustCompile(`^\s{2}(\d)\s{2}([a-z]+)`)
@@ -317,8 +318,19 @@ func TestHelpAgentsTopic(t *testing.T) {
 // worked example (+3) because it is how a sweep becomes a table an agent can
 // query — the ledger's reason to exist. At 98 lines the old budget fails
 // (checked before raising it); 100 keeps two lines of headroom.
+//
+// It was 100 until `publish` (TTP-114, 2026-09-18), and the text was 115. A
+// whole verb is what it bought, and the verb is the one whose flags a reader
+// must not have to guess at: it sends their run to somebody else's server.
+// The fifteen lines are the verb in Usage (+1), a fifth exit code and the
+// sentence saying what it means (+2), and the flags with what is public by
+// default and what is always removed (+12) — the two facts a reader needs
+// before the first upload, not after. Nothing was trimmed to pay for it,
+// which is itself the decision: --help has been the one place this CLI's
+// contract is stated, and a publishing verb documented somewhere else would
+// be the first exception. 118 keeps three lines of headroom.
 func TestHelpStaysScannable(t *testing.T) {
-	const maxLines = 100
+	const maxLines = 118
 	if n := strings.Count(usageText, "\n"); n > maxLines {
 		t.Errorf("--help is %d lines, over the %d-line budget; move detail into a help topic", n, maxLines)
 	}
@@ -456,6 +468,7 @@ func TestEveryExitConstIsNamed(t *testing.T) {
 	for name, code := range map[string]int{
 		"exitOK": exitOK, "exitUsage": exitUsage, "exitUnreachable": exitUnreachable,
 		"exitStreams": exitStreams, "exitUnavailable": exitUnavailable,
+		"exitPublish": exitPublish,
 	} {
 		named[name] = true
 		if exitCodeNames[code] == "" {
@@ -551,6 +564,8 @@ func exampleFlagSet(verb string) (*flag.FlagSet, error) {
 		declareRenderFlags(fs)
 	case "ls":
 		fs.String("out", defaultRunsDir(), "")
+	case "publish":
+		declarePublishFlags(fs)
 	default:
 		return nil, fmt.Errorf("the Examples section uses verb %q; teach this test how it parses", verb)
 	}

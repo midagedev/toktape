@@ -59,6 +59,10 @@ var verbOutputs = map[string][]outputFormat{
 	"record": {outputJSON, outputJSONL, outputMD, outputCSV, outputTSV, outputSQL},
 	"card":   {outputJSON, outputJSONL, outputMD, outputCSV, outputTSV, outputSQL, outputPNG},
 	"log":    {outputJSON, outputJSONL, outputMD, outputCSV, outputTSV, outputSQL},
+	// publish's product is a receipt, not a run: the link, the id and the
+	// delete token. The ledger formats would have to invent a row for
+	// something that is not a measurement, so it takes json alone.
+	"publish": {outputJSON, outputJSONL},
 }
 
 // outputRefusals is why a format another verb takes is not one this verb
