@@ -295,21 +295,35 @@ Charm VHS가 `.tape`를 쓴다(별 20,878개, 그것도 터미널 GIF라는 같�
 
 `internal/tui`·`internal/render`는 js/wasm으로 빌드된다. bubbletea를 import하는 파일은 `internal/tui/run.go` 하나뿐이라 거기에 `//go:build !js` 하나면 갈라진다(2026-09-17 확인, 2026-09-18 재확인). 렌더러가 하나로 유지되므로 카드가 두 곳에서 다르게 보이는 결함 계열이 열리지 않는다.
 
-다만 번들이 **16.1 MB, gzip 3.85 MB**다(2026-09-18 실측). 공유 링크 첫 화면으로는 무겁다. 그래서 순서를 이렇게 둔다:
+순서는 그래도 뒤다. 페이지는 **PNG 카드(92 KB)와 메타데이터로 즉시** 뜨고 — OG 이미지가 이미 그 카드라 미리보기가 공짜다 — "Replay"를 눌렀을 때만 wasm을 받는다. **공유 URL·검색·저널은 wasm 없이 출시된다.**
 
-1. 페이지는 **PNG 카드(92 KB)와 메타데이터로 즉시** 뜬다. OG 이미지가 이미 그 카드라 미리보기가 공짜다.
-2. "Replay"를 눌렀을 때만 wasm을 받는다.
+크기는 잴 수 있고, 재 보니 절반이 렌더와 무관한 짐이었다(2026-09-18, 사다리 실측):
 
-즉 **공유 URL·검색·저널은 wasm 없이 출시된다.** 크기를 줄이는 첫 레버는 `internal/tui`가 끌고 오는 `chroma/v2/lexers`(모든 언어 렉서를 등록한다)이고, 웹 빌드에서 이를 잘라내는 것은 wasm 단계에서 잰다. Cloudflare 제약도 여기 걸린다 — wasm은 Worker 스크립트(3~10 MB)가 아니라 Static Asset(파일당 25 MiB)으로 나간다.
+| 구성 | raw | gzip | brotli |
+|---|---|---|---|
+| 지금 그대로 | 16.1 MB | 3.85 MB | 2.76 MB |
+| GGUF 파서 제외 | 11.0 MB | 2.73 MB | |
+| GGUF + chroma 제외 | **6.7 MB** | **1.82 MB** | **1.36 MB** |
+
+귀속: Go wasm 빈 프로그램이 gz 756 KB이고 `internal/tape`는 거기에 22 KB를 더한다. 무게는 두 곳이다.
+
+**하나는 GGUF 파서이고, 이건 wasm보다 큰 문제다.** `internal/placement/gguf.go`의 `ModelInfoFromFile`이 gpustack/gguf-parser-go를 끌고 오고(그와 함께 json-iterator·modern-go/reflect2·httpretty·ringbuffer), `internal/card`가 placement를, `internal/tui`가 card를 import하므로 **렌더 경로 전체가 그것을 진다.** 그런데 그 함수는 모델 파일을 디스크에서 읽는 녹화 시점의 일이고, 테이프에는 이미 placement 요약이 들어 있다. CLAUDE.md의 계약은 "모든 렌더러는 `*tape.Tape`만 읽는다"인데 실제 의존 그래프는 그렇지 않다. 파일 하나를 자기 패키지로 옮겨 레코더만 import하게 하면 되고, 이득은 브라우저만이 아니다 — 배포되는 CLI 바이너리 18.3 MB에도 같은 짐이 들어 있다.
+
+**다른 하나는 chroma다.** `internal/tui/highlight.go`가 `chroma/v2/lexers`를 쓰는데 그 패키지는 모든 언어의 렉서 정의를 embed한다(gz 835 KB). 접점은 좁다 — `lexers.Get`과 `Tokenise` 두 줄, 그리고 토큰 타입을 8개 `codeClass`로 접는 `classOf` 하나뿐이다. 그래서 웹 빌드에서는 빌드 태그로 가벼운 구현을 끼운다: 포팅이 아니라 파일 교체이고, 계약이 "8개 클래스"라 대체 구현이 만족시켜야 할 것도 그게 전부다. 터미널 쪽은 chroma를 그대로 쓴다.
+
+TinyGo는 쓰지 않는다. lipgloss와 reflect 의존이 있어 그건 별도 프로젝트가 된다.
+
+Cloudflare 제약: wasm은 Worker 스크립트(3~10 MB)가 아니라 Static Asset(파일당 25 MiB)으로 나간다. 전송은 브로틀리이므로 위 표의 마지막 열이 실제로 내려가는 크기다.
 
 ### 9.9 단계
 
 1. **확장자** `.toktape`(TTP-111) + 양쪽 읽기 + 히어로 재렌더.
 2. **프롬프트 세트에 id와 버전**(TTP-112), 그리고 산문·한국어 보강. 인덱스가 비교 집합을 만들려면 이게 먼저 tape에 들어와 있어야 한다.
-3. **인덱스 타입과 정규화**(TTP-113) — 버전 붙은 Go 타입, 정규값과 원본을 함께, 실패는 빈 값. 서버가 아니라 여기서 판단이 끝난다.
-4. **정화 뷰와 `toktape publish`**(TTP-114) — `internal/tape`의 공개용 뷰, 설정 파일과 첫 실행 경고, `--dry-run`, `--private`, `--no-text`, 삭제 토큰, 토큰 발급.
-5. **Worker**(TTP-115) — R2·D1·업로드·`/r/<id>`·OG 이미지·검색. 코드는 이 레포 `web/`에 둔다(사용자 결정 2026-09-18): wasm과 인덱스 타입이 같은 커밋에서 빌드된다.
-6. **wasm 플레이어**(TTP-116) — 크기 레버를 재고 나서.
+3. **렌더 경로에서 GGUF 파서 분리**(TTP-118). wasm의 절반이자, 배포 바이너리의 같은 짐이다.
+4. **인덱스 타입과 정규화**(TTP-113) — 버전 붙은 Go 타입, 정규값과 원본을 함께, 실패는 빈 값. 서버가 아니라 여기서 판단이 끝난다.
+5. **정화 뷰와 `toktape publish`**(TTP-114) — `internal/tape`의 공개용 뷰, 설정 파일과 첫 실행 경고, `--dry-run`, `--private`, `--no-text`, 삭제 토큰, 토큰 발급.
+6. **Worker**(TTP-115) — R2·D1·업로드·`/r/<id>`·OG 이미지·검색. 코드는 이 레포 `web/`에 둔다(사용자 결정 2026-09-18): wasm과 인덱스 타입이 같은 커밋에서 빌드된다.
+7. **wasm 플레이어**(TTP-116) — 크기 레버를 재고 나서.
 
 ## 8. 다음 라운드
 
