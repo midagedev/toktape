@@ -33,6 +33,8 @@ Flags:
   --mp4 FILE       write an H.264 mp4 (needs ffmpeg on PATH)
   --cast FILE      write an asciicast v2 recording
   --frames DIR     write the PNG frame sequence into DIR (20 px cells — see Canvas)
+  --font-size N    cell height in pixels for every raster output (default 13 for
+                   --gif, 20 for --mp4/--frames; see Canvas)
   --open           open on a shell prompt with the command being typed, before the screen
   --no-poster      do not put the result on the clip's first frame
   --prefill-lead D open this long before the first token instead of at the run's start
@@ -85,10 +87,11 @@ Clip length
 
 Canvas, and cutting a window out of a clip
   --size is a cell grid, not a pixel size, and the pixel canvas differs by
-  output: --gif and --cast draw 13 px cells, --mp4 and --frames draw 20 px
-  ones. The same tape at --size 120x36 comes out 992x684 as a GIF and
-  1488x1026 as frames, and no flag reconciles them. So rendering --frames and
-  encoding them yourself is not the picture --gif would have made.
+  output: --gif draws 13 px cells, --mp4 and --frames draw 20 px ones. The
+  same tape at --size 120x36 comes out 992x684 as a GIF and 1488x1026 as
+  frames. Each ✓ line prints the canvas it drew, and --font-size makes the
+  outputs agree: --frames --font-size 13 --size 120x36 is the GIF's picture,
+  frame for frame, for an encoder of your own.
 
   When you want part of a clip, cut the finished GIF rather than re-rendering
   or re-encoding it:
@@ -114,6 +117,7 @@ type renderFlags struct {
 	lead     *time.Duration
 	fps      *int
 	size     *string
+	fontSize *float64
 	outDir   *string
 }
 
@@ -130,6 +134,7 @@ func declareRenderFlags(fs *flag.FlagSet) *renderFlags {
 		lead:     fs.Duration("prefill-lead", 0, "open this long before the first token instead of at the run's start"),
 		fps:      fs.Int("fps", render.DefaultFPS, "frame rate"),
 		size:     fs.String("size", "", "terminal size in cells, e.g. 120x36"),
+		fontSize: fs.Float64("font-size", 0, "cell height in pixels for the raster outputs (0 = each output's default)"),
 		outDir:   fs.String("out", defaultRunsDir(), "directory to take the newest run from"),
 	}
 }
@@ -164,6 +169,9 @@ func runRender(c *cli, args []string) int {
 	if *lead < 0 {
 		return c.usagef("toktape render: --prefill-lead must not be negative, got %v", *lead)
 	}
+	if *f.fontSize < 0 || (*f.fontSize > 0 && *f.fontSize < 6) {
+		return c.usagef("toktape render: --font-size is a cell height in pixels, 6 or more, got %g", *f.fontSize)
+	}
 
 	opts := render.Options{
 		FPS:         *fps,
@@ -171,6 +179,7 @@ func runRender(c *cli, args []string) int {
 		ColdOpen:    *coldOpen,
 		NoPoster:    *noPoster,
 		PrefillLead: *lead,
+		FontSize:    *f.fontSize,
 	}
 	if *size != "" {
 		w, h, err := parseSize(*size)
@@ -236,13 +245,13 @@ func runRender(c *cli, args []string) int {
 			return c.usagef("toktape: %v", err)
 		}
 		fmt.Fprint(c.stdout, artifactLine("Frames",
-			fmt.Sprintf("%s (%d frames)", tildePath(*framesTo), len(paths))))
+			fmt.Sprintf("%s (%d frames, %s)", tildePath(*framesTo), len(paths), canvasNote(opts, true))))
 	}
 	if *gifOut != "" {
 		if err := render.GIF(tp, opts, *gifOut); err != nil {
 			return c.usagef("toktape: %v", err)
 		}
-		fmt.Fprint(c.stdout, artifactLine("GIF", tildePath(*gifOut)))
+		fmt.Fprint(c.stdout, artifactLine("GIF", fmt.Sprintf("%s (%s)", tildePath(*gifOut), canvasNote(opts, false))))
 	}
 	if *mp4Out != "" {
 		if err := render.MP4(tp, opts, *mp4Out); err != nil {
@@ -257,7 +266,7 @@ func runRender(c *cli, args []string) int {
 			}
 			return c.usagef("toktape: %v", err)
 		}
-		fmt.Fprint(c.stdout, artifactLine("mp4", tildePath(*mp4Out)))
+		fmt.Fprint(c.stdout, artifactLine("mp4", fmt.Sprintf("%s (%s)", tildePath(*mp4Out), canvasNote(opts, true))))
 	}
 	return exitOK
 }
@@ -330,6 +339,17 @@ func secs(d time.Duration) string {
 // a recording uses (record.go's shareHint), so a clip and a card read as the
 // same tool talking. what is the path, already shortened, plus any note that
 // belongs on the same line.
+// canvasNote is the pixel canvas an output drew, as "992x684", so the ✓ line
+// says what --size alone never did (TTP-104). "?" if the rasteriser refuses
+// the size, which the render before it would already have failed on.
+func canvasNote(opts render.Options, video bool) string {
+	w, h, err := render.Canvas(opts, video)
+	if err != nil {
+		return "?"
+	}
+	return fmt.Sprintf("%dx%d", w, h)
+}
+
 func artifactLine(label, what string) string {
 	return fmt.Sprintf("✓ %-6s %s\n", label, what)
 }

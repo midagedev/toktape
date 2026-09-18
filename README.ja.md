@@ -316,9 +316,9 @@ speculative `n_max` の値ごとに 1 回ずつ流して同じテープに記録
 wl-copy・xclip があればそれで、SSH 越しなら端末への OSC 52 で）。
 
 **render:** `--gif FILE`、`--mp4 FILE`（`PATH` に ffmpeg が必要）、`--cast FILE`
-（asciicast v2）、`--frames DIR`（PNG シーケンス。GIF より大きなキャンバスに描かれます —
-両方のサイズは `toktape help render` にあります）、`--duration`、`--fps`、
-`--size WxH`、`--open`（実行の前に、シェルプロンプトでコマンドを打つ場面を
+（asciicast v2）、`--frames DIR`（PNG シーケンス。GIF が 13 px セルのところを 20 px
+セルで描くので、GIF と同じキャンバスが要るなら `--font-size 13` を。✓ の各行に
+描いたピクセルサイズが出ます）、`--duration`、`--fps`、`--size WxH`、`--open`（実行の前に、シェルプロンプトでコマンドを打つ場面を
 付けます）、`--prefill-lead D`（実行の先頭ではなく最初のトークンの D 秒前から
 クリップを始め、プリフィルを待った残りをクリップの外に置きます。残ったフレーム
 はすべてそのまま 1:1 で、画面の時計が切った地点から始まるので、断りは要りません）。

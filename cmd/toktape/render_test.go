@@ -116,8 +116,10 @@ func TestRenderVerbWritesEveryAskedForArtifact(t *testing.T) {
 	if len(frames) != 7 {
 		t.Errorf("%d frames, want 7", len(frames))
 	}
-	if !strings.Contains(out, "(7 frames)") {
-		t.Errorf("stdout = %q, does not report the frame count", out)
+	// The count, and since TTP-104 the canvas beside it: the frames' default
+	// is the video's 1920×1080, which is what the line has to say.
+	if !strings.Contains(out, "(7 frames, 1920x1080)") {
+		t.Errorf("stdout = %q, does not report the frame count and canvas", out)
 	}
 }
 
@@ -371,4 +373,74 @@ func TestHeroGIFIsPostable(t *testing.T) {
 	}
 	t.Logf("hero.gif: %d bytes, %d frames, %d×%d, %.2f s at %d fps",
 		fi.Size(), len(g.Image), g.Config.Width, g.Config.Height, float64(hundredths)/100, heroFPS)
+}
+
+// TestRenderFontSizeReconcilesTheCanvas (TTP-104): --frames and --gif drew
+// different pixel canvases from the same --size and no flag could make them
+// agree — 1488x1026 against 992x684 at 120x36 — and nothing on screen said
+// so. Now every ✓ line prints its canvas, and --font-size 13 puts the frames
+// on the GIF's.
+func TestRenderFontSizeReconcilesTheCanvas(t *testing.T) {
+	dir := t.TempDir()
+	tapePath := writeExampleTape(t, dir)
+	gifPath := filepath.Join(dir, "clip.gif")
+	plain := filepath.Join(dir, "plain")
+	matched := filepath.Join(dir, "matched")
+
+	args := append([]string{"render", tapePath, "--gif", gifPath, "--frames", plain, "--size", "120x36"}, shortClip...)
+	code, out, errOut := exec(t, args...)
+	if code != exitOK {
+		t.Fatalf("render: exit %d, stderr %q", code, errOut)
+	}
+	// The default canvases, printed on the lines so nobody has to measure a PNG.
+	if !strings.Contains(out, "✓ GIF") || !strings.Contains(out, "(992x684)") {
+		t.Errorf("the GIF line does not print its 992x684 canvas: %q", out)
+	}
+	if !strings.Contains(out, "frames, 1488x1026)") {
+		t.Errorf("the Frames line does not print its 1488x1026 canvas: %q", out)
+	}
+
+	args = append([]string{"render", tapePath, "--frames", matched, "--size", "120x36", "--font-size", "13"}, shortClip...)
+	if code, out, errOut = exec(t, args...); code != exitOK {
+		t.Fatalf("render --font-size 13: exit %d, stderr %q", code, errOut)
+	}
+	if !strings.Contains(out, "frames, 992x684)") {
+		t.Errorf("frames at --font-size 13 are not on the GIF's canvas: %q", out)
+	}
+	// The files agree with the lines.
+	if w, h := pngSize(t, filepath.Join(matched, "frame_00000.png")); w != 992 || h != 684 {
+		t.Errorf("matched frame is %dx%d, want 992x684", w, h)
+	}
+	if w, h := pngSize(t, filepath.Join(plain, "frame_00000.png")); w != 1488 || h != 1026 {
+		t.Errorf("default frame is %dx%d, want 1488x1026", w, h)
+	}
+	if w, h := gifSize(t, gifPath); w != 992 || h != 684 {
+		t.Errorf("gif is %dx%d, want 992x684", w, h)
+	}
+
+	// A cell too small to read is refused by name, not drawn.
+	if code, _, errOut := exec(t, "render", tapePath, "--frames", dir, "--font-size", "3"); code != exitUsage || !strings.Contains(errOut, "--font-size") {
+		t.Errorf("--font-size 3: exit %d, stderr %q", code, errOut)
+	}
+}
+
+func pngSize(t *testing.T, path string) (w, h int) {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) < 24 {
+		t.Fatalf("%s: %v", path, err)
+	}
+	// IHDR width and height sit at bytes 16..23, big-endian.
+	be := func(p []byte) int { return int(p[0])<<24 | int(p[1])<<16 | int(p[2])<<8 | int(p[3]) }
+	return be(b[16:20]), be(b[20:24])
+}
+
+func gifSize(t *testing.T, path string) (w, h int) {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) < 10 {
+		t.Fatalf("%s: %v", path, err)
+	}
+	// The logical screen descriptor follows the 6-byte header, little-endian.
+	return int(b[6]) | int(b[7])<<8, int(b[8]) | int(b[9])<<8
 }

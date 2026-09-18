@@ -124,6 +124,34 @@ type Options struct {
 	Timestamp time.Time
 }
 
+// Canvas is the pixel size of the frames an output would draw from o: the
+// cell grid times the cell a font size gives, plus the frame's padding, as
+// the rasteriser will lay it out. video picks the defaults of the mp4 and
+// the frame sequence (VideoWidth×VideoHeight, DefaultFontSize) over the GIF
+// and cast's (DefaultWidth×DefaultHeight, GIFFontSize).
+//
+// It exists so the CLI can print the canvas beside each artifact (TTP-104):
+// --size is a cell grid and the pixel canvas differed by output with
+// nothing on screen saying so, which is how a caller rendering --frames to
+// encode them elsewhere concluded one encoder was three times better than
+// another when the ratio was the canvas.
+func Canvas(o Options, video bool) (w, h int, err error) {
+	if video {
+		o = o.withVideoDefaults()
+	} else {
+		if o.FontSize <= 0 {
+			o.FontSize = GIFFontSize
+		}
+		o = o.withDefaults()
+	}
+	rs, err := newRasteriser(o.FontSize)
+	if err != nil {
+		return 0, 0, err
+	}
+	b := rs.bounds(o.Width, o.Height)
+	return b.Dx(), b.Dy(), nil
+}
+
 // withDefaults returns o with every unset field filled in.
 func (o Options) withDefaults() Options {
 	if o.Width == 0 {

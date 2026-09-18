@@ -315,9 +315,9 @@ file is named) besides the formats above, and `--copy` (also to the clipboard:
 pbcopy, wl-copy or xclip when one is there, OSC 52 to the terminal over SSH).
 
 **Render:** `--gif FILE`, `--mp4 FILE` (needs ffmpeg on `PATH`), `--cast FILE`
-(asciicast v2), `--frames DIR` (PNG sequence, drawn on a larger canvas than the GIF —
-`toktape help render` gives both sizes), `--duration`, `--fps`,
-`--size WxH`, `--open` (the command typed at a shell prompt in front of the
+(asciicast v2), `--frames DIR` (PNG sequence; 20 px cells where the GIF draws 13, so
+pass `--font-size 13` to get the GIF's exact canvas — every ✓ line prints the
+pixel size it drew), `--duration`, `--fps`, `--size WxH`, `--open` (the command typed at a shell prompt in front of the
 run), `--prefill-lead D` (open the clip D before the first token, leaving the
 rest of the wait out of it — every frame that is in it is still 1:1, and the
 clock on screen starts where it was cut). Name several outputs at once and they
