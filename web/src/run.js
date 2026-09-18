@@ -347,18 +347,20 @@ td.v { word-break: break-word; }
 // link is set, plain otherwise. When no author travels there is no byline
 // element at all. Everything stored was accepted verbatim and is escaped on
 // output; nothing stored is HTML.
-// ownedBadge marks a run a journal token owns. It says what that means for
-// the reader — there is somebody who can take it down — and nothing about
-// who: the token is a namespace, not an identity (§9.2), and the byline's
-// name stays the unverified label it is.
-export function ownedBadge(owned) {
-  if (!owned) return "";
-  return ` <span class="owned" title="Published with a journal token. Its holder can delete this run; an anonymous upload has only its one-time delete token.">token-owned</span>`;
+// anonBadge marks a run nobody owns. The common case — a publish from a
+// machine with a journal token — wears nothing (user, 2026-09-19: a
+// "token-owned" chip on every row was too much); the one-off upload is the
+// exception and is the one that gets a word. It says what that means for
+// the reader — nobody can take it down but its one-time delete token — and
+// nothing about who: the byline's name stays the unverified label it is.
+export function anonBadge(owned) {
+  if (owned) return "";
+  return ` <span class="anon" title="Uploaded without a journal token: only its one-time delete token can take it down, and no user page lists it.">anonymous</span>`;
 }
 
 function byline(row) {
   const avatar = avatarPath(row.avatar_key);
-  if (!row.author_name && !row.author_link && !avatar && row.owned !== 1) return "";
+  if (!row.author_name && !row.author_link && !avatar && row.owned === 1) return "";
   const img = avatar ? `<img class="avatar" src="${esc(avatar)}" width="24" height="24" alt="">` : "";
   let who = "";
   if (row.author_name && row.author_link) {
@@ -368,7 +370,7 @@ function byline(row) {
   } else if (row.author_link) {
     who = `<a rel="nofollow noopener" href="${esc(row.author_link)}">${esc(row.author_link)}</a>`;
   }
-  return `<p class="byline">${img}${img && who ? " " : ""}${who}${ownedBadge(row.owned === 1)}</p>`;
+  return `<p class="byline">${img}${img && who ? " " : ""}${who}${anonBadge(row.owned === 1)}</p>`;
 }
 
 // The lab-note as paragraphs split on blank lines, each escaped — no

@@ -56,6 +56,12 @@ tail -n 12 "$work/player.log"
 say "local D1"
 npx wrangler d1 migrations apply toktape --local >"$work/migrate.log" 2>&1 ||
   { cat "$work/migrate.log"; die "migrations failed"; }
+# The local D1 outlives one run of this gate, and the anonymous rate counter
+# lives in it: two runs inside a minute made the second one's fourth
+# anonymous publish a 429 (2026-09-19). The counter is state about the
+# previous run, not this one, so it is cleared before the server starts.
+npx wrangler d1 execute toktape --local --command "DELETE FROM upload_rate" >"$work/rate.log" 2>&1 ||
+  { cat "$work/rate.log"; die "could not clear the local rate counter"; }
 
 say "wrangler dev on $base"
 npx wrangler dev --port "$port" --inspector-port 0 \
@@ -360,13 +366,16 @@ code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/r/aaaaaaaaaaaaaaaaaaaa.j
 
 say "a journal token owns its runs"
 # A token minted straight into the local D1 (there is no issuance endpoint
-# yet — TTP-114), then a publish with it: the page and the row wear the
-# token-owned badge, the API says owned, and the token — not a delete
-# token — takes the run down. The anonymous hero page must not wear it.
+# — OR REPLACE, because the local D1 outlives one run of this gate and the
+# second run hit the primary key, 2026-09-19)
+# yet — TTP-114), then a publish with it: the page and the row wear no
+# badge, the API says owned, and the token — not a delete token — takes the
+# run down. The anonymous hero page and row wear the `anonymous` chip (user,
+# 2026-09-19: mark the exception, not the common case).
 jt="tk_local_harness_journal_token"
 if command -v shasum >/dev/null 2>&1; then jh=$(printf '%s' "$jt" | shasum -a 256 | cut -d' ' -f1); else jh=$(printf '%s' "$jt" | sha256sum | cut -d' ' -f1); fi
 npx wrangler d1 execute toktape --local --command \
-  "INSERT INTO tokens (id, hash, created_at, label) VALUES ('harness', '$jh', '2026-09-19T00:00:00Z', 'web/check.sh')" \
+  "INSERT OR REPLACE INTO tokens (id, hash, created_at, label) VALUES ('harness', '$jh', '2026-09-19T00:00:00Z', 'web/check.sh')" \
   >"$work/token.log" 2>&1 || { cat "$work/token.log"; die "could not mint the harness token"; }
 mkdir -p "$work/home-journal/.toktape"
 printf 'token = "%s"\nfirst_publish_warning_seen = true\n' "$jt" >"$work/home-journal/.toktape/config.toml"
@@ -374,11 +383,12 @@ HOME="$work/home-journal" "$work/toktape" publish "$repo/assets/hero.tape" --url
   >"$work/receipt3" 2>"$work/publish3.err" || { cat "$work/publish3.err"; die "a token-owned publish failed"; }
 grep -q 'Delete token' "$work/publish3.err" && die "a token-owned publish was handed a delete token"
 jid="$(tr -d '\r\n' <"$work/receipt3")"; jid="${jid##*/}"
-curl -fsS "$base/r/$jid" >"$work/fetched" && grep -q 'class="owned"' "$work/fetched" || die "the token-owned page wears no badge"
+curl -fsS "$base/r/$jid" >"$work/fetched" && grep -q 'class="anon"' "$work/fetched" && die "the token-owned page wears the anonymous chip"
 curl -fsS "$base/r/$jid.json" >"$work/fetched" && grep -q '"owned":true' "$work/fetched" || die "the API does not say the run is owned"
 curl -fsS "$base/api/v1/runs" >"$work/fetched" && grep -q "\"id\":\"$jid\",\"url\":\"[^\"]*\",\"published_at\":\"[^\"]*\",\"owned\":true" "$work/fetched" ||
   die "the listing row does not say the run is owned"
-curl -fsS "$base/r/$id" >"$work/fetched" && grep -q 'class="owned"' "$work/fetched" && die "the anonymous page wears the token-owned badge"
+curl -fsS "$base/r/$id" >"$work/fetched" && grep -q 'class="anon"' "$work/fetched" || die "the anonymous page wears no anonymous chip"
+curl -fsS "$base/" >"$work/fetched" && grep -q 'class="anon"' "$work/fetched" || die "the anonymous row wears no anonymous chip"
 code=$(curl -s -o "$work/body" -w '%{http_code}' -X DELETE "$base/api/v1/runs/$jid" -H "Authorization: Bearer $jt")
 [ "$code" = "204" ] || { cat "$work/body"; die "the journal token did not take its own run down (got $code)"; }
 

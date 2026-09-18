@@ -17,7 +17,7 @@
 import { avatarPath } from "./author.js";
 import { fail, json, publicBase } from "./http.js";
 import { EMPTY_FIGURE, esc, fmt, head, layout } from "./page.js";
-import { authorOf, ownedBadge } from "./run.js";
+import { anonBadge, authorOf } from "./run.js";
 import { sha256Hex } from "./ids.js";
 
 const PAGE_SIZE = 30;
@@ -367,13 +367,13 @@ function resultRow(r, url) {
 // the run page links it. Absent entirely when no author travels.
 function whoLine(r) {
   const avatar = avatarPath(r.avatar_key);
-  if (!r.author_name && !avatar && r.owned !== 1) return "";
+  if (!r.author_name && !avatar && r.owned === 1) return "";
   const img = avatar ? `<img class="avatar" src="${esc(avatar)}" width="16" height="16" alt="">` : "";
   const who =
     r.author_name && r.author_link
       ? `<a rel="nofollow noopener" href="${esc(r.author_link)}">${esc(r.author_name)}</a>`
       : esc(r.author_name || "");
-  return `<div class="who">${img}${img && who ? " " : ""}${who}${ownedBadge(r.owned === 1)}</div>`;
+  return `<div class="who">${img}${img && who ? " " : ""}${who}${anonBadge(r.owned === 1)}</div>`;
 }
 
 // A fact that is also a filter is a link to that filter, so narrowing a

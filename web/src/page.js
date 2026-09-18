@@ -98,8 +98,8 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #1b1f26;
   font-size: .875rem; color: #7d848f; }
 /* The lab-note: plain paragraphs, no markdown, no autolinking — what was
    typed is what is read, wrapped to the prose width. */
-.owned { display: inline-block; font-size: .7rem; line-height: 1.4; padding: 0 .45rem;
-  border: 1px solid #2a4a42; border-radius: 999px; color: #86c2b3; cursor: help; }
+.anon { display: inline-block; font-size: .7rem; line-height: 1.4; padding: 0 .45rem;
+  border: 1px solid #2a3038; border-radius: 999px; color: #6b727d; cursor: help; }
 .note { max-width: 40rem; color: #b9bec7; }
 .note p { margin: 0 0 .8rem; }
 `;
