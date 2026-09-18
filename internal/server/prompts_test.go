@@ -38,6 +38,34 @@ import (
 // by its memory is exactly the box this tool exists for, so the ceiling is set
 // where such a box still gets a run: 300 tokens is about 5 s on the 60 tok/s
 // rig and about 12 s on the paging one.
+// The set gained Korean and Japanese prompts on 2026-09-18 (TTP-112), and the
+// band survived them unchanged — which was measured, not assumed, because
+// len(text) counts BYTES and a Korean character is three of them.
+//
+// What makes one band work for four scripts is that these are byte-level BPE
+// tokenizers, so bytes per token barely moves with the script. Measured that
+// day against three real vocabularies (Qwen3-0.6B, Llama 3.1 8B, gpt-oss-20b),
+// tokenizer.json only, no chat template:
+//
+//	this set's densest code   3.3 - 3.5 B/token
+//	its most prose-like       4.9 - 5.0
+//	English prose             5.1 - 5.2
+//	Korean prose              3.4 - 4.0
+//	Japanese prose            4.1 - 4.6
+//
+// Characters per token, by contrast, is 1.4 to 1.7 for Korean and Japanese
+// against 5.1 for English prose: a band in characters would have been three
+// different bands. The names below say chars because Go's len says bytes and
+// this file's inputs are UTF-8; for the Latin-script prompts they are the same
+// number, and for the CJK ones the byte reading is the one that transfers.
+//
+// The conversion is a conversion, not a proof. Measured over the whole set,
+// real token counts run 197 to 310 against a band that claims 150 to 300: the
+// extremes above put the band's true reach at about 140 to 316 tokens, so this
+// catches a prompt that is wrong by a factor and not one that is five percent
+// over. Two prompts sit a little past 300 and are left there — they were sized
+// by the measurement in the paragraphs above, and trimming them to satisfy a
+// digit of precision the instrument does not have would be the tail wagging.
 const (
 	proseCharsPerToken = 4.9
 	codeCharsPerToken  = 3.5
@@ -142,7 +170,12 @@ func TestDefaultPromptsAreDistinctAndDeterministic(t *testing.T) {
 		if text != b[i].Messages[0].Content {
 			t.Errorf("prompt %d is not deterministic", i)
 		}
-		if !strings.HasSuffix(strings.TrimSpace(text), ".") {
+		// "。" joins "." on 2026-09-18, with the set (TTP-112). A Japanese
+		// prompt ends in the ideographic full stop and nothing else — it was
+		// red under the ASCII-only check, which is how this extension was
+		// confirmed to be needed rather than assumed. The check is still that
+		// a prompt ends in a sentence, not in a truncation.
+		if !endsInFullStop(text) {
 			t.Errorf("prompt %d does not end in a full stop: %.80q", i, text[max(0, len(text)-80):])
 		}
 	}
@@ -222,13 +255,14 @@ func TestStreamRequestBodyParamsCannotBreakTheStream(t *testing.T) {
 // So when this fails, the set changed. Decide which happened and do the
 // matching thing:
 //
-//   - a released set changed -> bump PromptSetID, then update this hash
-//   - the set has never shipped in a release -> update this hash alone,
-//     because there is no tape in the world carrying the old contents
+//   - PromptSetID has shipped in a release -> bump it, then update this hash,
+//     because tapes carrying the old id are already out there
+//   - it has not -> update this hash alone, since no tape in the world claims
+//     the old contents
 //
 // Updating the hash to make the test pass, without asking that question, is
 // the one move this gate exists to prevent.
-const promptSetHash = "886ccba10bf1c336c00f95d65aab0cfd98d1fdbc9946a334e883ebec9afd3c49"
+const promptSetHash = "9b2838be026b7d649b11219c3e44c95b9ce62b7c3ef3bbaeb79778d5f01b9bc3"
 
 func TestDefaultPromptsMatchTheirID(t *testing.T) {
 	sum := sha256.Sum256([]byte(strings.Join(defaultPrompts, "\x00")))
@@ -268,5 +302,51 @@ func TestPromptSetNeverReachesTheWire(t *testing.T) {
 	}
 	if _, ok := body["set"]; ok {
 		t.Error(`body carries a "set" key`)
+	}
+}
+
+// endsInFullStop accepts both stops the set uses: "." for the Latin-script
+// prompts and "。" for the Japanese one.
+func endsInFullStop(text string) bool {
+	t := strings.TrimSpace(text)
+	return strings.HasSuffix(t, ".") || strings.HasSuffix(t, "。")
+}
+
+// TestDefaultPromptsCoverTheirAxes: the set is the comparison set, so what it
+// leaves out is what nobody can compare (TTP-112, spec §9.5).
+//
+// Two axes, both measured rather than asserted from taste:
+//
+//   - Prose against code. They are different loads — measured 2026-09-18 with
+//     three real tokenizers (Qwen3, Llama 3.1, gpt-oss), this set's densest
+//     code runs 3.3 characters to a token and its most prose-like prompt 5.0.
+//     A decode rate measured on one does not transfer to the other, and a set
+//     that is all code invites exactly that misreading.
+//   - CJK against Latin. Korean and Japanese cost about 1.5 characters to a
+//     token against Latin prose's 5.0, so the same token budget is a very
+//     different amount of screen — and the card's east-asian width contract
+//     is only exercised when a run actually generates CJK.
+func TestDefaultPromptsCoverTheirAxes(t *testing.T) {
+	prose, cjk := 0, 0
+	for _, text := range defaultPrompts {
+		// A fenced block is how every code, config and log prompt in this set
+		// carries its material; a prompt without one is prose.
+		if !strings.Contains(text, "~~~") {
+			prose++
+		}
+		for _, r := range text {
+			if r > 0x2E7F {
+				cjk++
+				break
+			}
+		}
+	}
+	if prose < 5 {
+		t.Errorf("%d of %d prompts are prose, want at least 5: a set that is all code invites a decode rate measured on code being read as one for prose",
+			prose, len(defaultPrompts))
+	}
+	if cjk < 3 {
+		t.Errorf("%d prompts contain CJK, want at least 3: Korean and Japanese cost about a third the characters per token, and the card's east-asian width contract is only exercised by a run that generates them",
+			cjk)
 	}
 }

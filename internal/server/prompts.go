@@ -54,6 +54,24 @@ import (
 // instruction last, and nothing needs a tool, a file or the network, so any
 // instruction-tuned model can answer. Code is fenced with ~~~ so it can sit in
 // a Go raw string.
+//
+// Five prompts joined the set on 2026-09-18 (TTP-112), because the set is now
+// also the comparison set for published runs (spec §9.5) and what it leaves
+// out is what nobody can compare. Fifteen of the sixteen were code, config or
+// logs, and all sixteen were English. Two English prose prompts, two Korean
+// and one Japanese close both gaps, and prompts_test.go holds them open.
+//
+// They are prose on purpose rather than English instructions wrapped around a
+// code block: a decode rate measured on code does not transfer to prose (this
+// set's densest code runs 3.3 characters to a token, its most prose-like 5.0),
+// and Korean and Japanese run about 1.5 — the same token budget is a very
+// different amount of screen, which is the case the card's east-asian width
+// contract exists for and the one that never ran.
+//
+// The order is part of the set. A run sends the first Concurrency prompts, so
+// `-n 1` is prompt 0 and only `-n 21` is all of them: the additions are placed
+// where the common runs meet them rather than appended, with the first Korean
+// at 6 and the Japanese at 14, and `-n 1` through `-n 4` left in English.
 var defaultPrompts = []string{
 	`Review this Go rate limiter, keyed by client IP and called from every request goroutine of an HTTP server. In production it panics with "concurrent map writes" and the process grows until it is killed.
 
@@ -86,6 +104,17 @@ func (l *Limiter) Allow(key string) bool {
 
 Find every bug and risk, the ones that do not cause the panic included, and explain each. Then write a concurrency-safe version that evicts idle keys, with a table-driven test covering refill, burst and many callers under the race detector.`,
 
+	`Below is an architecture decision record a team circulated last week. Three reviewers approved it without comment.
+
+Title: move background jobs off the database queue and onto a managed broker.
+
+Context: the job table holds nine million rows. Workers poll it every two hundred milliseconds with SELECT ... FOR UPDATE SKIP LOCKED, and on Monday mornings the queue depth peaks near forty thousand. Two of our four read replicas now spend most of their time on queue traffic, not on customer queries.
+
+Decision: publish each job to the broker on commit and let the broker own retries and dead-lettering. Drop the job table once the backlog drains.
+
+Consequences: a job stops being visible to the transaction that created it, so it may run before the row it refers to is committed. We accept this and will make every job re-read its inputs.
+
+Name the assumptions this record leaves unstated. Say which of them the numbers above actually support and which they do not, and for each unsupported one, describe the smallest measurement that would settle it.`,
 	`Diagnose why this PostgreSQL 16 query went from 40 ms to 9 s after a nightly import added forty thousand customers and two million orders.
 
 ~~~
@@ -122,6 +151,11 @@ Walk through the plan and say what each gap between estimated and actual rows te
 
 Include a summary, the customer impact with numbers, the root cause, and the contributing factors — among them why a 5% canary with a healthy error rate missed a problem that appears only once retries pile up. Say what went well and badly in the response, then list at least six action items, each with an owner role and a way to verify it.`,
 
+	`A vendor published the benchmark summary below to claim their inference server is 3.4 times faster than the open-source one, and a colleague forwarded it as the reason we should switch.
+
+Both servers ran on one eight-card node with the same 70B model in 4-bit. The vendor's server was given all eight cards. The open-source server was started from the vendor's published example, which places the model on four. Each test sent two hundred requests of roughly nine hundred prompt tokens and recorded the mean time to the last token: 11.2 seconds for the vendor, 38.1 for the alternative. Each configuration was run once, back to back, on a machine the vendor describes as otherwise idle. The report gives no per-request figures, no token counts for the answers, and no time to the first token.
+
+Write the reply I should send. Separate what these numbers can support from what they cannot, and list the specific figures I should ask for before the comparison means anything.`,
 	`Refactor this Python script, which summarises a 40 GB nginx access log into request counts and 95th percentile latency per route. Run by hand on a small VM, it is killed by the kernel before it prints anything.
 
 ~~~python
@@ -144,6 +178,18 @@ def main(path):
 
 Turn it into a streaming tool that uses bounded memory, keeps the output format but sorts it, and takes options to filter by route prefix and status class. Explain each change, including why this percentile is wrong for small samples. Finish with pytest cases for one value, twenty values and all values equal.`,
 
+	`어제 오후 결제 서비스가 주문 확정 요청의 절반을 실패시켰다. 아래는 당직자가 남긴 기록이다.
+
+14:02 재고 서비스 응답 시간 경보. 평균 80밀리초에서 1.9초로.
+14:07 결제 서비스의 스레드 풀이 전부 대기 상태. 신규 요청은 큐에 쌓임.
+14:14 사용자 문의가 들어오기 시작. 상태 페이지는 여전히 정상으로 표시됨.
+14:31 재고 서비스를 재시작. 응답 시간 회복.
+14:38 큐가 한 번에 소진되며 실패한 요청이 동시에 재시도됨. 재고 서비스가 다시 느려짐.
+15:02 재고 서비스의 커넥션 풀을 두 배로 늘린 뒤 안정됨.
+
+전날 밤 배포에는 재고 조회 타임아웃을 3초에서 30초로 늘린 변경이 들어 있었다.
+
+이 기록으로 책임을 묻지 않는 사후 분석을 작성하라. 무엇이 원인이고 무엇이 증상인지 구분하고, 같은 일이 다시 일어났을 때 더 빨리 알아차릴 방법을 제안하라.`,
 	`The search box in our React app sometimes shows results for an earlier query than the one the user typed, and the network tab shows a request for almost every keystroke.
 
 ~~~tsx
@@ -208,6 +254,11 @@ fn longest_word(words: &mut Vec<String>) -> &str {
 
 Explain, in terms of borrows and lifetimes, exactly why the compiler is right to reject it, and describe the memory bug it would allow if it were accepted. Then fix it three ways: returning an owned String, working with an index instead of a reference, and splitting it into two functions with a different signature. Say which you would choose and why, make every version handle an empty vector without panicking, and write unit tests for all three.`,
 
+	`아래는 사내 파일 업로드 API의 설명서다. 이 문서만 읽고 구현한 팀이 지난달에 두 번 장애를 냈다.
+
+업로드는 두 단계다. 먼저 /uploads에 파일 이름과 크기를 보내면 업로드 URL과 토큰을 받는다. 그다음 그 URL로 파일 본문을 보낸다. 토큰은 일정 시간이 지나면 만료된다. 같은 파일을 다시 올리면 기존 것을 덮어쓴다. 업로드 도중 연결이 끊기면 처음부터 다시 보내야 한다. 완료되면 서버가 체크섬을 확인하고, 맞지 않으면 실패로 처리한다. 실패한 업로드는 하루 뒤에 정리된다.
+
+이 설명서에서 구현자마다 다르게 읽을 수 있는 대목을 전부 찾아라. 각각에 대해 어떤 두 가지 해석이 가능한지, 그중 무엇을 고르면 어떤 장애로 이어지는지 쓰고, 그 뒤에 설명서를 다시 작성하라.`,
 	`Design the PostgreSQL schema for a meeting room booking service.
 
 - An organisation has offices, each in its own time zone, and each office has rooms with a capacity and equipment such as a screen or a phone.
@@ -252,6 +303,11 @@ Last State: Terminated  Reason: OOMKilled  Exit Code: 137  Limits: memory 1Gi
 
 Explain what is killing the container and why the JVM never throws OutOfMemoryError first. Show how the heap percentage, metaspace, thread stacks, code cache and direct buffers add up against the 1 GiB limit, and what the Hikari warning and the GC pause each tell you. Then give a plan to confirm it on a live pod and the changes you would make.`,
 
+	`次のリリースノートは、社内の管理画面に入る検索機能について書かれたものです。公開前のレビューをお願いします。
+
+今回のリリースから、注文一覧の検索が新しくなります。これまでは注文番号の完全一致だけでしたが、これからは顧客名、メールアドレス、電話番号でも探せます。入力した文字がどこかに含まれていれば見つかります。検索の結果は新しい順に並び、一度に五十件まで表示されます。件数が多いときは続きを読み込めます。権限のない注文は結果に出ません。対象は過去二年分です。
+
+この文章のうち、読む人によって解釈が分かれるところをすべて挙げてください。それぞれについて、どの二通りに読めるのか、どちらを選ぶと利用者がどう困るのかを説明し、そのうえで全文を書き直してください。`,
 	`Implement the cache interface below in TypeScript without any library.
 
 ~~~ts
