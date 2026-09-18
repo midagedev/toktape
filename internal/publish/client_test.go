@@ -34,6 +34,15 @@ type received struct {
 	cardName    string
 	cardType    string
 	privateSeen bool
+	author      map[string]string
+	authorType  string
+	avatar      []byte
+	avatarName  string
+	avatarType  string
+	title       string
+	titleType   string
+	note        string
+	noteType    string
 	extraParts  []string
 }
 
@@ -82,6 +91,22 @@ func serve(t *testing.T, status int, reply string) (*httptest.Server, *received)
 					t.Errorf("private part = %q, want \"true\" or absent", b)
 				}
 				got.privateSeen = true
+			case "author":
+				got.authorType = p.Header.Get("Content-Type")
+				if err := json.NewDecoder(p).Decode(&got.author); err != nil {
+					t.Fatalf("decode author part: %v", err)
+				}
+			case "avatar":
+				got.avatarName, got.avatarType = p.FileName(), p.Header.Get("Content-Type")
+				got.avatar, _ = io.ReadAll(p)
+			case "title":
+				got.titleType = p.Header.Get("Content-Type")
+				b, _ := io.ReadAll(p)
+				got.title = string(b)
+			case "note":
+				got.noteType = p.Header.Get("Content-Type")
+				b, _ := io.ReadAll(p)
+				got.note = string(b)
 			default:
 				got.extraParts = append(got.extraParts, p.FormName())
 			}
@@ -230,6 +255,91 @@ func TestUploadFailures(t *testing.T) {
 			t.Fatal("a nil tape was accepted")
 		}
 	})
+}
+
+// The profile and the note travel as their own parts: author JSON with
+// either field omittable, the avatar bytes unchanged beside it, the title
+// and the body as text. The Worker parses the body the same way serve()
+// does above, so this is where the shape is pinned.
+func TestUploadAuthorAndNote(t *testing.T) {
+	srv, got := serve(t, http.StatusCreated, `{"id":"a","url":"https://tape.example/r/a"}`)
+	view, idx := viewFixture()
+	avatar := tinyPNG(t, 16, 16)
+
+	_, err := (&Client{BaseURL: srv.URL}).Upload(context.Background(), view, idx, Options{
+		Author: &Author{Name: "Lab Rat", Link: "https://github.com/example", Avatar: avatar},
+		Title:  "First ik_llama sweep",
+		Note:   "Trying -fa on.\n\nSecond paragraph.",
+	})
+	if err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+
+	if got.authorType != "application/json" {
+		t.Errorf("author part content type = %q, want application/json", got.authorType)
+	}
+	if got.author["name"] != "Lab Rat" || got.author["link"] != "https://github.com/example" {
+		t.Errorf("author part = %v, want the name and the link", got.author)
+	}
+	if got.avatarName != "avatar.png" || got.avatarType != "image/png" {
+		t.Errorf("avatar part = %q / %q, want avatar.png / image/png", got.avatarName, got.avatarType)
+	}
+	if !bytes.Equal(got.avatar, avatar) {
+		t.Error("the avatar bytes did not survive: they must travel unchanged, never re-encoded")
+	}
+	if got.titleType != "text/plain" || got.title != "First ik_llama sweep" {
+		t.Errorf("title part = %q / %q", got.title, got.titleType)
+	}
+	if got.noteType != "text/plain" || got.note != "Trying -fa on.\n\nSecond paragraph." {
+		t.Errorf("note part = %q / %q", got.note, got.noteType)
+	}
+	if len(got.extraParts) != 0 {
+		t.Errorf("unexpected parts %v", got.extraParts)
+	}
+}
+
+// Absent, never empty: a run without a profile or a note sends no such
+// parts, and an old server that never heard of them reads the rest the way
+// it always did.
+func TestUploadOmitsProfileAndNote(t *testing.T) {
+	srv, got := serve(t, http.StatusCreated, `{"id":"a","url":"https://tape.example/r/a"}`)
+	view, idx := viewFixture()
+
+	if _, err := (&Client{BaseURL: srv.URL}).Upload(context.Background(), view, idx, Options{}); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if got.author != nil || got.avatar != nil || got.title != "" || got.note != "" {
+		t.Errorf("a plain upload carried author=%v avatar=%dB title=%q note=%q",
+			got.author, len(got.avatar), got.title, got.note)
+	}
+}
+
+// The client refuses the contract's limits before sending, with the limit
+// named — a hand-edited config reaches uploadBody without passing a verb.
+func TestUploadRefusesBadProfile(t *testing.T) {
+	view, idx := viewFixture()
+	srv, _ := serve(t, http.StatusCreated, `{"id":"a","url":"https://tape.example/r/a"}`)
+	c := &Client{BaseURL: srv.URL}
+
+	for _, tc := range []struct {
+		name string
+		opts Options
+		want string
+	}{
+		{"name too long", Options{Author: &Author{Name: strings.Repeat("n", 41)}}, "41 runes, over the 40-rune limit"},
+		{"bad link scheme", Options{Author: &Author{Link: "javascript:alert(1)"}}, `"javascript:"`},
+		{"bad avatar", Options{Author: &Author{Name: "x", Avatar: []byte("nope")}}, "not a PNG"},
+		{"title too long", Options{Title: strings.Repeat("t", 121)}, "121 runes, over the 120-rune limit"},
+		{"note too long", Options{Note: strings.Repeat("n", 4001)}, "4001 runes, over the 4000-rune limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := c.Upload(context.Background(), view, idx, tc.opts); err == nil {
+				t.Fatalf("Upload accepted %s", tc.name)
+			} else if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want it to name %q", err, tc.want)
+			}
+		})
+	}
 }
 
 // The default is the hosted service, so a publish with no --url reaches it

@@ -251,6 +251,9 @@ func usageFor(verb string) string {
 	if verb == "render" {
 		return renderUsage
 	}
+	if verb == "profile" {
+		return profileUsage
+	}
 	return usageText
 }
 

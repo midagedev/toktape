@@ -13,6 +13,7 @@
 // request body internal/publish/client_test.go parses; this side is written
 // against those, never the other way round.
 
+import { serveAvatar } from "./author.js";
 import { deleteRun } from "./del.js";
 import { fail, json, publicBase } from "./http.js";
 import { serveCard, serveRunJSON, serveRunPage, serveTape } from "./run.js";
@@ -28,6 +29,9 @@ const RUN_JSON = /^\/r\/([a-z0-9]{8,64})\.json$/;
 const RUN_CARD = /^\/r\/([a-z0-9]{8,64})\.png$/;
 const RUN_PAGE = /^\/r\/([a-z0-9]{8,64})$/;
 const RUN_API = /^\/api\/v1\/runs\/([a-z0-9]{8,64})$/;
+// An avatar's name is its bytes: 64 hex digits, and anything else is a 404
+// before touching R2.
+const AVATAR = /^\/a\/([0-9a-f]{64})\.png$/;
 
 export default {
   async fetch(request, env) {
@@ -56,6 +60,7 @@ export default {
     if ((m = TAPE_SUFFIX.exec(path))) return serveTape(m[1], env);
     if ((m = RUN_JSON.exec(path))) return serveRunJSON(m[1], env);
     if ((m = RUN_CARD.exec(path))) return serveCard(m[1], env);
+    if ((m = AVATAR.exec(path))) return serveAvatar(m[1], env);
     if ((m = RUN_PAGE.exec(path))) return serveRunPage(m[1], env, publicBase(request, env));
 
     // The front page is the search: the thing a visitor came for is other

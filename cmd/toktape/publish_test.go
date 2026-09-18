@@ -109,6 +109,47 @@ func TestPublishDryRun(t *testing.T) {
 	}
 }
 
+// With a profile in the home directory the dry run lists it — the name, the
+// link and the avatar's size — because it is something that leaves the
+// machine. With --no-profile the listing says `none`, and the tape's own
+// secrets still stay out of it either way.
+func TestPublishDryRunProfiles(t *testing.T) {
+	pic := profileAvatar(t, 32, 32)
+	publishHome(t, "profile_name = \"Lab Rat\"\nprofile_link = \"https://github.com/example\"\nprofile_avatar = \""+pic+"\"\n")
+	path := publishTape(t)
+	srv, calls := acceptingServer(t, "")
+
+	code, stdout, stderr := exec(t, "publish", path, "--dry-run", "--url", srv.URL,
+		"--title", "First ik_llama sweep", "--note", "Trying -fa on.\n\nSecond paragraph.")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if *calls != 0 {
+		t.Errorf("a dry run reached the server %d times", *calls)
+	}
+	for _, want := range []string{"Lab Rat", "https://github.com/example", "32×32 PNG", "First ik_llama sweep", "Trying -fa on."} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("the dry run does not mention %q:\n%s", want, stdout)
+		}
+	}
+	for _, forbidden := range []string{"somebodys-box", "10.0.0.7", "/home/somebody"} {
+		if strings.Contains(stdout, forbidden) {
+			t.Errorf("the dry run shows %q:\n%s", forbidden, stdout)
+		}
+	}
+
+	code, stdout, stderr = exec(t, "publish", path, "--dry-run", "--url", srv.URL, "--no-profile")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "none — nothing about you travels") {
+		t.Errorf("a --no-profile dry run does not say so:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "Lab Rat") {
+		t.Errorf("a --no-profile dry run names the profile anyway:\n%s", stdout)
+	}
+}
+
 // The link is the product: one line on stdout, so `url=$(toktape publish ...)`
 // is the whole integration.
 func TestPublishPrintsTheLink(t *testing.T) {

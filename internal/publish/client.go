@@ -44,6 +44,12 @@ const UploadPath = "/api/v1/runs"
 //	              a card needs the whole tape, and this side is the only one
 //	              allowed to read it
 //	part "private" text/plain, "true" — present only for an unlisted upload
+//	part "author"  application/json — present only when a profile is sent:
+//	               {"name":"…","link":"…"}; either field may be absent
+//	part "avatar"  image/png, filename "avatar.png" — present only with "author";
+//	               ≤ 65536 bytes, ≤ 256×256, PNG signature checked by the server
+//	part "title"   text/plain — the note's title, present only when given
+//	part "note"    text/plain — the note's body, present only when given
 //
 //	201 Created, application/json:
 //	  {"id":"...","url":"https://.../r/<id>","delete_token":"..."}
@@ -89,6 +95,23 @@ type Options struct {
 	// Private keeps the run out of the search. It is still readable by
 	// anyone with the link — an unguessable URL, not a secret.
 	Private bool
+	// Author is the profile one publish carries (TTP-125). Nil means no
+	// profile travels — the default, and what --no-profile asks for even
+	// when the config names one.
+	Author *Author
+	// Title and Note are the lab-note: what this run was trying, in plain
+	// text. Empty means that part is not sent — absent, never an empty
+	// part.
+	Title string
+	Note  string
+}
+
+// authorWire is the "author" part's shape. Either field may be absent, so
+// both omit when empty — and a profile that is somehow neither is sent as
+// {}, which the server reads as "a profile with nothing in it".
+type authorWire struct {
+	Name string `json:"name,omitempty"`
+	Link string `json:"link,omitempty"`
 }
 
 // Upload posts one run. view must already be the public view: this sends what
@@ -187,6 +210,74 @@ func uploadBody(view *tape.Tape, idx Index, opts Options) (body []byte, contentT
 	}
 	if err := png.Encode(w, &view.Summary); err != nil {
 		return nil, "", fmt.Errorf("publish: render card: %w", err)
+	}
+
+	// The profile and the note travel as their own parts, beside the
+	// record — never inside the tape and never in the index row. Each is
+	// validated here with the same limits the verbs refused first, because
+	// a hand-edited config reaches this function without passing a verb.
+	if opts.Author != nil {
+		// Either field of the wire object may be absent, so only a field
+		// that is set is validated — and a profile that is neither is {}
+		// on the wire rather than a refusal.
+		var name, link string
+		if opts.Author.Name != "" {
+			var err error
+			if name, err = ValidateAuthorName(opts.Author.Name); err != nil {
+				return nil, "", err
+			}
+		}
+		if opts.Author.Link != "" {
+			var err error
+			if link, err = ValidateAuthorLink(opts.Author.Link); err != nil {
+				return nil, "", err
+			}
+		}
+		w, err = mw.CreatePart(partHeader(`form-data; name="author"`, "application/json"))
+		if err != nil {
+			return nil, "", fmt.Errorf("publish: %w", err)
+		}
+		if err := json.NewEncoder(w).Encode(authorWire{Name: name, Link: link}); err != nil {
+			return nil, "", fmt.Errorf("publish: encode author: %w", err)
+		}
+		if len(opts.Author.Avatar) > 0 {
+			if _, _, err := ValidateAvatarBytes(opts.Author.Avatar); err != nil {
+				return nil, "", err
+			}
+			w, err = mw.CreatePart(partHeader(`form-data; name="avatar"; filename="avatar.png"`, "image/png"))
+			if err != nil {
+				return nil, "", fmt.Errorf("publish: %w", err)
+			}
+			if _, err := w.Write(opts.Author.Avatar); err != nil {
+				return nil, "", fmt.Errorf("publish: encode avatar: %w", err)
+			}
+		}
+	}
+	if opts.Title != "" {
+		title, err := ValidateTitle(opts.Title)
+		if err != nil {
+			return nil, "", err
+		}
+		w, err = mw.CreatePart(partHeader(`form-data; name="title"`, "text/plain"))
+		if err != nil {
+			return nil, "", fmt.Errorf("publish: %w", err)
+		}
+		if _, err := io.WriteString(w, title); err != nil {
+			return nil, "", fmt.Errorf("publish: encode title: %w", err)
+		}
+	}
+	if opts.Note != "" {
+		note, err := ValidateNote(opts.Note)
+		if err != nil {
+			return nil, "", err
+		}
+		w, err = mw.CreatePart(partHeader(`form-data; name="note"`, "text/plain"))
+		if err != nil {
+			return nil, "", fmt.Errorf("publish: %w", err)
+		}
+		if _, err := io.WriteString(w, note); err != nil {
+			return nil, "", fmt.Errorf("publish: encode note: %w", err)
+		}
 	}
 
 	// Present or absent, never "false": the server reads absence as public,

@@ -48,6 +48,15 @@ type Config struct {
 	// name this machine goes by in public, for people who never want their
 	// real hostname in a tape.
 	HostLabel string
+	// ProfileName, ProfileLink and ProfileAvatar are the resident author
+	// profile (TTP-125): the nickname, the one link and the avatar file
+	// path one publish carries as "who it says published it". All three
+	// are optional and unset means nothing about you travels. The avatar
+	// is a path as typed — `~` is expanded at use, not by the parser —
+	// and is validated (PNG, size, dimensions) where it is used.
+	ProfileName   string
+	ProfileLink   string
+	ProfileAvatar string
 }
 
 // FileName is the config file's name inside Dir.
@@ -135,6 +144,24 @@ func (c *Config) set(key, value string) error {
 			return fmt.Errorf("host_label: %w", err)
 		}
 		c.HostLabel = s
+	case "profile_name":
+		s, err := unquote(value)
+		if err != nil {
+			return fmt.Errorf("profile_name: %w", err)
+		}
+		c.ProfileName = s
+	case "profile_link":
+		s, err := unquote(value)
+		if err != nil {
+			return fmt.Errorf("profile_link: %w", err)
+		}
+		c.ProfileLink = s
+	case "profile_avatar":
+		s, err := unquote(value)
+		if err != nil {
+			return fmt.Errorf("profile_avatar: %w", err)
+		}
+		c.ProfileAvatar = s
 	case "first_publish_warning_seen":
 		b, err := parseBool(value)
 		if err != nil {
@@ -223,6 +250,15 @@ func (c *Config) render() string {
 	}
 	if c.HostLabel != "" {
 		fmt.Fprintf(&b, "host_label = %s\n", quote(c.HostLabel))
+	}
+	if c.ProfileName != "" {
+		fmt.Fprintf(&b, "profile_name = %s\n", quote(c.ProfileName))
+	}
+	if c.ProfileLink != "" {
+		fmt.Fprintf(&b, "profile_link = %s\n", quote(c.ProfileLink))
+	}
+	if c.ProfileAvatar != "" {
+		fmt.Fprintf(&b, "profile_avatar = %s\n", quote(c.ProfileAvatar))
 	}
 	return b.String()
 }

@@ -137,6 +137,53 @@ func TestSaveToKeepsUnsetUnset(t *testing.T) {
 	}
 }
 
+// The profile keys round-trip the way host_label does: parsed by set,
+// written by render, and absent when unset so a default never turns into a
+// decision.
+func TestProfileKeysRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	write(t, path, `host_label = "the rig"
+profile_name = "Lab Rat"
+profile_link = "https://github.com/example"
+profile_avatar = "~/pic.png"
+`)
+	c, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if c.ProfileName != "Lab Rat" || c.ProfileLink != "https://github.com/example" || c.ProfileAvatar != "~/pic.png" {
+		t.Errorf("profile did not survive the load: %+v", c)
+	}
+
+	out := filepath.Join(t.TempDir(), "out.toml")
+	if err := SaveTo(out, c); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	back, err := LoadFrom(out)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if *back != *c {
+		t.Errorf("round trip lost a field: %+v became %+v", c, back)
+	}
+
+	// Unset profile keys are not written: nothing about the author travels
+	// by default, and the file must not invent it.
+	plain := filepath.Join(t.TempDir(), "plain.toml")
+	if err := SaveTo(plain, &Config{Token: "tk"}); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"profile_name", "profile_link", "profile_avatar"} {
+		if strings.Contains(string(body), key) {
+			t.Errorf("unset key %q was written:\n%s", key, body)
+		}
+	}
+}
+
 func write(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

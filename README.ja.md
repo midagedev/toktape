@@ -261,6 +261,7 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 | `log` | 全実行の実験台帳 | `toktape log --sort decode` |
 | `compare` | 2 つの実行の指標とフラグを比較する | `toktape compare a.tape b.tape` |
 | `publish` | 実行をアップロードしてリンクを出す | `toktape publish <tape>` |
+| `profile` | 公開のたびに付く作者情報を決める | `toktape profile --name NAME --link URL --avatar FILE` |
 | `version` | バージョンを表示する | `toktape version` |
 
 **1 回の記録は何秒か。** 実行は時計で終わります。既定は 20 秒で、
@@ -416,6 +417,15 @@ toktape publish ~/.toktape/runs/<id>.tape
 `--private` は検索から外し（リンクはそのまま開け、そのリンクだけが入口です）、
 `--no-text` はプロンプトと答えを付けずに上げます。どちらも
 `~/.toktape/config.toml` で既定にできます。
+
+`toktape profile` はこのマシンの作者を一度だけ決めます。ニックネーム、リンク
+ひとつ、アバターの PNG（65536 バイト・256×256 以下）で、以後の公開に毎回
+付きます。`--dry-run` は "Who it says published it" の下に、その三つを他の
+出ていくものと並べて出します。検証はありません。誰でもどんな名前でも書けます。
+`publish --no-profile` はその一回だけ外して上げます。`--title TEXT` と
+`--note TEXT`（または `--note-file FILE`）は実行ひとつに実験ノートを付けます。
+何を試した実行かをそのまま文章で書く場所で、ページでは作者行と数字の間に、
+一覧と API では作者の隣に載ります。
 
 ホスト名と絶対パスは公開かどうかに関係なく取り除かれます。サーバーの argv は
 フラグを残してパスだけ失い、モデルはファイル名を残してディレクトリを失います。

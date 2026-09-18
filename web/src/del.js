@@ -50,6 +50,9 @@ export async function deleteRun(id, request, env) {
   await env.DB.prepare("DELETE FROM runs WHERE id = ?").bind(id).run();
   await env.TAPES.delete(row.tape_key).catch(() => {});
   if (row.card_key) await env.TAPES.delete(row.card_key).catch(() => {});
+  // The avatar object stays: it is content-addressed (avatars/<sha256>.png)
+  // and may be shared by other runs, so deleting it here could take down a
+  // run that is still up. A COUNT-and-delete is a later ticket.
   return new Response(null, { status: 204 });
 }
 

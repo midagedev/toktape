@@ -14,8 +14,10 @@
 // Two scopes: everything public, and — with a journal token — mine, which is
 // the outward half of the local ledger (§9.2).
 
+import { avatarPath } from "./author.js";
 import { fail, json, publicBase } from "./http.js";
 import { EMPTY_FIGURE, esc, fmt, head, layout } from "./page.js";
+import { authorOf } from "./run.js";
 import { sha256Hex } from "./ids.js";
 
 const PAGE_SIZE = 30;
@@ -31,7 +33,8 @@ const GB = 1024 ** 3;
 const SELECT = `SELECT id, created_at, recorded_at, model_id, model_raw, repo,
     quant_id, quant_raw, engine_kind, engine_version, os, gpu_id, gpus_raw,
     gpu_count, vram_bytes, host_class, sessions, prompt_set, decode_per_sec,
-    caveat_count, tape_ext, card_key
+    caveat_count, tape_ext, card_key, author_name, author_link, avatar_key,
+    title, note
   FROM runs`;
 
 // The filters §9.4 names, each mapped to the column it narrows. A raw column
@@ -280,7 +283,9 @@ function decodeCursor(s) {
 // ------------------------------------------------------------------ shapes
 
 function apiRow(r) {
-  return {
+  // The profile and the note ride beside the index columns, each present
+  // only when set — absent, not null/empty, for unknown.
+  const out = {
     id: r.id,
     url: `/r/${r.id}`,
     published_at: r.created_at,
@@ -303,6 +308,11 @@ function apiRow(r) {
     decode_per_sec: r.decode_per_sec,
     caveat_count: r.caveat_count,
   };
+  const { author, title, note } = authorOf(r);
+  if (author) out.author = author;
+  if (title) out.title = title;
+  if (note) out.note = note;
+  return out;
 }
 
 function resultRow(r, url) {
@@ -329,11 +339,15 @@ function resultRow(r, url) {
     },
     { shown: r.prompt_set, param: "set", value: r.prompt_set },
   ];
+  // When the note's title is set it is the row's heading and the model
+  // name moves beneath in the small style; when unset the row is as today.
+  const model = r.model_id || r.model_raw || "a run";
   return `<article class="row">
   <div class="rowhead">
-    <a class="name" href="/r/${esc(r.id)}">${esc(r.model_id || r.model_raw || "a run")}</a>
+    <a class="name" href="/r/${esc(r.id)}">${esc(r.title || model)}</a>
     <span class="rate num">${fmt(r.decode_per_sec)}<span class="u"> tok/s</span></span>
   </div>
+  ${r.title ? `<div class="model">${esc(model)}</div>` : ""}
   <a class="stage feed" href="/r/${esc(r.id)}" data-tape="/r/${esc(r.id)}${esc(r.tape_ext || ".tape")}"
      aria-label="open this run">${
        r.card_key
@@ -341,8 +355,22 @@ function resultRow(r, url) {
          : `<div class="card nocard"></div>`
      }<pre class="screen"></pre></a>
   <div class="facts">${facts.filter((f) => f.shown).map((f) => chip(f, url)).join("")}${caveatChip(r)}</div>
+  ${whoLine(r)}
   <div class="when">${esc(String(r.created_at).slice(0, 10))}${r.repo ? ` · ${esc(r.repo)}` : ""}</div>
 </article>`;
+}
+
+// The row's `.who` line: the avatar at 16 px and the name, linked the way
+// the run page links it. Absent entirely when no author travels.
+function whoLine(r) {
+  const avatar = avatarPath(r.avatar_key);
+  if (!r.author_name && !avatar) return "";
+  const img = avatar ? `<img class="avatar" src="${esc(avatar)}" width="16" height="16" alt="">` : "";
+  const who =
+    r.author_name && r.author_link
+      ? `<a rel="nofollow noopener" href="${esc(r.author_link)}">${esc(r.author_name)}</a>`
+      : esc(r.author_name || "");
+  return `<div class="who">${img}${img && who ? " " : ""}${who}</div>`;
 }
 
 // A fact that is also a filter is a link to that filter, so narrowing a
@@ -501,6 +529,12 @@ kbd { font: .7rem ui-monospace, Menlo, monospace; color: #6b727d; border: 1px so
 .row { padding: 1rem 0; border-bottom: 1px solid #1b1f26; }
 .rowhead { display: flex; align-items: baseline; gap: 1rem; justify-content: space-between; }
 .name { color: #eef1f5; font-weight: 600; font-size: 1rem; word-break: break-word; }
+/* The model under a titled row, and the author under that: both small, both
+   beside the date line's colour, so a titled row still reads as one run. */
+.model { font-size: .78rem; color: #6b727d; }
+.who { display: flex; align-items: center; gap: .35rem; margin: .35rem 0 0;
+  font-size: .78rem; color: #7d848f; }
+.who .avatar { width: 16px; height: 16px; }
 .rate { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #9ece6a; white-space: nowrap; }
 .rate .u { color: #6b727d; font-size: .78rem; }

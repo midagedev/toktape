@@ -89,6 +89,17 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #1b1f26;
   .stage { margin-left: -1.25rem; margin-right: -1.25rem; }
   .card, .screen { border-radius: 0; border-left: 0; border-right: 0; }
 }
+/* The author beside a run: a small round avatar — the page's own ring
+   colour — and the name under the sub line. The row's .who line reuses
+   .avatar at its own size (search.js). */
+.avatar { width: 24px; height: 24px; border-radius: 50%; flex: none;
+  border: 1px solid #1b1f26; vertical-align: middle; }
+.byline { display: flex; align-items: center; gap: .45rem; margin: -.75rem 0 1.5rem;
+  font-size: .875rem; color: #7d848f; }
+/* The lab-note: plain paragraphs, no markdown, no autolinking — what was
+   typed is what is read, wrapped to the prose width. */
+.note { max-width: 40rem; color: #b9bec7; }
+.note p { margin: 0 0 .8rem; }
 `;
 
 // The mascot, as she appears around the site (web/static/README.md has her

@@ -9,6 +9,7 @@
 // A private run is served here. Unlisted means out of the search, not behind
 // a door — the id is the secret (§9.3).
 
+import { avatarPath } from "./author.js";
 import { fail, json } from "./http.js";
 import { esc, fmt, head, layout } from "./page.js";
 
@@ -65,12 +66,32 @@ export async function serveCard(id, env) {
   });
 }
 
+// authorOf is the profile and the note as the API prints them. Each is
+// present only when set — the API's existing rule is absent, not
+// null/empty, for unknown — and the avatar is the /a/<hash>.png path, or
+// absent with the rest. The profile and the note never pass through the
+// public view; they come off the row beside it.
+export function authorOf(row) {
+  const author = {};
+  if (row.author_name) author.name = row.author_name;
+  if (row.author_link) author.link = row.author_link;
+  const avatar = avatarPath(row.avatar_key);
+  if (avatar) author.avatar = avatar;
+  return {
+    author: Object.keys(author).length ? author : null,
+    title: row.title || null,
+    note: row.note || null,
+  };
+}
+
 export async function serveRunJSON(id, env) {
-  const row = await env.DB.prepare("SELECT id, created_at, private, index_json, tape_ext, tape_bytes, card_key FROM runs WHERE id = ?")
+  const row = await env.DB.prepare(
+    "SELECT id, created_at, private, index_json, tape_ext, tape_bytes, card_key, author_name, author_link, avatar_key, title, note FROM runs WHERE id = ?",
+  )
     .bind(id)
     .first();
   if (!row) return fail(404, "no run with that id");
-  return json({
+  const out = {
     id: row.id,
     published_at: row.created_at,
     private: row.private === 1,
@@ -78,11 +99,18 @@ export async function serveRunJSON(id, env) {
     tape_bytes: row.tape_bytes,
     card: row.card_key ? `/r/${row.id}.png` : null,
     index: JSON.parse(row.index_json),
-  });
+  };
+  const { author, title, note } = authorOf(row);
+  if (author) out.author = author;
+  if (title) out.title = title;
+  if (note) out.note = note;
+  return json(out);
 }
 
 export async function serveRunPage(id, env, base) {
-  const row = await env.DB.prepare("SELECT id, created_at, private, index_json, tape_ext, tape_bytes, card_key FROM runs WHERE id = ?")
+  const row = await env.DB.prepare(
+    "SELECT id, created_at, private, index_json, tape_ext, tape_bytes, card_key, author_name, author_link, avatar_key, title, note FROM runs WHERE id = ?",
+  )
     .bind(id)
     .first();
   if (!row) {
@@ -131,8 +159,12 @@ function runPage(row, idx, base) {
   ];
 
   const pageURL = `${base}/r/${row.id}`;
+  // When the note's title is set it becomes the h1 and the model name moves
+  // to the sub line; when unset the page is as today.
+  const heading = row.title || title;
+  const sub = row.title ? `${title} · ${summaryLine(idx)}` : summaryLine(idx);
   return layout({
-    title: `${shareTitle(idx, title)} — toktape`,
+    title: `${shareTitle(idx, title, row.title)} — toktape`,
     // The preview is the card. Its title leads with the figure, because the
     // figure is what the post is about and X truncates a title after two
     // lines on a phone; the description carries the rest of the sentence.
@@ -141,7 +173,7 @@ function runPage(row, idx, base) {
     // never promises a preview that 404s. An unlisted run asks the index to
     // leave it out, in the head as well as in the header (§9.3).
     meta: head({
-      title: shareTitle(idx, title),
+      title: shareTitle(idx, title, row.title),
       description: shareDescription(idx, row),
       url: pageURL,
       image: row.card_key ? `${pageURL}.png` : "",
@@ -173,9 +205,10 @@ ${
   <button class="act mp4" type="button" data-name="${esc(row.id)}.mp4">Download mp4</button>
   <a class="act" href="/r/${esc(row.id)}${esc(row.tape_ext)}">Download the record</a>
 </div>
-<h1>${esc(title)}</h1>
-<p class="sub">${esc(summaryLine(idx))}${row.private === 1 ? " · unlisted" : ""}</p>
-
+<h1>${esc(heading)}</h1>
+<p class="sub">${esc(sub)}${row.private === 1 ? " · unlisted" : ""}</p>
+${byline(row)}
+${noteSection(row.note)}
 <div class="figures">
 ${figures
   .map(
@@ -308,6 +341,38 @@ td.v { word-break: break-word; }
 }
 `;
 
+// The byline under the sub line: the avatar (24 px, round, only when one
+// travels) and the name — a link with rel="nofollow noopener" when the one
+// link is set, plain otherwise. When no author travels there is no byline
+// element at all. Everything stored was accepted verbatim and is escaped on
+// output; nothing stored is HTML.
+function byline(row) {
+  const avatar = avatarPath(row.avatar_key);
+  if (!row.author_name && !row.author_link && !avatar) return "";
+  const img = avatar ? `<img class="avatar" src="${esc(avatar)}" width="24" height="24" alt="">` : "";
+  let who = "";
+  if (row.author_name && row.author_link) {
+    who = `<a rel="nofollow noopener" href="${esc(row.author_link)}">${esc(row.author_name)}</a>`;
+  } else if (row.author_name) {
+    who = esc(row.author_name);
+  } else if (row.author_link) {
+    who = `<a rel="nofollow noopener" href="${esc(row.author_link)}">${esc(row.author_link)}</a>`;
+  }
+  return `<p class="byline">${img}${img && who ? " " : ""}${who}</p>`;
+}
+
+// The lab-note as paragraphs split on blank lines, each escaped — no
+// markdown, no autolinking.
+function noteSection(note) {
+  if (!note) return "";
+  const paras = String(note)
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!paras.length) return "";
+  return `<section class="note">\n${paras.map((p) => `<p>${esc(p)}</p>`).join("\n")}\n</section>`;
+}
+
 function caveatBlock(idx) {
   if (!idx.caveat_count) return "";
   const codes = (idx.caveats || []).map((c) => `<code>${esc(c)}</code>`).join(", ");
@@ -321,8 +386,10 @@ function caveatBlock(idx) {
 
 // The preview's first line: the figure, then the model. "196 tok/s ·
 // Qwen2.5-7B-Instruct Q3_K_M" is a sentence a thread reader can act on;
-// the file name alone was not.
-function shareTitle(idx, fallback) {
+// the file name alone was not. The note's title, when set, is appended
+// after a dash — never leading, because X truncates after two lines and
+// the figure stays first.
+function shareTitle(idx, fallback, noteTitle) {
   const parts = [];
   if (idx.decode_per_sec) parts.push(`${fmt(idx.decode_per_sec)} tok/s`);
   // The file name stands in when the model never normalised, without its
@@ -332,7 +399,8 @@ function shareTitle(idx, fallback) {
   // The quantisation only when the name does not already carry it: a raw
   // "Qwen2.5-7B-Instruct-Q3_K_M" followed by "Q3_K_M" said it twice.
   if (idx.quant_raw && !name.toLowerCase().includes(String(idx.quant_raw).toLowerCase())) parts.push(idx.quant_raw);
-  return parts.join(" · ");
+  const head = parts.join(" · ");
+  return noteTitle ? `${head} — ${noteTitle}` : head;
 }
 
 // The preview's second line: where and how, then what the reader can do

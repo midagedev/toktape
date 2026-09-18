@@ -260,6 +260,7 @@ side by side. Each field is there because it settles an argument.
 | `log` | the experiment ledger of every run | `toktape log --sort decode` |
 | `compare` | diff two runs, metrics and flags | `toktape compare a.tape b.tape` |
 | `publish` | upload a run and print its link | `toktape publish <tape>` |
+| `profile` | name the author every publish carries | `toktape profile --name NAME --link URL --avatar FILE` |
 | `version` | print the version | `toktape version` |
 
 **How long a run is.** A recording ends on the clock: twenty seconds by
@@ -418,6 +419,15 @@ to confirm that, once. `--private` keeps a run out of the search (the link
 still works and is the only way in); `--no-text` uploads the run without the
 prompts and the answers; both can be made the default in
 `~/.toktape/config.toml`.
+
+`toktape profile` names the author once per machine — a nickname, one link
+and an avatar PNG (at most 65536 bytes and 256×256) — and every publish
+carries it, listed by `--dry-run` under "Who it says published it" with
+anything else that leaves. The profile is unverified: anyone may type any
+name. `publish --no-profile` leaves it off one run. `--title TEXT` and
+`--note TEXT` (or `--note-file FILE`) attach a lab-note to one run — what
+it was trying, in plain text — shown on the page between the byline and the
+figures and carried on the row and the API beside the author.
 
 Hostnames and absolute paths are removed whatever the visibility is — the
 server's argv keeps its flags and loses its paths, the model keeps its file

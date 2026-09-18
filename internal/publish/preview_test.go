@@ -97,6 +97,36 @@ func TestPreviewSaysWhetherTheRunIsComparable(t *testing.T) {
 	}
 }
 
+// The profile and the note are something that leaves the machine, so the
+// listing names them the same way it names everything else that does — and
+// says "none" when nothing about the author travels.
+func TestPreviewNamesWhoPublishedIt(t *testing.T) {
+	out := previewOf(t, fullTape(), Options{
+		Author: &Author{Name: "Lab Rat", Link: "https://github.com/example", Avatar: tinyPNG(t, 16, 16)},
+		Title:  "First ik_llama sweep",
+		Note:   "Trying -fa on.\n\nSecond paragraph.",
+	})
+	for _, want := range []string{
+		"Who it says published it",
+		"Lab Rat",
+		"https://github.com/example",
+		"16×16 PNG",
+		"The note",
+		"First ik_llama sweep",
+		"Trying -fa on. … (",
+		"characters)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the preview does not mention %q:\n%s", want, out)
+		}
+	}
+
+	bare := previewOf(t, fullTape(), Options{})
+	if !strings.Contains(bare, "nothing about you travels") {
+		t.Errorf("a run with no profile does not say so:\n%s", bare)
+	}
+}
+
 // A tape with nothing in it must still produce a preview: the dry run is what
 // somebody reaches for when they do not trust what is about to happen, and it
 // failing is the worst moment for it to fail.

@@ -16,13 +16,17 @@ import (
 
 // publishFlags is every flag the publish verb declares.
 type publishFlags struct {
-	output   *string
-	dryRun   *bool
-	private  *bool
-	noText   *bool
-	withText *bool
-	yes      *bool
-	url      *string
+	output    *string
+	dryRun    *bool
+	private   *bool
+	noText    *bool
+	withText  *bool
+	yes       *bool
+	url       *string
+	noProfile *bool
+	title     *string
+	note      *string
+	noteFile  *string
 }
 
 // declarePublishFlags registers the publish verb's flags on fs.
@@ -36,10 +40,14 @@ func declarePublishFlags(fs *flag.FlagSet) *publishFlags {
 		// publishes text, --with-text on a machine whose config turned it
 		// off. A boolean flag cannot spell the second one without the reader
 		// having to know the config's value to predict what it does.
-		noText:   fs.Bool("no-text", false, "upload without the prompts and the generated text"),
-		withText: fs.Bool("with-text", false, "upload with them, overriding publish_text in the config"),
-		yes:      fs.Bool("yes", false, "acknowledge the first-publish warning without being asked"),
-		url:      fs.String("url", "", "the service to publish to (default "+publish.DefaultBaseURL+")"),
+		noText:    fs.Bool("no-text", false, "upload without the prompts and the generated text"),
+		withText:  fs.Bool("with-text", false, "upload with them, overriding publish_text in the config"),
+		yes:       fs.Bool("yes", false, "acknowledge the first-publish warning without being asked"),
+		url:       fs.String("url", "", "the service to publish to (default "+publish.DefaultBaseURL+")"),
+		noProfile: fs.Bool("no-profile", false, "this run travels without the author profile"),
+		title:     fs.String("title", "", "the lab-note's title for this run"),
+		note:      fs.String("note", "", "the lab-note's body for this run"),
+		noteFile:  fs.String("note-file", "", "read the lab-note's body from this file"),
 	}
 }
 
@@ -69,6 +77,9 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 	if *f.noText && *f.withText {
 		return c.usagef("toktape publish: --no-text and --with-text say opposite things")
 	}
+	if *f.note != "" && *f.noteFile != "" {
+		return c.usagef("toktape publish: --note and --note-file say the same thing twice")
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -82,7 +93,30 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 		return c.usagef("toktape: %v", err)
 	}
 
-	opts := publish.Options{Text: textPolicy(f, cfg), Private: *f.private}
+	note, err := noteText(f)
+	if err != nil {
+		return c.usagef("toktape publish: %v", err)
+	}
+	// The profile is read from the config — the resident form `toktape
+	// profile` wrote — and validated again here, because the file is
+	// hand-editable and the set-time check is not a guarantee.
+	author, err := authorFor(cfg, *f.noProfile)
+	if err != nil {
+		return c.usagef("toktape publish: %v", err)
+	}
+	title := *f.title
+	if title != "" {
+		if title, err = publish.ValidateTitle(title); err != nil {
+			return c.usagef("toktape publish: %v", err)
+		}
+	}
+	if note != "" {
+		if note, err = publish.ValidateNote(note); err != nil {
+			return c.usagef("toktape publish: %v", err)
+		}
+	}
+
+	opts := publish.Options{Text: textPolicy(f, cfg), Private: *f.private, Author: author, Title: title, Note: note}
 	view := publish.PublicView(tp, opts.Text)
 	idx := publish.IndexOf(view)
 	preview := publish.Preview(view, idx, opts)
@@ -119,6 +153,56 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 		})
 	}
 	return c.publishReceipt(receipt)
+}
+
+// noteText resolves the lab-note's body to one string. --note and
+// --note-file together is a usage error, settled before this is called.
+func noteText(f *publishFlags) (string, error) {
+	if *f.noteFile == "" {
+		return *f.note, nil
+	}
+	b, err := os.ReadFile(*f.noteFile)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", *f.noteFile, err)
+	}
+	return string(b), nil
+}
+
+// authorFor builds the profile one publish carries from the resident
+// config, or nil when nothing about the author travels: --no-profile, or a
+// machine that never set one. Every field is validated with the contract's
+// limits — the config file is hand-editable, so the set-time check is not a
+// guarantee — and the refusal names the limit.
+func authorFor(cfg *config.Config, noProfile bool) (*publish.Author, error) {
+	if noProfile {
+		return nil, nil
+	}
+	if cfg.ProfileName == "" && cfg.ProfileLink == "" && cfg.ProfileAvatar == "" {
+		return nil, nil
+	}
+	a := &publish.Author{}
+	if cfg.ProfileName != "" {
+		name, err := publish.ValidateAuthorName(cfg.ProfileName)
+		if err != nil {
+			return nil, err
+		}
+		a.Name = name
+	}
+	if cfg.ProfileLink != "" {
+		link, err := publish.ValidateAuthorLink(cfg.ProfileLink)
+		if err != nil {
+			return nil, err
+		}
+		a.Link = link
+	}
+	if cfg.ProfileAvatar != "" {
+		avatar, err := publish.LoadAvatar(expandHome(cfg.ProfileAvatar))
+		if err != nil {
+			return nil, err
+		}
+		a.Avatar = avatar
+	}
+	return a, nil
 }
 
 // textPolicy resolves the one setting with three sources. The order is the

@@ -87,6 +87,74 @@ printf 'published %s\n' "$url"
 # works until somebody clicks it.
 curl -fsS "$url" -o /dev/null || die "the receipt's own link does not open: $url"
 
+say "the author and the note"
+# The profile is set once per machine (web/static/favicon.png is a 64x64
+# PNG, 7943 bytes — inside every limit) and travels with the publish; the
+# note's title and body travel as their own parts beside it.
+"$work/toktape" profile --name "Lab Rat" --link https://github.com/example --avatar "$repo/web/static/favicon.png" \
+  >"$work/profile.txt" 2>&1 ||
+  { cat "$work/profile.txt"; die "profile set failed"; }
+for want in 'Lab Rat' 'https://github.com/example' '7943 bytes'; do
+  grep -q "$want" "$work/profile.txt" || { cat "$work/profile.txt"; die "the profile save does not name $want"; }
+done
+"$work/toktape" publish "$repo/assets/hero.tape" --url "$base" \
+  --title "First ik_llama sweep" --note "$(printf 'Trying -fa on.\n\nSecond paragraph.')" \
+  >"$work/receipt3" 2>"$work/publish3.err" ||
+  { cat "$work/publish3.err"; die "a profiled publish failed"; }
+url2="$(tr -d '\r\n' <"$work/receipt3")"; id2="${url2##*/}"
+[ -n "$id2" ] || die "the profiled receipt carried no link"
+# The title becomes the h1 and the model moves to the sub line; the byline
+# carries the avatar and the linked name; the note renders as paragraphs.
+curl -fsS "$base/r/$id2" >"$work/page2.html"
+grep -q '<h1>First ik_llama sweep</h1>' "$work/page2.html" || die "the note's title is not the h1"
+grep -q 'class="avatar"' "$work/page2.html" || die "the byline carries no avatar"
+grep -q 'href="https://github.com/example"' "$work/page2.html" || die "the byline does not link the author"
+grep -q '<p>Second paragraph.</p>' "$work/page2.html" || die "the note's second paragraph is not rendered"
+grep -q 'rel="nofollow noopener"' "$work/page2.html" || die "the author link carries no rel"
+# The row and the API carry the author, the title and the note beside them.
+curl -fsS "$base/api/v1/runs" >"$work/list2.json"
+grep -q '"title":"First ik_llama sweep"' "$work/list2.json" || { cat "$work/list2.json"; die "the listing carries no title"; }
+grep -q '"name":"Lab Rat"' "$work/list2.json" || die "the listing carries no author name"
+# The avatar path out of the JSON, fetched to a file: really a PNG, served
+# as image/png.
+avapath="$(grep -o '/a/[0-9a-f]\{64\}\.png' "$work/list2.json" | head -n 1)"
+[ -n "$avapath" ] || { cat "$work/list2.json"; die "the listing carries no avatar path"; }
+ctype=$(curl -fsS -o "$work/avatar.png" -w '%{content_type}' "$base$avapath")
+case "$ctype" in image/png*) ;; *) die "the avatar is served as $ctype" ;; esac
+head -c 8 "$work/avatar.png" | od -An -tx1 | tr -d ' \n' | grep -q '^89504e470d0a1a0a$' ||
+  die "what came back from $avapath is not a PNG"
+# Negatives, each a hand curl because the client refuses first: a scheme
+# that is not http(s), a title past 120 runes, an avatar past 65536 bytes.
+# Distinct addresses, so the probes spend their own rate budget and not the
+# binary publishes' one.
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X POST "$base/api/v1/runs" \
+  -H "CF-Connecting-IP: 203.0.113.20" \
+  -F 'tape=@'"$repo/assets/hero.tape"';filename=run.tape' -F 'index={"schema":1,"model_raw":"neg probe"}' \
+  -F 'author={"link":"javascript:alert(1)"}')
+[ "$code" = "400" ] || { cat "$work/body"; die "a javascript: author link was not refused (got $code)"; }
+grep -q 'javascript' "$work/body" || { cat "$work/body"; die "the refusal does not name the scheme"; }
+curl -fsS "$base/r/$id2" >"$work/fetched" && grep -q 'javascript:' "$work/fetched" && die "a scheme survived onto the page"
+title121="$(printf 't%.0s' $(seq 1 121))"
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X POST "$base/api/v1/runs" \
+  -H "CF-Connecting-IP: 203.0.113.21" \
+  -F 'tape=@'"$repo/assets/hero.tape"';filename=run.tape' -F 'index={"schema":1,"model_raw":"neg probe"}' \
+  -F "title=$title121")
+[ "$code" = "400" ] || { cat "$work/body"; die "a 121-rune title was not refused (got $code)"; }
+head -c 70000 /dev/zero >"$work/big.png"
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X POST "$base/api/v1/runs" \
+  -H "CF-Connecting-IP: 203.0.113.22" \
+  -F 'tape=@'"$repo/assets/hero.tape"';filename=run.tape' -F 'index={"schema":1,"model_raw":"neg probe"}' \
+  -F 'author={"name":"Big"}' -F 'avatar=@'"$work/big.png"';filename=avatar.png')
+case "$code" in 400|413) ;; *) cat "$work/body"; die "a 70000-byte avatar was not refused (got $code)" ;; esac
+# One run travels without the profile: no avatar, no name anywhere.
+"$work/toktape" publish "$repo/assets/hero.tape" --url "$base" --no-profile \
+  >"$work/receipt4" 2>"$work/publish4.err" ||
+  { cat "$work/publish4.err"; die "a --no-profile publish failed"; }
+url4="$(tr -d '\r\n' <"$work/receipt4")"; id4="${url4##*/}"
+curl -fsS "$base/r/$id4" >"$work/page4.html"
+grep -q 'class="avatar"' "$work/page4.html" && die "a --no-profile page carries an avatar"
+grep -q 'Lab Rat' "$work/page4.html" && die "a --no-profile page names the profile"
+
 say "the record comes back as a run file"
 curl -fsS "$base/r/$id.tape" -o "$work/downloaded.tape"
 "$work/toktape" card "$work/downloaded.tape" >"$work/card.txt" 2>&1 ||

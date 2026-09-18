@@ -189,6 +189,8 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		return runCompare(c, rest)
 	case "publish":
 		return runPublish(ctx, c, rest)
+	case "profile":
+		return runProfile(c, rest)
 	default:
 		c.json = jsonRequested(args)
 		return c.usageTextf(usageText, "toktape: unknown command %q", verb)
@@ -199,7 +201,7 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 // `toktape` and `toktape --url ...` both record.
 var verbs = map[string]bool{
 	"record": true, "card": true, "play": true, "render": true,
-	"ls": true, "log": true, "compare": true, "publish": true, "version": true,
+	"ls": true, "log": true, "compare": true, "publish": true, "profile": true, "version": true,
 }
 
 // splitVerb picks the verb out of the argument list.

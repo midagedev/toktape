@@ -1,8 +1,10 @@
 package publish
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
 	"strings"
 
 	"github.com/midagedev/toktape/internal/tape"
@@ -54,6 +56,26 @@ func Preview(view *tape.Tape, idx Index, opts Options) string {
 	// whole tape and the service never opens it — so it is something that
 	// leaves this machine and belongs in a listing of what does.
 	b.WriteString("  card           a 1200×675 PNG of the card, drawn from the fields above\n")
+	b.WriteString("\n")
+
+	// Who the run says published it. The profile is opt-in per machine and
+	// unverified — anyone may type any name — so the listing says what it
+	// is, the same way --dry-run lists everything else that leaves.
+	b.WriteString("Who it says published it\n")
+	if opts.Author == nil {
+		b.WriteString("  profile        none — nothing about you travels\n")
+	} else {
+		fmt.Fprintf(&b, "  name           %s\n", nonEmpty(opts.Author.Name, "none"))
+		fmt.Fprintf(&b, "  link           %s\n", nonEmpty(opts.Author.Link, "none"))
+		fmt.Fprintf(&b, "  avatar         %s\n", avatarLine(opts.Author.Avatar))
+	}
+	b.WriteString("\n")
+
+	// The lab-note: the title and the body's first line with its length, so
+	// the warning answers "how much" the way the text line does.
+	b.WriteString("The note\n")
+	fmt.Fprintf(&b, "  title          %s\n", nonEmpty(opts.Title, "none"))
+	fmt.Fprintf(&b, "  note           %s\n", noteLine(opts.Note))
 	b.WriteString("\n")
 
 	b.WriteString("The row the search will hold\n")
@@ -136,6 +158,32 @@ func textLine(view *tape.Tape, opts Options) string {
 	}
 	return fmt.Sprintf("%d characters of prompt and %d of generated text, across %s",
 		prompt, completion, plural(len(view.Requests), "stream"))
+}
+
+// avatarLine names the avatar's bytes and its header dimensions, the same
+// two facts the set-time check refused on. No avatar travels as "none".
+func avatarLine(b []byte) string {
+	if len(b) == 0 {
+		return "none"
+	}
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(b)); err == nil {
+		return fmt.Sprintf("%d bytes, %d×%d PNG", len(b), cfg.Width, cfg.Height)
+	}
+	return fmt.Sprintf("%d bytes", len(b))
+}
+
+// noteLine shows the body's first line and its length in characters, so a
+// long note still answers "how much" on one line.
+func noteLine(note string) string {
+	if strings.TrimSpace(note) == "" {
+		return "none"
+	}
+	first, _, _ := strings.Cut(note, "\n")
+	n := len([]rune(note))
+	if n == 1 {
+		return fmt.Sprintf("%s … (1 character)", first)
+	}
+	return fmt.Sprintf("%s … (%d characters)", first, n)
 }
 
 func plural(n int, noun string) string {

@@ -253,6 +253,7 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 | `log` | 모든 실행의 실험 장부 | `toktape log --sort decode` |
 | `compare` | 두 실행의 지표와 플래그를 비교합니다 | `toktape compare a.tape b.tape` |
 | `publish` | 실행을 올리고 링크를 찍습니다 | `toktape publish <tape>` |
+| `profile` | 올릴 때마다 붙는 작성자 정보를 정합니다 | `toktape profile --name NAME --link URL --avatar FILE` |
 | `version` | 버전 출력 | `toktape version` |
 
 **녹화는 몇 초짜리인가.** 실행은 시계로 끝납니다. 기본 20초이고,
@@ -404,6 +405,15 @@ toktape publish ~/.toktape/runs/<id>.tape
 `--private`는 검색에서 빼고(링크는 그대로 열리고, 그 링크가 유일한 입구),
 `--no-text`는 프롬프트와 답 없이 올립니다. 둘 다 `~/.toktape/config.toml`에서
 기본값으로 둘 수 있습니다.
+
+`toktape profile`은 이 기계의 작성자를 한 번 정합니다. 닉네임, 링크 하나,
+아바타 PNG(65536바이트·256×256 이하)이고, 그 뒤로는 올릴 때마다 함께 갑니다.
+`--dry-run`이 "Who it says published it" 아래에 그 셋을 다른 나가는 것들과
+나란히 찍습니다. 검증은 없습니다. 누구든 어떤 이름이든 적을 수 있습니다.
+`publish --no-profile`은 그 한 번만 빼고 올립니다. `--title TEXT`와 `--note
+TEXT`(또는 `--note-file FILE`)는 실행 하나에 실험 노트를 붙입니다. 무엇을
+해 보려던 실행인지 그냥 글로 적는 자리이고, 페이지에서는 작성자 줄과 숫자
+사이에, 목록과 API에서는 작성자 옆에 실립니다.
 
 호스트명과 절대 경로는 공개 여부와 상관없이 지워집니다. 서버 argv는 플래그를
 남기고 경로만 잃고, 모델은 파일명을 남기고 디렉터리를 잃습니다. 페이지 맨 위의

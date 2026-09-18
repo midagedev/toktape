@@ -33,6 +33,23 @@ const TAPE_EXTS = [".toktape", ".tape"];
 // A megabyte is room for it to grow and still not be something else.
 const MAX_CARD_BYTES = 1024 * 1024;
 
+// The author profile and the lab-note (TTP-125). Every limit mirrors the
+// client's refusal in internal/publish/avatar.go — the client refusing
+// first is courtesy, this refusing is the defence.
+const MAX_AUTHOR_NAME_RUNES = 40;
+const MAX_AUTHOR_LINK_BYTES = 200;
+const MAX_TITLE_RUNES = 120;
+const MAX_NOTE_RUNES = 4000;
+const MAX_AVATAR_BYTES = 65536;
+
+// Runes, not UTF-16 units: [...s] splits a surrogate pair the way Go's
+// []rune does, so the two sides count the same thing.
+function runes(s) {
+  return [...s].length;
+}
+
+const CONTROL_RE = /[\u0000-\u001F\u007F]/;
+
 export async function uploadRun(request, env) {
   const declared = Number(request.headers.get("Content-Length") || 0);
   if (declared > MAX_UPLOAD_BYTES) {
@@ -134,16 +151,143 @@ export async function uploadRun(request, env) {
     }
   }
 
+  // The author profile and the lab-note (TTP-125). Both travel as their
+  // own parts, beside the record — never inside the tape and never in the
+  // index row — and an older client sends none of them, which publishes
+  // exactly as today. Every limit here mirrors the client's refusal in
+  // internal/publish/avatar.go: the client refusing first is courtesy, this
+  // refusing is the defence. The page escapes on output (esc), so what is
+  // stored is exactly what was accepted — never HTML.
+  const parsed = (() => {
+    const bad = (status, why) => ({ failed: { status, why } });
+    const authorPart = form.get("author");
+    let authorName = null;
+    let authorLink = null;
+    if (authorPart !== null) {
+      if (typeof authorPart !== "string") return bad(400, "the author part must be JSON, not a file");
+      let author;
+      try {
+        author = JSON.parse(authorPart);
+      } catch (e) {
+        return bad(400, `the author part was not readable as JSON: ${e.message}`);
+      }
+      if (author === null || typeof author !== "object" || Array.isArray(author)) {
+        return bad(400, "the author part is not an object");
+      }
+      if (author.name !== undefined && author.name !== null) {
+        if (typeof author.name !== "string") return bad(400, "the author name is not a string");
+        const name = author.name.trim();
+        if (name === "") return bad(400, `the author name is empty: 1–${MAX_AUTHOR_NAME_RUNES} runes travel`);
+        if (runes(name) > MAX_AUTHOR_NAME_RUNES) {
+          return bad(400, `the author name is ${runes(name)} runes, over the ${MAX_AUTHOR_NAME_RUNES}-rune limit`);
+        }
+        if (CONTROL_RE.test(name)) return bad(400, "the author name carries a control character: names print on one line");
+        authorName = name;
+      }
+      if (author.link !== undefined && author.link !== null) {
+        if (typeof author.link !== "string") return bad(400, "the author link is not a string");
+        const link = author.link.trim();
+        if (link === "") return bad(400, `the author link is empty: 1–${MAX_AUTHOR_LINK_BYTES} bytes travel`);
+        if (new TextEncoder().encode(link).length > MAX_AUTHOR_LINK_BYTES) {
+          return bad(
+            400,
+            `the author link is ${new TextEncoder().encode(link).length} bytes, over the ${MAX_AUTHOR_LINK_BYTES}-byte limit`,
+          );
+        }
+        let scheme = "(none)";
+        let host = "";
+        try {
+          const u = new URL(link);
+          scheme = u.protocol;
+          host = u.host;
+        } catch {
+          return bad(400, `the author link is not a URL: ${JSON.stringify(link)}`);
+        }
+        // The scheme is refused by name — javascript:, data:, file: and
+        // anything else — because this is where a stored XSS would enter.
+        if (scheme !== "http:" && scheme !== "https:") {
+          return bad(400, `the author link uses scheme ${JSON.stringify(scheme)}: only http and https travel`);
+        }
+        if (!host) return bad(400, "the author link has no host: only http and https URLs with a host travel");
+        authorLink = link;
+      }
+    }
+
+    const titlePart = form.get("title");
+    let title = null;
+    if (titlePart !== null) {
+      if (typeof titlePart !== "string") return bad(400, "the title part must be text, not a file");
+      const t = titlePart.trim();
+      if (t === "") return bad(400, `the title is empty: 1–${MAX_TITLE_RUNES} runes travel`);
+      if (runes(t) > MAX_TITLE_RUNES) {
+        return bad(400, `the title is ${runes(t)} runes, over the ${MAX_TITLE_RUNES}-rune limit`);
+      }
+      if (/[\n\r]/.test(t)) return bad(400, "the title must be a single line");
+      title = t;
+    }
+
+    const notePart = form.get("note");
+    let note = null;
+    if (notePart !== null) {
+      if (typeof notePart !== "string") return bad(400, "the note part must be text, not a file");
+      const n = notePart.replace(/\r\n/g, "\n").trim();
+      if (n === "") return bad(400, `the note is empty: 1–${MAX_NOTE_RUNES} runes travel`);
+      if (runes(n) > MAX_NOTE_RUNES) {
+        return bad(400, `the note is ${runes(n)} runes, over the ${MAX_NOTE_RUNES}-rune limit`);
+      }
+      note = n;
+    }
+
+    return { authorName, authorLink, title, note };
+  })();
+  // Either the fields or {failed}: one early return, so the refusal reads
+  // next to the parsing it came from.
+  if (parsed.failed) return fail(parsed.failed.status, parsed.failed.why);
+  const { authorName, authorLink, title, note } = parsed;
+
+  const avatarPart = form.get("avatar");
+  let avatar = null;
+  if (avatarPart !== null && typeof avatarPart === "string") {
+    return fail(400, "the avatar part must be a PNG file, not text");
+  }
+  if (avatarPart) {
+    if (form.get("author") === null) {
+      return fail(400, "the upload carried an avatar part with no author part");
+    }
+    avatar = new Uint8Array(await avatarPart.arrayBuffer());
+    if (avatar.byteLength === 0) {
+      return fail(400, "the avatar part was empty");
+    }
+    if (avatar.byteLength > MAX_AVATAR_BYTES) {
+      return fail(413, `an avatar of ${avatar.byteLength} bytes is larger than this service accepts (${MAX_AVATAR_BYTES})`);
+    }
+    if (!isPNG(avatar)) {
+      return fail(400, "the avatar part is not a PNG");
+    }
+    // The bytes are stored, never decoded: dimensions were checked by the
+    // client at set time, and decoding here would be a second opinion about
+    // an image this side only serves.
+  }
+
   const isPrivate = form.get("private") === "true";
 
   const id = newRunID();
   const key = `runs/${id}/run${ext}`;
   const cardKey = card ? `runs/${id}/card.png` : null;
+  // Content-addressed, so the same image from the same machine is stored
+  // once — and so it may be shared by other runs, which is why neither the
+  // failure cleanup below nor the delete path removes it.
+  const avatarKey = avatar ? `avatars/${await sha256HexBytes(avatar)}.png` : null;
   await env.TAPES.put(key, bytes, {
     httpMetadata: { contentType: "application/gzip" },
   });
   if (card) {
     await env.TAPES.put(cardKey, card, {
+      httpMetadata: { contentType: "image/png", cacheControl: "public, max-age=31536000, immutable" },
+    });
+  }
+  if (avatar) {
+    await env.TAPES.put(avatarKey, avatar, {
       httpMetadata: { contentType: "image/png", cacheControl: "public, max-age=31536000, immutable" },
     });
   }
@@ -154,11 +298,15 @@ export async function uploadRun(request, env) {
   const deleteToken = owner ? null : newDeleteToken();
 
   try {
+    // The six new columns are bound explicitly beside card_key — they are
+    // not index columns (row.js is unchanged), because they were never in
+    // the index row the client derived.
     await env.DB.prepare(
       `INSERT INTO runs (id, created_at, private, owner_token, delete_hash,
                          tape_key, tape_ext, tape_bytes, card_key,
+                         author_name, author_link, avatar_key, title, note,
                          index_schema, index_json, ${INDEX_COLUMNS.join(", ")})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${INDEX_COLUMNS.map(() => "?").join(", ")})`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${INDEX_COLUMNS.map(() => "?").join(", ")})`,
     )
       .bind(
         id,
@@ -170,6 +318,11 @@ export async function uploadRun(request, env) {
         ext,
         bytes.byteLength,
         cardKey,
+        authorName,
+        authorLink,
+        avatarKey,
+        title,
+        note,
         idx.schema,
         indexPart,
         ...columnValues(idx),
@@ -178,7 +331,9 @@ export async function uploadRun(request, env) {
   } catch (e) {
     // The object is already in R2 and the row is not, so the record exists
     // with nothing pointing at it. Removing it keeps the two stores from
-    // drifting apart in the one direction that is silent.
+    // drifting apart in the one direction that is silent. The avatar is
+    // NOT removed here: it is content-addressed and may belong to other
+    // runs, so deleting it could take down someone else's byline.
     await env.TAPES.delete(key).catch(() => {});
     if (cardKey) await env.TAPES.delete(cardKey).catch(() => {});
     throw e;
@@ -195,6 +350,14 @@ function isPNG(b) {
   const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (b.byteLength < sig.length) return false;
   return sig.every((v, i) => b[i] === v);
+}
+
+// sha256Hex over bytes rather than a string: ids.js's sha256Hex encodes its
+// input as UTF-8, which would hash the encoding of the image rather than
+// the image. The avatar's R2 key is this digest.
+async function sha256HexBytes(bytes) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // UNKNOWN_TOKEN is distinct from null: null is an anonymous upload, which is
