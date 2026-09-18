@@ -201,12 +201,7 @@ Your own: <code>toktape record</code> against a running llama-server, then
 const PAGE_STYLE = `
 /* The card is the page's first sentence: it is what the link previews as,
    and it settles the argument before any of the table is read. */
-.stage { position: relative; margin: 0 0 2rem; }
-.card { width: 100%; height: auto; display: block; border-radius: 8px;
-  border: 1px solid #1b1f26; }
-.nocard { aspect-ratio: 16 / 9; background: #0a0c10; display: flex;
-  align-items: flex-end; justify-content: center; padding-bottom: 1.2rem;
-  color: #4d545f; font-size: .8rem; }
+.stage { margin: 0 0 2rem; }
 /* Replay sits on the card the way a play button sits on a poster: the card
    is the still, the run is the motion, and one click swaps them. */
 .replay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -216,17 +211,7 @@ const PAGE_STYLE = `
   backdrop-filter: blur(4px); letter-spacing: .01em; white-space: nowrap; }
 .replay:hover { background: rgba(30, 34, 42, .92); border-color: #7aa2f7; }
 .replay:disabled { opacity: .6; cursor: default; }
-/* The terminal, sized by host.js so 120 columns fill the stage; the height
-   follows from 36 lines of it. The background is the theme's own. */
-.screen { display: none; margin: 0; padding: 0; width: 100%; overflow: hidden;
-  line-height: 1.25; background: #101412; border-radius: 8px;
-  border: 1px solid #1b1f26; color: #e6e2d8;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre; cursor: pointer; user-select: none; }
-/* A wide (CJK, Hangul, emoji) character occupies exactly two cells, as the
-   renderer assumed when it laid the line out; see host.js. */
-.screen .w { display: inline-block; width: 2ch; font-weight: inherit;
-  text-align: center; overflow: hidden; vertical-align: bottom; }
+.screen { cursor: pointer; }
 /* Progress is written into the button itself; this line under the stage
    is for what went wrong, in the player's own words. */
 .status { margin: .6rem 0 0; font-size: .85rem; color: #e0b64a; }
@@ -237,8 +222,7 @@ const PAGE_STYLE = `
   min-width: 4.5rem; }
 .controls .toggle:hover { border-color: #7aa2f7; }
 .controls .scrub { flex: 1; accent-color: #86c2b3; }
-.stage.live .card, .stage.live .replay { display: none; }
-.stage.live .screen { display: block; }
+.stage.live .replay { display: none; }
 .stage.live .controls { display: flex; }
 .figures { display: flex; flex-wrap: wrap; gap: 2.5rem; margin: 0 0 2.5rem; }
 .figure .n { font: 600 1.9rem/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;

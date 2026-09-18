@@ -27,7 +27,7 @@ const MAX_PAGE_SIZE = 100;
 const SELECT = `SELECT id, created_at, recorded_at, model_id, model_raw, repo,
     quant_id, quant_raw, engine_kind, engine_version, os, gpu_id, gpus_raw,
     gpu_count, vram_bytes, host_class, sessions, prompt_set, decode_per_sec,
-    caveat_count
+    caveat_count, tape_ext, card_key
   FROM runs`;
 
 // The filters §9.4 names, each mapped to the column it narrows. A raw column
@@ -84,7 +84,9 @@ decision. Every row carries the caveats the card would print, because a
 result set without them is a leaderboard with the sorting taken out.<br>
 <code>toktape publish &lt;run.tape&gt;</code> puts one here.
 <a href="https://github.com/midagedev/toktape">toktape on GitHub</a>
-</footer>`,
+</footer>
+<script src="/player/wasm_exec.js"></script>
+<script src="/player/host.js"></script>`,
     }),
     { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } },
   );
@@ -263,6 +265,12 @@ function resultRow(r) {
     <a class="name" href="/r/${esc(r.id)}">${esc(r.model_id || r.model_raw || "a run")}</a>
     <span class="rate num">${fmt(r.decode_per_sec)}<span class="u"> tok/s</span></span>
   </div>
+  <a class="stage feed" href="/r/${esc(r.id)}" data-tape="/r/${esc(r.id)}${esc(r.tape_ext || ".tape")}"
+     aria-label="open this run">${
+       r.card_key
+         ? `<img class="card" src="/r/${esc(r.id)}.png" width="1200" height="675" loading="lazy" alt="">`
+         : `<div class="card nocard"></div>`
+     }<pre class="screen"></pre></a>
   <div class="facts">${facts.filter((f) => f.shown).map(chip).join("")}${caveatChip(r)}</div>
   <div class="when">${esc(String(r.created_at).slice(0, 10))}${r.repo ? ` · ${esc(r.repo)}` : ""}</div>
 </article>`;
@@ -347,6 +355,14 @@ a.fact.link { color: #99a0ab; }
 a.fact.link:hover { color: #d7dae0; border-color: #39414f; text-decoration: none; }
 .fact.caveat { color: #e0b64a; background: #1a160c; border-color: #3a2f16; }
 .when { font-size: .78rem; color: #6b727d; }
+/* On a phone the listing is a feed: each row carries its run, and the one
+   in view plays. On a wide screen it stays a list — twenty stages down a
+   desktop page is a wall, and the card is a click away. */
+.feed { display: none; }
+@media (max-width: 48rem) {
+  .feed { display: block; margin-block: .6rem .5rem; }
+  .row { padding: 1.25rem 0; }
+}
 .empty { color: #7d848f; padding: 2rem 0; }
 .more { margin: 1.75rem 0 0; }
 `;

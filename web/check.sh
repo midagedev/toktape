@@ -146,6 +146,10 @@ curl -fsS "$base/api/v1/runs?engine=vllm" | grep -q "\"runs\":\[\]" ||
 curl -fsS "$base/api/v1/runs?q=Qwen3.6" | grep -q "\"id\":\"$id\"" ||
   die "free text did not fall back to the name as recorded"
 curl -fsS "$base/" | grep -q 'ik_llama.cpp' || die "the front page does not list the run"
+# Each listed run carries its stage, so a phone can play it in place.
+curl -fsS "$base/" | grep -q 'class="stage feed" href="/r/'"$id"'" data-tape="/r/'"$id"'.tape"' ||
+  die "the front page row does not carry the run for the feed"
+curl -fsS "$base/" | grep -q 'src="/player/host.js"' || die "the front page does not load the player"
 # A filter in the URL shows in its box even when it matches nothing.
 curl -fsS "$base/?engine=vllm" | grep -q '<option value="vllm" selected>vllm (0)</option>' ||
   die "a filter that matched nothing vanished from its dropdown"
