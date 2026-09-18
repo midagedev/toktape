@@ -311,8 +311,8 @@ and inserts one row per run, so `toktape log -o sql | sqlite3 runs.db` is a
 database. A verb refuses a format it does not take and names the ones it does.
 
 **Card:** `-o png [FILE]` (the 1200×675 share image, next to the tape unless a
-file is named) besides the formats above, and `--copy` (also to the clipboard
-over OSC 52).
+file is named) besides the formats above, and `--copy` (also to the clipboard:
+pbcopy, wl-copy or xclip when one is there, OSC 52 to the terminal over SSH).
 
 **Render:** `--gif FILE`, `--mp4 FILE` (needs ffmpeg on `PATH`), `--cast FILE`
 (asciicast v2), `--frames DIR` (PNG sequence, drawn on a larger canvas than the GIF —

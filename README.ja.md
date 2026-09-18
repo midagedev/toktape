@@ -312,7 +312,8 @@ speculative `n_max` の値ごとに 1 回ずつ流して同じテープに記録
 示します。
 
 **card:** 上の形式に加えて `-o png [FILE]`（1200×675 の共有画像。ファイルを指定
-しなければテープの隣に書きます）、`--copy`（OSC 52 でクリップボードにもコピー）。
+しなければテープの隣に書きます）、`--copy`（クリップボードにもコピー。pbcopy・
+wl-copy・xclip があればそれで、SSH 越しなら端末への OSC 52 で）。
 
 **render:** `--gif FILE`、`--mp4 FILE`（`PATH` に ffmpeg が必要）、`--cast FILE`
 （asciicast v2）、`--frames DIR`（PNG シーケンス。GIF より大きなキャンバスに描かれます —

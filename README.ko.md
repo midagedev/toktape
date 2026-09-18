@@ -301,7 +301,8 @@ Markdown 표입니다. `sql`은 `runs` 테이블이 없으면 만들고 실행�
 않는 형식을 주면 거절하고, 받는 형식을 알려 줍니다.
 
 **card:** 위 형식에 더해 `-o png [FILE]`(1200×675 공유 이미지. 파일을 지정하지
-않으면 테이프 옆에 씁니다), `--copy`(OSC 52로 클립보드에도 복사).
+않으면 테이프 옆에 씁니다), `--copy`(클립보드에도 복사. pbcopy·wl-copy·xclip이
+있으면 그걸로, SSH 너머면 터미널로 OSC 52).
 
 **render:** `--gif FILE`, `--mp4 FILE`(`PATH`에 ffmpeg 필요), `--cast FILE`
 (asciicast v2), `--frames DIR`(PNG 시퀀스. GIF보다 큰 캔버스에 그려집니다 — 두 크기는

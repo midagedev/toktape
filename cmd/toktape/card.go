@@ -1,11 +1,9 @@
 package main
 
 import (
-	"encoding/base64"
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/midagedev/toktape/internal/bandwidth"
@@ -83,7 +81,7 @@ func runCard(c *cli, args []string) int {
 	fmt.Fprint(c.stdout, out)
 
 	if *f.copyTo {
-		copyOSC52(c.stderr, out)
+		copyToClipboard(c.stderr, out)
 	}
 	return exitOK
 }
@@ -134,30 +132,4 @@ func writeCardPNG(c *cli, tapePath, outPath string, s *tape.RunSummary) int {
 	}
 	fmt.Fprintln(c.stdout, outPath)
 	return exitOK
-}
-
-// copyOSC52 asks the terminal to put s on the system clipboard.
-//
-// OSC 52 is the only clipboard path that works the same locally and over SSH,
-// which is where this tool lives: the sequence is written to the terminal and
-// the terminal, not the program, owns the clipboard. It is written to the
-// controlling terminal rather than to stdout so a piped or redirected card
-// does not gain an escape sequence it must not contain — the card's contract
-// is that it carries no ANSI.
-//
-// The terminal may silently refuse (many do by default), so the message says
-// what was attempted rather than claiming success.
-func copyOSC52(stderr io.Writer, s string) {
-	seq := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(s)) + "\x07"
-	tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
-	if err != nil {
-		fmt.Fprintln(stderr, "Clipboard: no terminal to copy through (not a tty)")
-		return
-	}
-	defer tty.Close()
-	if _, err := io.WriteString(tty, seq); err != nil {
-		fmt.Fprintf(stderr, "Clipboard: could not write to the terminal: %v\n", err)
-		return
-	}
-	fmt.Fprintln(stderr, "Clipboard: sent to the terminal via OSC 52 (some terminals need it enabled)")
 }
