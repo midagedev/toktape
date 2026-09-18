@@ -266,6 +266,49 @@ type ModelInfo struct {
 	// decoded token (dense: all weights; MoE: attention + used experts).
 	// Effective bandwidth = ActiveBytesPerToken * decode tok/s.
 	ActiveBytesPerToken int64 `json:"active_bytes_per_token,omitempty"`
+
+	// Repo is the Hugging Face repository this model came from
+	// ("unsloth/Qwen3-0.6B-GGUF"), and RepoSource says what proved it
+	// (TTP-119, 2026-09-18).
+	//
+	// Measured that day against three real files: a repo id is not inside a
+	// GGUF. unsloth writes only its own org into general.repo_url, bartowski
+	// writes nothing, and an older ggml-org file has neither. The one place
+	// an exact id exists is the path, when the file sits in a Hugging Face
+	// cache — ~/.cache/huggingface/hub/models--<org>--<repo>/snapshots/<sha>/.
+	// So RepoSource is "hf-cache" and nothing else yet: it names the evidence,
+	// not the mechanism, because ollama and LM Studio keep their own layouts
+	// and a later one of those must not inherit this one's meaning.
+	//
+	// The source travels beside the value for the reason HostnameSource
+	// travels beside Hostname: an identity nobody observed must never be
+	// readable as one that was. Repo is empty far more often than not, and
+	// empty is the honest answer.
+	Repo       string `json:"repo,omitempty"`
+	RepoSource string `json:"repo_source,omitempty"` // "hf-cache"
+
+	// BaseName, SizeLabel and FineTune are the upstream GGUF naming
+	// convention (ggml docs/gguf.md): <BaseName>-<SizeLabel>-<FineTune>-…
+	// It is the vocabulary two quantizers of one model agree on even when
+	// their file names do not — unsloth's header says basename "Qwen3-0.6B"
+	// and bartowski's says "Qwen3", and both say size_label "0.6B".
+	//
+	// NameSource is "gguf" when they were read from general.basename /
+	// general.size_label / general.finetune, and "filename" when they were
+	// parsed out of the file name instead. The header wins whenever it has
+	// them; a name that does not follow the convention leaves all of this
+	// empty rather than guessing.
+	BaseName   string `json:"base_name,omitempty"`
+	SizeLabel  string `json:"size_label,omitempty"`
+	FineTune   string `json:"finetune,omitempty"`
+	NameSource string `json:"name_source,omitempty"` // "gguf" | "filename"
+
+	// QuantizedBy and RepoURL are general.quantized_by and general.repo_url
+	// verbatim. RepoURL is named after its key rather than after what unsloth
+	// puts in it (their org page, not the repo): a quantizer who writes the
+	// real repo URL must not be mislabelled by a field name of ours.
+	QuantizedBy string `json:"quantized_by,omitempty"`
+	RepoURL     string `json:"repo_url,omitempty"`
 }
 
 // HostInfo is the hardware line of the card.

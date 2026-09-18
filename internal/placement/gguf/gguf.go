@@ -44,6 +44,20 @@ func ModelInfo(path string) (tape.ModelInfo, []placement.Tensor, error) {
 		Params:    int64(f.ModelParameters),
 	}
 
+	// The upstream naming convention (ggml docs/gguf.md), which is the one
+	// vocabulary two quantizers of a model agree on. The header is the record;
+	// the file name is only consulted for the files that predate these keys.
+	info.BaseName = kvString(kv, "general.basename")
+	info.SizeLabel = kvString(kv, "general.size_label")
+	info.FineTune = kvString(kv, "general.finetune")
+	info.QuantizedBy = kvString(kv, "general.quantized_by")
+	info.RepoURL = kvString(kv, "general.repo_url")
+	if info.BaseName != "" || info.SizeLabel != "" {
+		info.NameSource = "gguf"
+	} else if b, s := NameFromFileName(info.FileName); b != "" {
+		info.BaseName, info.SizeLabel, info.NameSource = b, s, "filename"
+	}
+
 	// The file name carries tags the file_type enum cannot express
 	// (UD-Q4_K_M vs Q4_K_M are both file_type 15), so it wins when present.
 	info.Quant = placement.QuantFromFileName(info.FileName)
@@ -67,6 +81,27 @@ func ModelInfo(path string) (tape.ModelInfo, []placement.Tensor, error) {
 
 	info.ActiveBytesPerToken = placement.ActiveBytesPerToken(tensors, info.NExpertsUsed, info.NExperts)
 	return info, tensors, nil
+}
+
+// NameFromFileName reads the GGUF naming convention out of a file name, for
+// the files whose header does not carry general.basename — and for a run
+// recorded against a server whose model file is not on this machine at all,
+// where the name from /props is the only thing there is to read. The upstream
+// parser returns nil for a name that does not follow the convention, which is
+// the property this needs: it refuses instead of guessing.
+//
+// It deliberately returns no fine-tune. Measured 2026-09-18 against real
+// names: the convention's Encoding group does not match a quantizer's own
+// tag, so `Qwen3-0.6B-UD-Q6_K_XL.gguf` parses with FineTune "UD-Q6_K_XL" and
+// `Qwen3-30B-A3B-Instruct-2507-UD-Q4_K_XL.gguf` with
+// "Instruct-2507-UD-Q4_K_XL" — the quantisation wearing the fine-tune's name.
+// A fine-tune is only ever general.finetune.
+func NameFromFileName(name string) (baseName, sizeLabel string) {
+	f := ggufparser.ParseGGUFFilename(name)
+	if f == nil {
+		return "", ""
+	}
+	return f.BaseName, f.SizeLabel
 }
 
 // kvString reads a string metadata value, or "" when the key is absent or

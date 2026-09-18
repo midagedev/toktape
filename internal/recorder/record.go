@@ -315,7 +315,56 @@ func (r *run) waitReason(err error) (reason string, waitable bool) {
 	}
 }
 
-// collectModel reads the GGUF header when the model file is on this host.
+// collectModel records the model's shape, then where it came from. The shape
+// has two sources and the provenance has a third, which is why they are two
+// steps: the path is evidence no header carries, and it is there whether the
+// header was readable, unreadable, or never a GGUF at all (TTP-119).
+func (r *run) collectModel() {
+	r.collectModelShape()
+	if repo := hfCacheRepo(r.model.Path); repo != "" {
+		r.model.Repo, r.model.RepoSource = repo, "hf-cache"
+	}
+}
+
+// hfCacheRepo returns the Hugging Face repo id a path proves, or "" for a
+// path that proves nothing. The layout is the one `huggingface_hub` writes:
+//
+//	<cache>/hub/models--<org>--<repo>/snapshots/<sha>/<file>
+//
+// The `snapshots` component is required, not decoration: it is what separates
+// a real cache entry from a directory somebody happened to name that way, and
+// it is also where an exl3 model's own directory lives, so this reads a
+// non-GGUF run exactly as well as a GGUF one.
+//
+// A name that splits into anything but two non-empty halves is refused. A
+// repo whose own name contains "--" would arrive here indistinguishable from
+// an org that does, and a wrong repo id is worse than none: Repo is read as
+// proof.
+func hfCacheRepo(path string) string {
+	if path == "" {
+		return ""
+	}
+	// The path is the *server's*, not this machine's, so the separator cannot
+	// be filepath.Separator: a laptop on macOS attached with --url to a
+	// Windows server reads a Windows path. filepath.ToSlash is a no-op off
+	// Windows for exactly that reason, so both separators are split on here.
+	// A POSIX file name may legally contain a backslash; the models--/snapshots
+	// pair either side of it makes that harmless.
+	parts := strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' })
+	for i, p := range parts {
+		if !strings.HasPrefix(p, "models--") || i+1 >= len(parts) || parts[i+1] != "snapshots" {
+			continue
+		}
+		half := strings.Split(strings.TrimPrefix(p, "models--"), "--")
+		if len(half) != 2 || half[0] == "" || half[1] == "" {
+			return ""
+		}
+		return half[0] + "/" + half[1]
+	}
+	return ""
+}
+
+// collectModelShape reads the GGUF header when the model file is on this host.
 // When it is not — the normal case for a remote server — the file name and
 // the quantisation are still recoverable from the path /props reported, and
 // everything the header would have supplied stays zero.
@@ -324,7 +373,7 @@ func (r *run) waitReason(err error) (reason string, waitable bool) {
 // engine that is not llama.cpp has no GGUF to open and reports the model in
 // its own words, which is the record — there is no file to fail to read and
 // no warning to print about one.
-func (r *run) collectModel() {
+func (r *run) collectModelShape() {
 	if r.props.Engine != nil {
 		r.collectEngineModel()
 		return
@@ -352,6 +401,14 @@ func (r *run) collectModel() {
 		Path:     path,
 		FileName: base,
 		Quant:    placement.QuantFromFileName(base),
+	}
+	// The name is the whole of what a remote run has to identify the model
+	// with, and reading the convention out of it is observing rather than
+	// guessing — the parser refuses a name that does not follow it. This is
+	// the branch a laptop attached with --url takes, so it is the one most
+	// published runs will come through (TTP-119).
+	if b, s := gguf.NameFromFileName(base); b != "" {
+		r.model.BaseName, r.model.SizeLabel, r.model.NameSource = b, s, "filename"
 	}
 	// The parts are not on this machine either, so they are named but never
 	// stat'ed: FileBytes stays 0 and the card prints "?" rather than the size
