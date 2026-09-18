@@ -212,7 +212,7 @@ async function countTotal(env, url, scope) {
 
 async function totalLine(env, url, scope, limit, hasNext) {
   const n = await countTotal(env, url, scope);
-  return `<p class="total"><b>${n}</b> run(s), newest first${hasNext ? ` · showing the first ${limit}` : ""}</p>`;
+  return `<p class="total"><b>${n}</b> run${n === 1 ? "" : "s"}, newest first${hasNext ? ` · showing the first ${limit}` : ""}</p>`;
 }
 
 async function distinctFacets(env, url, scope) {

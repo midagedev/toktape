@@ -193,7 +193,7 @@ grep -q 'without engine' "$work/fetched" || die "the empty state offers no way b
 # The total above the rows: a population size, not a ranking.
 curl -fsS "$base/" >"$work/front.html" && grep -q 'class="total"' "$work/front.html" ||
   die "the front page carries no total"
-grep -qE 'class="total"><b>[0-9]+</b>' "$work/front.html" || die "the total names no population size"
+grep -qE 'class="total"><b>[0-9]+</b> runs?,' "$work/front.html" || die "the total names no population size"
 # The active line on a narrowed page, with its way out.
 curl -fsS "$base/?engine=ik_llama.cpp" >"$work/eng.html" && grep -q 'Narrowed to' "$work/eng.html" ||
   die "the filtered page names no active filters"
