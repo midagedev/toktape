@@ -480,7 +480,13 @@
     if (e.key === "ArrowLeft") live.seek(live.t - 5000);
     if (e.key === "ArrowRight") live.seek(live.t + 5000);
   });
-  window.addEventListener("resize", () => { if (live) { live.fitFont(); live.paint(true); } });
+  // Every stage that has painted keeps its last frame at the font it was
+  // fitted at; when the grid reflows (search.js .rows) that frame would clip
+  // inside its own box, so each one is refitted, not only the live one.
+  window.addEventListener("resize", () => {
+    for (const p of players) if (p.stage.classList.contains("live")) p.fitFont();
+    if (live) live.paint(true);
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && live) live.pause();
   });
@@ -493,10 +499,22 @@
   // On a phone the run page's own stage joins in: there is no hover and no
   // idle cursor to invite a click, so the run starts when it scrolls into
   // view, the way a video in a feed does (user, 2026-09-18: "스크롤하면
-  // 자동시작"). On a wide screen the Replay button stays the way in — a
-  // 1.6 MB download should be asked for where asking costs nothing.
+  // 자동시작"). On a wide screen the run page's Replay button stays the way
+  // in — a 1.6 MB download should be asked for where asking costs nothing —
+  // but the listing plays on a desktop too, two or three runs across
+  // (user, 2026-09-19: "데스크톱 리스트도 모바일처럼 리스트 재생"): the one
+  // most in view starts, and the one under the pointer takes over.
   const narrow = window.matchMedia("(max-width: 48rem)").matches;
   const feed = players.filter((p) => p.feed || narrow);
+  if (!narrow) {
+    for (const p of feed) {
+      p.stage.addEventListener("mouseenter", () => {
+        if (live === p && p.playing) return;
+        for (const q of feed) if (q !== p && q.playing) q.pause();
+        p.resume();
+      });
+    }
+  }
   if (feed.length && "IntersectionObserver" in window) {
     const ratio = new Map();
     const io = new IntersectionObserver((entries) => {

@@ -213,7 +213,7 @@ ${noteSection(row.note)}
 <div class="figures">
 ${figures
   .map(
-    ([k, v, u]) => `<div class="figure"><div class="k">${esc(k)}</div><div class="n num">${fmt(
+    ([k, v, u]) => `<div class="stat"><div class="k">${esc(k)}</div><div class="n num">${fmt(
       v,
     )}<span class="u">${esc(u)}</span></div></div>`,
   )
@@ -221,7 +221,13 @@ ${figures
 </div>
 
 <table>
-${rows.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v mono">${esc(v)}</td></tr>`).join("\n")}
+${rows
+  // A row whose value is "—" is one that does not apply to this run (no
+  // repo, no normalised id); it says nothing and is left out. "?" stays: it
+  // is a value that was not observed, and a reader should see that it wasn't.
+  .filter(([, v]) => v !== "—")
+  .map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v mono">${esc(v)}</td></tr>`)
+  .join("\n")}
 </table>
 
 <section class="details">
@@ -287,17 +293,24 @@ const PAGE_STYLE = `
 .stage.live .replay { display: none; }
 .stage.live .controls { display: flex; }
 .figures { display: flex; flex-wrap: wrap; gap: 2.5rem; margin: 0 0 2.5rem; }
-.figure .n { font: 600 1.9rem/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
+.stat .n { font: 600 1.9rem/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #eef1f5; }
-.figure .u { color: #6b727d; font-size: .8rem; margin-left: .3rem; }
-.figure .k { color: #6b727d; font-size: .72rem; text-transform: uppercase;
+.stat .u { color: #6b727d; font-size: .8rem; margin-left: .3rem; }
+.stat .k { color: #6b727d; font-size: .72rem; text-transform: uppercase;
   letter-spacing: .09em; margin-bottom: .35rem; }
 table { border-collapse: collapse; width: 100%; font-size: .9rem; }
 td { padding: .45rem 0; border-bottom: 1px solid #1b1f26; vertical-align: top; }
 td.k { color: #7d848f; width: 9.5rem; white-space: nowrap; }
+/* On a phone the three figures share one line as three equal columns rather
+   than wrapping two-and-one with TTFT stranded beneath (seen at 390 px,
+   2026-09-19); the digits shrink to fit. The actions do the same. */
 @media (max-width: 30rem) {
   td.k { width: 6.5rem; white-space: normal; }
-  .figures { gap: 1.5rem; }
+  .figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; }
+  .stat .n { font-size: 1.45rem; }
+  .stat .u { display: block; margin: .15rem 0 0; }
+  .actions { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .act { text-align: center; padding: .45rem .3rem; font-size: .8rem; white-space: nowrap; }
 }
 td.v { word-break: break-word; }
 .caveats { margin: 2rem 0 0; padding: .9rem 1.1rem; border: 1px solid #3a2f16;

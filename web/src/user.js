@@ -26,7 +26,7 @@ import {
   PAGE_STYLE,
   pageSize,
   query,
-  resultRow,
+  rowGrid,
   totalLine,
 } from "./search.js";
 
@@ -72,7 +72,7 @@ export async function serveUserPage(handle, request, env) {
     q.rows.length === 0
       ? `${EMPTY_FIGURE}<p class="empty">No public runs here yet.</p>`
       : `${await totalLine(env, url, scope, limit, q.next)}
-${q.rows.map((r) => resultRow(r, url)).join("\n")}`;
+${rowGrid(q.rows, url)}`;
   const more = (() => {
     if (!q.next) return "";
     const u = new URL(url.href);
@@ -104,7 +104,9 @@ ${more}
 <footer>
 <a href="/">Published runs</a> · the profile above follows the token, so the
 newest publish's name and avatar are what this page shows.
-</footer>`,
+</footer>
+<script src="/player/wasm_exec.js"></script>
+<script src="/player/host.js"></script>`,
     }),
     { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } },
   );

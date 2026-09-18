@@ -93,7 +93,7 @@ export async function searchPage(request, env) {
     q.rows.length === 0
       ? await emptyState(env, url, scope)
       : `${await totalLine(env, url, scope, limit, q.next)}
-${q.rows.map((r) => resultRow(r, url)).join("\n")}`;
+${rowGrid(q.rows, url)}`;
 
   return new Response(
     layout({
@@ -330,6 +330,13 @@ export function apiRow(r) {
   return out;
 }
 
+// The rows as one grid: two or three across on a desktop (the column count
+// falls out of the width — .rows in PAGE_STYLE), one down a phone. Shared
+// with the user home so the two listings cannot drift apart.
+export function rowGrid(rows, url) {
+  return `<div class="rows">\n${rows.map((r) => resultRow(r, url)).join("\n")}\n</div>`;
+}
+
 export function resultRow(r, url) {
   // Each fact is {shown, param, value}: what a reader sees and, where the
   // axis is one the index normalised, the exact value that narrows to it.
@@ -357,18 +364,23 @@ export function resultRow(r, url) {
   // When the note's title is set it is the row's heading and the model
   // name moves beneath in the small style; when unset the row is as today.
   const model = r.model_id || r.model_raw || "a run";
+  // The run leads the row and the words are its caption — the feed idiom
+  // (user, 2026-09-19: the frame sitting between the heading and the chips
+  // read as a banner stuck into the text, and its full-bleed edge on a phone
+  // fought the caption's own margin). DOM order, not CSS order, so a screen
+  // reader and the IntersectionObserver see the same row.
   return `<article class="row">
-  <div class="rowhead">
-    <a class="name" href="/r/${esc(r.id)}">${esc(r.title || model)}</a>
-    <span class="rate num">${fmt(r.decode_per_sec)}<span class="u"> tok/s</span></span>
-  </div>
-  ${r.title ? `<div class="model">${esc(model)}</div>` : ""}
   <a class="stage feed" href="/r/${esc(r.id)}" data-tape="/r/${esc(r.id)}${esc(r.tape_ext || ".tape")}"
      aria-label="open this run">${
        r.card_key
          ? `<img class="card" src="/r/${esc(r.id)}.png" width="1200" height="675" loading="lazy" alt="">`
          : `<div class="card nocard"></div>`
      }<pre class="screen"></pre></a>
+  <div class="rowhead">
+    <a class="name" href="/r/${esc(r.id)}">${esc(r.title || model)}</a>
+    <span class="rate num">${fmt(r.decode_per_sec)}<span class="u"> tok/s</span></span>
+  </div>
+  ${r.title ? `<div class="model">${esc(model)}</div>` : ""}
   <div class="facts">${facts.filter((f) => f.shown).map((f) => chip(f, url)).join("")}${caveatChip(r)}</div>
   ${whoLine(r)}
   <div class="when">${esc(String(r.created_at).slice(0, 10))}${r.repo ? ` · ${esc(r.repo)}` : ""}</div>
@@ -532,6 +544,24 @@ function withParam(url, key, value) {
 // Exported for the user home (user.js), whose rows are the front page's
 // rows: same stylesheet, or the same row reads differently there.
 export const PAGE_STYLE = `
+/* The listing is wider than a run page: it is a grid of runs, and a run
+   replayed at 120 columns needs every pixel a column can give it. 84rem
+   puts two across on a laptop (1280–1400 px, ~4.9 px a cell) and three on a
+   monitor (~3.5 px a cell) — the cell size, not taste, decides where the
+   third column appears (user, 2026-09-19: "한 행에 두 개나 세 개"). */
+main { max-width: 84rem; }
+/* Without the margin a 52rem page had, the fixed figures would sit on the
+   grid: below 106rem (the grid plus a figure either side) they take the
+   places the phone gives them — the peek at the foot, the wave small in
+   the top-right corner beside the brand. */
+@media (min-width: 48rem) and (max-width: 106rem) {
+  .figure { position: static; margin: 1rem auto 0; }
+  .figure.peek { width: 9rem; margin-bottom: -.5rem; }
+  .figure.wave { position: absolute; top: .75rem; right: 1.25rem; width: 5.5rem; margin: 0; z-index: 0; }
+  /* The filter row stops short of her corner, or she stands on Search
+     (main-scoped so it outranks the shorthand margin declared below). */
+  main .filters { margin-right: 6.5rem; }
+}
 .filters { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 2rem; }
 .filters input, .filters select, .filters button {
   background: #14171d; color: #d7dae0; border: 1px solid #242932; border-radius: 6px;
@@ -539,7 +569,7 @@ export const PAGE_STYLE = `
 .filters kbd { align-self: center; }
 /* The box gets its own row so the selects and the button share the next one
    rather than leaving one of them stranded below on a narrow window. */
-.filters input { flex: 1 1 100%; min-width: 0; }
+.filters input { flex: 1 1 14rem; min-width: 0; }
 .filters select { flex: 0 1 auto; min-width: 0; }
 .filters button { background: #1f2630; border-color: #2c3542; cursor: pointer; }
 .filters button:hover { background: #262f3b; }
@@ -551,7 +581,11 @@ export const PAGE_STYLE = `
 .fact .v { color: #6b727d; margin-left: .35rem; }
 kbd { font: .7rem ui-monospace, Menlo, monospace; color: #6b727d; border: 1px solid #242932; border-radius: 4px; padding: 0 .35rem; }
 @media (max-width: 48rem) { .filters kbd { display: none; } }
-.row { padding: 1rem 0; border-bottom: 1px solid #1b1f26; }
+/* The grid: as many 26rem columns as fit, so a laptop gets two and a
+   monitor three; each row is its run on top and the words as its caption. */
+.rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(26rem, 1fr));
+  gap: 2.25rem 1.5rem; margin-top: .75rem; }
+.row { display: flex; flex-direction: column; min-width: 0; }
 .rowhead { display: flex; align-items: baseline; gap: 1rem; justify-content: space-between; }
 .name { color: #eef1f5; font-weight: 600; font-size: 1rem; word-break: break-word; }
 /* The model under a titled row, and the author under that: both small, both
@@ -573,13 +607,20 @@ a.fact.on:hover { border-color: #e0b64a; text-decoration: none; }
 .fact.caveat { color: #e0b64a; background: #1a160c; border-color: #3a2f16; }
 a.fact.caveat:hover { color: #e0b64a; text-decoration: none; }
 .when { font-size: .78rem; color: #6b727d; }
-/* On a phone the listing is a feed: each row carries its run, and the one
-   in view plays. On a wide screen it stays a list — twenty stages down a
-   desktop page is a wall, and the card is a click away. */
-.feed { display: none; }
+/* Every row carries its run and the one most in view plays; on a desktop
+   the one under the pointer does (host.js). The frame is the row's opening
+   image, the heading sits right under it. */
+.feed { display: block; margin: 0 0 .7rem; }
+/* On a phone the grid is one column of rows with a rule between them, and
+   the frame bleeds to the screen's edges (every pixel is a bigger cell) with
+   no rule of its own above or below — the row's rule and the heading are
+   its edges, so the full-bleed frame and the inset caption read as the feed
+   idiom rather than as two margins. */
 @media (max-width: 48rem) {
-  .feed { display: block; margin-block: .6rem .5rem; }
-  .row { padding: 1.25rem 0; }
+  .rows { display: block; margin-top: 0; }
+  .row { padding: 1.1rem 0 1.25rem; border-bottom: 1px solid #1b1f26; }
+  .feed { margin: 0 -1.25rem .9rem; }
+  .feed .card, .feed .screen { border-top: 0; border-bottom: 0; }
 }
 .empty { color: #7d848f; padding: 1rem 0 2rem; text-align: center; }
 .more { margin: 1.75rem 0 0; }

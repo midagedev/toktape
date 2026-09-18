@@ -289,6 +289,12 @@ curl -fsS "$base/" >"$work/fetched" && grep -q 'ik_llama.cpp' "$work/fetched" ||
 curl -fsS "$base/" >"$work/fetched" && grep -q 'class="stage feed" href="/r/'"$id"'" data-tape="/r/'"$id"'.tape"' "$work/fetched" ||
   die "the front page row does not carry the run for the feed"
 curl -fsS "$base/" >"$work/fetched" && grep -q 'src="/player/host.js"' "$work/fetched" || die "the front page does not load the player"
+# The run leads its row and the words follow as its caption (2026-09-19):
+# inside the row the stage comes before the heading, and the rows sit in one
+# grid so a desktop can show two or three across.
+grep -q 'class="rows"' "$work/fetched" || die "the front page rows are not in a grid"
+awk '/<article class="row">/{n++; seen=0} /class="stage feed"/{seen=1} /class="rowhead"/{ if(!seen){bad=1} } END{exit bad}' "$work/fetched" ||
+  die "a front page row puts its heading before its stage"
 # A filter in the URL shows in its box even when it matches nothing.
 curl -fsS "$base/?engine=vllm" >"$work/fetched" && grep -q '<option value="vllm" selected>vllm (0)</option>' "$work/fetched" ||
   die "a filter that matched nothing vanished from its dropdown"
@@ -411,6 +417,10 @@ for want in '<h1>Harness Owner</h1>' '<p>Line two.</p>' 'href="https://example.c
   grep -q "$want" "$work/home.html" || die "the user home carries no $want"
 done
 grep -q "/r/$id\"" "$work/home.html" && die "the user home lists the anonymous hero"
+# The home lists in the front page's grid, and its stages play too, so it
+# loads the same player (2026-09-19: rows became a feed at every width).
+grep -q 'class="rows"' "$work/home.html" || die "the user home rows are not in the grid"
+grep -q 'src="/player/host.js"' "$work/home.html" || die "the user home does not load the player"
 curl -fsS "$base/u/harness.json" >"$work/home.json"
 # The local D1 outlives one run of this gate, so earlier runs' harness rows
 # may still be listed here: every assertion below is contains, never a count.

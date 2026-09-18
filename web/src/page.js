@@ -70,9 +70,12 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #1b1f26;
   align-items: flex-end; justify-content: center; padding-bottom: 1.2rem;
   color: #4d545f; font-size: .8rem; }
 /* The terminal, sized by host.js so 120 columns fill the stage; the height
-   follows from 36 lines of it. The background is the theme's own. */
+   follows from 36 lines of it. At a 0.6em cell advance, 36 lines × 1.125
+   over 120 × 0.6 is 16:9 exactly — the card's shape — so swapping the
+   still for the frame moves nothing around it (2026-09-19; 1.25 made the
+   frame a tenth taller than the card). The background is the theme's own. */
 .screen { display: none; margin: 0; padding: 0; width: 100%; overflow: hidden;
-  line-height: 1.25; background: #101412; border-radius: 8px;
+  line-height: 1.125; background: #101412; border-radius: 8px;
   border: 1px solid #1b1f26; color: #e6e2d8;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre; user-select: none; }
