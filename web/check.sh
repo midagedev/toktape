@@ -167,6 +167,26 @@ ctype=$(curl -fsS -o "$work/mascot.png" -w '%{content_type}' "$base/mascot.png")
 case "$ctype" in image/png*) ;; *) die "the mascot is served as $ctype" ;; esac
 [ "$(head -c 4 "$work/mascot.png" | od -An -tx1 | tr -d ' ')" = "89504e47" ] || die "what came back from /mascot.png is not a PNG"
 [ "$(wc -c <"$work/mascot.png")" -gt 10000 ] || die "the mascot is too small to be the image"
+# The favicon is her too, and each page has its pose in the margin: the run
+# page sleeps, the front page peeks. The poses are WebP with alpha, and a
+# wrong content type here means the browser shows a broken image where the
+# sticker should be.
+grep -q '<link rel="icon" type="image/png" sizes="64x64" href="/favicon.png">' "$work/page.html" || die "the page does not link the PNG favicon"
+grep -q '<img class="figure sleep" src="/mascot-sleep.webp"' "$work/page.html" || die "the run page has no sleeping figure"
+curl -fsS "$base/" >"$work/front.html"
+grep -q '<img class="figure peek" src="/mascot-peek.webp"' "$work/front.html" || die "the front page has no peeking figure"
+for f in favicon.png apple-touch-icon.png; do
+  ctype=$(curl -fsS -o "$work/asset" -w '%{content_type}' "$base/$f")
+  case "$ctype" in image/png*) ;; *) die "$f is served as $ctype" ;; esac
+done
+for f in mascot-peek.webp mascot-sleep.webp mascot-sit.webp; do
+  ctype=$(curl -fsS -o "$work/asset" -w '%{content_type}' "$base/$f")
+  case "$ctype" in image/webp*) ;; *) die "$f is served as $ctype" ;; esac
+  [ "$(head -c 4 "$work/asset")" = "RIFF" ] || die "what came back from /$f is not a WebP"
+done
+# The empty state shows her sitting with the tape: a filter nothing matches.
+curl -fsS "$base/?gpu=no-such-gpu-ever" >"$work/empty.html"
+grep -q '<img class="empty-figure" src="/mascot-sit.webp"' "$work/empty.html" || die "the empty state has no sitting figure"
 # A path under /player/ that is not an asset falls through to the Worker
 # rather than into the asset handler's own 404, so a stale asset directory
 # cannot swallow a route this code owns.

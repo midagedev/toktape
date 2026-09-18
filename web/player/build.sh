@@ -39,7 +39,7 @@ cp host.js "$out/host.js"
 # web/static holds the few committed files the site serves as-is (the
 # mascot, and its provenance note); they ship from dist/ root so a page can
 # reference /mascot.png and the Worker never sees the request.
-cp ../static/*.png dist/
+cp ../static/*.png ../static/*.webp dist/
 GOOS=js GOARCH=wasm go build \
   -ldflags "-s -w -X main.version=$version" \
   -o "$out/toktape.wasm" .

@@ -23,6 +23,19 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
    no matting; the 1px ring is the card's border colour. */
 .brand .mascot { width: 2.25rem; height: 2.25rem; border-radius: 50%; flex: none;
   border: 1px solid #1b1f26; background: #0e1014; }
+/* The figure in the margin: the same character, sitting in the page's empty
+   corner the way a sticker sits on a laptop lid. Fixed to the viewport so
+   it stays put as the runs scroll past, behind everything, never a click
+   target, and gone when the viewport is too narrow to have a margin
+   (52rem of main plus the figure's width), so it never covers a card. */
+.figure { position: fixed; right: 1.5rem; bottom: 0; z-index: -1; pointer-events: none;
+  user-select: none; display: none; }
+.figure.peek { width: 11rem; }
+.figure.sleep { width: 15rem; bottom: 1.25rem; opacity: .92; }
+@media (min-width: 78rem) { .figure { display: block; } }
+/* The empty state gets her in person: sitting with the tape, above the line
+   that says there is nothing here yet. */
+.empty-figure { display: block; width: 11rem; margin: 2.5rem auto 0; }
 h1 { font-size: 1.35rem; margin: 0 0 .25rem; font-weight: 600; letter-spacing: -.01em;
   word-break: break-word; }
 .sub { color: #7d848f; font-size: .875rem; margin: 0 0 2.25rem; }
@@ -63,14 +76,23 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #1b1f26;
 }
 `;
 
-// The favicon is inline — one request fewer, and a service with two pages
-// does not need an asset pipeline for a 300-byte glyph. A tape reel, drawn
-// in the card's mint on the page's ground.
-const FAVICON =
-  "data:image/svg+xml," +
-  encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#0e1014"/><circle cx="16" cy="16" r="9.5" fill="none" stroke="#86c2b3" stroke-width="3"/><circle cx="16" cy="16" r="2.5" fill="#86c2b3"/><path d="M16 6.5v5M16 20.5v5M6.5 16h5M20.5 16h5" stroke="#86c2b3" stroke-width="2.4" stroke-linecap="round"/></svg>`,
-  );
+// The mascot, as she appears around the site (web/static/README.md has her
+// provenance). One character, four poses, each a static asset under dist/:
+//
+//   /mascot.png            her face on the page's ground — the brand row's
+//                          avatar and the favicon's source
+//   /favicon.png           64px of the same, /apple-touch-icon.png 180px
+//   /mascot-sit.webp       sitting with the tape — the empty state
+//   /mascot-peek.webp      peeking over the bottom edge — the front page's margin
+//   /mascot-sleep.webp     asleep on a cassette — a run page's margin
+//
+// The figures are decoration and say so (empty alt, aria-hidden), so a
+// screen reader never meets a sticker between the search and its results.
+export const FIGURES = {
+  peek: `<img class="figure peek" src="/mascot-peek.webp" alt="" aria-hidden="true">`,
+  sleep: `<img class="figure sleep" src="/mascot-sleep.webp" alt="" aria-hidden="true">`,
+};
+export const EMPTY_FIGURE = `<img class="empty-figure" src="/mascot-sit.webp" alt="" aria-hidden="true">`;
 
 export const SITE_NAME = "toktape";
 
@@ -113,20 +135,23 @@ export function head({ title, description, url, image, imageAlt, imageWidth, ima
   return tags.join("\n");
 }
 
-export function layout({ title, meta = "", style = "", body }) {
+// figure names the pose that sits in this page's margin ("peek" on the front
+// page, "sleep" on a run page), or nothing.
+export function layout({ title, meta = "", style = "", body, figure }) {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
-<link rel="icon" href="${FAVICON}">
+<link rel="icon" type="image/png" sizes="64x64" href="/favicon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#0e1014">
 ${meta}
 <style>${STYLE}${style}</style>
 </head><body><main>
 <div class="brand"><a href="/"><img class="mascot" src="/mascot.png" width="36" height="36" alt="toktape mascot: a mint-haired chibi in headphones"></a><a href="/">toktape</a><span>the record, not a recording of it</span></div>
 ${body}
-</main></body></html>
+</main>${FIGURES[figure] || ""}</body></html>
 `;
 }
 

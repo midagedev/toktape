@@ -15,7 +15,7 @@
 // the outward half of the local ledger (§9.2).
 
 import { fail, json, publicBase } from "./http.js";
-import { esc, fmt, head, layout } from "./page.js";
+import { EMPTY_FIGURE, esc, fmt, head, layout } from "./page.js";
 import { sha256Hex } from "./ids.js";
 
 const PAGE_SIZE = 30;
@@ -101,6 +101,7 @@ ${q.rows.map((r) => resultRow(r, url)).join("\n")}`;
         url: `${publicBase(request, env)}/`,
       }),
       style: PAGE_STYLE,
+      figure: "peek",
       body: `
 ${filterForm(url, facets)}
 ${active}
@@ -450,10 +451,10 @@ function filterForm(url, facets) {
 async function emptyState(env, url, scope) {
   const filtered = [...url.searchParams.keys()].some((k) => k !== "cursor");
   if (!filtered) {
-    return `<p class="empty">No runs published yet. <code>toktape publish &lt;run.tape&gt;</code> puts the first one here.</p>`;
+    return `${EMPTY_FIGURE}<p class="empty">No runs published yet. <code>toktape publish &lt;run.tape&gt;</code> puts the first one here.</p>`;
   }
   const back = (await wayBack(env, url, scope)).join(" · ");
-  return `<p class="empty">No published run matches that. The filters are exact; the search box falls back to the names as they were recorded.${back ? `<br>Try ${back}.` : ""}</p>`;
+  return `${EMPTY_FIGURE}<p class="empty">No published run matches that. The filters are exact; the search box falls back to the names as they were recorded.${back ? `<br>Try ${back}.` : ""}</p>`;
 }
 
 // One link per active filter, each naming the population that filter hides:
@@ -521,6 +522,6 @@ a.fact.caveat:hover { color: #e0b64a; text-decoration: none; }
   .feed { display: block; margin-block: .6rem .5rem; }
   .row { padding: 1.25rem 0; }
 }
-.empty { color: #7d848f; padding: 2rem 0; }
+.empty { color: #7d848f; padding: 1rem 0 2rem; text-align: center; }
 .more { margin: 1.75rem 0 0; }
 `;

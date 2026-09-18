@@ -151,6 +151,7 @@ function runPage(row, idx, base) {
       noindex: row.private === 1,
     }),
     style: PAGE_STYLE,
+    figure: "sleep",
     body: `<div class="stage" data-tape="/r/${esc(row.id)}${esc(row.tape_ext)}">
 ${
       row.card_key
