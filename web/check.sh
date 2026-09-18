@@ -358,6 +358,30 @@ grep -q 'model_raw' "$work/body" || { cat "$work/body"; die "the refusal does no
 code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/r/aaaaaaaaaaaaaaaaaaaa.json")
 [ "$code" = "404" ] || { cat "$work/body"; die "an id that does not exist was not a 404 (got $code)"; }
 
+say "a journal token owns its runs"
+# A token minted straight into the local D1 (there is no issuance endpoint
+# yet — TTP-114), then a publish with it: the page and the row wear the
+# token-owned badge, the API says owned, and the token — not a delete
+# token — takes the run down. The anonymous hero page must not wear it.
+jt="tk_local_harness_journal_token"
+if command -v shasum >/dev/null 2>&1; then jh=$(printf '%s' "$jt" | shasum -a 256 | cut -d' ' -f1); else jh=$(printf '%s' "$jt" | sha256sum | cut -d' ' -f1); fi
+npx wrangler d1 execute toktape --local --command \
+  "INSERT INTO tokens (id, hash, created_at, label) VALUES ('harness', '$jh', '2026-09-19T00:00:00Z', 'web/check.sh')" \
+  >"$work/token.log" 2>&1 || { cat "$work/token.log"; die "could not mint the harness token"; }
+mkdir -p "$work/home-journal/.toktape"
+printf 'token = "%s"\nfirst_publish_warning_seen = true\n' "$jt" >"$work/home-journal/.toktape/config.toml"
+HOME="$work/home-journal" "$work/toktape" publish "$repo/assets/hero.tape" --url "$base" --title "owned by a journal" \
+  >"$work/receipt3" 2>"$work/publish3.err" || { cat "$work/publish3.err"; die "a token-owned publish failed"; }
+grep -q 'Delete token' "$work/publish3.err" && die "a token-owned publish was handed a delete token"
+jid="$(tr -d '\r\n' <"$work/receipt3")"; jid="${jid##*/}"
+curl -fsS "$base/r/$jid" >"$work/fetched" && grep -q 'class="owned"' "$work/fetched" || die "the token-owned page wears no badge"
+curl -fsS "$base/r/$jid.json" >"$work/fetched" && grep -q '"owned":true' "$work/fetched" || die "the API does not say the run is owned"
+curl -fsS "$base/api/v1/runs" >"$work/fetched" && grep -q "\"id\":\"$jid\",\"url\":\"[^\"]*\",\"published_at\":\"[^\"]*\",\"owned\":true" "$work/fetched" ||
+  die "the listing row does not say the run is owned"
+curl -fsS "$base/r/$id" >"$work/fetched" && grep -q 'class="owned"' "$work/fetched" && die "the anonymous page wears the token-owned badge"
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X DELETE "$base/api/v1/runs/$jid" -H "Authorization: Bearer $jt")
+[ "$code" = "204" ] || { cat "$work/body"; die "the journal token did not take its own run down (got $code)"; }
+
 say "the delete token is the only key"
 dt=$(sed -n 's/^Delete token: //p' "$work/publish.err" | tr -d '\r\n')
 [ -n "$dt" ] || die "no delete token was printed"
