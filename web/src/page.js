@@ -29,10 +29,17 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .
    target, and gone when the viewport is too narrow to have a margin
    (52rem of main plus the figure's width), so it never covers a card. */
 .figure { position: fixed; right: 1.5rem; bottom: 0; z-index: -1; pointer-events: none;
-  user-select: none; display: none; }
+  user-select: none; display: block; }
 .figure.peek { width: 11rem; }
 .figure.sleep { width: 15rem; bottom: 1.25rem; opacity: .92; }
-@media (min-width: 78rem) { .figure { display: block; } }
+/* Without a margin to sit in (a phone, a narrow window) she moves to the
+   foot of the page instead — in the flow, after the footer, so she never
+   covers a card and is still there when the reader reaches the end. */
+@media (max-width: 78rem) {
+  .figure { position: static; margin: 1rem auto 0; }
+  .figure.peek { display: block; width: 9rem; margin-bottom: -.5rem; }
+  .figure.sleep { display: block; width: 12rem; margin-bottom: 1.5rem; }
+}
 /* The empty state gets her in person: sitting with the tape, above the line
    that says there is nothing here yet. */
 .empty-figure { display: block; width: 11rem; margin: 2.5rem auto 0; }
