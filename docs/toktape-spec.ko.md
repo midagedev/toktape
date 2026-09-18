@@ -373,6 +373,19 @@ Cloudflare 제약: wasm은 Worker 스크립트(3~10 MB)가 아니라 Static Asse
    **재생 크기는 120×36 고정이다.** tape는 본 화면 크기를 기록하지 않으므로 터미널 기본값을 쓰고, 좁은 화면은 폰트만 줄인다 — `MinWidth×MinHeight` 아래로 열 수를 줄이면 렌더러가 "too small"을 그린다. 340 px 폭에서 폰트 4.7 px, 넘침 없음(실측). 그 폭에서 런은 그림이고, 폰 독자가 받는 것은 그 위의 카드다. 카드 위에 ▶ Replay가 포스터의 재생 버튼처럼 얹히고, 한 번 누르면 정지컷이 런으로 바뀐다.
 
    플레이어는 Cloudflare Static Assets(`player/dist`, 커밋하지 않음)로 `/player/*`에서 나간다: `application/wasm`·brotli·`max-age=0, must-revalidate`가 코드 없이 따라오고, 없는 경로는 Worker로 떨어진다. `web/check.sh`가 먼저 플레이어를 빌드하고(크기 예산·node 스모크가 매 게이트 앞에 선다) 그 넷을 확인한다.
+8. **페이지가 기록을 다 보여준다**(2026-09-18~19 배포, a725d4c·a43b353·e8e53dd·39c4ad1·d3128a8). 6·7에서 열린 자리에 넷이 들어갔고, 전부 같은 원칙 위에 있다 — **Worker는 여전히 tape를 열지 않고, 열 필요가 있는 것은 브라우저의 wasm이 연다.**
+
+   **리플레이는 클립이다.** 첫 판은 RunEnd에서 멈춰 결과 카드가 없었다(사용자 지적). 고친 곳은 카드 분기가 아니라 `render.Schedule`이다 — GIF·mp4를 자르는 그 스케줄로 재생하니 인트로 1초·런 1:1·카드 5초가 브라우저에서도 같다. 폰에서는 목록이 피드다: 행마다 스테이지를 실어 뷰에 들어온 것 하나만 재생하고(wasm은 tape 하나만 든다), 좌우 여백 없이 붙인다 — 120열에는 픽셀 하나가 다 필요하다. 넓은 화면은 목록으로 남는다.
+
+   **mp4는 브라우저가 만든다.** Worker는 ffmpeg가 없고 렌더 큐를 두면 렌더러 사본이 하나 더 생긴다. 페이지에 이미 렌더러가 있으니 `host.js`가 프레임을 캔버스에 칠해 WebCodecs H.264로 넣고 mp4 컨테이너(ftyp·mdat·moov, avcC는 인코더 것)를 손으로 쓴다. ffprobe로 확인한 산출물: Baseline 1280×720 30 fps, 738프레임 24.6 s, 5.4 MB. 비용은 wasm 프레임이다(TTP-123 — 아래).
+
+   **Details 섹션.** 표 아래 "Load details"(옵트인 — 스크롤 안 하는 독자는 추가 다운로드가 없다)를 누르면 wasm의 `details()`가 텍스트 카드·요약 JSON(+caveats)·Reproduce·설명(`card --explain` 순서)·스트림별 트랜스크립트를 한 번에 넘긴다. 트랜스크립트 투영은 새 패키지 `internal/transcript`다 — 스트림이 어떻게 끝났는지(에러 → 시계 컷 → 서버의 finish 단어 → `?`) 같은 판단은 스키마 옆 Go에서 끝나고, JS는 포맷과 이스케이프만 한다. 이 export가 그동안 dead code였던 card/bandwidth 함수들을 링크해 예산을 1,600,000 → 1,700,000 B brotli로 올렸다(실측 1,654,716; 사유는 `build.sh`에 날짜와 함께).
+
+   **공유 헤드.** `page.head()` 하나가 og 짝·twitter 짝·canonical·description·noindex(비공개)를 다 쓴다. 제목은 수치가 앞이다: `196 tok/s · Qwen2.5-7B-Instruct-Q3_K_M` — 스레드 독자가 행동할 수 있는 문장이고, 파일명만으로는 아니었다. robots.txt와 sitemap.xml(공개 런만)도 여기서 나간다.
+
+   **메인 화면은 좁히기와 되돌리기다.** 비교 사이트 조사(HF models·OpenRouter·Artificial Analysis·LocalScore·CanItRun·llama.cpp 스레드·Open LLM Leaderboard)에서 이 페이지가 이미 앞선 것은 둘 — 행의 칩이 곧 필터, 미관측은 `?` — 이고 비어 있던 것은 좁히기였다. 칩 클릭은 이제 기존 필터에 **누적**되고, 활성 필터 줄(`Narrowed to engine: vllm × · Clear all`, ×는 그 파라미터만 뺀 GET 링크)이 있고, facet 개수는 현재 필터(자기 축 제외)를 따르고, 총계가 있고, 엔진 칩이 빌드를 싣는다(llama.cpp 스레드는 빌드 없는 tok/s를 올리지 않는다). 조사가 "리더보드로 가는 첫 계단"으로 이름 붙인 것 — 정렬·랭크·모델/GPU별 중앙값·수치 색 스케일·테이블 뷰·caveat 개수 필터·비교 — 은 스펙의 금지 항목으로 넣었다.
+
+   **게이트 하나를 고쳤다.** `web/check.sh`가 `curl | grep -q`를 쓰고 있었는데, grep이 첫 매치에서 끝나면 curl이 SIGPIPE를 받고 `pipefail`이 그걸 실패로 읽는다. host.js가 버퍼 하나를 넘는 크기가 되자 "host.js is not served"가 서빙되는 파일에 대해 났다. 본문을 파일로 받아 grep한다.
 
 ## 8. 다음 라운드
 
