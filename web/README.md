@@ -18,9 +18,14 @@ have to — the Worker is written against those, never the other way round.
 
 ```sh
 cd web
-wrangler dev      # locally
-wrangler deploy   # production; the lead does this, with the user's approval
+npm install
+npm run migrate:local   # the miniflare D1 the dev server and the harness use
+npm run dev             # locally, on http://127.0.0.1:8787
+npm run deploy          # production; the lead does this, with the user's approval
 ```
+
+`migrations/` is the D1 schema. It is applied to the local database first and
+to the remote one only as part of a deploy, which is outward-facing.
 
 Deploying uses the scoped token `toktape-hub-deploy`, never the account's
 global API key.

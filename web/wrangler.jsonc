@@ -19,5 +19,22 @@
       "pattern": "tape.midagedev.com",
       "custom_domain": true
     }
+  ],
+
+  // R2 holds the record itself and, later, the PNG card. It is the original:
+  // if the normalisation table turns out to be wrong, the index is re-derived
+  // from what is here and nothing is lost (§9.4, rule 3).
+  "r2_buckets": [
+    { "binding": "TAPES", "bucket_name": "toktape" }
+  ],
+
+  // D1 holds the index rows and nothing a tape has to be opened to learn.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "toktape",
+      "database_id": "cbbf941e-cace-4cd4-b780-a8258ede5493",
+      "migrations_dir": "migrations"
+    }
   ]
 }
