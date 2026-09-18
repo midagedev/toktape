@@ -164,6 +164,11 @@ ${
 </div>
 <p class="status" hidden></p>
 </div>
+<div class="actions">
+  <button class="act copy" type="button" data-url="${esc(base)}/r/${esc(row.id)}">Copy link</button>
+  <button class="act mp4" type="button" data-name="${esc(row.id)}.mp4">Download mp4</button>
+  <a class="act" href="/r/${esc(row.id)}${esc(row.tape_ext)}">Download the record</a>
+</div>
 <h1>${esc(title)}</h1>
 <p class="sub">${esc(summaryLine(idx))}${row.private === 1 ? " · unlisted" : ""}</p>
 
@@ -201,7 +206,7 @@ Your own: <code>toktape record</code> against a running llama-server, then
 const PAGE_STYLE = `
 /* The card is the page's first sentence: it is what the link previews as,
    and it settles the argument before any of the table is read. */
-.stage { margin: 0 0 2rem; }
+.stage { margin: 0 0 .75rem; }
 /* Replay sits on the card the way a play button sits on a poster: the card
    is the still, the run is the motion, and one click swaps them. */
 .replay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -222,6 +227,18 @@ const PAGE_STYLE = `
   min-width: 4.5rem; }
 .controls .toggle:hover { border-color: #7aa2f7; }
 .controls .scrub { flex: 1; accent-color: #86c2b3; }
+/* What a reader does with a run once they have seen it: pass it on, keep a
+   video of it, keep the record. The mp4 is drawn in the browser from the
+   same frames Replay paints (host.js), so the service still never opens a
+   tape and there is no render queue anywhere. */
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 2.25rem; }
+.act { font: inherit; font-size: .85rem; color: #d7dae0; background: #161a21;
+  border: 1px solid #262b35; border-radius: 6px; padding: .4rem .8rem; cursor: pointer;
+  text-decoration: none; line-height: 1.3; }
+.act:hover { border-color: #7aa2f7; text-decoration: none; }
+.act:disabled { color: #8a919c; cursor: progress; }
+.act.done { border-color: #86c2b3; color: #86c2b3; }
+@media (max-width: 48rem) { .actions { margin-top: .9rem; } }
 .stage.live .replay { display: none; }
 .stage.live .controls { display: flex; }
 .figures { display: flex; flex-wrap: wrap; gap: 2.5rem; margin: 0 0 2.5rem; }

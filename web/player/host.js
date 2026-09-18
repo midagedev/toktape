@@ -254,6 +254,76 @@
 
   const players = stages.map((s) => new Player(s));
 
+  // -- the actions under the run page's stage -------------------------------
+
+  const copyButton = document.querySelector(".actions .copy");
+  if (copyButton) {
+    const label = copyButton.textContent;
+    copyButton.addEventListener("click", async () => {
+      const url = copyButton.dataset.url || location.href;
+      try {
+        // The clipboard where there is one; the share sheet where there is
+        // not (a phone in a non-secure context, an old WebView).
+        if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(url);
+        else if (navigator.share) { await navigator.share({ url }); return; }
+        else throw new Error("no clipboard");
+        copyButton.textContent = "Copied";
+        copyButton.classList.add("done");
+        setTimeout(() => { copyButton.textContent = label; copyButton.classList.remove("done"); }, 1600);
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+        copyButton.textContent = "Could not copy — the link is in the address bar";
+        setTimeout(() => { copyButton.textContent = label; }, 2500);
+      }
+    });
+  }
+
+  const mp4Button = document.querySelector(".actions .mp4");
+  if (mp4Button) {
+    const label = mp4Button.textContent;
+    // The page's one non-feed player: the run this page is about.
+    const page = players.find((p) => !p.feed) || players[0];
+    if (!("VideoEncoder" in window)) {
+      // Said up front rather than discovered on click. The CLI has the same
+      // render with ffmpeg behind it, and the footer already names it.
+      mp4Button.disabled = true;
+      mp4Button.textContent = "mp4 needs a browser with WebCodecs";
+    } else {
+      mp4Button.addEventListener("click", async () => {
+        mp4Button.disabled = true;
+        try {
+          mp4Button.textContent = "loading the player…";
+          const api = await loadWasm();
+          const bytes = await fetchTape(page.tapeURL);
+          // The encoder needs the tape in the wasm for the whole pass; a
+          // playing stage would keep swapping it out under the render.
+          if (live) live.pause();
+          const loaded = api.load(bytes);
+          if (!loaded.ok) throw new Error(loaded.error);
+          const blob = await encodeMP4(api, loaded.durationMs, (done, total) => {
+            mp4Button.textContent = `encoding ${Math.round((100 * done) / total)}%`;
+          });
+          // Give the tape back to the stage that had it.
+          if (live) { api.load(bytes); live.paint(true); }
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = mp4Button.dataset.name || "run.mp4";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+          mp4Button.textContent = `${label} (${(blob.size / 1048576).toFixed(1)} MB)`;
+          mp4Button.classList.add("done");
+        } catch (err) {
+          report(err);
+          mp4Button.textContent = `mp4 failed: ${err && err.message ? err.message : err}`;
+        } finally {
+          mp4Button.disabled = false;
+        }
+      });
+    }
+  }
+
   document.addEventListener("keydown", (e) => {
     if (!live || live.feed || e.target.tagName === "INPUT") return;
     if (e.key === " " || e.key === "k") { e.preventDefault(); live.playing ? live.pause() : live.play(); }
@@ -343,10 +413,227 @@
   // therefore boxed to two cells of the ASCII face, which is what the
   // renderer assumed.
   const WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]|[\u{1F300}-\u{1F64F}\u{1F900}-\u{1F9FF}\u{20000}-\u{3FFFD}]/gu;
+  // The same set, one character at a time, for the canvas painter.
+  const WIDE_ONE = new RegExp(`^(?:${WIDE.source})$`, "u");
+  const WIDE_ANY = new RegExp(WIDE.source, "u");
   function escapeHTML(s) {
     return s
       .replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c])
       .replace(WIDE, (c) => `<b class="w">${c}</b>`);
+  }
+
+  // -- the mp4: the same frames, encoded in the browser ------------------------
+  //
+  // The Worker never opens a tape (spec §9.6) and cannot run ffmpeg, and a
+  // render queue somewhere else would be a second copy of the renderer to
+  // keep in step. The page already has the renderer — it is what Replay
+  // paints with — so the video is drawn here: each frame onto a canvas,
+  // through WebCodecs' H.264 encoder, into an mp4 written by hand below.
+  // 1280×720 at 30 fps, the shape `toktape render --mp4` would give at its
+  // smaller size, and the one every phone's encoder accepts.
+  const MP4_W = 1280, MP4_H = 720, MP4_FPS = 30;
+
+  async function encodeMP4(api, durationMs, progress) {
+    const canvas = document.createElement("canvas");
+    canvas.width = MP4_W;
+    canvas.height = MP4_H;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const cellW = MP4_W / COLS, cellH = MP4_H / ROWS;
+    // Size the face so one glyph advances exactly one cell, measured rather
+    // than assumed: the browser's monospace face is whatever it is.
+    ctx.font = "100px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    const fontPx = (100 * cellW) / ctx.measureText("0").width;
+    const face = `${fontPx.toFixed(2)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+    ctx.textBaseline = "alphabetic";
+
+    const total = Math.ceil((durationMs / 1000) * MP4_FPS) + 1;
+    const chunks = [];
+    // Where the time went, printed at the end: the three costs are the wasm
+    // frame, the canvas paint and the encoder, and a slow render is a
+    // different fix depending on which.
+    const cost = { frame: 0, paint: 0, wait: 0, started: performance.now() };
+    let description = null;
+    let failed = null;
+    const encoder = new VideoEncoder({
+      output: (chunk, meta) => {
+        if (meta && meta.decoderConfig && meta.decoderConfig.description && !description) {
+          description = new Uint8Array(meta.decoderConfig.description.slice(0));
+        }
+        const data = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(data);
+        chunks.push({ data, key: chunk.type === "key" });
+      },
+      error: (e) => { failed = e; },
+    });
+    const config = {
+      codec: "avc1.42001f",
+      width: MP4_W,
+      height: MP4_H,
+      bitrate: 3_000_000,
+      framerate: MP4_FPS,
+      avc: { format: "avc" },
+      latencyMode: "quality",
+    };
+    const support = await VideoEncoder.isConfigSupported(config);
+    if (!support.supported) throw new Error("this browser cannot encode H.264");
+    encoder.configure(config);
+
+    for (let i = 0; i < total; i++) {
+      if (failed) throw failed;
+      const t = Math.min(durationMs, (i * 1000) / MP4_FPS);
+      let mark = performance.now();
+      const text = api.frame(t, COLS, ROWS);
+      cost.frame += performance.now() - mark;
+      mark = performance.now();
+      paintCanvas(ctx, text, face, cellW, cellH);
+      cost.paint += performance.now() - mark;
+      const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / MP4_FPS), duration: Math.round(1e6 / MP4_FPS) });
+      encoder.encode(frame, { keyFrame: i % (MP4_FPS * 2) === 0 });
+      frame.close();
+      progress(i + 1, total);
+      // Let the encoder drain: a tight loop would queue every frame in
+      // memory. Waiting on its own dequeue event rather than a timer, because
+      // a background tab clamps timers to once a second and a render that
+      // took 20 s in front took ten minutes behind (measured 2026-09-18).
+      mark = performance.now();
+      while (encoder.encodeQueueSize > 4) {
+        await new Promise((r) => encoder.addEventListener("dequeue", r, { once: true }));
+      }
+      cost.wait += performance.now() - mark;
+    }
+    await encoder.flush();
+    encoder.close();
+    if (failed) throw failed;
+    if (!description) throw new Error("the encoder gave no avcC");
+    progress(total, total);
+    const wall = performance.now() - cost.started;
+    console.log(`toktape mp4: ${total} frames in ${(wall / 1000).toFixed(1)} s — wasm ${cost.frame.toFixed(0)} ms, canvas ${cost.paint.toFixed(0)} ms, waiting on the encoder ${cost.wait.toFixed(0)} ms, ${document.hidden ? "tab hidden" : "tab visible"}`);
+    return new Blob([muxMP4(chunks, description, MP4_W, MP4_H, MP4_FPS)], { type: "video/mp4" });
+  }
+
+  // One frame onto the canvas: background, then each run of text in its
+  // colour, wide characters two cells as everywhere else.
+  function paintCanvas(ctx, frame, face, cellW, cellH) {
+    ctx.fillStyle = "#101412";
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    const lines = frame.split("\n");
+    const baseline = cellH * 0.78;
+    for (let y = 0; y < lines.length; y++) {
+      let x = 0;
+      let fg = "", bg = "", bold = false;
+      const re = /\x1b\[([0-9;]*)m/g;
+      let last = 0, m;
+      // A run of narrow characters is one fillText: the face was sized so
+      // each advances exactly a cell, so the run lands where the cells are.
+      // Only a wide character is placed by hand, because its advance is the
+      // fallback face's, not the cell's. Measured 2026-09-18: per-character
+      // fillText was 16.6 s of a 738-frame render; runs cut most of it.
+      const draw = (text) => {
+        if (!text) return;
+        let cells = 0;
+        for (const ch of text) cells += WIDE_ONE.test(ch) ? 2 : 1;
+        if (bg) { ctx.fillStyle = bg; ctx.fillRect(x * cellW, y * cellH, cells * cellW, cellH); }
+        if (text.trim() !== "") {
+          ctx.fillStyle = fg || "#e6e2d8";
+          ctx.font = (bold ? "600 " : "") + face;
+          if (!WIDE_ANY.test(text)) {
+            ctx.fillText(text, x * cellW, y * cellH + baseline);
+          } else {
+            let cx = x;
+            for (const ch of text) {
+              const w = WIDE_ONE.test(ch) ? 2 : 1;
+              if (ch !== " ") ctx.fillText(ch, cx * cellW, y * cellH + baseline);
+              cx += w;
+            }
+          }
+        }
+        x += cells;
+      };
+      const line = lines[y];
+      while ((m = re.exec(line))) {
+        draw(line.slice(last, m.index));
+        last = re.lastIndex;
+        const p = m[1] === "" ? [0] : m[1].split(";").map(Number);
+        for (let i = 0; i < p.length; i++) {
+          const c = p[i];
+          if (c === 0) { fg = ""; bg = ""; bold = false; }
+          else if (c === 1) bold = true;
+          else if (c === 22) bold = false;
+          else if (c === 39) fg = "";
+          else if (c === 49) bg = "";
+          else if ((c === 38 || c === 48) && p[i + 1] === 2) {
+            const rgb = `rgb(${p[i + 2]},${p[i + 3]},${p[i + 4]})`;
+            if (c === 38) fg = rgb; else bg = rgb;
+            i += 4;
+          }
+        }
+      }
+      draw(line.slice(last));
+    }
+  }
+
+  // A plain, unfragmented mp4: ftyp, one mdat with every sample, and a moov
+  // describing them — the shape every player and every share sheet accepts.
+  // The avcC comes from the encoder itself, so the SPS/PPS are the ones the
+  // samples were coded against.
+  function muxMP4(chunks, avcC, width, height, fps) {
+    const TIMESCALE = 90000;
+    const delta = Math.round(TIMESCALE / fps);
+    const n = chunks.length;
+    const durationTS = n * delta;
+    const durationMs = Math.round((n * 1000) / fps);
+
+    const be32 = (v) => [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255];
+    const be16 = (v) => [(v >>> 8) & 255, v & 255];
+    const str = (s) => [...s].map((c) => c.charCodeAt(0));
+    const box = (type, ...parts) => {
+      const body = concat(parts.map((p) => (p instanceof Uint8Array ? p : Uint8Array.from(p))));
+      return concat([Uint8Array.from(be32(8 + body.length)), Uint8Array.from(str(type)), body]);
+    };
+    const full = (type, version, flags, ...parts) => box(type, [version, (flags >>> 16) & 255, (flags >>> 8) & 255, flags & 255], ...parts);
+
+    const ftyp = box("ftyp", str("isom"), be32(0x200), str("isom"), str("iso2"), str("avc1"), str("mp41"));
+    const sampleData = concat(chunks.map((c) => c.data));
+    const mdat = box("mdat", sampleData);
+    const mdatDataOffset = ftyp.length + 8;
+
+    const mvhd = full("mvhd", 0, 0, be32(0), be32(0), be32(1000), be32(durationMs),
+      be32(0x00010000), be16(0x0100), be16(0), be32(0), be32(0),
+      be32(0x00010000), be32(0), be32(0), be32(0), be32(0x00010000), be32(0), be32(0), be32(0), be32(0x40000000),
+      be32(0), be32(0), be32(0), be32(0), be32(0), be32(0), be32(2));
+    const tkhd = full("tkhd", 0, 3, be32(0), be32(0), be32(1), be32(0), be32(durationMs),
+      be32(0), be32(0), be16(0), be16(0), be16(0), be16(0),
+      be32(0x00010000), be32(0), be32(0), be32(0), be32(0x00010000), be32(0), be32(0), be32(0), be32(0x40000000),
+      be32(width << 16), be32(height << 16));
+    const mdhd = full("mdhd", 0, 0, be32(0), be32(0), be32(TIMESCALE), be32(durationTS), be16(0x55c4), be16(0));
+    const hdlr = full("hdlr", 0, 0, be32(0), str("vide"), be32(0), be32(0), be32(0), str("toktape\0"));
+    const vmhd = full("vmhd", 0, 1, be16(0), be16(0), be16(0), be16(0));
+    const dinf = box("dinf", full("dref", 0, 0, be32(1), full("url ", 0, 1)));
+    const avc1 = box("avc1", be32(0), be16(0), be16(1), be32(0), be32(0), be32(0), be32(0),
+      be16(width), be16(height), be32(0x00480000), be32(0x00480000), be32(0), be16(1),
+      new Uint8Array(32), be16(0x0018), be16(0xffff), box("avcC", avcC));
+    const stsd = full("stsd", 0, 0, be32(1), avc1);
+    const stts = full("stts", 0, 0, be32(1), be32(n), be32(delta));
+    const keys = chunks.map((c, i) => (c.key ? i + 1 : 0)).filter(Boolean);
+    const stss = full("stss", 0, 0, be32(keys.length), ...keys.map(be32));
+    const stsc = full("stsc", 0, 0, be32(1), be32(1), be32(n), be32(1));
+    const stsz = full("stsz", 0, 0, be32(0), be32(n), ...chunks.map((c) => be32(c.data.length)));
+    const stco = full("stco", 0, 0, be32(1), be32(mdatDataOffset));
+    const stbl = box("stbl", stsd, stts, stss, stsc, stsz, stco);
+    const minf = box("minf", vmhd, dinf, stbl);
+    const mdia = box("mdia", mdhd, hdlr, minf);
+    const trak = box("trak", tkhd, mdia);
+    const moov = box("moov", mvhd, trak);
+    return concat([ftyp, mdat, moov]);
+  }
+
+  function concat(arrays) {
+    let n = 0;
+    for (const a of arrays) n += a.length;
+    const out = new Uint8Array(n);
+    let o = 0;
+    for (const a of arrays) { out.set(a, o); o += a.length; }
+    return out;
   }
 
   function stamp(ms) {

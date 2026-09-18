@@ -113,6 +113,14 @@ grep -q "og:image\" content=\"$base/r/$id.png" "$work/page.html" ||
 curl -fsS "$base/r/$id.json" >"$work/row.json"
 grep -q '"schema": *1' "$work/row.json" || { cat "$work/row.json"; die "the index row is not there"; }
 
+say "the actions under the stage"
+# The copy button carries the public link (absolute, from PUBLIC_BASE_URL),
+# and the mp4 is named after the run, so a downloads folder tells two apart.
+grep -q 'class="act copy" type="button" data-url="'"$base"'/r/'"$id"'"' "$work/page.html" ||
+  die "the copy button does not carry the run's public link"
+grep -q 'class="act mp4" type="button" data-name="'"$id"'.mp4"' "$work/page.html" ||
+  die "the mp4 button is not named after the run"
+
 say "the player is served"
 grep -q 'data-tape="/r/'"$id"'.tape"' "$work/page.html" || die "the page does not name the record for Replay"
 grep -q 'src="/player/host.js"' "$work/page.html" || die "the page does not load the player"
