@@ -270,15 +270,28 @@ type ModelInfo struct {
 
 // HostInfo is the hardware line of the card.
 type HostInfo struct {
-	Hostname    string `json:"hostname,omitempty"`
-	OS          string `json:"os"` // linux | darwin
-	Kernel      string `json:"kernel,omitempty"`
-	CPU         string `json:"cpu,omitempty"` // model name
-	CPUCores    int    `json:"cpu_cores,omitempty"`
-	CPUThreads  int    `json:"cpu_threads,omitempty"`
-	RAMBytes    int64  `json:"ram_bytes"`
-	RAMSpeed    string `json:"ram_speed,omitempty"` // "DDR5-6000" when readable, else ""
-	RAMChannels int    `json:"ram_channels,omitempty"`
+	// Hostname is the machine's name, and HostnameSource says whether anyone
+	// read it off the machine. A tape is meant to be posted, and a hostname is
+	// the one field in it that identifies a place rather than a measurement —
+	// rig-log's rule is that nothing public carries one, and before
+	// `record --host-label` their only way to honour it was to gunzip a tape,
+	// rewrite two fields and re-render (TTP-93).
+	//
+	// A label is not an observation, which is why the source travels beside it
+	// for the same reason RAMSource travels beside RAMBytesPerSec below: two
+	// runs labelled "workstation" are not evidence they ran on one machine,
+	// and nothing downstream may read them as such. internal/compare is where
+	// that matters today.
+	Hostname       string `json:"hostname,omitempty"`
+	HostnameSource string `json:"hostname_source,omitempty"`
+	OS             string `json:"os"` // linux | darwin
+	Kernel         string `json:"kernel,omitempty"`
+	CPU            string `json:"cpu,omitempty"` // model name
+	CPUCores       int    `json:"cpu_cores,omitempty"`
+	CPUThreads     int    `json:"cpu_threads,omitempty"`
+	RAMBytes       int64  `json:"ram_bytes"`
+	RAMSpeed       string `json:"ram_speed,omitempty"` // "DDR5-6000" when readable, else ""
+	RAMChannels    int    `json:"ram_channels,omitempty"`
 	// RAMBytesPerSec is the host's memory bandwidth, and RAMSource says where
 	// the figure came from. Together they are the host leg of the bandwidth
 	// ceiling, which decides whether the card can print an "of peak" ratio on
@@ -295,6 +308,17 @@ type HostInfo struct {
 	RAMSource      string    `json:"ram_source,omitempty"`
 	GPUs           []GPUInfo `json:"gpus,omitempty"`
 }
+
+// Where a hostname came from. Unknown stays "" — which is both "not recorded"
+// and "this tape predates the field", and those are the same bytes, so only
+// HostnameLabelled asserts anything.
+const (
+	// HostnameObserved: read off the machine, /proc/sys/kernel/hostname.
+	HostnameObserved = "observed"
+	// HostnameLabelled: the operator named it (record --host-label). It says
+	// nothing about which machine this was.
+	HostnameLabelled = "labelled"
+)
 
 // Where a host bandwidth figure came from. The card says which, because a
 // theoretical peak, a number the operator typed and a STREAM run are three

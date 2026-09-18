@@ -552,6 +552,10 @@ func (r *run) collectHost(ctx context.Context) {
 	// What the operator stated wins over what the machine could be read for,
 	// because on Linux the machine cannot be read for it at all (TTP-45).
 	r.opts.HostRAM.apply(&host)
+	// The one place the name is replaced. record.go:137 and reduce.go:74 copy
+	// r.host.Hostname onward, so replacing it here covers them and any copy
+	// added later; replacing it at each copy site would not (TTP-93).
+	r.opts.HostLabel.apply(&host)
 	r.host = host
 
 	r.gpus = r.opts.GPU

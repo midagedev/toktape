@@ -167,6 +167,44 @@ type Options struct {
 	// machine could be asked, which on Linux is neither the memory speed nor
 	// the channel count.
 	HostRAM HostRAM
+	// HostLabel replaces the machine's name in the tape (TTP-93). Its zero
+	// value is `HostLabel{}`, which changes nothing and records whatever
+	// /proc/sys/kernel/hostname says; Set with an empty Text stores no name at
+	// all. Either way the tape says which it was, because a label is not an
+	// observation and internal/compare must not read two identical labels as
+	// one machine.
+	HostLabel HostLabel
+}
+
+// HostLabel is what the operator wants a tape to say instead of the machine's
+// name.
+//
+// A tape is made to be posted and the hostname is the one field in it that
+// names a place rather than a measurement. Before this, honouring "nothing
+// public carries a hostname" meant gunzipping the tape, rewriting two fields
+// and re-rendering — a manual step, and on 2026-09-17 it was skipped and a
+// real name reached a working tree (rig-log, TTP-93).
+//
+// Set is separate from Text so that `--host-label ""` can mean "store no name"
+// rather than "no flag given". Both are deliberate answers; only one of them
+// is the default.
+type HostLabel struct {
+	Set  bool
+	Text string
+}
+
+// apply replaces the name procmon read. It is called at the single place the
+// host line is assembled, not at the two sites that copy the name onward, so
+// there is one owner and a third copy cannot reintroduce the leak.
+func (l HostLabel) apply(h *tape.HostInfo) {
+	if !l.Set {
+		if h.Hostname != "" {
+			h.HostnameSource = tape.HostnameObserved
+		}
+		return
+	}
+	h.Hostname = l.Text
+	h.HostnameSource = tape.HostnameLabelled
 }
 
 // HostRAM is the operator's answer to a question the machine cannot be asked.

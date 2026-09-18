@@ -67,6 +67,8 @@ Record flags:
   --ram-gbs-measured N  the same, as STREAM measured it (the tape says which)
   --ram-speed NAME      memory type, e.g. DDR5-5200 (Linux cannot read it)
   --ram-channels N      populated memory channels, e.g. 8 (with --ram-speed)
+  --host-label TEXT     store TEXT as the hostname, or none if TEXT is empty,
+                        so a tape you post never carried the machine's name
   --out DIR             where run files are written (default ~/.toktape/runs)
   --tag TEXT            label this run for the experiment log (e.g. ngl=40)
   --note TEXT           a free-text note recorded with the run

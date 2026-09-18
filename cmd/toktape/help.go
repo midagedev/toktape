@@ -185,6 +185,21 @@ Figures the machine cannot read
   state it: --ram-gbs N, or --ram-gbs-measured N for a STREAM result, or
   --ram-speed DDR5-5200 --ram-channels 8. The tape records which of the three
   it was, and nothing is ever assumed in their absence.
+
+A tape that gets posted
+  A tape is made to be shared, and the hostname is the one field in it that
+  names a place rather than a measurement. --host-label TEXT stores TEXT
+  instead of what /proc says, so the file that gets replayed never had the
+  name; --host-label "" stores none, and the card then leaves the machine out
+  of its ENGINE line rather than printing "?". The substitution happens once,
+  where the host line is assembled, so every field that carries the name gets
+  the label and not just the one on the card.
+
+  The tape says which it was — hostname_source is "observed" or "labelled" —
+  because a label is not an observation, and two runs both labelled
+  "workstation" are not evidence they ran on one machine. toktape card -o json
+  shows it. Nothing else in the tape carries the name: --url has to be a
+  loopback address, so server.url cannot hold one either.
 `
 }
 

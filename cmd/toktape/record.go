@@ -142,6 +142,7 @@ type recordFlags struct {
 	ramGBsMeasured *float64
 	ramSpeed       *string
 	ramChannels    *int
+	hostLabel      *string
 }
 
 // declareRecordFlags registers the record verb's flags on fs.
@@ -205,6 +206,11 @@ func declareRecordFlags(fs *flag.FlagSet) *recordFlags {
 	f.ramGBsMeasured = fs.Float64("ram-gbs-measured", 0, "host memory bandwidth in GB/s, as a benchmark measured it")
 	f.ramSpeed = fs.String("ram-speed", "", "memory type, e.g. DDR5-5200")
 	f.ramChannels = fs.Int("ram-channels", 0, "populated memory channels, e.g. 8")
+	// The name the tape carries instead of the machine's (TTP-93). Whether it
+	// was given is what matters, not the text: --host-label "" is a deliberate
+	// "store no name", so the flag is read through flagSet below and not by
+	// testing the string for empty.
+	f.hostLabel = fs.String("host-label", "", "store this instead of the machine's hostname; empty stores none")
 	return f
 }
 
@@ -306,6 +312,7 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 		// still fail in a second rather than in ten minutes.
 		WaitForStart: flagSet(fs, "wait") && *f.wait > 0,
 		HostRAM:      hostRAM,
+		HostLabel:    recorder.HostLabel{Set: flagSet(fs, "host-label"), Text: *f.hostLabel},
 	}
 	if code := checkSessions(c, fs, f, opts); code != exitOK {
 		return code
