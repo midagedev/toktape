@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -416,7 +415,7 @@ func diffLines(t *testing.T, want, got string) {
 // and taking everything before it. Building the expectation from the theme
 // rather than from a hardcoded escape means the palette can be retuned without
 // rewriting the hierarchy test.
-func sgrPrefix(th Theme, st lipgloss.Style) string {
+func sgrPrefix(th Theme, st style) string {
 	painted := th.paint(st, "\x00")
 	return painted[:strings.Index(painted, "\x00")]
 }
@@ -618,7 +617,7 @@ func TestPrefillFrameShowsProgress(t *testing.T) {
 	m.Theme = th
 	coloured := View(m, shades, 120, 36)
 	for _, part := range []struct {
-		st   lipgloss.Style
+		st   style
 		what string
 	}{
 		{th.accentLow, "the prefix the cache already held"},

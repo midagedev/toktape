@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -157,7 +156,7 @@ func pctStr(v float64) string {
 
 // headerSeg is one painted run of a header figure.
 type headerSeg struct {
-	st   lipgloss.Style
+	st   style
 	text string
 }
 

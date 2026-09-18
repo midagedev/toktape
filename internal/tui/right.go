@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -66,7 +65,7 @@ func buildRightPane(m Model, th Theme, t time.Duration, cw, h int, boardDrawn bo
 	//
 	// A tag, when there is one, sits at the right end of the rule: a verdict
 	// about the whole section that used to spend a line of its own.
-	section := func(title, tag string, tagSt lipgloss.Style) {
+	section := func(title, tag string, tagSt style) {
 		if len(out) > 0 {
 			out = append(out, blank)
 		}
@@ -103,7 +102,7 @@ func buildRightPane(m Model, th Theme, t time.Duration, cw, h int, boardDrawn bo
 // barRow is the shape every device line shares: a five-column label, a bar,
 // and a right-aligned figure. Keeping one shape for all of them is what makes
 // the pane read as a table instead of a list.
-func barRow(th Theme, cw int, label string, frac float64, value string, st lipgloss.Style) string {
+func barRow(th Theme, cw int, label string, frac float64, value string, st style) string {
 	const labelW, valueW = 5, 7
 	barW := cw - labelW - valueW - 1
 	l := newLine(th, cw)
@@ -158,7 +157,7 @@ func placementRows(m Model, th Theme, t time.Duration, cw int) []string {
 		l2 := newLine(th, cw)
 		l2.space(labelW)
 		for _, key := range []struct {
-			st    lipgloss.Style
+			st    style
 			label string
 		}{{th.accentMuted, " weights  "}, {th.accentLow, " kv  "}, {th.dim, " buf"}} {
 			l2.add(key.st, string(barGlyph))
@@ -661,7 +660,7 @@ func utilStr(p float64) string {
 }
 
 // kvRow is a dim label on the left and a right-aligned value.
-func kvRow(th Theme, cw int, label, value string, st lipgloss.Style) string {
+func kvRow(th Theme, cw int, label, value string, st style) string {
 	l := newLine(th, cw)
 	l.add(th.dim, label)
 	l.gapTo(width(value))

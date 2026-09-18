@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -177,7 +177,7 @@ type titleSeg struct {
 	role titleRole
 }
 
-func (r titleRole) style(th Theme) lipgloss.Style {
+func (r titleRole) style(th Theme) style {
 	switch r {
 	case roleBrand:
 		return th.accent
@@ -370,14 +370,14 @@ const minStripW = 20
 // of it reads as an alarm the run did not raise. A fault sparkline does raise
 // one, and goes warm.
 type cellPalette struct {
-	base, warn, bad lipgloss.Style
+	base, warn, bad style
 }
 
 // writeCells appends sparkline or strip cells, painting each severity in its
 // own colour. Runs of one colour are emitted as a single styled segment so a
 // frame does not carry an escape sequence per column.
 func writeCells(l *lineBuf, th Theme, cells []Cell, pal cellPalette) {
-	style := func(sev Severity) lipgloss.Style {
+	styleOf := func(sev Severity) style {
 		switch sev {
 		case SevWarn:
 			return pal.warn
@@ -390,14 +390,29 @@ func writeCells(l *lineBuf, th Theme, cells []Cell, pal cellPalette) {
 	for i := 0; i < len(cells); {
 		sev := cells[i].Sev
 		var b strings.Builder
+		b.Grow(jLen(cells, i))
 		j := i
 		for j < len(cells) && cells[j].Sev == sev {
-			b.WriteRune(cells[j].R)
+			if r := cells[j].R; r < utf8.RuneSelf {
+				b.WriteByte(byte(r))
+			} else {
+				b.WriteRune(r)
+			}
 			j++
 		}
-		l.add(style(sev), b.String())
+		l.add(styleOf(sev), b.String())
 		i = j
 	}
+}
+
+// jLen bounds the bytes one severity run of cells can take: one byte per
+// cell minimum, so the Builder never grows from zero (TTP-123).
+func jLen(cells []Cell, i int) int {
+	n := 0
+	for j := i; j < len(cells) && cells[j].Sev == cells[i].Sev; j++ {
+		n++
+	}
+	return n
 }
 
 // tooSmall renders the "make the window bigger" frame. It still returns

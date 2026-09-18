@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // The emphasis contract (TTP-28, user 2026-09-13: "화면에 너무 많은 요소들이
@@ -38,7 +36,7 @@ func accentShades() map[string]bool {
 	// accentMuted and accentMid here. They are listed so the set stays the
 	// answer to "every style that paints the accent hue" and not a list that
 	// happens to cover them (TTP-43b, 2026-09-13).
-	for _, st := range []lipgloss.Style{th.accent, th.accentBold, th.accentHigh, th.accentMid, th.accentLow, th.accentMuted, th.graphRidge, th.graphSolo} {
+	for _, st := range []style{th.accent, th.accentBold, th.accentHigh, th.accentMid, th.accentLow, th.accentMuted, th.graphRidge, th.graphSolo} {
 		out[styleHex(st)] = true
 	}
 	return out
@@ -472,7 +470,7 @@ func TestBodyToneLadderDescends(t *testing.T) {
 	th := ColourTheme()
 	ladder := []struct {
 		name string
-		st   lipgloss.Style
+		st   style
 	}{
 		{"text", th.text},
 		{"textMid", th.textMid},
@@ -626,7 +624,7 @@ func TestFreshTokensGlowAtTheWriteHead(t *testing.T) {
 	th := ColourTheme()
 	for _, glow := range []struct {
 		name string
-		st   lipgloss.Style
+		st   style
 	}{{"textMid", th.textMid}, {"dimMid", th.dimMid}} {
 		hex := styleHex(glow.st)
 		for y, row := range rows {

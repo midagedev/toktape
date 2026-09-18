@@ -2,8 +2,6 @@ package tui
 
 import (
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Painting the text card for the card screen (TTP-42, lead 2026-09-13).
@@ -77,7 +75,7 @@ func paintCardLine(th Theme, line string) string {
 // cardStyle is the style each role is drawn in. The fill is the shade the
 // right pane's placement bars wear, so the two measures on a clip's last two
 // frames read as the same kind of thing.
-func (th Theme) cardStyle(role cardRole) lipgloss.Style {
+func (th Theme) cardStyle(role cardRole) style {
 	switch role {
 	case cardFill:
 		return th.accentMuted

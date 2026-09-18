@@ -3,8 +3,6 @@ package tui
 import (
 	"math"
 	"time"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Everything that moves on this screen is a pure function of the clip time t.
@@ -151,7 +149,7 @@ func shimmerStart(t time.Duration, w int) int {
 // so the travel is w + 2*gleamBand + 2*gleamLead with the band starting at
 // -(gleamBand + gleamLead), and at p = 0 and p = 1 every cell of every figure
 // width is back on accentBold rather than snapping to it mid-lit.
-func gleamStyle(th Theme, p float64, w, r, x int) lipgloss.Style {
+func gleamStyle(th Theme, p float64, w, r, x int) style {
 	if p >= 1 {
 		return th.accentBold
 	}

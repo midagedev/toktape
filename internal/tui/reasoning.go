@@ -4,8 +4,6 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // This file is how the answer pane shows a thinking model thinking.
@@ -141,14 +139,32 @@ func textRuns(s Stream) []textRun {
 		}
 		return []textRun{{text: s.Text}}
 	}
-	var out []textRun
-	for _, tk := range s.Tokens {
-		if n := len(out); n > 0 && out[n-1].reasoning == tk.Reasoning {
-			out[n-1].text += tk.Text
-			continue
+	// One Builder per kind-run, not one concatenation per token: the += above
+	// recopied the run's whole text for every token (TTP-123: two thirds of
+	// View's allocated bytes). The runs this returns are identical strings.
+	var (
+		out      []textRun
+		b        strings.Builder
+		cur      bool
+		building bool
+	)
+	flush := func() {
+		if building {
+			out = append(out, textRun{text: b.String(), reasoning: cur})
+			b.Reset()
+			building = false
 		}
-		out = append(out, textRun{text: tk.Text, reasoning: tk.Reasoning})
 	}
+	for _, tk := range s.Tokens {
+		if building && cur != tk.Reasoning {
+			flush()
+		}
+		if !building {
+			cur, building = tk.Reasoning, true
+		}
+		b.WriteString(tk.Text)
+	}
+	flush()
 	return out
 }
 
@@ -197,7 +213,7 @@ func thinkingBadge(s Stream) string {
 // gives it weight; it never lifts it, and the write head wins over it. Ladder
 // positions are text, textMid, textMuted, dimMid, dim; the answer's settled
 // stop is textMuted, so a comment there is dim and punctuation dimMid.
-func bodyStyle(th Theme, bl bodyLine, band tokenBand, class codeClass) lipgloss.Style {
+func bodyStyle(th Theme, bl bodyLine, band tokenBand, class codeClass) style {
 	if bl.marker {
 		return th.dim
 	}
@@ -213,7 +229,8 @@ func bodyStyle(th Theme, bl bodyLine, band tokenBand, class codeClass) lipgloss.
 	if band == bandFresh {
 		return th.textFresh
 	}
-	ladder := []lipgloss.Style{th.textMid, th.textMuted, th.dimMid, th.dim}
+	// An array, not a slice literal: the slice escaped per segment (TTP-123).
+	ladder := [...]style{th.textMid, th.textMuted, th.dimMid, th.dim}
 	stop := 1
 	if band == bandMid {
 		stop = 0
@@ -291,16 +308,20 @@ func bodyBands(s Stream, lines []bodyLine, t time.Duration) [][]bodySeg {
 			out[i] = []bodySeg{{text: bl.text, band: bandSettled}}
 			continue
 		}
+		// Segments slice the line's own text (TTP-123): the Builder above wrote
+		// every rune out and back per segment. A segment is a contiguous byte
+		// range of bl.text, so slicing it is the same string with no copy.
 		var (
 			segs   []bodySeg
-			b      strings.Builder
+			start  int
+			pos    int
 			cur    = bandSettled
 			curCls = classPlain
 		)
 		flush := func() {
-			if b.Len() > 0 {
-				segs = append(segs, bodySeg{text: b.String(), band: cur, class: curCls})
-				b.Reset()
+			if pos > start {
+				segs = append(segs, bodySeg{text: bl.text[start:pos], band: cur, class: curCls})
+				start = pos
 			}
 		}
 		// A line's leading indent never glows (2026-09-14, seen on a real
@@ -337,7 +358,7 @@ func bodyBands(s Stream, lines []bodyLine, t time.Duration) [][]bodySeg {
 				flush()
 				cur, curCls = band, cls
 			}
-			b.WriteRune(r)
+			pos += utf8.RuneLen(r)
 		}
 		flush()
 		out[i] = segs

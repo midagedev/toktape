@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/midagedev/toktape/internal/card"
 )
 
@@ -16,7 +15,7 @@ func TestPaintCardLineByRole(t *testing.T) {
 	for _, c := range []struct {
 		what string
 		in   string
-		st   lipgloss.Style
+		st   style
 	}{
 		{"a gauge fill", "████", th.accentMuted},
 		{"a gauge track", "░░░░", th.darkFill},

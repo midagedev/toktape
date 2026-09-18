@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -365,16 +364,16 @@ func placementLines(th Theme, p tape.PlacementSummary, res tape.HostResidency, c
 	// carries two figures and the words between them are dim, the way the
 	// pane's legend paints the same fact: words dim, figures a step brighter.
 	type span struct {
-		st lipgloss.Style
+		st style
 		s  string
 	}
 	type entry struct {
-		st    lipgloss.Style
+		st    style
 		label string
 		value []span
 	}
 	var parts []float64
-	var styles []lipgloss.Style
+	var styles []style
 	var legend []entry
 	total := 0.0
 	// The host is split once: Residency sums every CPU device, so splitting a

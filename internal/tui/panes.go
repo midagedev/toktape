@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -504,7 +503,7 @@ func shortGPUName(n string) string {
 
 // styleFor picks the style a flagged value wears: amber when the run is
 // compromised, the plain text colour otherwise.
-func styleFor(th Theme, warn bool) lipgloss.Style {
+func styleFor(th Theme, warn bool) style {
 	if warn {
 		return th.warn
 	}

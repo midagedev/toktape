@@ -111,6 +111,36 @@ const (
 	colDimMid    = palette.DimMid
 )
 
+// style is a lipgloss style with its escape sequences precomputed.
+//
+// paint used to call Style.Render per segment, and every call re-parsed the
+// colour through termenv (Hex, Sprintf, Sscanf, Convert — a quarter of View's
+// allocations on the TTP-123 profile, while the bytes they wrap never change
+// for a theme). The open/close pair is split out of one Render at theme
+// construction, so painting is two concatenations. A style whose rendering
+// does not split cleanly keeps raw and falls back to Render; no theme style
+// does today.
+//
+// 2026-09-19 (TTP-123): allocation cut, zero byte change (TestViewFramesPinned).
+type style struct {
+	st          lipgloss.Style
+	open, close string
+	raw         bool
+}
+
+// seqOf splits one Render of st around a sentinel into its open/close pair.
+// The theme never sets widths, padding, borders, alignment or transforms, so
+// the wrapping is content-independent and the pair renders every string the
+// way Render would.
+func seqOf(st lipgloss.Style) style {
+	const sentinel = "\x00"
+	out := st.Render(sentinel)
+	if before, after, ok := strings.Cut(out, sentinel); ok {
+		return style{st: st, open: before, close: after}
+	}
+	return style{st: st, raw: true}
+}
+
 // Theme carries the styles View paints with. The zero Theme is plain: every
 // paint call returns its argument unchanged, which is what the golden tests
 // render. Colour comes from ColourTheme.
@@ -130,31 +160,31 @@ const (
 type Theme struct {
 	colour bool
 
-	accent lipgloss.Style
-	warn   lipgloss.Style
-	bad    lipgloss.Style
-	text   lipgloss.Style
-	dim    lipgloss.Style
+	accent style
+	warn   style
+	bad    style
+	text   style
+	dim    style
 
 	// accentBold carries the hierarchy: section titles, the active stream and
 	// the three headline figures wear it, and nothing else does.
-	accentBold lipgloss.Style
-	darkFill   lipgloss.Style
+	accentBold style
+	darkFill   style
 
-	accentLow  lipgloss.Style
-	accentMid  lipgloss.Style
-	accentHigh lipgloss.Style
+	accentLow  style
+	accentMid  style
+	accentHigh style
 	// accentMuted is what the shapes wear: sparklines and placement bars. It
 	// is the accent with its lightness spent (see colAccentMuted), so a bar
 	// still reads as one of the screen's measures without competing with the
 	// figure it qualifies.
-	accentMuted lipgloss.Style
+	accentMuted style
 
 	// textMid, textMuted and dimMid are the body-text ladder above. Nothing
 	// but a stream's generated text wears them.
-	textMid   lipgloss.Style
-	textMuted lipgloss.Style
-	dimMid    lipgloss.Style
+	textMid   style
+	textMuted style
+	dimMid    style
 
 	// textFresh is an answer token that has just landed: the header's tone on
 	// the dark fill (TTP-47, user 2026-09-14, "마지막 출력토큰의 하일라이팅이
@@ -167,7 +197,7 @@ type Theme struct {
 	// A fill is the axis the body was not using: a couple of tokens wide, it
 	// reads as a cursor trail rather than as a highlighted phrase, and it
 	// fades with the band the moment the next token lands.
-	textFresh lipgloss.Style
+	textFresh style
 
 	// codeString and codeIdent are the two hues a fenced block may wear
 	// (palette.CodeString, palette.CodeIdent). Nothing outside a code block
@@ -176,7 +206,7 @@ type Theme struct {
 	// gleamPeak is the core of the result modal's one pass of light
 	// (palette.GleamPeak). Nothing else wears it: it exists for a band two
 	// cells wide that crosses the figures once.
-	gleamPeak lipgloss.Style
+	gleamPeak style
 
 	// The placement bar's device hues, shared with the PNG share card
 	// (palette.CardGPU*, palette.CardHost) so a modal and a posted card colour
@@ -184,29 +214,29 @@ type Theme struct {
 	// three shades of the accent and the host wore one of them, which made
 	// "where the weights live" — the one row the bar exists for — a question
 	// of lightness alone.
-	devGPU  [3]lipgloss.Style
-	devHost lipgloss.Style
+	devGPU  [3]style
+	devHost style
 
-	codeKeyword lipgloss.Style
-	codeFunc    lipgloss.Style
-	codeType    lipgloss.Style
-	codeString  lipgloss.Style
-	codeNumber  lipgloss.Style
-	codeComment lipgloss.Style
-	codeVar     lipgloss.Style
+	codeKeyword style
+	codeFunc    style
+	codeType    style
+	codeString  style
+	codeNumber  style
+	codeComment style
+	codeVar     style
 
 	// graphTrack is the unlit part of a resource graph's measured columns,
 	// painted as spaces; graphRidge is a column's topmost lit cell. Both sit
 	// on colDarkFill (see the exception above).
-	graphTrack lipgloss.Style
-	graphRidge lipgloss.Style
+	graphTrack style
+	graphRidge style
 	// graphSolo is a one-row graph's lit cells (TTP-43b, 2026-09-13). At
 	// h = 1 every lit cell is its column's topmost, so a row painted in
 	// graphRidge is a bright band with nothing to contrast against — which is
 	// what the 100x30 layout drew. It is no new colour: the accentMuted every
 	// other shape on the screen wears, on the track's own ground so the row
 	// stays inside its measure.
-	graphSolo lipgloss.Style
+	graphSolo style
 }
 
 // PlainTheme returns the theme that emits no escape sequences. It is the zero
@@ -233,49 +263,55 @@ func ColourTheme() Theme {
 		fg := func(hex string) lipgloss.Style {
 			return r.NewStyle().Foreground(lipgloss.Color(hex))
 		}
+		// sty precomputes the escape pair: the bytes are constant per theme
+		// (TTP-123).
+		sty := func(st lipgloss.Style) style { return seqOf(st) }
 		colourTheme = Theme{
 			colour:      true,
-			accent:      fg(colAccent),
-			accentBold:  fg(colAccent).Bold(true),
-			darkFill:    fg(colDarkFill),
-			warn:        fg(colWarn),
-			bad:         fg(colBad),
-			text:        fg(colText),
-			dim:         fg(colDim),
-			accentLow:   fg(colAccentLow),
-			accentMid:   fg(colAccentMid),
-			accentHigh:  fg(colAccentHigh),
-			accentMuted: fg(colAccentMuted),
-			textMid:     fg(colTextMid),
-			textMuted:   fg(colTextMuted),
-			dimMid:      fg(colDimMid),
-			textFresh:   fg(colText).Background(lipgloss.Color(colDarkFill)),
-			gleamPeak:   fg(palette.GleamPeak).Bold(true),
-			devGPU: [3]lipgloss.Style{
-				fg(palette.CardGPU1), fg(palette.CardGPU2), fg(palette.CardGPU3),
+			accent:      sty(fg(colAccent)),
+			accentBold:  sty(fg(colAccent).Bold(true)),
+			darkFill:    sty(fg(colDarkFill)),
+			warn:        sty(fg(colWarn)),
+			bad:         sty(fg(colBad)),
+			text:        sty(fg(colText)),
+			dim:         sty(fg(colDim)),
+			accentLow:   sty(fg(colAccentLow)),
+			accentMid:   sty(fg(colAccentMid)),
+			accentHigh:  sty(fg(colAccentHigh)),
+			accentMuted: sty(fg(colAccentMuted)),
+			textMid:     sty(fg(colTextMid)),
+			textMuted:   sty(fg(colTextMuted)),
+			dimMid:      sty(fg(colDimMid)),
+			textFresh:   sty(fg(colText).Background(lipgloss.Color(colDarkFill))),
+			gleamPeak:   sty(fg(palette.GleamPeak).Bold(true)),
+			devGPU: [3]style{
+				sty(fg(palette.CardGPU1)), sty(fg(palette.CardGPU2)), sty(fg(palette.CardGPU3)),
 			},
-			devHost:     fg(palette.CardHost),
-			codeKeyword: fg(palette.CodeKeyword).Bold(true),
-			codeFunc:    fg(palette.CodeFunc),
-			codeType:    fg(palette.CodeType),
-			codeString:  fg(palette.CodeString),
-			codeNumber:  fg(palette.CodeNumber),
-			codeComment: fg(palette.CodeComment),
-			codeVar:     fg(palette.CodeVar),
-			graphTrack:  r.NewStyle().Background(lipgloss.Color(colDarkFill)),
-			graphRidge:  fg(colAccentMid).Background(lipgloss.Color(colDarkFill)),
-			graphSolo:   fg(colAccentMuted).Background(lipgloss.Color(colDarkFill)),
+			devHost:     sty(fg(palette.CardHost)),
+			codeKeyword: sty(fg(palette.CodeKeyword).Bold(true)),
+			codeFunc:    sty(fg(palette.CodeFunc)),
+			codeType:    sty(fg(palette.CodeType)),
+			codeString:  sty(fg(palette.CodeString)),
+			codeNumber:  sty(fg(palette.CodeNumber)),
+			codeComment: sty(fg(palette.CodeComment)),
+			codeVar:     sty(fg(palette.CodeVar)),
+			graphTrack:  sty(r.NewStyle().Background(lipgloss.Color(colDarkFill))),
+			graphRidge:  sty(fg(colAccentMid).Background(lipgloss.Color(colDarkFill))),
+			graphSolo:   sty(fg(colAccentMuted).Background(lipgloss.Color(colDarkFill))),
 		}
 	})
 	return colourTheme
 }
 
 // paint applies st to s, or returns s untouched on a plain theme.
-func (th Theme) paint(st lipgloss.Style, s string) string {
+func (th Theme) paint(st style, s string) string {
 	if !th.colour || s == "" {
 		return s
 	}
-	return st.Render(s)
+	if st.raw {
+		return st.st.Render(s)
+	}
+	return st.open + s + st.close
 }
 
 // lineBuf assembles one screen line to an exact column count.
@@ -297,7 +333,7 @@ func newLine(th Theme, w int) *lineBuf { return &lineBuf{th: th, w: w} }
 func (l *lineBuf) left() int { return l.w - l.used }
 
 // add appends s painted with st, clipped to what is left.
-func (l *lineBuf) add(st lipgloss.Style, s string) *lineBuf {
+func (l *lineBuf) add(st style, s string) *lineBuf {
 	s = clip(oneLine(s), l.left())
 	if s == "" {
 		return l
@@ -308,14 +344,14 @@ func (l *lineBuf) add(st lipgloss.Style, s string) *lineBuf {
 }
 
 // addTrunc is add with an ellipsis when the text does not fit.
-func (l *lineBuf) addTrunc(st lipgloss.Style, s string) *lineBuf {
+func (l *lineBuf) addTrunc(st style, s string) *lineBuf {
 	return l.addRaw(st, truncate(oneLine(s), l.left()))
 }
 
 // addRaw appends s painted with st. The caller has already fitted it, so the
 // clip is a no-op on every path that measured correctly; it is there so that a
 // path that did not cannot push a line past its width.
-func (l *lineBuf) addRaw(st lipgloss.Style, s string) *lineBuf {
+func (l *lineBuf) addRaw(st style, s string) *lineBuf {
 	s = clip(oneLine(s), l.left())
 	if s == "" {
 		return l

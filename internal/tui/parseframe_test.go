@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // A frame is text with escape sequences in it; a contract about colour is
@@ -147,14 +145,14 @@ func hex(parts ...string) string {
 // its own conversion and can land a unit away (#6b7280 arrives as #6b7180), so
 // a test that compared against the source constant would be checking the
 // palette's spelling rather than the frame's colour.
-func styleHex(st lipgloss.Style) string {
+func styleHex(st style) string {
 	th := ColourTheme()
 	rows := parseFrame(th.paint(st, "x"), 1, 1)
 	return rows[0][0].fg
 }
 
 // styleBG is the background a style emits, "" when it sets none.
-func styleBG(st lipgloss.Style) string {
+func styleBG(st style) string {
 	th := ColourTheme()
 	rows := parseFrame(th.paint(st, "x"), 1, 1)
 	return rows[0][0].bg
@@ -183,7 +181,7 @@ func TestParseFrameReadsTheThemesColours(t *testing.T) {
 		}
 	}
 	th := ColourTheme()
-	for name, st := range map[string]lipgloss.Style{
+	for name, st := range map[string]style{
 		"accent": th.accent, "dim": th.dim, "text": th.text, "accentMuted": th.accentMuted,
 	} {
 		if !seen[styleHex(st)] {

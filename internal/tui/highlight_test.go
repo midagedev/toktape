@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"github.com/charmbracelet/lipgloss"
 	"strings"
 	"testing"
 	"time"
@@ -139,7 +138,7 @@ func TestCodeWearsItsOwnHues(t *testing.T) {
 	answer := bodyLine{}
 	for _, tc := range []struct {
 		class codeClass
-		want  lipgloss.Style
+		want  style
 		name  string
 	}{
 		{classKeyword, th.codeKeyword, "keyword"},
@@ -154,7 +153,7 @@ func TestCodeWearsItsOwnHues(t *testing.T) {
 			t.Errorf("a settled %s is %s, want %s", tc.name, got, want)
 		}
 	}
-	if !bodyStyle(th, answer, bandSettled, classKeyword).GetBold() {
+	if !bodyStyle(th, answer, bandSettled, classKeyword).st.GetBold() {
 		t.Error("a keyword is not bold")
 	}
 	// Punctuation and the fence line stay chrome: they are the parts of a
@@ -181,7 +180,7 @@ func TestCodeWearsItsOwnHues(t *testing.T) {
 	// and the active stream, and the emphasis contract (emphasis_test.go)
 	// reads the screen for exactly those (2026-09-16).
 	accents := accentShades()
-	for _, st := range []lipgloss.Style{th.codeKeyword, th.codeFunc, th.codeType,
+	for _, st := range []style{th.codeKeyword, th.codeFunc, th.codeType,
 		th.codeString, th.codeNumber, th.codeComment, th.codeVar} {
 		if accents[styleHex(st)] {
 			t.Errorf("a code hue is an accent shade: %s", styleHex(st))

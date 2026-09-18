@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mattn/go-runewidth"
 	"github.com/midagedev/toktape/internal/card"
@@ -269,9 +270,15 @@ func wrapParagraph(cells []wrapCell, w int) []wrappedLine {
 // cellLine turns a line's cells into its text and its source offsets.
 func cellLine(cells []wrapCell) wrappedLine {
 	var b strings.Builder
+	b.Grow(len(cells))
 	src := make([]int, len(cells))
 	for i, c := range cells {
-		b.WriteRune(c.r)
+		// TTP-123: the fast path for ASCII, same bytes out.
+		if c.r < utf8.RuneSelf {
+			b.WriteByte(byte(c.r))
+		} else {
+			b.WriteRune(c.r)
+		}
 		src[i] = c.src
 	}
 	return wrappedLine{text: b.String(), src: src}
