@@ -313,7 +313,7 @@ function caveatBlock(idx) {
   // The codes, not sentences. The sentences belong to the card, which is the
   // one place that writes them (internal/card/caveat.go); a second wording
   // here would be a second answer to what a caveat means.
-  return `<div class="caveats"><b>! ${idx.caveat_count} caveat${
+  return `<div class="caveats" id="caveats"><b>! ${idx.caveat_count} caveat${
     idx.caveat_count === 1 ? "" : "s"
   }</b> — ${codes}. The card that comes with this record spells each one out.</div>`;
 }

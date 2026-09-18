@@ -187,6 +187,44 @@ curl -fsS "$base/" >"$work/fetched" && grep -q 'src="/player/host.js"' "$work/fe
 # A filter in the URL shows in its box even when it matches nothing.
 curl -fsS "$base/?engine=vllm" >"$work/fetched" && grep -q '<option value="vllm" selected>vllm (0)</option>' "$work/fetched" ||
   die "a filter that matched nothing vanished from its dropdown"
+# The empty state offers a way back: one link per active filter, each naming
+# the population that filter hides.
+grep -q 'without engine' "$work/fetched" || die "the empty state offers no way back"
+# The total above the rows: a population size, not a ranking.
+curl -fsS "$base/" >"$work/front.html" && grep -q 'class="total"' "$work/front.html" ||
+  die "the front page carries no total"
+grep -qE 'class="total"><b>[0-9]+</b>' "$work/front.html" || die "the total names no population size"
+# The active line on a narrowed page, with its way out.
+curl -fsS "$base/?engine=ik_llama.cpp" >"$work/eng.html" && grep -q 'Narrowed to' "$work/eng.html" ||
+  die "the filtered page names no active filters"
+grep -q 'engine: ik_llama.cpp' "$work/eng.html" || die "the active line does not name the engine filter"
+grep -q 'class="clear" href="/"' "$work/eng.html" || die "the active line has no Clear all link"
+# On that page the hero row's engine chip is marked active rather than
+# linked, while the streams chip accumulates the current filters.
+grep -q '<span class="fact on">ik_llama.cpp' "$work/eng.html" ||
+  die "the hero row's engine chip is not marked active"
+href="$(grep -o 'href="[^"]*sessions=[^"]*"' "$work/eng.html" | head -n 1)"
+case "$href" in *engine=ik_llama.cpp*) ;; *) die "the streams chip did not accumulate the engine filter: $href";; esac
+# The engine build rides inside the engine chip; the OS rides beside it.
+grep -q 'class="v">c10fbbcc<' "$work/eng.html" || die "the engine chip carries no build"
+grep -q '>linux</a>' "$work/eng.html" || die "the row carries no OS chip"
+# The caveat chip links at the reasons; the run page carries the anchor.
+if grep -q '"caveat_count":1' "$work/row.json"; then
+  grep -q "/r/$id#caveats" "$work/front.html" || die "the caveat chip does not link at the reasons"
+  grep -q 'id="caveats"' "$work/page.html" || die "the run page carries no caveats anchor"
+else
+  grep -q '#caveats' "$work/front.html" && die "a run with no caveats links at reasons"
+  grep -q 'id="caveats"' "$work/page.html" && die "a run with no caveats carries the anchor"
+  printf 'note: the hero currently has no caveats, so the caveat-link checks asserted absence\n'
+fi
+# The VRAM floor: impossible empties the listing, 1 GB keeps the hero (whose
+# card says 48 GiB, and whose row must say so in bytes).
+grep -q '"vram_bytes": *[1-9]' "$work/row.json" || { cat "$work/row.json"; die "the hero row carries no vram_bytes"; }
+curl -fsS "$base/?min_vram=999999" >"$work/fetched" && grep -q 'No published run matches' "$work/fetched" ||
+  die "an impossible VRAM floor still lists runs"
+curl -fsS "$base/?min_vram=1" >"$work/fetched" && grep -q "/r/$id" "$work/fetched" ||
+  die "a 1 GB VRAM floor dropped the run"
+grep -q 'vram: 1 GB+' "$work/fetched" || die "the VRAM floor is not named in the active line"
 code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?scope=mine")
 [ "$code" = "401" ] || { cat "$work/body"; die "the journal scope answered without a token (got $code)"; }
 
