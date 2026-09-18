@@ -16,6 +16,9 @@
 //     design note and upstream disagree, upstream wins and the deviation is
 //     named in a comment.
 //
-// Everything except ModelInfoFromFile is a pure function, so the placement
-// logic is testable without a multi-gigabyte model on disk.
+// Everything here is a pure function, so the placement logic is testable
+// without a multi-gigabyte model on disk. The one file that reads a model
+// from disk lives in internal/placement/gguf, imported only by the recorder —
+// that direction keeps the GGUF parser (and its HTTP client) out of every
+// render path, because a renderer reads a tape and nothing else.
 package placement

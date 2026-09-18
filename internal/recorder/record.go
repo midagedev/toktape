@@ -14,6 +14,7 @@ import (
 
 	"github.com/midagedev/toktape/internal/gpu"
 	"github.com/midagedev/toktape/internal/placement"
+	"github.com/midagedev/toktape/internal/placement/gguf"
 	"github.com/midagedev/toktape/internal/procmon"
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
@@ -334,7 +335,7 @@ func (r *run) collectModel() {
 		return
 	}
 	base := filepath.Base(path)
-	mi, tensors, err := placement.ModelInfoFromFile(path)
+	mi, tensors, err := gguf.ModelInfo(path)
 	if err == nil {
 		r.model, r.tensors = mi, tensors
 		// The header was read from the named part; the variant directory and

@@ -1,4 +1,4 @@
-package placement
+package gguf
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/midagedev/toktape/internal/placement"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -122,7 +123,7 @@ func synFixtureTensors() []ggufTensor {
 
 // --- tests ------------------------------------------------------------------
 
-func TestModelInfoFromFile(t *testing.T) {
+func TestModelInfo(t *testing.T) {
 	// A non-llama architecture on purpose: gguf-parser-go's own Metadata()
 	// defaults the architecture to "llama", and a "llama" fixture would hide
 	// the difference between reading the key and inheriting that default.
@@ -140,9 +141,9 @@ func TestModelInfoFromFile(t *testing.T) {
 		{arch + ".context_length", ggufTypeUint32, uint32(32768)},
 	}, synFixtureTensors())
 
-	info, tensors, err := ModelInfoFromFile(path)
+	info, tensors, err := ModelInfo(path)
 	if err != nil {
-		t.Fatalf("ModelInfoFromFile: %v", err)
+		t.Fatalf("ModelInfo: %v", err)
 	}
 
 	if info.Arch != arch {
@@ -181,10 +182,10 @@ func TestModelInfoFromFile(t *testing.T) {
 		layer int
 		class tape.TensorClass
 	}{
-		"token_embd.weight":          {512, NoLayer, tape.ClassEmbed},
+		"token_embd.weight":          {512, placement.NoLayer, tape.ClassEmbed},
 		"blk.0.ffn_down_exps.weight": {512, 0, tape.ClassExperts},
 		"blk.1.attn_q.weight":        {256, 1, tape.ClassAttention},
-		"output.weight":              {512, NoLayer, tape.ClassOutput},
+		"output.weight":              {512, placement.NoLayer, tape.ClassOutput},
 	}
 	for _, got := range tensors {
 		w, ok := want[got.Name]
@@ -205,17 +206,17 @@ func TestModelInfoFromFile(t *testing.T) {
 	}
 }
 
-// TestModelInfoFromFileMissingKeys pins rule 2: a header without the keys
+// TestModelInfoMissingKeys pins rule 2: a header without the keys
 // yields "" and 0, never the parser's "llama" default.
-func TestModelInfoFromFileMissingKeys(t *testing.T) {
+func TestModelInfoMissingKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nameless.gguf")
 	writeGGUF(t, path, []ggufKV{
 		{"general.quantization_version", ggufTypeUint32, uint32(2)},
 	}, synFixtureTensors())
 
-	info, tensors, err := ModelInfoFromFile(path)
+	info, tensors, err := ModelInfo(path)
 	if err != nil {
-		t.Fatalf("ModelInfoFromFile: %v", err)
+		t.Fatalf("ModelInfo: %v", err)
 	}
 	if info.Arch != "" {
 		t.Errorf("Arch = %q, want \"\" (the parser defaults this to \"llama\")", info.Arch)
@@ -235,19 +236,19 @@ func TestModelInfoFromFileMissingKeys(t *testing.T) {
 	}
 }
 
-func TestModelInfoFromFileNotGGUF(t *testing.T) {
+func TestModelInfoNotGGUF(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "notamodel.gguf")
 	if err := os.WriteFile(path, []byte("this is not a gguf file at all"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ModelInfoFromFile(path); err == nil {
+	if _, _, err := ModelInfo(path); err == nil {
 		t.Fatal("want an error for a non-GGUF file")
 	}
 }
 
-// TestModelInfoFromFileSharded checks the multi-shard path: given any shard,
+// TestModelInfoSharded checks the multi-shard path: given any shard,
 // the parser opens all of them and merges the tensor lists.
-func TestModelInfoFromFileSharded(t *testing.T) {
+func TestModelInfoSharded(t *testing.T) {
 	const arch = "qwen3moe"
 	dir := t.TempDir()
 	kvs := []ggufKV{
@@ -266,9 +267,9 @@ func TestModelInfoFromFileSharded(t *testing.T) {
 		{name: "output.weight", dims: []uint64{8, 16}, offset: 256},
 	})
 
-	info, tensors, err := ModelInfoFromFile(shard1)
+	info, tensors, err := ModelInfo(shard1)
 	if err != nil {
-		t.Fatalf("ModelInfoFromFile: %v", err)
+		t.Fatalf("ModelInfo: %v", err)
 	}
 	if len(tensors) != 4 {
 		t.Fatalf("got %d tensors, want 4 across both shards: %v", len(tensors), tensorNames(tensors))
@@ -284,7 +285,7 @@ func TestModelInfoFromFileSharded(t *testing.T) {
 	}
 }
 
-func tensorNames(ts []Tensor) []string {
+func tensorNames(ts []placement.Tensor) []string {
 	out := make([]string, 0, len(ts))
 	for _, t := range ts {
 		out = append(out, t.Name)
@@ -292,20 +293,20 @@ func tensorNames(ts []Tensor) []string {
 	return out
 }
 
-// TestModelInfoFromRealGGUF runs against a model on this machine when
+// TestModelInfoRealGGUF runs against a model on this machine when
 // TOKTAPE_GGUF points at one. The synthetic fixtures above cover the parsing
 // contract; this is the escape hatch for checking a real header by hand:
 //
-//	TOKTAPE_GGUF=/models/Qwen3-30B-A3B-UD-Q4_K_M.gguf go test ./internal/placement/ -run RealGGUF -v
-func TestModelInfoFromRealGGUF(t *testing.T) {
+//	TOKTAPE_GGUF=/models/Qwen3-30B-A3B-UD-Q4_K_M.gguf go test ./internal/placement/gguf/ -run RealGGUF -v
+func TestModelInfoRealGGUF(t *testing.T) {
 	path := os.Getenv("TOKTAPE_GGUF")
 	if path == "" {
 		t.Skip("set TOKTAPE_GGUF=<path to a .gguf> to run this")
 	}
 
-	info, tensors, err := ModelInfoFromFile(path)
+	info, tensors, err := ModelInfo(path)
 	if err != nil {
-		t.Fatalf("ModelInfoFromFile(%s): %v", path, err)
+		t.Fatalf("ModelInfo(%s): %v", path, err)
 	}
 	if len(tensors) == 0 {
 		t.Fatal("no tensors read from the header")
@@ -328,7 +329,7 @@ func TestModelInfoFromRealGGUF(t *testing.T) {
 			other*100/total, tape.ClassOther)
 	}
 
-	s := Estimate(tensors, tape.ServerFlags{NGL: "99"}, 1, false)
+	s := placement.Estimate(tensors, tape.ServerFlags{NGL: "99"}, 1, false)
 	t.Logf("model: %s %s %s, %d layers, %d/%d experts, %d tensors",
 		info.Name, info.Arch, info.Quant, info.NLayers, info.NExpertsUsed, info.NExperts, len(tensors))
 	t.Logf("active bytes/token: %d of %d total", info.ActiveBytesPerToken, total)

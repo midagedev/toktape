@@ -307,7 +307,7 @@ Charm VHS가 `.tape`를 쓴다(별 20,878개, 그것도 터미널 GIF라는 같�
 
 귀속: Go wasm 빈 프로그램이 gz 756 KB이고 `internal/tape`는 거기에 22 KB를 더한다. 무게는 두 곳이다.
 
-**하나는 GGUF 파서이고, 이건 wasm보다 큰 문제다.** `internal/placement/gguf.go`의 `ModelInfoFromFile`이 gpustack/gguf-parser-go를 끌고 오고(그와 함께 json-iterator·modern-go/reflect2·httpretty·ringbuffer), `internal/card`가 placement를, `internal/tui`가 card를 import하므로 **렌더 경로 전체가 그것을 진다.** 그런데 그 함수는 모델 파일을 디스크에서 읽는 녹화 시점의 일이고, 테이프에는 이미 placement 요약이 들어 있다. CLAUDE.md의 계약은 "모든 렌더러는 `*tape.Tape`만 읽는다"인데 실제 의존 그래프는 그렇지 않다. 파일 하나를 자기 패키지로 옮겨 레코더만 import하게 하면 되고, 이득은 브라우저만이 아니다 — 배포되는 CLI 바이너리 18.3 MB에도 같은 짐이 들어 있다.
+**하나는 GGUF 파서이고, 이건 wasm보다 큰 문제다.** `internal/placement/gguf.go`의 `ModelInfoFromFile`이 gpustack/gguf-parser-go를 끌고 오고(그와 함께 json-iterator·modern-go/reflect2·httpretty·ringbuffer), `internal/card`가 placement를, `internal/tui`가 card를 import하므로 **렌더 경로 전체가 그것을 진다.** 그런데 그 함수는 모델 파일을 디스크에서 읽는 녹화 시점의 일이고, 테이프에는 이미 placement 요약이 들어 있다. CLAUDE.md의 계약은 "모든 렌더러는 `*tape.Tape`만 읽는다"인데 실제 의존 그래프는 그렇지 않다. 파일 하나를 자기 패키지로 옮겨 레코더만 import하게 하면 된다(TTP-118, 2026-09-18 완료). **다만 이득은 브라우저에만 있다** — 배포되는 CLI는 레코더와 렌더러가 한 바이너리라 파서가 여전히 링크되고, 실제로 재 보니 linux/amd64 `-s -w`가 18,768,034 → 18,759,842바이트로 8 KB밖에 줄지 않았다. 리드가 "바이너리도 같이 가벼워진다"고 적었다가 측정으로 기각했다. 남는 이득은 번들과, 의존 그래프가 계약과 다시 일치한다는 사실이다.
 
 **다른 하나는 chroma다.** `internal/tui/highlight.go`가 `chroma/v2/lexers`를 쓰는데 그 패키지는 모든 언어의 렉서 정의를 embed한다(gz 835 KB). 접점은 좁다 — `lexers.Get`과 `Tokenise` 두 줄, 그리고 토큰 타입을 8개 `codeClass`로 접는 `classOf` 하나뿐이다. 그래서 웹 빌드에서는 빌드 태그로 가벼운 구현을 끼운다: 포팅이 아니라 파일 교체이고, 계약이 "8개 클래스"라 대체 구현이 만족시켜야 할 것도 그게 전부다. 터미널 쪽은 chroma를 그대로 쓴다.
 
