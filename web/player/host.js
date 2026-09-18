@@ -113,6 +113,7 @@
   function seek(ms) {
     t = Math.max(0, Math.min(durationMs, ms));
     wallAtT = performance.now();
+    if (!playing) toggle.textContent = t >= durationMs ? "Replay" : "Play";
     paint(true);
   }
 
