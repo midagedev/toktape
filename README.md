@@ -9,6 +9,8 @@ English · [한국어](README.ko.md) · [日本語](README.ja.md)
 [![go](https://img.shields.io/github/go-mod/go-version/midagedev/toktape)](go.mod)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+<img src="docs/mascot.png" align="right" width="150" alt="the toktape mascot: a small chibi in headphones, eyes closed, hugging a cassette tape">
+
 toktape attaches to a llama-server you already have running, records one run
 into a `.tape` file, and prints a card that says where the model sits, what the
 process actually touched, and how fast the request really was — for one

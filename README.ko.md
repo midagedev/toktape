@@ -9,6 +9,8 @@
 [![go](https://img.shields.io/github/go-mod/go-version/midagedev/toktape)](go.mod)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+<img src="docs/mascot.png" align="right" width="150" alt="the toktape mascot: a small chibi in headphones, eyes closed, hugging a cassette tape">
+
 toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.tape` 파일로
 녹화하고, 카드 한 장을 출력합니다. 모델이 어디에 올라가 있는지, 프로세스가
 실제로 무엇을 건드렸는지, 요청이 정말 얼마나 빨랐는지가 그 한 장에 담깁니다.

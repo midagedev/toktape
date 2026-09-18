@@ -15,9 +15,9 @@ originals stay in the session scratchpad under `mascot/`.
 
 | file | pose | seed | where it shows |
 |---|---|---|---|
-| `mascot.png` | face, front | 21 | brand row avatar (36 px circle), 256 px on the page's ground |
-| `favicon.png` | the same | 21 | 64 px |
-| `apple-touch-icon.png` | the same | 21 | 180 px |
+| `mascot.png` | sitting, eyes closed, hugging a cassette — the first sticker the user picked ("최초 이미지") | 2483962039 (d_fluxpro_chibi) | brand row avatar (36 px circle), 256 px on the page's ground; the square window covers head and tape |
+| `favicon.png` | the same | — | 64 px |
+| `apple-touch-icon.png` | the same | — | 180 px |
 | `mascot-sit.webp` | sitting, hugging a glowing cassette | 8 | the front page's empty state |
 | `mascot-peek.webp` | peeking over an edge, head and hands | 5 | the front page's bottom-right margin (≥78rem wide) |
 | `mascot-sleep.webp` | asleep on a cassette | 12 | a run page's bottom-right margin (≥78rem wide) |
