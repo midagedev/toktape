@@ -34,13 +34,7 @@ func Write(path string, t *Tape) error {
 			_ = os.Remove(tmpName)
 		}
 	}()
-	gz := gzip.NewWriter(tmp)
-	enc := json.NewEncoder(gz)
-	if err := enc.Encode(t); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := gz.Close(); err != nil {
+	if err := Encode(tmp, t); err != nil {
 		_ = tmp.Close()
 		return err
 	}
@@ -52,6 +46,24 @@ func Write(path string, t *Tape) error {
 	}
 	ok = true
 	return nil
+}
+
+// Encode writes t to w in the file's own form: gzip'd JSON. It is what Write
+// puts on disk, so anything that ships a tape somewhere other than the file
+// system — `toktape publish` uploads one — sends the same bytes rather than a
+// second serialisation that could drift from this one.
+//
+// Schema is stamped here, not in Write, for the same reason: a tape that
+// travels without touching the disk carries its version too.
+func Encode(w io.Writer, t *Tape) error {
+	if t.Schema == 0 {
+		t.Schema = SchemaVersion
+	}
+	gz := gzip.NewWriter(w)
+	if err := json.NewEncoder(gz).Encode(t); err != nil {
+		return err
+	}
+	return gz.Close()
 }
 
 // Read loads a tape. Plain (non-gzip) JSON is accepted too, so a tape
