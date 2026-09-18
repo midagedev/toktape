@@ -1,0 +1,43 @@
+// A typed wrapper around localStorage that survives parse errors: a corrupt
+// entry reads as absent instead of throwing on every page load.
+
+interface Storable {
+  version: number;
+  savedAt: string;
+}
+
+type Load = (raw: unknown) => Storable | null;
+
+const KEY_PREFIX = "app:v1:";
+
+/* read parses the JSON under key and validates it with load; anything that
+   does not survive the round trip reads as the fallback. */
+function read(key: string, load: Load, fallback: Storable): Storable {
+  try {
+    const raw = window.localStorage.getItem(KEY_PREFIX + key);
+    if (raw === null) {
+      return fallback;
+    }
+    const parsed = load(JSON.parse(raw));
+    return parsed ?? fallback;
+  } catch (error) {
+    console.warn(`dropping corrupt entry ${key}:`, error);
+    return fallback;
+  }
+}
+
+function write(key: string, value: Storable): void {
+  const text = JSON.stringify({ ...value, savedAt: new Date().toISOString() });
+  window.localStorage.setItem(KEY_PREFIX + key, text);
+}
+
+// Count how many saved sessions are older than a week.
+function staleCount(names: string[]): number {
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  return names.filter((name) => {
+    const entry = read(name, (raw) => raw as Storable, { version: 0, savedAt: "" });
+    return Date.parse(entry.savedAt) < cutoff;
+  }).length;
+}
+
+export { read, write, staleCount };

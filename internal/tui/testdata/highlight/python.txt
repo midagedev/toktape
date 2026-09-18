@@ -1,0 +1,40 @@
+"""Rate limiter with a sliding window, the way a small service actually
+needs one: no Redis, no background thread, just arithmetic on the way in."""
+
+import time
+from collections import deque
+
+
+class SlidingWindow:
+    # window is how long memory lasts; limit is how many calls fit in it
+    def __init__(self, limit, window):
+        self.limit = limit
+        self.window = window
+        self.hits = deque()
+
+    def allow(self):
+        """Record a hit and say whether it was inside the limit."""
+        now = time.monotonic()
+        while self.hits and now - self.hits[0] > self.window:
+            self.hits.popleft()
+        if len(self.hits) >= self.limit:
+            return False
+        self.hits.append(now)
+        return True
+
+
+def run(urls, per_minute=120):
+    limiter = SlidingWindow(per_minute, 60.0)
+    fetched = 0
+    for url in urls:
+        if not limiter.allow():
+            time.sleep(0.5)
+            continue
+        fetched += 1
+        print(f"fetching {url} ({fetched} done)")
+    return fetched
+
+
+if __name__ == "__main__":
+    total = run(["a", "b", "c"])
+    print("fetched", total, "of", 3)

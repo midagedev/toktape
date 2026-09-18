@@ -1,0 +1,54 @@
+/* Read a whole file into a NUL-terminated buffer, or return NULL.
+   The caller owns the buffer and frees it. */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// The buffer grows by doubling; it starts one page big.
+#define CHUNK 4096
+
+char *read_file(const char *path) {
+    FILE *fp = fopen(path, "rb");
+    if (fp == NULL) {
+        return NULL;
+    }
+    size_t cap = CHUNK;
+    size_t len = 0;
+    char *buf = malloc(cap);
+    while (1) {
+        if (len + 1 >= cap) {
+            cap *= 2;
+            char *grown = realloc(buf, cap);
+            if (grown == NULL) {
+                free(buf);
+                fclose(fp);
+                return NULL;
+            }
+            buf = grown;
+        }
+        size_t got = fread(buf + len, 1, cap - len - 1, fp);
+        if (got == 0) {
+            break; /* eof or error: either way, we are done */
+        }
+        len += got;
+    }
+    buf[len] = '\0';
+    fclose(fp);
+    return buf;
+}
+
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s <file>\n", argv[0]);
+        return 1;
+    }
+    char *text = read_file(argv[1]);
+    if (text == NULL) {
+        perror("read_file");
+        return 1;
+    }
+    printf("file is %zu bytes long\n", strlen(text));
+    free(text);
+    return 0;
+}

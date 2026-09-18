@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Bench every model in models/ and append one summary line per run to
+# results.tsv. Safe to re-run: finished models are skipped by name.
+
+set -euo pipefail
+
+MODELS_DIR="${1:-models}"
+OUT="results.tsv"
+TIMEOUT=900
+
+if [[ ! -d "$MODELS_DIR" ]]; then
+    echo "no such directory: $MODELS_DIR" >&2
+    exit 1
+fi
+
+# one header, written once
+if [[ ! -f "$OUT" ]]; then
+    printf 'model\ttok_s\ttpot_ms\tttft_ms\n' > "$OUT"
+fi
+
+for gguf in "$MODELS_DIR"/*.gguf; do
+    name=$(basename "$gguf" .gguf)
+    if grep -q "^$name$(printf '\t')" "$OUT"; then
+        echo "skip $name (already measured)"
+        continue
+    fi
+    echo "measuring $name"
+    row=$(timeout "$TIMEOUT" toktape record --model "$gguf" --json |
+        jq -r '[.summary.id, .summary.tokens_per_second, .summary.tpot_ms] | @tsv')
+    printf '%s\t%s\n' "$name" "$row" >> "$OUT"
+done
+
+count=$(wc -l < "$OUT")
+echo "done: $((count - 1)) runs recorded in $OUT"

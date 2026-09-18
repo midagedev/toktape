@@ -1,0 +1,36 @@
+-- Marginal tok/s by hour of day over the last week, with the slow tail
+-- called out separately: p50 hides what users actually feel.
+
+CREATE TABLE runs (
+    id          INTEGER PRIMARY KEY,
+    started_at  TIMESTAMP NOT NULL,
+    model       TEXT NOT NULL,
+    concurrency INTEGER NOT NULL DEFAULT 1,
+    tokens      INTEGER NOT NULL,
+    elapsed_ms  INTEGER NOT NULL
+);
+
+/* Corrections arrive as a new row with the same run id and a later
+   ingested_at; the view below keeps only the latest of each. */
+CREATE TABLE run_corrections (
+    run_id      INTEGER NOT NULL REFERENCES runs(id),
+    tokens      INTEGER NOT NULL,
+    elapsed_ms  INTEGER NOT NULL,
+    ingested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO runs (started_at, model, concurrency, tokens, elapsed_ms)
+VALUES ('2026-09-17 09:00:00', 'glm-4.7-q4', 4, 8192, 61000);
+
+SELECT
+    date_trunc('hour', r.started_at)              AS hour,
+    count(*)                                      AS runs,
+    round(avg(r.tokens * 1000.0 / r.elapsed_ms), 1) AS avg_tok_s,
+    max(r.tokens * 1000.0 / r.elapsed_ms)           AS peak_tok_s
+FROM runs r
+WHERE r.started_at >= now() - INTERVAL '7 days'
+  AND r.concurrency > 1
+GROUP BY 1
+HAVING count(*) >= 3
+ORDER BY hour DESC
+LIMIT 48;

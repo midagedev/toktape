@@ -1,0 +1,47 @@
+//! A tiny ring buffer for fixed-size metric windows.
+//!
+//! The window never allocates after construction, which is the point: the
+//! collector runs on the hot path and must not surprise the allocator.
+
+use std::collections::VecDeque;
+
+/// Holds the last `cap` samples pushed to it.
+pub struct Window {
+    samples: VecDeque<f64>,
+    cap: usize,
+}
+
+impl Window {
+    /* new builds a window that remembers exactly cap samples. */
+    pub fn new(cap: usize) -> Self {
+        Window {
+            samples: VecDeque::with_capacity(cap),
+            cap,
+        }
+    }
+
+    /// Push a sample, evicting the oldest once the window is full.
+    pub fn push(&mut self, value: f64) {
+        if self.samples.len() == self.cap {
+            self.samples.pop_front();
+        }
+        self.samples.push_back(value);
+    }
+
+    /// Mean of the window, or 0.0 when nothing has been pushed yet.
+    pub fn mean(&self) -> f64 {
+        if self.samples.is_empty() {
+            return 0.0;
+        }
+        let sum: f64 = self.samples.iter().sum();
+        sum / self.samples.len() as f64
+    }
+}
+
+fn main() {
+    let mut window = Window::new(60);
+    for i in 0..60 {
+        window.push(i as f64 * 1.5);
+    }
+    println!("mean over the last minute: {:.2}", window.mean());
+}

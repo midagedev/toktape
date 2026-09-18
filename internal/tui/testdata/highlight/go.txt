@@ -1,0 +1,58 @@
+// WorkerPool fans out jobs over a fixed set of workers and collects their
+// results in order. It exists so the caller does not have to think about
+// goroutine lifetimes at all.
+package main
+
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+// Job is one unit of work; Result is what comes back for it.
+type Job struct {
+	ID    int
+	Bytes int
+}
+
+type Result struct {
+	Job  Job
+	Took time.Duration
+}
+
+/* Run processes jobs over n workers and returns when every job is done.
+   The results slice is indexed by job ID, so the order never depends on
+   which worker happened to finish first. */
+func Run(jobs []Job, n int) []Result {
+	results := make([]Result, len(jobs))
+	var wg sync.WaitGroup
+	work := make(chan Job)
+
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			for j := range work {
+				start := time.Now()
+				time.Sleep(50 * time.Millisecond)
+				results[j.ID] = Result{Job: j, Took: time.Since(start)}
+			}
+		}()
+	}
+	for _, j := range jobs {
+		work <- j
+	}
+	close(work)
+	wg.Wait()
+	return results
+}
+
+func main() {
+	jobs := make([]Job, 8)
+	for i := range jobs {
+		jobs[i] = Job{ID: i, Bytes: 1024}
+	}
+	for _, r := range Run(jobs, 4) {
+		fmt.Printf("job %d took %v\n", r.Job.ID, r.Took)
+	}
+}

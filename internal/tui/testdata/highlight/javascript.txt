@@ -1,0 +1,45 @@
+// A retry wrapper with jittered backoff. fetch is retried on 5xx and on
+// network errors, never on 4xx: retrying those just burns quota.
+
+const BASE_DELAY_MS = 250;
+const MAX_ATTEMPTS = 4;
+
+/* sleep resolves after ms, so the await in the loop reads linearly. */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchWithRetry(url, options = {}) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.status >= 500) {
+        throw new Error(`server returned ${response.status}`);
+      }
+      return response;
+    } catch (error) {
+      lastError = error;
+      const jitter = Math.random() * 0.3 + 0.85;
+      await sleep(BASE_DELAY_MS * 2 ** (attempt - 1) * jitter);
+    }
+  }
+  throw lastError;
+}
+
+// Usage: pull every page until the cursor runs out.
+async function pullAll(startUrl) {
+  const items = [];
+  let cursor = startUrl;
+  while (cursor) {
+    const body = await fetchWithRetry(cursor, {
+      headers: { accept: "application/json" },
+    });
+    const page = await body.json();
+    items.push(...page.items);
+    cursor = page.next;
+  }
+  return items;
+}
+
+export { fetchWithRetry, pullAll };

@@ -4,9 +4,6 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
-
-	"github.com/alecthomas/chroma/v2"
-	"github.com/alecthomas/chroma/v2/lexers"
 )
 
 // Syntax in a fenced code block (TTP-52, user 2026-09-14: "코드 하일라이팅은?").
@@ -23,7 +20,9 @@ import (
 //
 // The lexer is chroma (what glamour, glow and crush lex with), chosen by the
 // fence's language tag and nothing else: a block with no tag, or a tag chroma
-// does not know, is drawn plain rather than lexed as a guess.
+// does not know, is drawn plain rather than lexed as a guess — in the browser
+// build, which this file knows nothing about, the small hand-written lexer in
+// highlight_light_impl.go keeps the same rule (docs/toktape-spec.ko.md §9.8).
 
 // codeClass is what a rune of a fenced block is, as far as the pane cares.
 type codeClass uint8
@@ -187,20 +186,7 @@ func lexBlock(lang, code string) []codeClass {
 	}
 	lexCache.Unlock()
 
-	classes := make([]codeClass, utf8.RuneCountInString(code))
-	if lx := lexers.Get(lang); lx != nil {
-		if it, err := chroma.Coalesce(lx).Tokenise(nil, code); err == nil {
-			off := 0
-			for tok := it(); tok != chroma.EOF; tok = it() {
-				c := classOf(tok.Type)
-				n := utf8.RuneCountInString(tok.Value)
-				for k := off; k < off+n && k < len(classes); k++ {
-					classes[k] = c
-				}
-				off += n
-			}
-		}
-	}
+	classes := lexRunes(lang, code)
 
 	lexCache.Lock()
 	if len(lexCache.m) >= lexCacheMax {
@@ -214,40 +200,4 @@ func lexBlock(lang, code string) []codeClass {
 	lexCache.m[key] = classes
 	lexCache.Unlock()
 	return classes
-}
-
-// classOf maps chroma's token categories onto the pane's treatment.
-func classOf(t chroma.TokenType) codeClass {
-	switch t {
-	case chroma.NameFunction, chroma.NameFunctionMagic, chroma.NameDecorator,
-		chroma.NameBuiltin:
-		// A builtin is something being called, so it reads with the calls and
-		// not with the types: len() and a user's own helper are the same move
-		// to someone scanning a line.
-		return classFunc
-	case chroma.NameClass, chroma.NameBuiltinPseudo, chroma.NameException,
-		chroma.NameNamespace, chroma.KeywordType:
-		return classType
-	case chroma.NameConstant, chroma.KeywordConstant, chroma.NameLabel:
-		return classNumber
-	case chroma.NameAttribute, chroma.NameVariable, chroma.NameVariableClass,
-		chroma.NameVariableGlobal, chroma.NameVariableInstance, chroma.NameProperty,
-		chroma.NameTag:
-		return classVar
-	}
-	switch {
-	case t.InCategory(chroma.Comment):
-		return classComment
-	case t.InCategory(chroma.Keyword):
-		return classKeyword
-	case t.InSubCategory(chroma.LiteralString):
-		return classString
-	case t.InSubCategory(chroma.LiteralNumber):
-		return classNumber
-	case t.InCategory(chroma.Literal):
-		return classString
-	case t.InCategory(chroma.Punctuation), t.InCategory(chroma.Operator):
-		return classPunct
-	}
-	return classPlain
 }

@@ -1,0 +1,39 @@
+# One deploy of the recorder: four streams, one GPU, everything pinned so a
+# rerun of the same commit measures the same thing.
+
+name: bench-run
+version: "3"
+
+labels:
+  env: lab
+  gpu: a100-80g
+  revision: 42
+
+server:
+  image: ghcr.io/local/llama-server:0.9
+  command: >
+    serve model.gguf
+    --ctx-size 8192
+    --parallel 4
+  ports:
+    - "8080:8080"
+  resources:
+    limits:
+      memory: 72Gi
+      nvidia.com/gpu: 1
+
+streams:
+  - prompt: "Write a haiku about KV caches."
+    max_tokens: 128
+  - prompt: "Explain paged attention in two sentences."
+    max_tokens: 256
+  - prompt: "Name three causes of tail latency."
+    max_tokens: 96
+  - prompt: "Summarize the mmap vs read tradeoff."
+    max_tokens: 192
+
+output:
+  dir: /var/lib/toktape
+  format: tape   # gzip json, one file per run
+  retention_days: 30
+  overwrite: false

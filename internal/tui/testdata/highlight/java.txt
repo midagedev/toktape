@@ -1,0 +1,47 @@
+// Exponential backoff with jitter, the way a client that must be polite to
+// a struggling server does it: capped delay, bounded retries, full jitter.
+
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
+
+public final class Retry {
+    private static final Duration BASE = Duration.ofMillis(250);
+    private static final Duration CAP = Duration.ofSeconds(8);
+    private static final int MAX_ATTEMPTS = 5;
+
+    /* delayFor is the backoff curve: base doubled per attempt, capped. */
+    private static Duration delayFor(int attempt) {
+        long doubled = BASE.toMillis() << (attempt - 1);
+        long capped = Math.min(doubled, CAP.toMillis());
+        return Duration.ofMillis(capped);
+    }
+
+    public static <T> T call(List<String> hosts, Operation<T> op)
+            throws InterruptedException {
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            for (String host : hosts) {
+                try {
+                    return op.run(host);
+                } catch (TransientError error) {
+                    System.err.println("attempt " + attempt + " on " + host
+                            + " failed: " + error.getMessage());
+                }
+            }
+            long jitter = ThreadLocalRandom.current().nextLong(0, 2);
+            Duration wait = delayFor(attempt).plusMillis(jitter);
+            Thread.sleep(wait.toMillis());
+        }
+        throw new IllegalStateException("all attempts exhausted");
+    }
+
+    interface Operation<T> {
+        T run(String host) throws TransientError;
+    }
+
+    static class TransientError extends Exception {
+        TransientError(String message) {
+            super(message);
+        }
+    }
+}
