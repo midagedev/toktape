@@ -64,6 +64,14 @@ for (const [label, at] of [
 const mid = api.frame(Math.floor(loaded.durationMs / 2), COLS, ROWS);
 check("the frame is styled", mid.includes("["), `${(mid.match(/\[/g) || []).length} escapes`);
 
+// The clip ends on the result card, held for render.CardHold, exactly as a
+// GIF does. The first build stopped at the last token and the card never
+// came; a duration equal to the run's is how that reads from here.
+const last = api.frame(loaded.durationMs, COLS, ROWS);
+const stripped = last.replace(/\x1b\[[0-9;]*m/g, "");
+check("the clip is longer than the run", loaded.durationMs >= 11000 + 5000, `${loaded.durationMs} ms for an ~11.6 s run`);
+check("the last frame is the card", /decode · \d+ streams?/.test(stripped), stripped.split("\n").find((l) => /decode · \d+ stream/.test(l))?.trim().slice(0, 70) || "no card text in the last frame");
+
 // A tape it cannot read must say so rather than throw: a page that fetched a
 // truncated file has to be able to tell its reader what happened.
 const bad = api.load(new Uint8Array([1, 2, 3, 4]));

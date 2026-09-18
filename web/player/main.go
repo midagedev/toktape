@@ -22,11 +22,9 @@ package main
 import (
 	"bytes"
 	"syscall/js"
-	"time"
 
 	"github.com/midagedev/toktape/internal/render"
 	"github.com/midagedev/toktape/internal/tape"
-	"github.com/midagedev/toktape/internal/tui"
 )
 
 // version is set at build time with -ldflags "-X main.version=...", the same
@@ -37,6 +35,20 @@ var version = "dev"
 // player shows one run, and keeping every tape a page ever opened would grow
 // without anything having decided to.
 var loaded *tape.Tape
+
+// sched is the clip the loaded tape plays as — the same render.Schedule a GIF
+// or an mp4 is cut on, so the browser shows what a clip shows: a second on
+// the pre-run screen, the run at 1:1, and the result card held at the end.
+// The first build of this player stopped at RunEnd and never reached the
+// card (user, 2026-09-18: "리플레이가 마지막 서머리 카드가 누락되네"); the fix
+// is not a card branch of its own here but the schedule that already owns
+// when the card comes on.
+//
+// At 1000 frames a second, a frame index is a millisecond of clip time, so
+// frame(atMs) is one lookup and nothing here re-derives the phases.
+var sched render.Schedule
+
+const schedFPS = 1000
 
 func main() {
 	api := js.Global().Get("Object").New()
@@ -74,24 +86,24 @@ func load(_ js.Value, args []js.Value) any {
 		return result(false, err.Error(), 0, 0)
 	}
 	loaded = tp
-	return result(true, "", render.RunEnd(tp).Milliseconds(), tp.Summary.Concurrency)
+	// A whole-run clip without the cold open: the page already opened on the
+	// card, so the typed command would be a second introduction.
+	sched = render.NewSchedule(0, render.RunEnd(tp), schedFPS, 0, false)
+	return result(true, "", sched.Duration.Milliseconds(), tp.Summary.Concurrency)
 }
 
-// frame draws one instant. atMs is clip time, not wall time: View is a pure
-// function of it, which is what lets the same tape replay to the same frames
-// in a browser as in a terminal (§1 decision 10).
+// frame draws one instant. atMs is clip time, not wall time: the frame is a
+// pure function of it, which is what lets the same tape replay to the same
+// frames in a browser as in a terminal (§1 decision 10). The schedule maps
+// clip time onto run time and mode; render.FrameText draws it exactly as a
+// GIF frame is drawn, theme and all.
 func frame(_ js.Value, args []js.Value) any {
 	if loaded == nil || len(args) != 3 {
 		return ""
 	}
-	at := time.Duration(args[0].Float()) * time.Millisecond
+	f := sched.Frame(int(args[0].Float()))
 	cols, rows := args[1].Int(), args[2].Int()
-
-	m := tui.ModelAt(loaded, at)
-	// The terminal's own theme. A browser that chose a different palette
-	// would be a second answer to what the product looks like.
-	m.Theme = tui.ColourTheme()
-	return tui.View(m, at, cols, rows)
+	return render.FrameText(loaded, render.Options{Width: cols, Height: rows}, f)
 }
 
 // result is load's answer. Every field is set on every path, failures
