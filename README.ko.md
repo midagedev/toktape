@@ -500,6 +500,14 @@ pid도 같은 보고에 적어 줍니다. 그래야 메모리와 페이지 폴�
 일을 합니다. EXL3 모델 하나를 toktape가 이미 아는 llama-server 표면에 얹어
 주므로, EXL3 모델도 손댈 것 없이 그대로 녹화됩니다.
 
+그 밖의 OpenAI 호환 서버 — vLLM, SGLang, TabbyAPI, LM Studio 등 — 는 범용
+모드로 녹화합니다. `toktape --engine-kind openai`, 또는 아무것도 주지 않아도
+됩니다. 자동 감지가 `/props`를 먼저 찔러 보고 없으면 `/v1/models`로 넘어가,
+거기에 답하는 서버에 붙습니다. 이런 서버는 timings를 보고하지 않으니 녹화기
+자신의 시계가 기록이 되고, 카드는 디코드 속도 옆에 `client-timed`라고 적습니다.
+다른 client-timed 실행과만 비교하세요. 슬롯도 플래그 블록도 없고, `--engine`은
+엔진 이름을 주장으로 받아 그 말과 함께 찍습니다.
+
 로드맵: sudo 없는 macOS 수집기, `/api/ps` 기반 Ollama 오프로드 카드,
 `toktape ab URL1 URL2`(서버 둘, 프롬프트 하나, 나란히).
 

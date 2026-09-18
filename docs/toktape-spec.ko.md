@@ -394,6 +394,7 @@ Cloudflare 제약: wasm은 Worker 스크립트(3~10 MB)가 아니라 Static Asse
 
    **"기계를 떠나는 것" 목록에 들어간다.** `--dry-run`과 첫 발행 경고가 "Who it says published it" 절을 갖는다. 검증은 없다는 점을 문서에 적었다: 토큰이 계정이 되기 전(TTP-114)까지 닉네임은 이름표일 뿐이다. 페이지에서는 제목이 있으면 h1이 되고 모델명이 부제로 내려가며, 부제 아래 바이라인(24 px 아바타·닉네임 링크), 그 아래 노트, 그 다음이 숫자다. 목록 행과 API 행에도 같은 셋이 실린다.
 
+10. **llama.cpp 밖으로**(2026-09-19, TTP-99). 조사(§3.3의 표)를 끝내고 어댑터가 아니라 **범용 모드** 하나를 넣었다: `/props`가 404면 `/v1/models`로 붙는다(`--engine-kind auto|llama|openai`). 결정 셋. ① 서버 timings가 없으면 녹화기의 시계가 기록이다 — `TimingsSummary.Source = "client"`, 카드 헤드라인 옆에 `client-timed`, 런 수준 caveat `client_timed`. 1번 교훈("서버 수치가 기록")은 폐기가 아니라 예외 조항을 얻었다. ② 청크는 토큰이 아니다 — 토큰 수는 마지막 청크의 `usage.completion_tokens`로 세고 속도는 `(n−1)/구간`으로 다시 계산한다. usage가 없으면 청크 수만 남기고 tok/s는 `?`, caveat `tokens_uncounted`, 그 스트림 하나가 집계도 오염시킨다. ③ `--engine "vLLM 0.11"`은 주장이다 — `ServerInfo.EngineClaim`에 담고 `claim:`이라는 말과 함께 찍으며 Kind·Build·Commit에는 들어가지 않는다. llama 전용 경로(슬롯·GGUF·argv·PID 추정·`/apply-template`·`timings_per_token`)는 `ServerKind.SpeaksLlamaProtocol()` 한 분기로 꺼진다. 다음은 엔진별 보강기다: vLLM `/metrics`, SGLang `/get_server_info`, Ollama `/api/ps`. 실측 픽스처는 ws 서버를 띄워야 하므로 허락을 받고 한다.
 ## 8. 다음 라운드
 
 1. **런 파일 스키마 초안**(`docs/tape-schema.md`): `RunSummary`·`RunSample`·토큰 이벤트. 인계 8교훈을 필드·상수로. 리드가 쓴다.
