@@ -62,9 +62,16 @@ const (
 	// DefaultFontSize and the frame adds 48×54 px of padding, so 156×38 cells
 	// is exactly 1920×1080 — 16:9 at a size X, Reddit and YouTube play without
 	// scaling. Measured on the four-stream example at 12 s: 120×36 is
-	// 1488×1026, 144×40 is 1776×1134, 160×45 is 1968×1270. The GIF keeps
-	// DefaultWidth×DefaultHeight: it is posted inline, has a 1.5 MB budget and
-	// has to stay legible on a phone (see GIFFontSize).
+	// 1488×1026, 144×40 is 1776×1134, 160×45 is 1968×1270.
+	//
+	// The README's hero is rendered on this canvas too since 2026-09-18, at
+	// GIFFontSize rather than DefaultFontSize, which is 1280×720 — the same
+	// 16:9 as the video at a size a GIF can afford. It used to keep
+	// DefaultWidth×DefaultHeight because a 16:9 hero's body text was too small
+	// to read in a feed; the scoreboard carries the figure now, so that no
+	// longer decides it (internal/render/cmd/hero). The plain --gif default is
+	// still DefaultWidth×DefaultHeight, which is what a first run gets and what
+	// the help quotes.
 	VideoWidth  = 156
 	VideoHeight = 38
 )

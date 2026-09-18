@@ -77,7 +77,23 @@ func main() {
 	// run has no file on disk, so the path is derived from its own ID rather
 	// than typed in: a hard-coded string would keep showing the old ID after
 	// the fixture changed.
+	// The video canvas, not the GIF one (user, 2026-09-18: "히어로를 이제 기본
+	// 비디오 전환 비율과 맞춰도 괜찮지 않을까"). VideoWidth×VideoHeight is 16:9
+	// — 1280×720 at GIFFontSize, 1920×1080 at DefaultFontSize — so the hero and
+	// anything exported with --mp4 are now one shape, and the GIF plays without
+	// letterboxing wherever a video would.
+	//
+	// It was DefaultWidth×DefaultHeight because a 16:9 hero's body text was too
+	// small to read in a feed. The scoreboard answered that: the figure a
+	// reader has to take away is five rows tall and survives the smaller cell,
+	// so the prose no longer has to carry the clip (see internal/tui/
+	// scoreboard.go). Measured on this tape at 15 fps: 1280×720 is 1.43 MB
+	// against the old 992×684's 1.54 MB, so the wider canvas came in under the
+	// budget rather than over it — a wider tile wraps less, and a line that
+	// does not rewrap is a line the encoder does not store again.
 	opts := render.Options{
+		Width:       render.VideoWidth,
+		Height:      render.VideoHeight,
 		FPS:         HeroFPS,
 		ColdOpen:    true,
 		PrefillLead: HeroPrefillLead,

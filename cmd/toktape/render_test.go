@@ -348,8 +348,15 @@ func TestHeroGIFIsPostable(t *testing.T) {
 	if want := int(sched.Stream*time.Duration(sched.FPS)/time.Second) * 4 / 5; len(g.Image) < want {
 		t.Errorf("the hero has %d frames, want at least the streaming phase's %d", len(g.Image), want)
 	}
-	if g.Config.Width != 992 {
-		t.Errorf("the hero is %d px wide, want the 992 GIFFontSize gives", g.Config.Width)
+	// 2026-09-18: the hero moved to the video canvas (VideoWidth×VideoHeight at
+	// GIFFontSize = 1280×720), so it is 16:9 and plays without letterboxing
+	// wherever a video would. Both axes are pinned now rather than the width
+	// alone, because the ratio is the thing that changed and a height drift
+	// would leave the width assertion green. FAIL-first: the shipped
+	// 992×684 hero fails both.
+	if g.Config.Width != 1280 || g.Config.Height != 720 {
+		t.Errorf("the hero is %d×%d px, want the 1280×720 VideoWidth×VideoHeight gives at GIFFontSize",
+			g.Config.Width, g.Config.Height)
 	}
 	// The file's own timing says what it was rendered at: the stored delays
 	// are hundredths of a second and sum to the clip's length, so a hero
