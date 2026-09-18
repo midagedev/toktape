@@ -324,8 +324,13 @@ function caveatBlock(idx) {
 function shareTitle(idx, fallback) {
   const parts = [];
   if (idx.decode_per_sec) parts.push(`${fmt(idx.decode_per_sec)} tok/s`);
-  parts.push(idx.model_id || idx.model_raw || fallback);
-  if (idx.quant_raw && !(idx.model_id || "").includes(idx.quant_raw)) parts.push(idx.quant_raw);
+  // The file name stands in when the model never normalised, without its
+  // extension: ".gguf" is not part of what the run measured.
+  const name = idx.model_id || String(idx.model_raw || fallback).replace(/\.gguf$/i, "");
+  parts.push(name);
+  // The quantisation only when the name does not already carry it: a raw
+  // "Qwen2.5-7B-Instruct-Q3_K_M" followed by "Q3_K_M" said it twice.
+  if (idx.quant_raw && !name.toLowerCase().includes(String(idx.quant_raw).toLowerCase())) parts.push(idx.quant_raw);
   return parts.join(" · ");
 }
 
@@ -335,8 +340,10 @@ function shareTitle(idx, fallback) {
 function shareDescription(idx, row) {
   const parts = [];
   if (idx.sessions) parts.push(`${idx.sessions} concurrent stream${idx.sessions === 1 ? "" : "s"}`);
-  if (idx.gpu_id) parts.push(`on ${idx.gpu_count > 1 ? `${idx.gpu_count}× ` : ""}${idx.gpu_id}`);
-  else if (idx.gpus_raw && idx.gpus_raw.length) parts.push(`on ${idx.gpus_raw.join(" / ")}`);
+  // The GPU as it named itself, not the index slug: "RTX A6000" is a
+  // sentence, "rtx-a6000" is a key. The slug is for the filter, not the tweet.
+  if (idx.gpus_raw && idx.gpus_raw.length) parts.push(`on ${gpuNames(idx.gpus_raw)}`);
+  else if (idx.gpu_id) parts.push(`on ${idx.gpu_count > 1 ? `${idx.gpu_count}× ` : ""}${idx.gpu_id}`);
   const engine = [idx.engine_kind, idx.engine_version].filter(Boolean).join(" ");
   if (engine) parts.push(`with ${engine}`);
   const figures = [];
@@ -347,6 +354,14 @@ function shareDescription(idx, row) {
   if (figures.length) s += (s ? " · " : "") + figures.join(" · ");
   s += (s ? ". " : "") + "Replay the run in the browser, read the transcript, or download the record.";
   return s;
+}
+
+// Four identical cards read as "4× NVIDIA RTX A6000", a mixed rig as the
+// list it is.
+function gpuNames(raw) {
+  const names = raw.map(String);
+  if (names.length > 1 && names.every((n) => n === names[0])) return `${names.length}× ${names[0]}`;
+  return names.join(" / ");
 }
 
 function summaryLine(idx) {
