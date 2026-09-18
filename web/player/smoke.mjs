@@ -72,6 +72,21 @@ const stripped = last.replace(/\x1b\[[0-9;]*m/g, "");
 check("the clip is longer than the run", loaded.durationMs >= 11000 + 5000, `${loaded.durationMs} ms for an ~11.6 s run`);
 check("the last frame is the card", /decode · \d+ streams?/.test(stripped), stripped.split("\n").find((l) => /decode · \d+ stream/.test(l))?.trim().slice(0, 70) || "no card text in the last frame");
 
+// details() is what the run page's Details section shows: the per-stream
+// transcript, the card as text, the reproduce block, the caveat and
+// bandwidth explainers and the summary JSON, read out of the same loaded
+// tape.
+const raw = api.details();
+check("details answers while a tape is loaded", typeof raw === "string" && raw.length > 0, `${raw.length} chars`);
+const d = JSON.parse(raw);
+check("the transcript has streams", Array.isArray(d.streams) && d.streams.length > 0, `${d.streams.length} streams`);
+check("the first stream has its answer", typeof d.streams[0].completion === "string" && d.streams[0].completion.length > 0, JSON.stringify(d.streams[0].completion.slice(0, 100)));
+check("the first stream ended with a verdict", d.streams[0].ended !== "?", d.streams[0].ended);
+check("the card text is a card", typeof d.card === "string" && d.card.split("\n").length > 10, `${d.card.split("\n").length} lines`);
+check("the reproduce block names the record", /Reproduce/.test(d.reproduce) && /Recorded with:/.test(d.reproduce), `${String(d.reproduce).length} chars`);
+check("the explainers list the caveat checks", /caveats of /.test(d.explain), String(d.explain).split("\n")[0]);
+check("the summary is an object carrying caveats", typeof d.summary === "object" && d.summary !== null && "caveats" in d.summary, `caveats: ${JSON.stringify((d.summary || {}).caveats)}`);
+
 // A tape it cannot read must say so rather than throw: a page that fetched a
 // truncated file has to be able to tell its reader what happened.
 const bad = api.load(new Uint8Array([1, 2, 3, 4]));
@@ -80,5 +95,8 @@ check("a file that is not a tape is refused by name", bad.ok === false && bad.er
 // And the refusal must not leave the previous run loaded, or a failed load
 // would silently keep replaying whatever was there before.
 check("a failed load clears what was loaded", api.frame(0, COLS, ROWS) === "", "empty frame");
+// details() with nothing loaded is the empty string, not an exception: the
+// page asks before Replay has ever run.
+check("details is empty with nothing loaded", api.details() === "", "empty string");
 
 process.exit(failures === 0 ? 0 : 1);

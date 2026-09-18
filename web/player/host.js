@@ -324,8 +324,158 @@
     }
   }
 
+  // -- the Details section under the run page's table --------------------------
+
+  // The transcript, the card as text, and the record's own paperwork, read
+  // out of the tape in the browser by the same wasm Replay paints with — so
+  // this side still never opens a tape. Opt-in behind the button: a reader
+  // who never scrolls down downloads nothing extra, and Replay starting
+  // (from its button or the phone observer below) never loads this.
+  const detailsButton = document.querySelector(".details .load");
+  if (detailsButton) {
+    const detailsBody = document.querySelector(".details .body");
+    // The page's one non-feed player: the run this page is about — the same
+    // lookup the mp4 button uses.
+    const page = players.find((p) => !p.feed) || players[0];
+    detailsButton.addEventListener("click", async () => {
+      detailsButton.disabled = true;
+      try {
+        detailsButton.textContent = "loading the player…";
+        const api = await loadWasm();
+        detailsButton.textContent = "fetching the record…";
+        const bytes = await fetchTape(page.tapeURL);
+        // The wasm holds one tape. When it already holds this page's there
+        // is nothing to load; otherwise load it and give the live stage its
+        // own tape back afterwards, exactly as the mp4 handler does —
+        // without pausing it.
+        let raw;
+        if (live === page) {
+          raw = api.details();
+        } else {
+          const prior = live;
+          const loaded = api.load(bytes);
+          if (!loaded.ok) throw new Error(loaded.error);
+          try {
+            raw = api.details();
+          } finally {
+            if (prior) { api.load(bytesCache.get(prior.tapeURL)); prior.paint(true); }
+          }
+        }
+        if (!raw) throw new Error("the player has no record loaded");
+        renderDetails(detailsBody, JSON.parse(raw));
+        detailsBody.hidden = false;
+        detailsButton.remove();
+      } catch (err) {
+        report(err);
+        detailsButton.disabled = false;
+        detailsButton.textContent = `details failed: ${err && err.message ? err.message : err}`;
+      }
+    });
+  }
+
+  // Figures the record never observed print as ?, never as a zero nobody
+  // measured — the schema rule, the page-side half of it (page.js fmt is
+  // the server-side half, for the index row).
+  function qInt(v) {
+    return v === 0 || v === undefined || v === null ? "?" : String(v);
+  }
+  function qDec(v, digits) {
+    return v === 0 || v === undefined || v === null ? "?" : Number(v).toFixed(digits);
+  }
+
+  // Each block is a <details class="block"> with a <summary>, in the order
+  // the section promises: Transcript (open), Card, Reproduce, Why the
+  // caveats fired, Summary (JSON). A field the wasm did not send — the
+  // build's size budget keeps some out — leaves its block out rather than
+  // printing a block about nothing. All model text crosses through
+  // escapeHTML before innerHTML; nothing raw is ever templated.
+  function renderDetails(body, d) {
+    const streams = Array.isArray(d.streams) ? d.streams : [];
+    const multiRound = streams.some((s) => s && s.round > 0);
+    let out = `<details class="block" open><summary>Transcript</summary><div class="inner">`;
+    for (const s of streams) out += renderStream(s);
+    if (!streams.length) out += `<p>?</p>`;
+    out += `</div></details>`;
+    if (typeof d.card === "string" && d.card) {
+      // Through toHTML, which boxes wide characters to two cells so the
+      // box art lines up; a string with no SGR passes through it unchanged.
+      out += `<details class="block"><summary>Card</summary><div class="inner"><pre class="cardtext">${toHTML(d.card)}</pre></div></details>`;
+    }
+    if (typeof d.reproduce === "string" && d.reproduce) {
+      out += `<details class="block"><summary>Reproduce</summary><div class="inner">${renderReproduce(d.reproduce)}</div></details>`;
+    }
+    if (typeof d.explain === "string" && d.explain) {
+      out += `<details class="block"><summary>Why the caveats fired</summary><div class="inner"><pre>${escapeHTML(d.explain)}</pre></div></details>`;
+    }
+    if (d.summary && typeof d.summary === "object") {
+      out += `<details class="block"><summary>Summary (JSON)</summary><div class="inner"><pre>${escapeHTML(JSON.stringify(d.summary, null, 2))}</pre></div></details>`;
+    }
+    body.innerHTML = out;
+
+    function renderStream(s) {
+      const idx = Number(s.index) || 0;
+      let head = `stream ${idx + 1}`;
+      // The round only when the tape has more than one of them.
+      if (multiRound) head += ` · round ${(Number(s.round) || 0) + 1}`;
+      if (s.name) head += ` · ${escapeHTML(String(s.name))}`;
+      const ended = s.ended === undefined || s.ended === null ? "?" : String(s.ended);
+      const bad = ended.indexOf("failed") === 0 || ended === "clock cut" || ended === "token cap";
+      const t = s.timings || {};
+      head += ` <span class="ended${bad ? " bad" : ""}">${escapeHTML(ended)}</span>`;
+      head += ` <span class="num">${qInt(t.predicted_n)} tok · ${qDec(t.predicted_per_second, 1)} tok/s · ttft ${qDec(t.ttft_ms, 0)} ms</span>`;
+      let st = `<article class="stream"><h3>${head}</h3>`;
+      for (const m of s.messages || []) {
+        const role = m.role === undefined || m.role === null ? "" : String(m.role);
+        // The label is the tape's own string; the class is the same string
+        // sanitised to [a-z], so a role nobody has heard of still prints.
+        st += `<div class="msg ${escapeHTML(role.toLowerCase().replace(/[^a-z]/g, ""))}"><span class="role">${escapeHTML(role) || "?"}</span><pre>${escapeHTML(m.content === undefined || m.content === null ? "" : String(m.content))}</pre></div>`;
+      }
+      if (s.reasoning) {
+        st += `<details class="reasoning"><summary>thinking · ${qInt(s.reasoning_n)} tok</summary><pre>${escapeHTML(String(s.reasoning))}</pre></details>`;
+      }
+      const completion = s.completion === undefined || s.completion === null ? "" : String(s.completion);
+      if (completion) {
+        st += `<div class="msg answer"><span class="role">answer</span><pre>${escapeHTML(completion)}</pre></div>`;
+      } else if (s.error) {
+        st += `<div class="msg answer err"><span class="role">answer</span><pre>${escapeHTML(String(s.error))}</pre></div>`;
+      } else {
+        st += `<div class="msg answer"><span class="role">answer</span><pre>?</pre></div>`;
+      }
+      return st + `</article>`;
+    }
+  }
+
+  // The reproduce string is Markdown whose outer <details> wrapper this page
+  // already provides. No Markdown library: the block's shape is fixed (4-space
+  // indented commands, paragraphs, `code` spans), so exact-string rules
+  // render it. Everything is escaped first; the structure is derived from
+  // the escaped text, never the other way round.
+  function renderReproduce(md) {
+    const s = String(md)
+      .replace(/^<details><summary>Reproduce<\/summary>/, "")
+      .replace(/<\/details>\s*$/, "");
+    const lines = s.split("\n");
+    let out = "";
+    let pre = [];
+    const flushPre = () => {
+      if (pre.length) { out += `<pre>${escapeHTML(pre.join("\n"))}</pre>`; pre = []; }
+    };
+    const inlineCode = (line) => escapeHTML(line).split("`").map((part, i) =>
+      (i % 2 ? `<code>${part}</code>` : part)).join("");
+    for (const line of lines) {
+      if (/^    /.test(line)) { pre.push(line.slice(4)); continue; }
+      flushPre();
+      if (/^\s*$/.test(line)) continue;
+      out += `<p>${inlineCode(line)}</p>`;
+    }
+    flushPre();
+    return out || `<p>?</p>`;
+  }
+
   document.addEventListener("keydown", (e) => {
     if (!live || live.feed || e.target.tagName === "INPUT") return;
+    // Space inside a <summary> toggles the block; the player must not steal it.
+    if (e.target.closest && e.target.closest(".details")) return;
     if (e.key === " " || e.key === "k") { e.preventDefault(); live.playing ? live.pause() : live.play(); }
     if (e.key === "ArrowLeft") live.seek(live.t - 5000);
     if (e.key === "ArrowRight") live.seek(live.t + 5000);

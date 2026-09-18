@@ -8,6 +8,14 @@
 #
 #   2026-09-18, before chroma went behind a build tag   2.01 MB brotli
 #   the same build with chroma out                      ~1.36 MB brotli
+#   2026-09-18, details(): card text, summary JSON,      1.65 MB brotli
+#     reproduce, explainers and the transcript, which
+#     linked card/bandwidth code the frame never called
+#
+# The second raise (lead, 2026-09-18) is deliberate: the run page's Details
+# section shows the transcript and the card's own paperwork out of the same
+# wasm Replay uses, and 73 KB more brotli on a click that already fetches
+# 1.58 MB is worth a page that shows what the record says.
 #
 # The budget below is that, with headroom. Raising it is a decision about
 # what a share link costs its reader, so it is made deliberately and with a
@@ -21,7 +29,7 @@ repo="$(cd ../.. && pwd)"
 # toolchain, and host.js copied from beside this script so the three ship as
 # one set. Nothing under dist/ is committed.
 out="dist/player"
-budget=1600000
+budget=1700000
 
 version="$(cd "$repo" && git describe --tags --always --dirty 2>/dev/null || echo dev)"
 

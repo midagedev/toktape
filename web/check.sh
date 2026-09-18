@@ -120,6 +120,14 @@ grep -q 'class="act copy" type="button" data-url="'"$base"'/r/'"$id"'"' "$work/p
   die "the copy button does not carry the run's public link"
 grep -q 'class="act mp4" type="button" data-name="'"$id"'.mp4"' "$work/page.html" ||
   die "the mp4 button is not named after the run"
+# The Details section: the transcript and the record's paperwork, read out of
+# the tape in the browser by the wasm player. It finds its tape through the
+# page's own player, never a data-tape of its own — host.js treats every
+# [data-tape] as a stage — so it carries no such attribute.
+grep -q '<section class="details">' "$work/page.html" ||
+  die "the page has no Details section"
+grep -q 'class="act load"' "$work/page.html" ||
+  die "the Details section has no Load button"
 
 say "the player is served"
 grep -q 'data-tape="/r/'"$id"'.tape"' "$work/page.html" || die "the page does not name the record for Replay"

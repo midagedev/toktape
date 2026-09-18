@@ -186,6 +186,13 @@ ${figures
 ${rows.map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v mono">${esc(v)}</td></tr>`).join("\n")}
 </table>
 
+<section class="details">
+  <h2>Details</h2>
+  <p class="sub">The transcript, the card as text, and why each caveat fired — read out of the record in your browser, the same way Replay draws it.</p>
+  <button class="act load" type="button">Load details</button>
+  <div class="body" hidden></div>
+</section>
+
 ${caveatBlock(idx)}
 
 <footer>
@@ -259,6 +266,42 @@ td.v { word-break: break-word; }
   background: #1a160c; border-radius: 6px; font-size: .875rem; }
 .caveats b { color: #e0b64a; font-weight: 600; }
 .caveats code { color: #b9a06a; }
+/* Details: the transcript and the record's own paperwork, read out of the
+   tape in the browser by web/player (host.js) — this side still never opens
+   a tape. Long prose wraps; the 80-column card keeps its shape and scrolls
+   sideways inside its own pre, so the page body never scrolls. */
+.details { margin-top: 2.5rem; }
+.details h2 { color: #6b727d; font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .09em; margin: 0 0 .35rem; font-weight: 600; }
+.details .sub { margin-bottom: 1rem; }
+.details .body[hidden] { display: none; }
+.block { border: 1px solid #1b1f26; border-radius: 6px; margin: .6rem 0; }
+.block > summary { padding: .6rem .9rem; cursor: pointer; color: #d7dae0; }
+.block .inner { padding: 0 .9rem .9rem; }
+.stream { border-top: 1px solid #1b1f26; padding-top: .8rem; margin-top: .8rem; }
+.stream:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+.stream h3 { font-size: .9rem; font-weight: 600; display: flex; flex-wrap: wrap;
+  gap: .6rem; align-items: baseline; margin: 0 0 .2rem; }
+.ended { color: #86c2b3; }
+.ended.bad { color: #e0b64a; }
+.msg { display: grid; grid-template-columns: 5.5rem 1fr; gap: .6rem; margin: .5rem 0; }
+.msg .role { color: #7d848f; font-size: .75rem; text-transform: uppercase;
+  letter-spacing: .08em; padding-top: .2rem; }
+.msg pre, .reasoning pre, .cardtext, .details pre { white-space: pre-wrap;
+  word-break: break-word;
+  font: .85rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin: 0; color: #d7dae0; }
+/* The card is 80 columns of box art: it must not wrap. */
+.cardtext { white-space: pre; overflow-x: auto; }
+.msg.err pre { color: #e0b64a; }
+.reasoning { margin: .4rem 0 .4rem 6.1rem; color: #8a919c; }
+.reasoning > summary { cursor: pointer; font-size: .85rem; }
+.details p { margin: .6rem 0; font-size: .9rem; }
+.details code { color: #b9a06a; }
+@media (max-width: 30rem) {
+  .msg { grid-template-columns: 1fr; }
+  .reasoning { margin-left: 0; }
+}
 `;
 
 function caveatBlock(idx) {
