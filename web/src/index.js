@@ -13,6 +13,7 @@
 // request body internal/publish/client_test.go parses; this side is written
 // against those, never the other way round.
 
+import { deleteRun } from "./del.js";
 import { fail, json, text } from "./http.js";
 import { serveRunJSON, serveRunPage, serveTape } from "./run.js";
 import { uploadRun } from "./upload.js";
@@ -23,6 +24,7 @@ import { uploadRun } from "./upload.js";
 const TAPE_SUFFIX = /^\/r\/([a-z0-9]{8,64})(\.toktape|\.tape)$/;
 const RUN_JSON = /^\/r\/([a-z0-9]{8,64})\.json$/;
 const RUN_PAGE = /^\/r\/([a-z0-9]{8,64})$/;
+const RUN_API = /^\/api\/v1\/runs\/([a-z0-9]{8,64})$/;
 
 export default {
   async fetch(request, env) {
@@ -43,6 +45,12 @@ export default {
     }
 
     let m;
+    if ((m = RUN_API.exec(path))) {
+      if (request.method !== "DELETE") {
+        return fail(405, "a run is read at /r/<id> and deleted with DELETE here", { Allow: "DELETE" });
+      }
+      return deleteRun(m[1], request, env);
+    }
     if ((m = TAPE_SUFFIX.exec(path))) return serveTape(m[1], env);
     if ((m = RUN_JSON.exec(path))) return serveRunJSON(m[1], env);
     if ((m = RUN_PAGE.exec(path))) return serveRunPage(m[1], env);

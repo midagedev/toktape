@@ -102,4 +102,31 @@ grep -q 'schema 1' "$work/body" || { cat "$work/body"; die "the refusal does not
 code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/r/aaaaaaaaaaaaaaaaaaaa.json")
 [ "$code" = "404" ] || { cat "$work/body"; die "an id that does not exist was not a 404 (got $code)"; }
 
+say "the delete token is the only key"
+dt=$(sed -n 's/^Delete token: //p' "$work/publish.err" | tr -d '\r\n')
+[ -n "$dt" ] || die "no delete token was printed"
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X DELETE "$base/api/v1/runs/$id" \
+  -H "Authorization: Bearer dt_not_the_right_one")
+[ "$code" = "403" ] || { cat "$work/body"; die "a wrong delete token was accepted (got $code)"; }
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X DELETE "$base/api/v1/runs/$id" \
+  -H "Authorization: Bearer $dt")
+[ "$code" = "204" ] || { cat "$work/body"; die "the delete token did not open the run (got $code)"; }
+# Gone means gone: the row and the record both.
+code=$(curl -s -o /dev/null -w '%{http_code}' "$base/r/$id.json")
+[ "$code" = "404" ] || die "a deleted run is still indexed (got $code)"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$base/r/$id.tape")
+[ "$code" = "404" ] || die "a deleted run's record is still served (got $code)"
+
+say "the anonymous limit"
+# Six a minute; the seventh is refused. If this ever stops being enforced
+# locally the check fails here rather than in production.
+limited=no
+for _ in $(seq 1 9); do
+  code=$(curl -s -o "$work/body" -w '%{http_code}' -X POST "$base/api/v1/runs" \
+    -F 'tape=@'"$work/downloaded.tape"';filename=run.tape' -F 'index={"schema":1}')
+  if [ "$code" = "429" ]; then limited=yes; break; fi
+done
+[ "$limited" = yes ] || die "nine anonymous uploads in a row were all accepted"
+grep -q 'a minute' "$work/body" || { cat "$work/body"; die "the 429 does not say what the limit is"; }
+
 printf '\nweb/check.sh: OK\n'

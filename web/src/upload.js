@@ -43,6 +43,26 @@ export async function uploadRun(request, env) {
     return fail(401, "that token is not one this service issued; publish without it for a one-off upload");
   }
 
+  // Before the body is read, so a flood costs this service the headers and
+  // not the bytes. Anonymous only: a journal token was issued by us and is
+  // revocable, which is a better answer to abuse than a counter.
+  if (!owner) {
+    if (!env.ANON_UPLOADS) {
+      // Closed beats unlimited. A deploy that lost the binding would
+      // otherwise serve an anonymous endpoint with no limit at all, and
+      // nothing about it would look wrong.
+      return fail(503, "this deployment has no upload limit configured and will not take anonymous uploads");
+    }
+    const { success } = await env.ANON_UPLOADS.limit({ key: request.headers.get("CF-Connecting-IP") || "unknown" });
+    if (!success) {
+      return fail(
+        429,
+        "six uploads a minute is the limit for an address with no token; wait a minute, or publish with a journal token",
+        { "Retry-After": "60" },
+      );
+    }
+  }
+
   let form;
   try {
     form = await request.formData();

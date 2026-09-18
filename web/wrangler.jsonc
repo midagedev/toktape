@@ -43,6 +43,15 @@
     { "binding": "TAPES", "bucket_name": "toktape" }
   ],
 
+  // The anonymous upload limit (§9.3 — anonymous is a supported path, not a
+  // degraded one, so it gets a limit rather than a door). Cloudflare keeps
+  // the counter, which is why nothing here has to store a client address:
+  // this repo strips hostnames out of every tape it publishes and keeping a
+  // log of who uploaded from where would be the same fact, kept anyway.
+  "ratelimits": [
+    { "name": "ANON_UPLOADS", "namespace_id": "1001", "simple": { "limit": 6, "period": 60 } }
+  ],
+
   // D1 holds the index rows and nothing a tape has to be opened to learn.
   "d1_databases": [
     {
