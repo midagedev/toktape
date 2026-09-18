@@ -26,7 +26,7 @@ export async function deleteRun(id, request, env) {
     return fail(401, "the Authorization header carried no token");
   }
 
-  const row = await env.DB.prepare("SELECT tape_key, owner_token, delete_hash FROM runs WHERE id = ?")
+  const row = await env.DB.prepare("SELECT tape_key, card_key, owner_token, delete_hash FROM runs WHERE id = ?")
     .bind(id)
     .first();
   if (!row) {
@@ -49,6 +49,7 @@ export async function deleteRun(id, request, env) {
   // fails the object is unreferenced rather than exposed.
   await env.DB.prepare("DELETE FROM runs WHERE id = ?").bind(id).run();
   await env.TAPES.delete(row.tape_key).catch(() => {});
+  if (row.card_key) await env.TAPES.delete(row.card_key).catch(() => {});
   return new Response(null, { status: 204 });
 }
 

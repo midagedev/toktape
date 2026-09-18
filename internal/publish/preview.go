@@ -48,8 +48,12 @@ func Preview(view *tape.Tape, idx Index, opts Options) string {
 	fmt.Fprintf(&b, "  server argv    %s\n", argvLine(s))
 	b.WriteString("\n")
 
-	b.WriteString("What travels as text\n")
-	fmt.Fprintf(&b, "  %s\n", textLine(view, opts))
+	b.WriteString("What travels besides the record\n")
+	fmt.Fprintf(&b, "  text           %s\n", textLine(view, opts))
+	// The card is uploaded, not drawn by the service — drawing one needs the
+	// whole tape and the service never opens it — so it is something that
+	// leaves this machine and belongs in a listing of what does.
+	b.WriteString("  card           a 1200×675 PNG of the card, drawn from the fields above\n")
 	b.WriteString("\n")
 
 	b.WriteString("The row the search will hold\n")

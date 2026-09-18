@@ -14,8 +14,8 @@
 // against those, never the other way round.
 
 import { deleteRun } from "./del.js";
-import { fail, json } from "./http.js";
-import { serveRunJSON, serveRunPage, serveTape } from "./run.js";
+import { fail, json, publicBase } from "./http.js";
+import { serveCard, serveRunJSON, serveRunPage, serveTape } from "./run.js";
 import { searchAPI, searchPage } from "./search.js";
 import { uploadRun } from "./upload.js";
 
@@ -24,6 +24,7 @@ import { uploadRun } from "./upload.js";
 // back as whichever it arrived as.
 const TAPE_SUFFIX = /^\/r\/([a-z0-9]{8,64})(\.toktape|\.tape)$/;
 const RUN_JSON = /^\/r\/([a-z0-9]{8,64})\.json$/;
+const RUN_CARD = /^\/r\/([a-z0-9]{8,64})\.png$/;
 const RUN_PAGE = /^\/r\/([a-z0-9]{8,64})$/;
 const RUN_API = /^\/api\/v1\/runs\/([a-z0-9]{8,64})$/;
 
@@ -53,7 +54,8 @@ export default {
     }
     if ((m = TAPE_SUFFIX.exec(path))) return serveTape(m[1], env);
     if ((m = RUN_JSON.exec(path))) return serveRunJSON(m[1], env);
-    if ((m = RUN_PAGE.exec(path))) return serveRunPage(m[1], env);
+    if ((m = RUN_CARD.exec(path))) return serveCard(m[1], env);
+    if ((m = RUN_PAGE.exec(path))) return serveRunPage(m[1], env, publicBase(request, env));
 
     // The front page is the search: the thing a visitor came for is other
     // people's runs, not an explanation of the service.

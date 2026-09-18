@@ -13,7 +13,7 @@
 // lives in internal/tape, and a second copy of it in JavaScript would be two
 // places that are wrong differently.
 
-import { fail, json } from "./http.js";
+import { fail, json, publicBase } from "./http.js";
 import { newDeleteToken, newRunID, sha256Hex } from "./ids.js";
 import { INDEX_COLUMNS, SUPPORTED_INDEX_SCHEMA, columnValues } from "./row.js";
 
@@ -27,6 +27,10 @@ const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 // writes, so both are accepted and the one that arrived is what a download
 // is served as: the file format has one owner and it is the Go side.
 const TAPE_EXTS = [".toktape", ".tape"];
+
+// The card is 1200×675 and comes out of internal/card/png at around 92 KB.
+// A megabyte is room for it to grow and still not be something else.
+const MAX_CARD_BYTES = 1024 * 1024;
 
 export async function uploadRun(request, env) {
   const declared = Number(request.headers.get("Content-Length") || 0);
@@ -116,13 +120,35 @@ export async function uploadRun(request, env) {
     );
   }
 
+  // The card the link previews as. Optional, because a run published by an
+  // older client has none and a page without a preview is better than a
+  // refusal — but checked when it is there, because an image served as
+  // image/png that is not one is a broken preview everywhere at once.
+  const cardPart = form.get("card");
+  let card = null;
+  if (cardPart && typeof cardPart !== "string") {
+    card = new Uint8Array(await cardPart.arrayBuffer());
+    if (card.byteLength > MAX_CARD_BYTES) {
+      return fail(413, `a card of ${card.byteLength} bytes is larger than this service accepts (${MAX_CARD_BYTES})`);
+    }
+    if (!isPNG(card)) {
+      return fail(400, "the card part is not a PNG");
+    }
+  }
+
   const isPrivate = form.get("private") === "true";
 
   const id = newRunID();
   const key = `runs/${id}/run${ext}`;
+  const cardKey = card ? `runs/${id}/card.png` : null;
   await env.TAPES.put(key, bytes, {
     httpMetadata: { contentType: "application/gzip" },
   });
+  if (card) {
+    await env.TAPES.put(cardKey, card, {
+      httpMetadata: { contentType: "image/png", cacheControl: "public, max-age=31536000, immutable" },
+    });
+  }
 
   // Only anonymous uploads get a delete token. A token-owned run is already
   // deletable by its owner, and inventing a second key for it would be one
@@ -132,9 +158,9 @@ export async function uploadRun(request, env) {
   try {
     await env.DB.prepare(
       `INSERT INTO runs (id, created_at, private, owner_token, delete_hash,
-                         tape_key, tape_ext, tape_bytes,
+                         tape_key, tape_ext, tape_bytes, card_key,
                          index_schema, index_json, ${INDEX_COLUMNS.join(", ")})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${INDEX_COLUMNS.map(() => "?").join(", ")})`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${INDEX_COLUMNS.map(() => "?").join(", ")})`,
     )
       .bind(
         id,
@@ -145,6 +171,7 @@ export async function uploadRun(request, env) {
         key,
         ext,
         bytes.byteLength,
+        cardKey,
         idx.schema,
         indexPart,
         ...columnValues(idx),
@@ -155,6 +182,7 @@ export async function uploadRun(request, env) {
     // with nothing pointing at it. Removing it keeps the two stores from
     // drifting apart in the one direction that is silent.
     await env.TAPES.delete(key).catch(() => {});
+    if (cardKey) await env.TAPES.delete(cardKey).catch(() => {});
     throw e;
   }
 
@@ -163,14 +191,12 @@ export async function uploadRun(request, env) {
   return json(receipt, 201);
 }
 
-// publicBase is where this service answers, which is not the same question
-// as where the request came from. `wrangler dev` simulates the configured
-// route, so a request to a dev server arrives claiming to be
-// tape.midagedev.com — a link derived from it would hand a developer a
-// production URL for a run that only exists on their laptop.
-function publicBase(request, env) {
-  if (env.PUBLIC_BASE_URL) return env.PUBLIC_BASE_URL.replace(/\/+$/, "");
-  return new URL(request.url).origin;
+// The PNG signature. Two bytes settle gzip; a PNG's is eight and all eight
+// are checked because this one is handed to browsers as an image.
+function isPNG(b) {
+  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (b.byteLength < sig.length) return false;
+  return sig.every((v, i) => b[i] === v);
 }
 
 // UNKNOWN_TOKEN is distinct from null: null is an anonymous upload, which is

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/midagedev/toktape/internal/card/png"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -24,8 +25,9 @@ const UploadPath = "/api/v1/runs"
 
 // The contract TTP-115 implements.
 //
-// The Worker never parses a tape (§9.6). This client sends two parts and the
-// server stores the first and indexes the second:
+// The Worker never parses a tape (§9.6), so everything it needs is derived
+// here and sent beside the record: the row it indexes and the image it puts
+// on the link.
 //
 //	POST {base}/api/v1/runs
 //	Content-Type: multipart/form-data
@@ -35,6 +37,12 @@ const UploadPath = "/api/v1/runs"
 //	part "tape"   application/gzip, filename "run.tape" — exactly the bytes
 //	              tape.Write puts on disk, so a download is a run file
 //	part "index"  application/json — one publish.Index, schema IndexSchema
+//	part "card"   image/png, filename "card.png" — the 1200×675 share card,
+//	              drawn from the public view so that what the JSON had taken
+//	              out is not baked back into the pixels. The server serves it
+//	              as the link's preview image and never renders one: drawing
+//	              a card needs the whole tape, and this side is the only one
+//	              allowed to read it
 //	part "private" text/plain, "true" — present only for an unlisted upload
 //
 //	201 Created, application/json:
@@ -165,6 +173,20 @@ func uploadBody(view *tape.Tape, idx Index, opts Options) (body []byte, contentT
 	}
 	if err := json.NewEncoder(w).Encode(idx); err != nil {
 		return nil, "", fmt.Errorf("publish: encode index: %w", err)
+	}
+
+	// Drawn here rather than sent in, so it cannot be forgotten: a run
+	// published without a card is a link that previews as nothing, and
+	// nothing about that looks wrong from this side. It is drawn from the
+	// view, never the tape it came from — a card rendered from the original
+	// would paint the hostname back into an image after the JSON had taken
+	// it out.
+	w, err = mw.CreatePart(partHeader(`form-data; name="card"; filename="card.png"`, "image/png"))
+	if err != nil {
+		return nil, "", fmt.Errorf("publish: %w", err)
+	}
+	if err := png.Encode(w, &view.Summary); err != nil {
+		return nil, "", fmt.Errorf("publish: render card: %w", err)
 	}
 
 	// Present or absent, never "false": the server reads absence as public,

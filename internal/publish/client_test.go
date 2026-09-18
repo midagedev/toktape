@@ -1,8 +1,11 @@
 package publish
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	_ "image/png"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -27,6 +30,9 @@ type received struct {
 	tapeType    string
 	index       Index
 	indexType   string
+	card        []byte
+	cardName    string
+	cardType    string
 	privateSeen bool
 	extraParts  []string
 }
@@ -67,6 +73,9 @@ func serve(t *testing.T, status int, reply string) (*httptest.Server, *received)
 				if err := json.NewDecoder(p).Decode(&got.index); err != nil {
 					t.Fatalf("decode index part: %v", err)
 				}
+			case "card":
+				got.cardName, got.cardType = p.FileName(), p.Header.Get("Content-Type")
+				got.card, _ = io.ReadAll(p)
 			case "private":
 				b, _ := io.ReadAll(p)
 				if string(b) != "true" {
@@ -127,7 +136,23 @@ func TestUpload(t *testing.T) {
 		t.Error("a public upload sent a private part")
 	}
 	if len(got.extraParts) != 0 {
-		t.Errorf("unexpected parts %v: the Worker's contract is tape, index and private", got.extraParts)
+		t.Errorf("unexpected parts %v: the Worker's contract is tape, index, card and private", got.extraParts)
+	}
+
+	// The card is what the link previews as. The server cannot draw one —
+	// drawing it needs the whole tape — so an upload without this part is a
+	// run that shows up as a blank rectangle wherever it is posted.
+	if got.cardName != "card.png" || got.cardType != "image/png" {
+		t.Errorf("card part = %q / %q, want card.png / image/png", got.cardName, got.cardType)
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(got.card))
+	if err != nil {
+		t.Fatalf("the card part is not an image: %v", err)
+	}
+	// 1200x675: X and Reddit crop an OpenGraph large image to exactly 16:9,
+	// which is why internal/card/png fixes the canvas (see its doc comment).
+	if cfg.Width != 1200 || cfg.Height != 675 {
+		t.Errorf("card is %dx%d, want 1200x675 — the size the preview crops to", cfg.Width, cfg.Height)
 	}
 
 	// The part the Worker stores has to be a run file: it is handed back to

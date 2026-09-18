@@ -31,7 +31,10 @@ func TestPreviewAnswersTheQuestionItIsAskedFor(t *testing.T) {
 		"Qwen3-0.6B-Q8_0.gguf", // the file name that travels in its place
 		"paths shortened to file names",
 		"characters of prompt", // how much text, not that there is some
-		`"schema": 1`,          // the row itself
+		// The card leaves the machine too, and it is the one thing on the
+		// published page that the service could not have drawn itself.
+		"1200×675",
+		`"schema": 1`, // the row itself
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the preview does not mention %q:\n%s", want, out)

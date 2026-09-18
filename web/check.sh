@@ -85,8 +85,21 @@ if grep -qi 'ws\b\|/home/\|192\.168\.' "$work/card.txt"; then
   die "the downloaded record still carries the place it ran"
 fi
 
+say "the card the link previews as"
+# Unauthenticated, image/png, and really a PNG: get any of the three wrong
+# and every preview everywhere renders nothing, with no error to notice.
+ctype=$(curl -fsS -o "$work/card.png" -w '%{content_type}' "$base/r/$id.png")
+case "$ctype" in image/png*) ;; *) die "the card is served as $ctype" ;; esac
+head -c 8 "$work/card.png" | od -An -tx1 | tr -d ' \n' | grep -q '^89504e470d0a1a0a$' ||
+  die "what came back from /r/<id>.png is not a PNG"
+[ "$(wc -c <"$work/card.png")" -gt 10000 ] || die "the card is too small to be the card"
+
 say "the page and the row"
-curl -fsS "$base/r/$id" | grep -q '<title>' || die "/r/<id> is not a page"
+curl -fsS "$base/r/$id" >"$work/page.html"
+grep -q '<title>' "$work/page.html" || die "/r/<id> is not a page"
+# An og:image must be absolute or a crawler will not fetch it.
+grep -q "og:image\" content=\"$base/r/$id.png" "$work/page.html" ||
+  { grep -o 'og:image[^>]*' "$work/page.html"; die "the page has no absolute og:image"; }
 curl -fsS "$base/r/$id.json" >"$work/row.json"
 grep -q '"schema": *1' "$work/row.json" || { cat "$work/row.json"; die "the index row is not there"; }
 

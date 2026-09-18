@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"image"
 	stdpng "image/png"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -52,16 +53,27 @@ func renderCanvas(s *tape.RunSummary) (*canvas, error) {
 	return c, nil
 }
 
+// Encode renders s and writes the PNG to w.
+//
+// It is what Write puts on disk, so a card that travels somewhere other than
+// the file system — `toktape publish` uploads one beside the record, to be
+// the link's preview image — is the same image rather than a second encoding
+// that could drift from this one. Same reason tape.Encode exists.
+func Encode(w io.Writer, s *tape.RunSummary) error {
+	img, err := Render(s)
+	if err != nil {
+		return err
+	}
+	enc := stdpng.Encoder{CompressionLevel: stdpng.BestCompression}
+	return enc.Encode(w, img)
+}
+
 // Write renders s and writes it to path as a PNG, creating parent directories.
 //
 // The file is written through a temporary file in the same directory and
 // renamed, so a reader watching the output directory never sees a half-encoded
 // card.
 func Write(path string, s *tape.RunSummary) error {
-	img, err := Render(s)
-	if err != nil {
-		return err
-	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("png: create %s: %w", dir, err)
@@ -73,8 +85,7 @@ func Write(path string, s *tape.RunSummary) error {
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
 
-	enc := stdpng.Encoder{CompressionLevel: stdpng.BestCompression}
-	if err := enc.Encode(tmp, img); err != nil {
+	if err := Encode(tmp, s); err != nil {
 		tmp.Close()
 		return fmt.Errorf("png: encode %s: %w", path, err)
 	}

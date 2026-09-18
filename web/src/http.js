@@ -32,3 +32,13 @@ export function text(body, status = 200, extra = {}) {
     },
   });
 }
+
+// publicBase is where this service answers, which is not the same question
+// as where the request came from. `wrangler dev` simulates the configured
+// route, so a request to a dev server arrives claiming to be
+// tape.midagedev.com — a link or an og:image derived from it would point a
+// developer, and every crawler, at production.
+export function publicBase(request, env) {
+  if (env.PUBLIC_BASE_URL) return env.PUBLIC_BASE_URL.replace(/\/+$/, "");
+  return new URL(request.url).origin;
+}

@@ -40,8 +40,33 @@ export async function serveTape(id, env) {
   });
 }
 
+// GET /r/<id>.png — the share card, unauthenticated and with the right
+// content type, or Reddit and X render no preview at all. An unlisted run's
+// card is served too: the id is the secret, and a preview that 404'd on a
+// link somebody deliberately shared would break the sharing the link is for.
+export async function serveCard(id, env) {
+  const row = await env.DB.prepare("SELECT card_key FROM runs WHERE id = ?").bind(id).first();
+  if (!row) return fail(404, "no run with that id");
+  if (!row.card_key) {
+    // Published by a client that did not send one. Saying so beats an image
+    // this side would have to invent, which it cannot: drawing the card
+    // means reading the tape.
+    return fail(404, "that run was published without a card");
+  }
+  const obj = await env.TAPES.get(row.card_key);
+  if (!obj) return fail(500, "that run's card is missing from storage");
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": "image/png",
+      "Content-Length": String(obj.size),
+      // A run's card never changes: it was rendered once, before the upload.
+      "Cache-Control": "public, max-age=31536000, immutable",
+    },
+  });
+}
+
 export async function serveRunJSON(id, env) {
-  const row = await env.DB.prepare("SELECT id, created_at, private, index_json, tape_ext, tape_bytes FROM runs WHERE id = ?")
+  const row = await env.DB.prepare("SELECT id, created_at, private, index_json, tape_ext, tape_bytes, card_key FROM runs WHERE id = ?")
     .bind(id)
     .first();
   if (!row) return fail(404, "no run with that id");
@@ -51,12 +76,13 @@ export async function serveRunJSON(id, env) {
     private: row.private === 1,
     tape: `/r/${row.id}${row.tape_ext}`,
     tape_bytes: row.tape_bytes,
+    card: row.card_key ? `/r/${row.id}.png` : null,
     index: JSON.parse(row.index_json),
   });
 }
 
-export async function serveRunPage(id, env) {
-  const row = await env.DB.prepare("SELECT id, created_at, private, index_json, tape_ext, tape_bytes FROM runs WHERE id = ?")
+export async function serveRunPage(id, env, base) {
+  const row = await env.DB.prepare("SELECT id, created_at, private, index_json, tape_ext, tape_bytes, card_key FROM runs WHERE id = ?")
     .bind(id)
     .first();
   if (!row) {
@@ -66,7 +92,7 @@ export async function serveRunPage(id, env) {
     });
   }
   const idx = JSON.parse(row.index_json);
-  return new Response(runPage(row, idx), {
+  return new Response(runPage(row, idx, base), {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       // A published run does not change, but it can be deleted, so this is
@@ -79,7 +105,7 @@ export async function serveRunPage(id, env) {
   });
 }
 
-function runPage(row, idx) {
+function runPage(row, idx, base) {
   const title = idx.model_id || idx.model_raw || "a toktape run";
   const rows = [
     ["model", idx.model_raw || "?"],
@@ -106,11 +132,28 @@ function runPage(row, idx) {
 
   return layout({
     title: `${title} — toktape`,
+    // og:image is absolute, because a crawler does not resolve a relative
+    // one — and it is emitted only when there really is a card, so a link
+    // never promises a preview that 404s.
     meta: `<meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(summaryLine(idx))}">
-<meta property="og:type" content="website">`,
+<meta property="og:type" content="website">
+<meta property="og:url" content="${esc(base)}/r/${esc(row.id)}">${
+      row.card_key
+        ? `
+<meta property="og:image" content="${esc(base)}/r/${esc(row.id)}.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="675">
+<meta name="twitter:card" content="summary_large_image">`
+        : ""
+    }`,
     style: PAGE_STYLE,
-    body: `
+    body: `${
+      row.card_key
+        ? `<img class="card" src="/r/${esc(row.id)}.png" width="1200" height="675"
+     alt="The toktape card for this run: ${esc(summaryLine(idx))}">`
+        : ""
+    }
 <h1>${esc(title)}</h1>
 <p class="sub">${esc(summaryLine(idx))}${row.private === 1 ? " · unlisted" : ""}</p>
 
@@ -141,6 +184,10 @@ draws the card from the same file.
 }
 
 const PAGE_STYLE = `
+/* The card is the page's first sentence: it is what the link previews as,
+   and it settles the argument before any of the table is read. */
+.card { width: 100%; height: auto; display: block; border-radius: 8px;
+  border: 1px solid #1b1f26; margin: 0 0 2rem; }
 .figures { display: flex; flex-wrap: wrap; gap: 2.5rem; margin: 0 0 2.5rem; }
 .figure .n { font: 600 1.9rem/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #eef1f5; }

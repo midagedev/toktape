@@ -1,0 +1,11 @@
+-- The share card the client uploaded beside the record.
+--
+-- The Worker cannot draw one. Drawing the card means reading the whole tape
+-- — every field, in the order §4 fixes, with `?` for anything unobserved —
+-- and this side never opens a tape, so the image arrives already rendered
+-- from the public view and is stored the same way the record is.
+--
+-- Nullable because a run published by an older client has none, and a page
+-- without a preview image is better than a page claiming one that is not
+-- there.
+ALTER TABLE runs ADD COLUMN card_key TEXT;
