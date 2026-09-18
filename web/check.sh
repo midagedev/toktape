@@ -79,8 +79,10 @@ curl -fsS "$base/r/$id.tape" -o "$work/downloaded.tape"
 "$work/toktape" card "$work/downloaded.tape" >"$work/card.txt" 2>&1 ||
   { cat "$work/card.txt"; die "the downloaded record does not load"; }
 # The public view is what was uploaded, so the place the run happened must
-# not have survived the round trip.
-if grep -qi 'ws\b\|/home/\|192\.168\.' "$work/card.txt"; then
+# not have survived the round trip. Path shapes only: the field-by-field
+# proof is TestNoPlaceSurvivesAnywhereInTheSummary, and a bare hostname
+# pattern here would fire on any card that printed a word ending in it.
+if grep -qE '(^| )(/|~/)[^ ]' "$work/card.txt"; then
   cat "$work/card.txt"
   die "the downloaded record still carries the place it ran"
 fi
