@@ -50,6 +50,15 @@ const UploadPath = "/api/v1/runs"
 //	               ≤ 65536 bytes, ≤ 256×256, PNG signature checked by the server
 //	part "title"   text/plain — the note's title, present only when given
 //	part "note"    text/plain — the note's body, present only when given
+//	part "bio"     text/plain — the author's bio, ≤ 600 runes after TrimSpace,
+//	               \r\n normalised to \n; present only on an upload with an
+//	               Authorization header, and stored on the token, never the run
+//
+//	PATCH {base}/api/v1/runs/<id>
+//	Authorization: Bearer <token>        (the journal token that owns the run)
+//	Content-Type: application/json — {"title"?, "note"?, "private"?}; null
+//	clears a field, absent leaves it, unknown keys are refused. 200 answers
+//	the same shape as /r/<id>.json.
 //
 //	201 Created, application/json:
 //	  {"id":"...","url":"https://.../r/<id>","delete_token":"..."}
@@ -104,6 +113,22 @@ type Options struct {
 	// part.
 	Title string
 	Note  string
+	// Bio is the user-home bio (TTP-127): plain paragraphs shown on
+	// /u/<handle> and stored on the token, never the run. Empty means no
+	// bio part is sent. It is sent only on a token-owned upload — Upload
+	// drops it when there is no token — because an anonymous run has no
+	// home to show it on.
+	Bio string
+}
+
+// Edit is one owner edit of a run's title, note and visibility (TTP-127).
+// A nil field is left alone; a non-nil Title or Note replaces the field,
+// and Private replaces the visibility. There is no way to clear a field
+// to empty here — an empty title is refused the way an upload refuses it.
+type Edit struct {
+	Title   *string
+	Note    *string
+	Private *bool
 }
 
 // authorWire is the "author" part's shape. Either field may be absent, so
@@ -121,7 +146,7 @@ func (c *Client) Upload(ctx context.Context, view *tape.Tape, idx Index, opts Op
 	if view == nil {
 		return nil, fmt.Errorf("publish: nothing to upload")
 	}
-	body, contentType, err := uploadBody(view, idx, opts)
+	body, contentType, err := uploadBody(view, idx, opts, c.Token)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +184,90 @@ func (c *Client) Upload(ctx context.Context, view *tape.Tape, idx Index, opts Op
 	return &r, nil
 }
 
+// Edit changes one run's title, note and visibility (TTP-127). Only the
+// fields e sets travel — nil means leave it — and the run is named by id.
+// It needs the journal token that owns the run in c.Token: an anonymous run
+// cannot be edited and a delete token cannot edit. Anything but 200 is a
+// failure reported verbatim like Upload's, and 200 answers the same shape
+// as /r/<id>.json.
+func (c *Client) Edit(ctx context.Context, id string, e Edit) (*Receipt, error) {
+	body := map[string]any{}
+	if e.Title != nil {
+		title, err := ValidateTitle(*e.Title)
+		if err != nil {
+			return nil, err
+		}
+		body["title"] = title
+	}
+	if e.Note != nil {
+		note, err := ValidateNote(*e.Note)
+		if err != nil {
+			return nil, err
+		}
+		body["note"] = note
+	}
+	if e.Private != nil {
+		body["private"] = *e.Private
+	}
+	if len(body) == 0 {
+		return nil, fmt.Errorf("publish: nothing to change: name --title, --note or --private/--public")
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("publish: %w", err)
+	}
+
+	base := strings.TrimRight(c.baseURL(), "/")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, base+"/api/v1/runs/"+id, bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("publish: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if c.UserAgent != "" {
+		req.Header.Set("User-Agent", c.UserAgent)
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+
+	resp, err := c.http().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("publish: %s: %w", base, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, editError(base, resp)
+	}
+	// The answer is the run's own JSON shape — the same object /r/<id>.json
+	// serves, with no link in it — so the link is built from the service
+	// that was just talked to, the way Upload reads it out of the receipt.
+	var got struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&got); err != nil {
+		return nil, fmt.Errorf("publish: %s accepted the edit but its answer was unreadable: %w", base, err)
+	}
+	if got.ID == "" {
+		return nil, fmt.Errorf("publish: %s accepted the edit without naming the run", base)
+	}
+	return &Receipt{ID: got.ID, URL: base + "/r/" + got.ID}, nil
+}
+
+// editError quotes a refused edit the way uploadError quotes a refused
+// upload: the status and the server's short text body.
+func editError(base string, resp *http.Response) error {
+	msg := strings.TrimSpace(readShort(resp.Body))
+	if msg != "" {
+		if len(msg) > 400 {
+			msg = msg[:400] + "…"
+		}
+		return fmt.Errorf("publish: %s refused the edit (%s): %s", base, resp.Status, msg)
+	}
+	return fmt.Errorf("publish: %s refused the edit (%s)", base, resp.Status)
+}
+
 func (c *Client) baseURL() string {
 	if c.BaseURL == "" {
 		return DefaultBaseURL
@@ -178,7 +287,12 @@ func (c *Client) http() *http.Client {
 // uploadBody builds the multipart body. The whole thing is assembled in
 // memory on purpose: a tape is tens of kilobytes (the hero is 25 KB on disk),
 // and a streaming body would cost a retry the ability to be a retry.
-func uploadBody(view *tape.Tape, idx Index, opts Options) (body []byte, contentType string, err error) {
+//
+// token is the client's journal token, or "" for an anonymous upload. The
+// bio part is written only when a token is present: the bio belongs to a
+// home page and an anonymous run has none, so it is dropped rather than
+// refused and a profile with a bio still publishes anonymously.
+func uploadBody(view *tape.Tape, idx Index, opts Options, token string) (body []byte, contentType string, err error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 
@@ -277,6 +391,21 @@ func uploadBody(view *tape.Tape, idx Index, opts Options) (body []byte, contentT
 		}
 		if _, err := io.WriteString(w, note); err != nil {
 			return nil, "", fmt.Errorf("publish: encode note: %w", err)
+		}
+	}
+	// Only with a token (see above), and validated here like every other
+	// part, so a hand-edited config cannot smuggle past the verb.
+	if opts.Bio != "" && token != "" {
+		bio, err := ValidateBio(opts.Bio)
+		if err != nil {
+			return nil, "", err
+		}
+		w, err = mw.CreatePart(partHeader(`form-data; name="bio"`, "text/plain"))
+		if err != nil {
+			return nil, "", fmt.Errorf("publish: %w", err)
+		}
+		if _, err := io.WriteString(w, bio); err != nil {
+			return nil, "", fmt.Errorf("publish: encode bio: %w", err)
 		}
 	}
 

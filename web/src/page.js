@@ -102,6 +102,15 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #1b1f26;
   border: 1px solid #2a3038; border-radius: 999px; color: #6b727d; cursor: help; }
 .note { max-width: 40rem; color: #b9bec7; }
 .note p { margin: 0 0 .8rem; }
+/* A user home (TTP-127): the profile at 64 px, the name, the one link, the
+   bio as paragraphs, then the count and the rows in the front page's row
+   format. */
+.uhead { display: flex; gap: 1rem; align-items: center; margin: 0 0 .5rem; }
+/* The home's avatar at 64 px: scoped to the header, so the 24 px byline
+   and 16 px row avatars elsewhere keep their size. */
+.uhead .avatar { width: 64px; height: 64px; }
+.uhead h1 { margin: 0; }
+.ulink { margin: 0 0 1.5rem; font-size: .875rem; }
 `;
 
 // The mascot, as she appears around the site (web/static/README.md has her
@@ -135,7 +144,11 @@ export const SITE_NAME = "toktape";
 // pair beside them, and Slack, Discord, Telegram and iMessage each read a
 // slightly different subset; emitting the union costs a few hundred bytes
 // and removes the guessing. The image is only promised when there is one.
-export function head({ title, description, url, image, imageAlt, imageWidth, imageHeight, noindex, type = "website" }) {
+// card names the twitter:card for a page with an image: "summary_large_image"
+// by default (the 1200×675 run card it was built for), "summary" where the
+// image is square — a user home's round avatar under summary_large_image
+// crops badly (TTP-127). Pages without an image always say "summary".
+export function head({ title, description, url, image, imageAlt, imageWidth, imageHeight, noindex, type = "website", card = "summary_large_image" }) {
   const tags = [];
   if (description) tags.push(`<meta name="description" content="${esc(description)}">`);
   if (url) tags.push(`<link rel="canonical" href="${esc(url)}">`);
@@ -153,7 +166,7 @@ export function head({ title, description, url, image, imageAlt, imageWidth, ima
     if (imageWidth) tags.push(`<meta property="og:image:width" content="${imageWidth}">`);
     if (imageHeight) tags.push(`<meta property="og:image:height" content="${imageHeight}">`);
     if (imageAlt) tags.push(`<meta property="og:image:alt" content="${esc(imageAlt)}">`);
-    tags.push(`<meta name="twitter:card" content="summary_large_image">`);
+    tags.push(`<meta name="twitter:card" content="${card === "summary" ? "summary" : "summary_large_image"}">`);
     tags.push(`<meta name="twitter:image" content="${esc(image)}">`);
     if (imageAlt) tags.push(`<meta name="twitter:image:alt" content="${esc(imageAlt)}">`);
   } else {

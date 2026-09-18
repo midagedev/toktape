@@ -15,11 +15,13 @@
 
 import { serveAvatar } from "./author.js";
 import { deleteRun } from "./del.js";
+import { editRun } from "./edit.js";
 import { fail, json, publicBase } from "./http.js";
 import { serveCard, serveRunJSON, serveRunPage, serveTape } from "./run.js";
 import { searchAPI, searchPage } from "./search.js";
 import { robots, sitemap } from "./seo.js";
 import { uploadRun } from "./upload.js";
+import { serveUserJSON, serveUserPage } from "./user.js";
 
 // Both extensions are served: `.toktape` is where the format is going
 // (§9.7), `.tape` is what today's client uploads under, and a run is served
@@ -29,6 +31,10 @@ const RUN_JSON = /^\/r\/([a-z0-9]{8,64})\.json$/;
 const RUN_CARD = /^\/r\/([a-z0-9]{8,64})\.png$/;
 const RUN_PAGE = /^\/r\/([a-z0-9]{8,64})$/;
 const RUN_API = /^\/api\/v1\/runs\/([a-z0-9]{8,64})$/;
+// A user home. The handle is URL-safe by construction on this side: a token
+// id that does not match has no home page, and the lookup 404s it.
+const USER_JSON = /^\/u\/([a-z0-9][a-z0-9-]{1,31})\.json$/;
+const USER_PAGE = /^\/u\/([a-z0-9][a-z0-9-]{1,31})$/;
 // An avatar's name is its bytes: 64 hex digits, and anything else is a 404
 // before touching R2.
 const AVATAR = /^\/a\/([0-9a-f]{64})\.png$/;
@@ -52,16 +58,19 @@ export default {
 
     let m;
     if ((m = RUN_API.exec(path))) {
-      if (request.method !== "DELETE") {
-        return fail(405, "a run is read at /r/<id> and deleted with DELETE here", { Allow: "DELETE" });
-      }
-      return deleteRun(m[1], request, env);
+      if (request.method === "DELETE") return deleteRun(m[1], request, env);
+      if (request.method === "PATCH") return editRun(m[1], request, env);
+      return fail(405, "a run is read at /r/<id>, changed with PATCH and deleted with DELETE here", {
+        Allow: "DELETE, PATCH",
+      });
     }
     if ((m = TAPE_SUFFIX.exec(path))) return serveTape(m[1], env);
     if ((m = RUN_JSON.exec(path))) return serveRunJSON(m[1], env);
     if ((m = RUN_CARD.exec(path))) return serveCard(m[1], env);
     if ((m = AVATAR.exec(path))) return serveAvatar(m[1], env);
     if ((m = RUN_PAGE.exec(path))) return serveRunPage(m[1], env, publicBase(request, env));
+    if ((m = USER_JSON.exec(path))) return serveUserJSON(m[1], request, env);
+    if ((m = USER_PAGE.exec(path))) return serveUserPage(m[1], request, env);
 
     // The front page is the search: the thing a visitor came for is other
     // people's runs, not an explanation of the service.

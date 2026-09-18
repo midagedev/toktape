@@ -56,7 +56,10 @@ export async function deleteRun(id, request, env) {
   return new Response(null, { status: 204 });
 }
 
-async function tokenOwns(env, hash, ownerID) {
+// Exported for the owner-edit endpoint (edit.js), which authenticates the
+// same way: by hash against what was stored. Not duplicated there, or the
+// two copies answer "who owns this" differently one day.
+export async function tokenOwns(env, hash, ownerID) {
   const t = await env.DB.prepare("SELECT id FROM tokens WHERE hash = ?").bind(hash).first();
   return t !== null && t.id === ownerID;
 }

@@ -177,3 +177,29 @@ func TestValidateNote(t *testing.T) {
 		t.Errorf("error = %q, want it to name the count and the limit", err)
 	}
 }
+
+// The bio is paragraphs like the note with its own limit (TTP-127): 600
+// runes travel, 601 do not, CRLF is folded, and the refusal names the
+// count and the limit.
+func TestValidateBio(t *testing.T) {
+	got, err := ValidateBio("Line one.\r\n\r\nLine two.")
+	if err != nil {
+		t.Fatalf("ValidateBio: %v", err)
+	}
+	if got != "Line one.\n\nLine two." {
+		t.Errorf("ValidateBio = %q, want CRLF folded to LF", got)
+	}
+	if _, err := ValidateBio(strings.Repeat("b", 600)); err != nil {
+		t.Errorf("ValidateBio refused 600 runes: %v", err)
+	}
+	if _, err := ValidateBio(strings.Repeat("b", 601)); err == nil {
+		t.Fatal("ValidateBio accepted 601 runes")
+	} else if !strings.Contains(err.Error(), "601 runes, over the 600-rune limit") {
+		t.Errorf("error = %q, want it to name the count and the limit", err)
+	}
+	if _, err := ValidateBio("   "); err == nil {
+		t.Fatal("ValidateBio accepted an empty bio")
+	} else if !strings.Contains(err.Error(), "1–600") {
+		t.Errorf("error = %q, want it to name the range", err)
+	}
+}

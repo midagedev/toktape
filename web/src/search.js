@@ -30,11 +30,15 @@ const GB = 1024 ** 3;
 // The columns a result row is drawn from. index_json is not read here: these
 // are the axes the schema flattened for exactly this query, and going back to
 // the JSON would be the search deciding it knows better than its own index.
+// owner_token travels beside owned: the row's `.who` line links a
+// token-owned run's name at its user home (/u/<handle>, TTP-127), and that
+// needs the handle, not just the fact of ownership. apiRow leaves it out
+// the way it leaves out every column the API does not print.
 const SELECT = `SELECT id, created_at, recorded_at, model_id, model_raw, repo,
     quant_id, quant_raw, engine_kind, engine_version, os, gpu_id, gpus_raw,
     gpu_count, vram_bytes, host_class, sessions, prompt_set, decode_per_sec,
     caveat_count, tape_ext, card_key, author_name, author_link, avatar_key,
-    title, note, owner_token IS NOT NULL AS owned
+    title, note, owner_token, owner_token IS NOT NULL AS owned
   FROM runs`;
 
 // The filters §9.4 names, each mapped to the column it narrows. A raw column
@@ -135,14 +139,19 @@ result set without them is a leaderboard with the sorting taken out.<br>
 // alternatives on its own axis). The cursor is not part of this WHERE at
 // all: it windows the page, while every consumer here describes the whole
 // filtered population.
-function whereFor(url, scope, skipParam) {
+export function whereFor(url, scope, skipParam) {
   const where = [];
   const args = [];
 
-  if (scope.name === "mine") {
+  // The user scope (TTP-127) is modelled on the journal scope: one owner's
+  // runs — but public ones only, because the home is public and unlisted
+  // runs never appear on it, even the owner's (the owner sees those under
+  // scope=mine).
+  if (scope.name === "mine" || scope.name === "user") {
     where.push("owner_token = ?");
     args.push(scope.owner);
-  } else {
+  }
+  if (scope.name !== "mine") {
     // Unlisted is unlisted in every scope but its owner's.
     where.push("private = 0");
   }
@@ -176,7 +185,7 @@ function whereFor(url, scope, skipParam) {
   return { where, args };
 }
 
-async function query(env, url, scope, limit) {
+export async function query(env, url, scope, limit) {
   const { where, args } = whereFor(url, scope, null);
   const cursor = decodeCursor(url.searchParams.get("cursor"));
   if (cursor) {
@@ -204,7 +213,10 @@ async function query(env, url, scope, limit) {
 
 // One COUNT over the same WHERE: a population size for the page, not a
 // ranking of anything.
-async function countTotal(env, url, scope) {
+// Exported for the user home (user.js), whose head description and header
+// count the same population the listing pages: one COUNT over the same
+// WHERE, or the two drift apart.
+export async function countTotal(env, url, scope) {
   const { where, args } = whereFor(url, scope, null);
   const row = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM runs WHERE ${where.join(" AND ")}`,
@@ -214,12 +226,12 @@ async function countTotal(env, url, scope) {
   return row.n;
 }
 
-async function totalLine(env, url, scope, limit, hasNext) {
+export async function totalLine(env, url, scope, limit, hasNext) {
   const n = await countTotal(env, url, scope);
   return `<p class="total"><b>${n}</b> run${n === 1 ? "" : "s"}, newest first${hasNext ? ` · showing the first ${limit}` : ""}</p>`;
 }
 
-async function distinctFacets(env, url, scope) {
+export async function distinctFacets(env, url, scope) {
   const one = async (param, column) => {
     const { where, args } = whereFor(url, scope, param);
     // One row past what is shown, only to learn whether the tail was
@@ -259,7 +271,7 @@ async function scopeOf(request, env, url) {
   return { name: "mine", owner: row.id };
 }
 
-function pageSize(url) {
+export function pageSize(url) {
   const n = Number(url.searchParams.get("limit"));
   if (!Number.isFinite(n) || n <= 0) return PAGE_SIZE;
   return Math.min(Math.floor(n), MAX_PAGE_SIZE);
@@ -282,7 +294,7 @@ function decodeCursor(s) {
 
 // ------------------------------------------------------------------ shapes
 
-function apiRow(r) {
+export function apiRow(r) {
   // The profile and the note ride beside the index columns, each present
   // only when set — absent, not null/empty, for unknown.
   const out = {
@@ -318,7 +330,7 @@ function apiRow(r) {
   return out;
 }
 
-function resultRow(r, url) {
+export function resultRow(r, url) {
   // Each fact is {shown, param, value}: what a reader sees and, where the
   // axis is one the index normalised, the exact value that narrows to it.
   // The two are never derived from each other here — turning `UD-Q6_K` into
@@ -364,15 +376,23 @@ function resultRow(r, url) {
 }
 
 // The row's `.who` line: the avatar at 16 px and the name, linked the way
-// the run page links it. Absent entirely when no author travels.
+// the run page links it. Absent entirely when no author travels. On a run
+// a journal token owns, the name links at the owner's home (/u/<handle>,
+// TTP-127) — the external link moved there, so it is not printed here —
+// and what is shown is still read off the run's own columns (the record of
+// what that upload said), never off the token.
 function whoLine(r) {
   const avatar = avatarPath(r.avatar_key);
   if (!r.author_name && !avatar && r.owned === 1) return "";
   const img = avatar ? `<img class="avatar" src="${esc(avatar)}" width="16" height="16" alt="">` : "";
-  const who =
-    r.author_name && r.author_link
-      ? `<a rel="nofollow noopener" href="${esc(r.author_link)}">${esc(r.author_name)}</a>`
-      : esc(r.author_name || "");
+  let who = "";
+  if (r.owner_token) {
+    if (r.author_name) who = `<a href="/u/${esc(r.owner_token)}">${esc(r.author_name)}</a>`;
+  } else if (r.author_name && r.author_link) {
+    who = `<a rel="nofollow noopener" href="${esc(r.author_link)}">${esc(r.author_name)}</a>`;
+  } else {
+    who = esc(r.author_name || "");
+  }
   return `<div class="who">${img}${img && who ? " " : ""}${who}${anonBadge(r.owned === 1)}</div>`;
 }
 
@@ -423,7 +443,7 @@ function withoutParam(url, param) {
   return u.pathname + u.search;
 }
 
-function activeFilters(url) {
+export function activeFilters(url) {
   const params = activeParams(url);
   if (!params.length) return "";
   const links = params
@@ -435,7 +455,7 @@ function activeFilters(url) {
   return `<div class="active"><span class="k">Narrowed to</span>${links}<a class="clear" href="/">Clear all</a></div>`;
 }
 
-function filterForm(url, facets) {
+export function filterForm(url, facets) {
   const sel = (name, label, facet) => {
     let rows = facet.rows;
     const current = url.searchParams.get(name) || "";
@@ -509,7 +529,9 @@ function withParam(url, key, value) {
   return u.pathname + u.search;
 }
 
-const PAGE_STYLE = `
+// Exported for the user home (user.js), whose rows are the front page's
+// rows: same stylesheet, or the same row reads differently there.
+export const PAGE_STYLE = `
 .filters { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 2rem; }
 .filters input, .filters select, .filters button {
   background: #14171d; color: #d7dae0; border: 1px solid #242932; border-radius: 6px;

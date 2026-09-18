@@ -31,6 +31,18 @@ export async function sitemap(env, base) {
   for (const r of rows) {
     urls.push(`<url><loc>${esc(base)}/r/${esc(r.id)}</loc><lastmod>${esc(day(r.created_at))}</lastmod></url>`);
   }
+  // The user homes (TTP-127): one per token that owns at least one public
+  // run. A token whose runs are all unlisted has no home worth indexing —
+  // the home itself would be empty — and an anonymous upload has no home at
+  // all. Budgeted with the runs under the same SITEMAP_MAX.
+  const owners = await env.DB.prepare(
+    "SELECT DISTINCT owner_token AS h FROM runs WHERE private = 0 AND owner_token IS NOT NULL LIMIT ?",
+  )
+    .bind(Math.max(0, SITEMAP_MAX - 1 - rows.length))
+    .all();
+  for (const o of owners.results || []) {
+    urls.push(`<url><loc>${esc(base)}/u/${esc(o.h)}</loc></url>`);
+  }
   return new Response(
     `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>\n`,
     {

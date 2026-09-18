@@ -337,6 +337,80 @@ func TestPublishJSON(t *testing.T) {
 	}
 }
 
+// --edit changes one owned run instead of uploading (TTP-127): the usage
+// errors refuse an empty change, opposite visibilities and a missing token,
+// and a successful edit prints the run's link on stdout.
+func TestPublishEditUsageErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config string
+		args   []string
+		want   string
+	}{
+		{"no flags", "token = \"tk_journal\"\nfirst_publish_warning_seen = true\n",
+			[]string{"publish", "--edit", "abc123"}, "--title, --note or --private/--public"},
+		{"both visibilities", "token = \"tk_journal\"\nfirst_publish_warning_seen = true\n",
+			[]string{"publish", "--edit", "abc123", "--title", "x", "--private", "--public"}, "opposite"},
+		{"no token", "first_publish_warning_seen = true\n",
+			[]string{"publish", "--edit", "abc123", "--title", "x"}, "needs a journal token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			publishHome(t, tc.config)
+			code, _, stderr := exec(t, tc.args...)
+			if code == exitOK {
+				t.Fatalf("%v was accepted", tc.args)
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr = %q, want it to name %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestPublishEditPrintsTheLink(t *testing.T) {
+	publishHome(t, "token = \"tk_journal\"\nfirst_publish_warning_seen = true\n")
+	var method, auth, path string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, auth, path = r.Method, r.Header.Get("Authorization"), r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"abc123","published_at":"2026-09-19T00:00:00Z","private":false,"tape":"/r/abc123.tape","tape_bytes":25,"card":null,"owned":true,"index":{"schema":1}}`)
+	}))
+	defer srv.Close()
+
+	code, stdout, stderr := exec(t, "publish", "--edit", "abc123", "--title", "edited", "--url", srv.URL)
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if strings.TrimSpace(stdout) != srv.URL+"/r/abc123" {
+		t.Errorf("stdout = %q, want the run's link and nothing else", stdout)
+	}
+	if method != http.MethodPatch || path != "/api/v1/runs/abc123" {
+		t.Errorf("the edit was %s %s, want PATCH /api/v1/runs/abc123", method, path)
+	}
+	if !strings.HasPrefix(auth, "Bearer ") || len(body) != 1 || body["title"] != "edited" {
+		t.Errorf("auth = %q body = %v, want the journal token and only the title", auth, body)
+	}
+}
+
+// The run is named by id or by link: a /r/<id> URL gives up its path and
+// one trailing extension, a bare id travels as-is.
+func TestEditTargetID(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"abc123", "abc123"},
+		{"https://tape.midagedev.com/r/abc123", "abc123"},
+		{"https://tape.midagedev.com/r/abc123.json", "abc123"},
+		{"http://127.0.0.1:8787/r/abc123.tape", "abc123"},
+		{"http://127.0.0.1:8787/r/abc123.png", "abc123"},
+		{"", ""},
+	} {
+		if got := editTargetID(tc.in); got != tc.want {
+			t.Errorf("editTargetID(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // The verb is in the usage text, and its flags parse — the same contract the
 // other verbs keep.
 func TestPublishIsInTheUsageText(t *testing.T) {

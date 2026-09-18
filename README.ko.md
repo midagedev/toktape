@@ -253,7 +253,7 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 | `log` | 모든 실행의 실험 장부 | `toktape log --sort decode` |
 | `compare` | 두 실행의 지표와 플래그를 비교합니다 | `toktape compare a.tape b.tape` |
 | `publish` | 실행을 올리고 링크를 찍습니다 | `toktape publish <tape>` |
-| `profile` | 올릴 때마다 붙는 작성자 정보를 정합니다 | `toktape profile --name NAME --link URL --avatar FILE` |
+| `profile` | 올릴 때마다 붙는 작성자 정보를 정합니다 | `toktape profile --name NAME --link URL --avatar FILE --bio TEXT` |
 | `version` | 버전 출력 | `toktape version` |
 
 **녹화는 몇 초짜리인가.** 실행은 시계로 끝납니다. 기본 20초이고,
@@ -414,6 +414,13 @@ toktape publish ~/.toktape/runs/<id>.tape
 TEXT`(또는 `--note-file FILE`)는 실행 하나에 실험 노트를 붙입니다. 무엇을
 해 보려던 실행인지 그냥 글로 적는 자리이고, 페이지에서는 작성자 줄과 숫자
 사이에, 목록과 API에서는 작성자 옆에 실립니다.
+
+올린 뒤에도 고칠 수 있습니다. `publish --edit <id>`에 `--title`, `--note`(또는
+`--note-file`), `--private`/`--public`을 주면 페이지가 그대로 바뀌는데, 내 저널
+토큰으로 올린 실행만 그렇습니다. 토큰마다 사용자 홈 `/u/<handle>`이 있어
+프로필과 소개(`--bio`), 그 사람의 공개 실행만 모아 보여 줍니다. 프로필은
+토큰을 따라가므로 가장 최근에 올릴 때 보낸 이름과 아바타가 홈에 보이는
+것입니다.
 
 호스트명과 절대 경로는 공개 여부와 상관없이 지워집니다. 서버 argv는 플래그를
 남기고 경로만 잃고, 모델은 파일명을 남기고 디렉터리를 잃습니다. 페이지 맨 위의

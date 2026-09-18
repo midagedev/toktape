@@ -86,7 +86,7 @@ export function authorOf(row) {
 
 export async function serveRunJSON(id, env) {
   const row = await env.DB.prepare(
-    "SELECT id, created_at, private, index_json, tape_ext, tape_bytes, card_key, author_name, author_link, avatar_key, title, note, owner_token IS NOT NULL AS owned FROM runs WHERE id = ?",
+    "SELECT id, created_at, private, index_json, tape_ext, tape_bytes, card_key, author_name, author_link, avatar_key, title, note, owner_token, owner_token IS NOT NULL AS owned FROM runs WHERE id = ?",
   )
     .bind(id)
     .first();
@@ -110,7 +110,7 @@ export async function serveRunJSON(id, env) {
 
 export async function serveRunPage(id, env, base) {
   const row = await env.DB.prepare(
-    "SELECT id, created_at, private, index_json, tape_ext, tape_bytes, card_key, author_name, author_link, avatar_key, title, note, owner_token IS NOT NULL AS owned FROM runs WHERE id = ?",
+    "SELECT id, created_at, private, index_json, tape_ext, tape_bytes, card_key, author_name, author_link, avatar_key, title, note, owner_token, owner_token IS NOT NULL AS owned FROM runs WHERE id = ?",
   )
     .bind(id)
     .first();
@@ -362,8 +362,14 @@ function byline(row) {
   const avatar = avatarPath(row.avatar_key);
   if (!row.author_name && !row.author_link && !avatar && row.owned === 1) return "";
   const img = avatar ? `<img class="avatar" src="${esc(avatar)}" width="24" height="24" alt="">` : "";
+  // On a run a journal token owns, the name links at the owner's home
+  // (/u/<handle>, TTP-127) and the external link moves there — it is not
+  // printed here. Read off the run's own columns (what that upload said),
+  // never off the token.
   let who = "";
-  if (row.author_name && row.author_link) {
+  if (row.owner_token) {
+    if (row.author_name) who = `<a href="/u/${esc(row.owner_token)}">${esc(row.author_name)}</a>`;
+  } else if (row.author_name && row.author_link) {
     who = `<a rel="nofollow noopener" href="${esc(row.author_link)}">${esc(row.author_name)}</a>`;
   } else if (row.author_name) {
     who = esc(row.author_name);
@@ -374,8 +380,9 @@ function byline(row) {
 }
 
 // The lab-note as paragraphs split on blank lines, each escaped — no
-// markdown, no autolinking.
-function noteSection(note) {
+// markdown, no autolinking. Exported for the user home (user.js), whose bio
+// renders the same way: plain paragraphs, nothing else.
+export function noteSection(note) {
   if (!note) return "";
   const paras = String(note)
     .split(/\n\n+/)

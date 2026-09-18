@@ -27,6 +27,8 @@ const (
 	MaxTitleRunes = 120
 	// MaxNoteRunes bounds the note's body after TrimSpace.
 	MaxNoteRunes = 4000
+	// MaxBioRunes bounds the user-home bio after TrimSpace (TTP-127).
+	MaxBioRunes = 600
 	// MaxAvatarBytes bounds the avatar file.
 	MaxAvatarBytes = 65536
 	// MaxAvatarWidth and MaxAvatarHeight bound the avatar's decoded header
@@ -133,6 +135,21 @@ func ValidateNote(note string) (string, error) {
 	}
 	if n > MaxNoteRunes {
 		return "", fmt.Errorf("note is %d runes, over the %d-rune limit", n, MaxNoteRunes)
+	}
+	return t, nil
+}
+
+// ValidateBio normalises, trims and checks the user-home bio (TTP-127):
+// 1–600 runes, plain paragraphs like the note — CRLF folded to LF, and
+// nothing else rewritten. It returns the normalised text that travels.
+func ValidateBio(bio string) (string, error) {
+	t := strings.TrimSpace(NormalizeNote(bio))
+	n := len([]rune(t))
+	if n == 0 {
+		return "", fmt.Errorf("bio is empty: 1–%d runes travel", MaxBioRunes)
+	}
+	if n > MaxBioRunes {
+		return "", fmt.Errorf("bio is %d runes, over the %d-rune limit", n, MaxBioRunes)
 	}
 	return t, nil
 }

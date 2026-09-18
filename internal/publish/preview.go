@@ -60,7 +60,10 @@ func Preview(view *tape.Tape, idx Index, opts Options) string {
 
 	// Who the run says published it. The profile is opt-in per machine and
 	// unverified — anyone may type any name — so the listing says what it
-	// is, the same way --dry-run lists everything else that leaves.
+	// is, the same way --dry-run lists everything else that leaves. The
+	// bio is listed only when it will travel: the verb sets it only on a
+	// token-owned publish, so a set Bio here is a travelling one and an
+	// unset one prints nothing at all (never "bio none").
 	b.WriteString("Who it says published it\n")
 	if opts.Author == nil {
 		b.WriteString("  profile        none — nothing about you travels\n")
@@ -68,6 +71,9 @@ func Preview(view *tape.Tape, idx Index, opts Options) string {
 		fmt.Fprintf(&b, "  name           %s\n", nonEmpty(opts.Author.Name, "none"))
 		fmt.Fprintf(&b, "  link           %s\n", nonEmpty(opts.Author.Link, "none"))
 		fmt.Fprintf(&b, "  avatar         %s\n", avatarLine(opts.Author.Avatar))
+	}
+	if opts.Bio != "" {
+		fmt.Fprintf(&b, "  bio            %s\n", noteLine(opts.Bio))
 	}
 	b.WriteString("\n")
 

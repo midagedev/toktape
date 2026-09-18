@@ -111,6 +111,60 @@ func TestProfileClear(t *testing.T) {
 	}
 }
 
+// The bio (TTP-127): set with --bio or --bio-file, printed as its first
+// line with its length, refused past 600 runes, and removed by --clear
+// with the other three.
+func TestProfileBio(t *testing.T) {
+	publishHome(t, "")
+
+	code, stdout, stderr := exec(t, "profile", "--bio", "Line one.\n\nLine two.")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Line one. … (20 characters)") {
+		t.Errorf("the save does not list the bio:\n%s", stdout)
+	}
+
+	code, stdout, stderr = exec(t, "profile")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "bio     Line one. … (20 characters)") {
+		t.Errorf("the print does not carry the bio:\n%s", stdout)
+	}
+
+	bioFile := filepath.Join(t.TempDir(), "bio.txt")
+	if err := os.WriteFile(bioFile, []byte("From a file.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := exec(t, "profile", "--bio-file", bioFile); code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if _, stdout, _ := exec(t, "profile"); !strings.Contains(stdout, "bio     From a file. … (12 characters)") {
+		t.Errorf("the print does not carry the file's bio:\n%s", stdout)
+	}
+
+	if code, _, stderr := exec(t, "profile", "--bio", "a", "--bio-file", bioFile); code == exitOK {
+		t.Fatal("--bio with --bio-file was accepted")
+	} else if !strings.Contains(stderr, "--bio and --bio-file") {
+		t.Errorf("stderr = %q, want it to name the pair", stderr)
+	}
+	if code, _, stderr := exec(t, "profile", "--bio", strings.Repeat("b", 601)); code == exitOK {
+		t.Fatal("a 601-rune bio was accepted")
+	} else if !strings.Contains(stderr, "601 runes, over the 600-rune limit") {
+		t.Errorf("stderr = %q, want it to name the count and the limit", stderr)
+	}
+
+	if code, _, stderr := exec(t, "profile", "--clear"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if code, stdout, _ := exec(t, "profile"); code != exitOK {
+		t.Fatalf("exit %d", code)
+	} else if !strings.Contains(stdout, "bio     ?\n") || strings.Contains(stdout, "From a file") {
+		t.Errorf("--clear left the bio behind:\n%s", stdout)
+	}
+}
+
 // Every refusal names the limit it hit: the message is the contract.
 func TestProfileRefusalsNameTheLimit(t *testing.T) {
 	publishHome(t, "")

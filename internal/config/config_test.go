@@ -193,3 +193,44 @@ func write(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+// The bio key round-trips the way the other profile keys do: parsed by set,
+// written by render, and absent when unset so nothing about the author is
+// invented (TTP-127).
+func TestProfileBioRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	write(t, path, "profile_bio = \"Line one.\\n\\nLine two.\"\n")
+	c, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if c.ProfileBio != "Line one.\n\nLine two." {
+		t.Errorf("bio did not survive the load: %q", c.ProfileBio)
+	}
+
+	out := filepath.Join(t.TempDir(), "out.toml")
+	if err := SaveTo(out, c); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	back, err := LoadFrom(out)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if back.ProfileBio != c.ProfileBio {
+		t.Errorf("round trip lost the bio: %q became %q", c.ProfileBio, back.ProfileBio)
+	}
+
+	// Unset means the key is not written: a bio is opt-in, and the file
+	// must not invent one.
+	plain := filepath.Join(t.TempDir(), "plain.toml")
+	if err := SaveTo(plain, &Config{Token: "tk"}); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "profile_bio") {
+		t.Errorf("unset key \"profile_bio\" was written:\n%s", body)
+	}
+}

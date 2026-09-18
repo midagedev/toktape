@@ -20,19 +20,23 @@ const profileUsage = `toktape profile — the author one publish says published 
 
 Usage:
   toktape profile                         print the current profile
-  toktape profile --name TEXT --link URL --avatar FILE
-                                          set the nickname, the one link and the avatar
-  toktape profile --clear                 remove all three
+  toktape profile --name TEXT --link URL --avatar FILE --bio TEXT
+                                          set the nickname, the one link, the avatar and the bio
+  toktape profile --clear                 remove all four
 
 The profile is opt-in per machine and unverified — anyone may type any
 name — and it stays so until tokens become accounts. What is set here
 travels with every publish until --clear, and one run travels without it
-with publish --no-profile. There is no email field: one URL only.
+with publish --no-profile. There is no email field: one URL only. The
+bio is shown on your user home (/u/<handle>) and travels only on a
+token-owned publish — an anonymous run has no home to show it on.
 
   --name TEXT     1–40 runes, no control characters
   --link URL      1–200 bytes, http or https with a host
   --avatar FILE   a PNG, at most 65536 bytes and 256×256
-  --clear         remove the name, the link and the avatar
+  --bio TEXT      1–600 runes, plain paragraphs like the note
+  --bio-file FILE read the bio from this file instead
+  --clear         remove the name, the link, the avatar and the bio
 
 Examples:
   toktape profile --name "Lab Rat" --link https://github.com/example --avatar ~/pic.png
@@ -52,7 +56,9 @@ func runProfile(c *cli, args []string) int {
 	name := fs.String("name", "", "the nickname one publish carries")
 	link := fs.String("link", "", "the one link one publish carries")
 	avatar := fs.String("avatar", "", "the avatar image file")
-	clear := fs.Bool("clear", false, "remove the name, the link and the avatar")
+	bio := fs.String("bio", "", "the bio shown on your user home")
+	bioFile := fs.String("bio-file", "", "read the bio from this file instead")
+	clear := fs.Bool("clear", false, "remove the name, the link, the avatar and the bio")
 	files, err := parseArgs(fs, args)
 	if err != nil {
 		return c.badFlags("profile", usageFor("profile"), args, err)
@@ -66,17 +72,20 @@ func runProfile(c *cli, args []string) int {
 		return c.usagef("toktape: %v", err)
 	}
 
-	if !*clear && *name == "" && *link == "" && *avatar == "" {
+	if !*clear && *name == "" && *link == "" && *avatar == "" && *bio == "" && *bioFile == "" {
 		printProfile(c, cfg)
 		return exitOK
 	}
 
-	if *clear && (*name != "" || *link != "" || *avatar != "") {
-		return c.usagef("toktape profile: --clear removes all three and takes no setters beside it")
+	if *clear && (*name != "" || *link != "" || *avatar != "" || *bio != "" || *bioFile != "") {
+		return c.usagef("toktape profile: --clear removes all four and takes no setters beside it")
+	}
+	if *bio != "" && *bioFile != "" {
+		return c.usagef("toktape profile: --bio and --bio-file say the same thing twice")
 	}
 
 	if *clear {
-		cfg.ProfileName, cfg.ProfileLink, cfg.ProfileAvatar = "", "", ""
+		cfg.ProfileName, cfg.ProfileLink, cfg.ProfileAvatar, cfg.ProfileBio = "", "", "", ""
 		if err := config.Save(cfg); err != nil {
 			return c.failf(exitUnavailable, "toktape: %v", err)
 		}
@@ -107,6 +116,21 @@ func runProfile(c *cli, args []string) int {
 		}
 		cfg.ProfileAvatar = *avatar
 	}
+	if *bio != "" || *bioFile != "" {
+		text := *bio
+		if *bioFile != "" {
+			b, err := os.ReadFile(*bioFile)
+			if err != nil {
+				return c.usagef("toktape profile: read %s: %v", *bioFile, err)
+			}
+			text = string(b)
+		}
+		v, err := publish.ValidateBio(text)
+		if err != nil {
+			return c.usagef("toktape profile: %v", err)
+		}
+		cfg.ProfileBio = v
+	}
 	if err := config.Save(cfg); err != nil {
 		return c.failf(exitUnavailable, "toktape: %v", err)
 	}
@@ -117,11 +141,28 @@ func runProfile(c *cli, args []string) int {
 
 // printProfile prints the current profile, one field per line, `?` for
 // unset. The avatar line carries the resolved path and the byte size, or
-// `?` with "missing" beside it when the file is gone.
+// `?` with "missing" beside it when the file is gone. The bio line carries
+// its first line and its length in characters — a bio is paragraphs, and
+// the print is one line per field — or `?` when unset.
 func printProfile(c *cli, cfg *config.Config) {
 	fmt.Fprintf(c.stdout, "name    %s\n", nonEmptyProfile(cfg.ProfileName))
 	fmt.Fprintf(c.stdout, "link    %s\n", nonEmptyProfile(cfg.ProfileLink))
 	fmt.Fprintf(c.stdout, "avatar  %s\n", avatarProfileLine(cfg.ProfileAvatar))
+	fmt.Fprintf(c.stdout, "bio     %s\n", bioProfileLine(cfg.ProfileBio))
+}
+
+// bioProfileLine shows the bio's first line and its length, the way the
+// preview's note line does: one line that answers "how much".
+func bioProfileLine(bio string) string {
+	if strings.TrimSpace(bio) == "" {
+		return "?"
+	}
+	first, _, _ := strings.Cut(bio, "\n")
+	n := len([]rune(bio))
+	if n == 1 {
+		return fmt.Sprintf("%s … (1 character)", first)
+	}
+	return fmt.Sprintf("%s … (%d characters)", first, n)
 }
 
 func nonEmptyProfile(s string) string {

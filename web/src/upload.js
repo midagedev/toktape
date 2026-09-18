@@ -36,16 +36,52 @@ const MAX_CARD_BYTES = 1024 * 1024;
 // The author profile and the lab-note (TTP-125). Every limit mirrors the
 // client's refusal in internal/publish/avatar.go — the client refusing
 // first is courtesy, this refusing is the defence.
-const MAX_AUTHOR_NAME_RUNES = 40;
-const MAX_AUTHOR_LINK_BYTES = 200;
-const MAX_TITLE_RUNES = 120;
-const MAX_NOTE_RUNES = 4000;
+export const MAX_AUTHOR_NAME_RUNES = 40;
+export const MAX_AUTHOR_LINK_BYTES = 200;
+export const MAX_TITLE_RUNES = 120;
+export const MAX_NOTE_RUNES = 4000;
+export const MAX_BIO_RUNES = 600;
 const MAX_AVATAR_BYTES = 65536;
 
 // Runes, not UTF-16 units: [...s] splits a surrogate pair the way Go's
 // []rune does, so the two sides count the same thing.
 function runes(s) {
   return [...s].length;
+}
+
+// The lab-note validators as pure functions, exported so the owner-edit
+// endpoint (edit.js) refuses exactly what the upload refuses: one refusal
+// text in one place, or the two drift apart the way two copies always do.
+// Each returns { value } or { error } — the sentence only, never the
+// status, because the callers already know a bad field is a 400.
+export function checkTitle(t) {
+  const v = t.trim();
+  if (v === "") return { error: `the title is empty: 1–${MAX_TITLE_RUNES} runes travel` };
+  if (runes(v) > MAX_TITLE_RUNES) {
+    return { error: `the title is ${runes(v)} runes, over the ${MAX_TITLE_RUNES}-rune limit` };
+  }
+  if (/[\n\r]/.test(v)) return { error: "the title must be a single line" };
+  return { value: v };
+}
+
+export function checkNote(n) {
+  const v = n.replace(/\r\n/g, "\n").trim();
+  if (v === "") return { error: `the note is empty: 1–${MAX_NOTE_RUNES} runes travel` };
+  if (runes(v) > MAX_NOTE_RUNES) {
+    return { error: `the note is ${runes(v)} runes, over the ${MAX_NOTE_RUNES}-rune limit` };
+  }
+  return { value: v };
+}
+
+// The user-home bio (TTP-127): paragraphs like the note, with its own
+// limit. Stored on the token, never the run.
+export function checkBio(b) {
+  const v = b.replace(/\r\n/g, "\n").trim();
+  if (v === "") return { error: `the bio is empty: 1–${MAX_BIO_RUNES} runes travel` };
+  if (runes(v) > MAX_BIO_RUNES) {
+    return { error: `the bio is ${runes(v)} runes, over the ${MAX_BIO_RUNES}-rune limit` };
+  }
+  return { value: v };
 }
 
 const CONTROL_RE = /[\u0000-\u001F\u007F]/;
@@ -217,33 +253,41 @@ export async function uploadRun(request, env) {
     let title = null;
     if (titlePart !== null) {
       if (typeof titlePart !== "string") return bad(400, "the title part must be text, not a file");
-      const t = titlePart.trim();
-      if (t === "") return bad(400, `the title is empty: 1–${MAX_TITLE_RUNES} runes travel`);
-      if (runes(t) > MAX_TITLE_RUNES) {
-        return bad(400, `the title is ${runes(t)} runes, over the ${MAX_TITLE_RUNES}-rune limit`);
-      }
-      if (/[\n\r]/.test(t)) return bad(400, "the title must be a single line");
-      title = t;
+      const c = checkTitle(titlePart);
+      if (c.error) return bad(400, c.error);
+      title = c.value;
     }
 
     const notePart = form.get("note");
     let note = null;
     if (notePart !== null) {
       if (typeof notePart !== "string") return bad(400, "the note part must be text, not a file");
-      const n = notePart.replace(/\r\n/g, "\n").trim();
-      if (n === "") return bad(400, `the note is empty: 1–${MAX_NOTE_RUNES} runes travel`);
-      if (runes(n) > MAX_NOTE_RUNES) {
-        return bad(400, `the note is ${runes(n)} runes, over the ${MAX_NOTE_RUNES}-rune limit`);
-      }
-      note = n;
+      const c = checkNote(notePart);
+      if (c.error) return bad(400, c.error);
+      note = c.value;
     }
 
-    return { authorName, authorLink, title, note };
+    // The user-home bio (TTP-127). On a token-owned upload it is validated
+    // like the rest and stored on the token below, never the run. On an
+    // anonymous upload it is dropped with no error — not even type-checked
+    // — because an anonymous run has no home to show it on.
+    const bioPart = form.get("bio");
+    let bio = null;
+    let bioPresent = false;
+    if (bioPart !== null && owner) {
+      if (typeof bioPart !== "string") return bad(400, "the bio part must be text, not a file");
+      const c = checkBio(bioPart);
+      if (c.error) return bad(400, c.error);
+      bio = c.value;
+      bioPresent = true;
+    }
+
+    return { authorName, authorLink, title, note, bio, bioPresent, authorPresent: form.get("author") !== null };
   })();
   // Either the fields or {failed}: one early return, so the refusal reads
   // next to the parsing it came from.
   if (parsed.failed) return fail(parsed.failed.status, parsed.failed.why);
-  const { authorName, authorLink, title, note } = parsed;
+  const { authorName, authorLink, title, note, bio, bioPresent, authorPresent } = parsed;
 
   const avatarPart = form.get("avatar");
   let avatar = null;
@@ -337,6 +381,31 @@ export async function uploadRun(request, env) {
     await env.TAPES.delete(key).catch(() => {});
     if (cardKey) await env.TAPES.delete(cardKey).catch(() => {});
     throw e;
+  }
+
+  // The profile follows the token, not each run (TTP-127): on a token-owned
+  // publish the token's row is overwritten with what this upload carried,
+  // so the home always shows the latest profile. An `author` part rewrites
+  // all three of name/link/avatar_key — a field it did not carry becomes
+  // NULL — while no `author` part at all leaves the three untouched, which
+  // is what keeps an old client's publish from blanking the home. The bio
+  // is rewritten only when its part was present. updated_at moves whenever
+  // anything above did. The per-run columns above stay as the record of
+  // what this upload said, and anonymous runs have nothing else.
+  if (owner && (authorPresent || bioPresent)) {
+    const sets = [];
+    const args = [];
+    if (authorPresent) {
+      sets.push("name = ?", "link = ?", "avatar_key = ?");
+      args.push(authorName, authorLink, avatarKey);
+    }
+    if (bioPresent) {
+      sets.push("bio = ?");
+      args.push(bio);
+    }
+    sets.push("updated_at = ?");
+    args.push(new Date().toISOString());
+    await env.DB.prepare(`UPDATE tokens SET ${sets.join(", ")} WHERE id = ?`).bind(...args, owner).run();
   }
 
   const receipt = { id, url: `${publicBase(request, env)}/r/${id}` };

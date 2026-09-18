@@ -261,7 +261,7 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 | `log` | 全実行の実験台帳 | `toktape log --sort decode` |
 | `compare` | 2 つの実行の指標とフラグを比較する | `toktape compare a.tape b.tape` |
 | `publish` | 実行をアップロードしてリンクを出す | `toktape publish <tape>` |
-| `profile` | 公開のたびに付く作者情報を決める | `toktape profile --name NAME --link URL --avatar FILE` |
+| `profile` | 公開のたびに付く作者情報を決める | `toktape profile --name NAME --link URL --avatar FILE --bio TEXT` |
 | `version` | バージョンを表示する | `toktape version` |
 
 **1 回の記録は何秒か。** 実行は時計で終わります。既定は 20 秒で、
@@ -426,6 +426,13 @@ toktape publish ~/.toktape/runs/<id>.tape
 `--note TEXT`（または `--note-file FILE`）は実行ひとつに実験ノートを付けます。
 何を試した実行かをそのまま文章で書く場所で、ページでは作者行と数字の間に、
 一覧と API では作者の隣に載ります。
+
+公開したあとでも直せます。`publish --edit <id>` に `--title`、`--note`（または
+`--note-file`）、`--private`/`--public` を渡すとページがそのまま変わりますが、
+自分のジャーナルトークンで公開した実行に限ります。トークンごとにユーザーホーム
+`/u/<handle>` があり、プロフィールと自己紹介（`--bio`）、その人の公開実行だけを
+並べます。プロフィールはトークンに付いて回るので、いちばん新しい公開で送った
+名前とアバターがホームに出ます。
 
 ホスト名と絶対パスは公開かどうかに関係なく取り除かれます。サーバーの argv は
 フラグを残してパスだけ失い、モデルはファイル名を残してディレクトリを失います。

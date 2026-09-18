@@ -260,7 +260,7 @@ side by side. Each field is there because it settles an argument.
 | `log` | the experiment ledger of every run | `toktape log --sort decode` |
 | `compare` | diff two runs, metrics and flags | `toktape compare a.tape b.tape` |
 | `publish` | upload a run and print its link | `toktape publish <tape>` |
-| `profile` | name the author every publish carries | `toktape profile --name NAME --link URL --avatar FILE` |
+| `profile` | name the author every publish carries | `toktape profile --name NAME --link URL --avatar FILE --bio TEXT` |
 | `version` | print the version | `toktape version` |
 
 **How long a run is.** A recording ends on the clock: twenty seconds by
@@ -428,6 +428,12 @@ name. `publish --no-profile` leaves it off one run. `--title TEXT` and
 `--note TEXT` (or `--note-file FILE`) attach a lab-note to one run — what
 it was trying, in plain text — shown on the page between the byline and the
 figures and carried on the row and the API beside the author.
+A run you own can be changed after it is up: `publish --edit <id>`
+with `--title`, `--note` (or `--note-file`) or `--private`/`--public`
+rewrites what the page shows. Every journal token has a user home at
+`/u/<handle>` showing the profile, the bio and that user's public runs;
+the profile follows the token, so the newest publish's name and avatar are
+what the home shows.
 
 Hostnames and absolute paths are removed whatever the visibility is — the
 server's argv keeps its flags and loses its paths, the model keeps its file

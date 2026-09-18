@@ -389,6 +389,119 @@ curl -fsS "$base/api/v1/runs" >"$work/fetched" && grep -q "\"id\":\"$jid\",\"url
   die "the listing row does not say the run is owned"
 curl -fsS "$base/r/$id" >"$work/fetched" && grep -q 'class="anon"' "$work/fetched" || die "the anonymous page wears no anonymous chip"
 curl -fsS "$base/" >"$work/fetched" && grep -q 'class="anon"' "$work/fetched" || die "the anonymous row wears no anonymous chip"
+say "the user home"
+# The profile belongs to the token (TTP-127): setting it in the harness
+# HOME and publishing again copies it onto the token's row, so /u/harness
+# shows the newest name, link, avatar and bio — and only that token's runs.
+# Both publishes below are token-owned, so they spend no anonymous rate
+# budget (owned uploads are not rate-limited).
+HOME="$work/home-journal" "$work/toktape" profile --name "Harness Owner" \
+  --link https://example.com/h --avatar "$repo/web/static/favicon.png" \
+  --bio "$(printf 'Line one.\n\nLine two.')" \
+  >"$work/profile-journal.txt" 2>&1 ||
+  { cat "$work/profile-journal.txt"; die "a profile set with a bio failed"; }
+HOME="$work/home-journal" "$work/toktape" publish "$repo/assets/hero.tape" --url "$base" --yes \
+  --title "second" \
+  >"$work/receipt-journal2" 2>"$work/publish-journal2.err" ||
+  { cat "$work/publish-journal2.err"; die "a second token-owned publish failed"; }
+jid2="$(tr -d '\r\n' <"$work/receipt-journal2")"; jid2="${jid2##*/}"
+[ -n "$jid2" ] || die "the second receipt carried no link"
+curl -fsS "$base/u/harness" >"$work/home.html"
+for want in '<h1>Harness Owner</h1>' '<p>Line two.</p>' 'href="https://example.com/h"' 'class="avatar"' 'owned by a journal' 'second'; do
+  grep -q "$want" "$work/home.html" || die "the user home carries no $want"
+done
+grep -q "/r/$id\"" "$work/home.html" && die "the user home lists the anonymous hero"
+curl -fsS "$base/u/harness.json" >"$work/home.json"
+# The local D1 outlives one run of this gate, so earlier runs' harness rows
+# may still be listed here: every assertion below is contains, never a count.
+for want in '"handle":"harness"' '"runs":\[' "\"id\":\"$jid\"" "\"id\":\"$jid2\""; do
+  grep -q "$want" "$work/home.json" || { cat "$work/home.json"; die "the user home JSON carries no $want"; }
+done
+# The bio travels JSON-escaped: in the file it is backslash-n, which grep
+# needs as \\n (a bare \n in a pattern means the letter n).
+grep -q '"bio":"Line one.\\n\\nLine two."' "$work/home.json" ||
+  { cat "$work/home.json"; die "the user home JSON carries no bio"; }
+code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/u/nobody")
+[ "$code" = "404" ] || { cat "$work/body"; die "an unknown user was not a 404 (got $code)"; }
+# A token minted before 0006 has every new column NULL: the home shows the
+# handle as the name and no bio — absent, never null, the API's rule for
+# unknown.
+npx wrangler d1 execute toktape --local --command \
+  "INSERT OR REPLACE INTO tokens (id, hash, created_at, label) VALUES ('stale', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '2026-01-01T00:00:00Z', 'web/check.sh stale-schema probe')" \
+  >"$work/stale.log" 2>&1 || { cat "$work/stale.log"; die "could not mint the stale-schema token"; }
+curl -fsS "$base/u/stale" >"$work/stale.html" && grep -q '<h1>stale</h1>' "$work/stale.html" ||
+  die "a profile-less home does not fall back to the handle"
+grep -q 'class="avatar"' "$work/stale.html" && die "a profile-less home carries an avatar"
+curl -fsS "$base/u/stale.json" >"$work/stale.json"
+grep -q '"handle":"stale"' "$work/stale.json" || { cat "$work/stale.json"; die "a profile-less home JSON carries no handle"; }
+grep -q '"name"' "$work/stale.json" && { cat "$work/stale.json"; die "a profile-less home JSON invents a name"; }
+grep -q '"bio"' "$work/stale.json" && { cat "$work/stale.json"; die "a profile-less home JSON invents a bio"; }
+code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/u/../etc")
+[ "$code" = "404" ] || { cat "$work/body"; die "a handle outside the route was not a 404 (got $code)"; }
+# The byline on a token-owned run page links the home; the anonymous hero
+# page links no home anywhere.
+curl -fsS "$base/r/$jid2" >"$work/fetched" && grep -q 'href="/u/harness"' "$work/fetched" ||
+  die "the token-owned page does not link the user home"
+curl -fsS "$base/r/$id" >"$work/fetched" && grep -q '/u/' "$work/fetched" &&
+  die "the anonymous page links a user home"
+# A publish that carries no profile at all — what an old client sends —
+# leaves the token's row untouched, so the home keeps the previous bio.
+HOME="$work/home-journal" "$work/toktape" profile --clear >"$work/profile-clear.txt" 2>&1 ||
+  { cat "$work/profile-clear.txt"; die "profile --clear failed"; }
+HOME="$work/home-journal" "$work/toktape" publish "$repo/assets/hero.tape" --url "$base" --yes \
+  --title "third" \
+  >"$work/receipt-journal3" 2>"$work/publish-journal3.err" ||
+  { cat "$work/publish-journal3.err"; die "a profile-less token-owned publish failed"; }
+curl -fsS "$base/u/harness" >"$work/home.html"
+for want in '<h1>Harness Owner</h1>' '<p>Line two.</p>' 'third'; do
+  grep -q "$want" "$work/home.html" || die "a profile-less publish blanked the home: no $want"
+done
+
+say "the owner edit"
+HOME="$work/home-journal" "$work/toktape" publish --edit "$jid" --url "$base" --title "edited" --note "new body" \
+  >"$work/receipt-edit" 2>"$work/publish-edit.err" ||
+  { cat "$work/publish-edit.err"; die "publish --edit failed"; }
+[ "$(tr -d '\r\n' <"$work/receipt-edit")" = "$base/r/$jid" ] ||
+  { cat "$work/receipt-edit"; die "publish --edit did not print the run's link"; }
+curl -fsS "$base/r/$jid" >"$work/fetched"
+grep -q '<h1>edited</h1>' "$work/fetched" || die "the edited title is not the h1"
+grep -q '<p>new body</p>' "$work/fetched" || die "the edited note is not rendered"
+HOME="$work/home-journal" "$work/toktape" publish --edit "$jid" --url "$base" --private \
+  >"$work/receipt-edit" 2>"$work/publish-edit.err" ||
+  { cat "$work/publish-edit.err"; die "publish --edit --private failed"; }
+curl -fsS "$base/api/v1/runs" >"$work/fetched" && grep -q "$jid" "$work/fetched" &&
+  die "an unlisted run is in the listing"
+curl -fsS "$base/u/harness" >"$work/fetched" && grep -q "$jid" "$work/fetched" &&
+  die "an unlisted run is on the user home"
+HOME="$work/home-journal" "$work/toktape" publish --edit "$jid" --url "$base" --public \
+  >"$work/receipt-edit" 2>"$work/publish-edit.err" ||
+  { cat "$work/publish-edit.err"; die "publish --edit --public failed"; }
+curl -fsS "$base/api/v1/runs" >"$work/fetched" && grep -q "$jid" "$work/fetched" ||
+  die "a re-listed run is not back in the listing"
+# Negatives by hand curl because the client refuses first: a delete token
+# does not edit, an unknown key is named, no token is refused, a string for
+# private is not a boolean, and a 121-rune title is past the limit.
+dt=$(sed -n 's/^Delete token: //p' "$work/publish.err" | tr -d '\r\n')
+[ -n "$dt" ] || die "no delete token was printed"
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X PATCH "$base/api/v1/runs/$jid" \
+  -H "Authorization: Bearer $dt" -H 'Content-Type: application/json' -d '{"title":"x"}')
+[ "$code" = "403" ] || { cat "$work/body"; die "a delete token edited a run (got $code)"; }
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X PATCH "$base/api/v1/runs/$jid" \
+  -H "Authorization: Bearer $jt" -H 'Content-Type: application/json' -d '{"colour":"red"}')
+[ "$code" = "400" ] || { cat "$work/body"; die "an unknown edit key was not refused (got $code)"; }
+grep -q 'colour' "$work/body" || { cat "$work/body"; die "the refusal does not name the key"; }
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X PATCH "$base/api/v1/runs/$jid" \
+  -H 'Content-Type: application/json' -d '{"title":"x"}')
+[ "$code" = "401" ] || { cat "$work/body"; die "an edit with no token was not refused (got $code)"; }
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X PATCH "$base/api/v1/runs/$jid" \
+  -H "Authorization: Bearer $jt" -H 'Content-Type: application/json' -d '{"private":"yes"}')
+[ "$code" = "400" ] || { cat "$work/body"; die "a string for private was not refused (got $code)"; }
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X PATCH "$base/api/v1/runs/$jid" \
+  -H "Authorization: Bearer $jt" -H 'Content-Type: application/json' -d "{\"title\":\"$title121\"}")
+[ "$code" = "400" ] || { cat "$work/body"; die "a 121-rune edit title was not refused (got $code)"; }
+curl -fsS "$base/sitemap.xml" >"$work/fetched" && grep -q "<loc>$base/u/harness</loc>" "$work/fetched" ||
+  die "the sitemap does not list the user home"
+
 code=$(curl -s -o "$work/body" -w '%{http_code}' -X DELETE "$base/api/v1/runs/$jid" -H "Authorization: Bearer $jt")
 [ "$code" = "204" ] || { cat "$work/body"; die "the journal token did not take its own run down (got $code)"; }
 

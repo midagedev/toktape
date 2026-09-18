@@ -127,6 +127,22 @@ func TestPreviewNamesWhoPublishedIt(t *testing.T) {
 	}
 }
 
+// The bio is listed under "Who it says published it" only when it will
+// travel (TTP-127): the verb sets it only on a token-owned publish, so a
+// set Bio prints its first line and its length, and an unset one prints
+// nothing at all — never a "bio none" line.
+func TestPreviewBioListedOnlyWhenItTravels(t *testing.T) {
+	out := previewOf(t, fullTape(), Options{Bio: "Line one.\n\nLine two."})
+	if !strings.Contains(out, "bio            Line one. … (20 characters)") {
+		t.Errorf("the preview does not list the travelling bio:\n%s", out)
+	}
+
+	bare := previewOf(t, fullTape(), Options{})
+	if strings.Contains(bare, "  bio ") {
+		t.Errorf("the preview lists a bio that will not travel:\n%s", bare)
+	}
+}
+
 // A tape with nothing in it must still produce a preview: the dry run is what
 // somebody reaches for when they do not trust what is about to happen, and it
 // failing is the worst moment for it to fail.

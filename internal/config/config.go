@@ -57,6 +57,11 @@ type Config struct {
 	ProfileName   string
 	ProfileLink   string
 	ProfileAvatar string
+	// ProfileBio is the resident user-home bio (TTP-127): plain paragraphs
+	// shown on /u/<handle>. It travels only on a token-owned publish — an
+	// anonymous run has no home to show it on — and is validated (1–600
+	// runes after TrimSpace, CRLF folded) where it is used.
+	ProfileBio string
 }
 
 // FileName is the config file's name inside Dir.
@@ -162,6 +167,12 @@ func (c *Config) set(key, value string) error {
 			return fmt.Errorf("profile_avatar: %w", err)
 		}
 		c.ProfileAvatar = s
+	case "profile_bio":
+		s, err := unquote(value)
+		if err != nil {
+			return fmt.Errorf("profile_bio: %w", err)
+		}
+		c.ProfileBio = s
 	case "first_publish_warning_seen":
 		b, err := parseBool(value)
 		if err != nil {
@@ -259,6 +270,9 @@ func (c *Config) render() string {
 	}
 	if c.ProfileAvatar != "" {
 		fmt.Fprintf(&b, "profile_avatar = %s\n", quote(c.ProfileAvatar))
+	}
+	if c.ProfileBio != "" {
+		fmt.Fprintf(&b, "profile_bio = %s\n", quote(c.ProfileBio))
 	}
 	return b.String()
 }

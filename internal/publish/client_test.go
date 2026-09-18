@@ -43,6 +43,8 @@ type received struct {
 	titleType   string
 	note        string
 	noteType    string
+	bio         string
+	bioType     string
 	extraParts  []string
 }
 
@@ -107,6 +109,10 @@ func serve(t *testing.T, status int, reply string) (*httptest.Server, *received)
 				got.noteType = p.Header.Get("Content-Type")
 				b, _ := io.ReadAll(p)
 				got.note = string(b)
+			case "bio":
+				got.bioType = p.Header.Get("Content-Type")
+				b, _ := io.ReadAll(p)
+				got.bio = string(b)
 			default:
 				got.extraParts = append(got.extraParts, p.FormName())
 			}
@@ -340,6 +346,180 @@ func TestUploadRefusesBadProfile(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The bio travels only on a token-owned upload (TTP-127): with a token it
+// is a text part beside the rest, without one it is dropped with no error —
+// an anonymous run has no home to show it on, so refusing would turn a
+// profile with a bio into an upload that cannot go out anonymously.
+func TestUploadBodyBioNeedsAToken(t *testing.T) {
+	view, idx := viewFixture()
+	for _, tc := range []struct {
+		name  string
+		token string
+		want  string
+	}{
+		{"a token-owned upload carries the bio", "tk_live_abc", "Line one.\n\nLine two."},
+		{"an anonymous upload drops the bio with no error", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, ctype, err := uploadBody(view, idx, Options{Bio: "Line one.\n\nLine two."}, tc.token)
+			if err != nil {
+				t.Fatalf("uploadBody: %v", err)
+			}
+			_, params, err := mime.ParseMediaType(ctype)
+			if err != nil {
+				t.Fatalf("content type: %v", err)
+			}
+			var bio, bioType string
+			var names []string
+			mr := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+			for {
+				p, err := mr.NextPart()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					t.Fatalf("next part: %v", err)
+				}
+				names = append(names, p.FormName())
+				if p.FormName() == "bio" {
+					bioType = p.Header.Get("Content-Type")
+					b, _ := io.ReadAll(p)
+					bio = string(b)
+				}
+			}
+			if bio != tc.want {
+				t.Errorf("bio part = %q, want %q (parts: %v)", bio, tc.want, names)
+			}
+			if tc.want != "" && bioType != "text/plain" {
+				t.Errorf("bio part content type = %q, want text/plain", bioType)
+			}
+		})
+	}
+}
+
+// The same gating through Upload: a bio set on an anonymous client never
+// reaches the server, and a 601-rune bio is refused before sending.
+func TestUploadBioNeedsAToken(t *testing.T) {
+	view, idx := viewFixture()
+	srv, got := serve(t, http.StatusCreated, `{"id":"a","url":"https://tape.example/r/a"}`)
+
+	if _, err := (&Client{BaseURL: srv.URL}).Upload(context.Background(), view, idx, Options{Bio: "Line one."}); err != nil {
+		t.Fatalf("an anonymous upload with a bio was refused: %v", err)
+	}
+	if got.bio != "" {
+		t.Errorf("an anonymous upload carried bio = %q", got.bio)
+	}
+
+	srv, got = serve(t, http.StatusCreated, `{"id":"a","url":"https://tape.example/r/a"}`)
+	if _, err := (&Client{BaseURL: srv.URL, Token: "tk_live_abc"}).Upload(
+		context.Background(), view, idx, Options{Bio: "Line one.\n\nLine two."}); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if got.bio != "Line one.\n\nLine two." {
+		t.Errorf("bio part = %q, want the bio", got.bio)
+	}
+	if got.bioType != "text/plain" {
+		t.Errorf("bio part content type = %q, want text/plain", got.bioType)
+	}
+
+	if _, err := (&Client{BaseURL: srv.URL, Token: "tk_live_abc"}).Upload(
+		context.Background(), view, idx, Options{Bio: strings.Repeat("b", 601)}); err == nil {
+		t.Fatal("Upload accepted a 601-rune bio")
+	} else if !strings.Contains(err.Error(), "601 runes, over the 600-rune limit") {
+		t.Errorf("error = %q, want it to name the count and the limit", err)
+	}
+}
+
+// An owner edit is a PATCH with the journal token and only the fields that
+// were set (TTP-127): nil means leave it, and the server's short refusal is
+// quoted verbatim the way an upload refusal is.
+func TestClientEdit(t *testing.T) {
+	var method, auth, path string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, auth, path = r.Method, r.Header.Get("Authorization"), r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"abc123","published_at":"2026-09-19T00:00:00Z","private":true,"tape":"/r/abc123.tape","tape_bytes":25,"card":null,"owned":true,"index":{"schema":1},"title":"edited"}`)
+	}))
+	defer srv.Close()
+
+	title := "edited"
+	private := true
+	r, err := (&Client{BaseURL: srv.URL, Token: "tk_journal"}).Edit(context.Background(), "abc123", Edit{Title: &title, Private: &private})
+	if err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	if method != http.MethodPatch {
+		t.Errorf("method = %s, want PATCH", method)
+	}
+	if auth != "Bearer tk_journal" {
+		t.Errorf("Authorization = %q", auth)
+	}
+	if path != "/api/v1/runs/abc123" {
+		t.Errorf("path = %s, want /api/v1/runs/abc123", path)
+	}
+	if len(body) != 2 || body["title"] != "edited" || body["private"] != true {
+		t.Errorf("body = %v, want only the two set fields", body)
+	}
+	if r.URL != srv.URL+"/r/abc123" {
+		t.Errorf("receipt URL = %q", r.URL)
+	}
+}
+
+func TestClientEditRefusals(t *testing.T) {
+	t.Run("a refusal is quoted verbatim", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, `{"error":"editing needs the journal token that owns this run"}`)
+		}))
+		defer srv.Close()
+
+		title := "edited"
+		_, err := (&Client{BaseURL: srv.URL, Token: "tk_wrong"}).Edit(context.Background(), "abc123", Edit{Title: &title})
+		if err == nil {
+			t.Fatal("a 403 was accepted")
+		}
+		if !strings.Contains(err.Error(), "editing needs the journal token") || !strings.Contains(err.Error(), "403") {
+			t.Errorf("error = %q, want the status and the server's own words", err)
+		}
+	})
+
+	t.Run("nothing to change", func(t *testing.T) {
+		calls := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+		}))
+		defer srv.Close()
+
+		if _, err := (&Client{BaseURL: srv.URL, Token: "tk"}).Edit(context.Background(), "abc123", Edit{}); err == nil {
+			t.Fatal("an empty edit was accepted")
+		}
+		if calls != 0 {
+			t.Errorf("an empty edit reached the server %d times", calls)
+		}
+	})
+
+	t.Run("a bad title is refused before sending", func(t *testing.T) {
+		calls := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+		}))
+		defer srv.Close()
+
+		title := strings.Repeat("t", 121)
+		if _, err := (&Client{BaseURL: srv.URL, Token: "tk"}).Edit(context.Background(), "abc123", Edit{Title: &title}); err == nil {
+			t.Fatal("Edit accepted a 121-rune title")
+		} else if !strings.Contains(err.Error(), "121 runes, over the 120-rune limit") {
+			t.Errorf("error = %q, want it to name the count and the limit", err)
+		}
+		if calls != 0 {
+			t.Errorf("a bad title reached the server %d times", calls)
+		}
+	})
 }
 
 // The default is the hosted service, so a publish with no --url reaches it

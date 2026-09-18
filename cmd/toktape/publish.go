@@ -19,6 +19,7 @@ type publishFlags struct {
 	output    *string
 	dryRun    *bool
 	private   *bool
+	public    *bool
 	noText    *bool
 	withText  *bool
 	yes       *bool
@@ -27,6 +28,7 @@ type publishFlags struct {
 	title     *string
 	note      *string
 	noteFile  *string
+	edit      *string
 }
 
 // declarePublishFlags registers the publish verb's flags on fs.
@@ -45,9 +47,11 @@ func declarePublishFlags(fs *flag.FlagSet) *publishFlags {
 		yes:       fs.Bool("yes", false, "acknowledge the first-publish warning without being asked"),
 		url:       fs.String("url", "", "the service to publish to (default "+publish.DefaultBaseURL+")"),
 		noProfile: fs.Bool("no-profile", false, "this run travels without the author profile"),
-		title:     fs.String("title", "", "the lab-note's title for this run"),
-		note:      fs.String("note", "", "the lab-note's body for this run"),
+		title:     fs.String("title", "", "the lab-note's title for this run (or its new title with --edit)"),
+		note:      fs.String("note", "", "the lab-note's body for this run (or its new body with --edit)"),
 		noteFile:  fs.String("note-file", "", "read the lab-note's body from this file"),
+		public:    fs.Bool("public", false, "with --edit: list the run in the search again"),
+		edit:      fs.String("edit", "", "change a run you own instead of uploading: the run id or its /r/<id> link"),
 	}
 }
 
@@ -71,12 +75,6 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 	if refused != nil {
 		return c.fail(*refused)
 	}
-	if len(files) != 1 {
-		return c.usageTextf(usageText, "toktape publish: expected one tape file")
-	}
-	if *f.noText && *f.withText {
-		return c.usagef("toktape publish: --no-text and --with-text say opposite things")
-	}
 	if *f.note != "" && *f.noteFile != "" {
 		return c.usagef("toktape publish: --note and --note-file say the same thing twice")
 	}
@@ -86,6 +84,24 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 		// The config holds the opt-out. Publishing past a file we could not
 		// read would be publishing past a decision somebody made.
 		return c.usagef("toktape: %v", err)
+	}
+
+	// --edit is a different operation on the same verb: no tape is read and
+	// nothing is uploaded; one owned run is changed instead.
+	if *f.edit != "" {
+		if len(files) != 0 {
+			return c.usagef("toktape publish: --edit takes the run id itself, not a tape file")
+		}
+		return runPublishEdit(ctx, c, f, cfg)
+	}
+	if *f.public {
+		return c.usagef("toktape publish: --public lists a run again and only makes sense with --edit")
+	}
+	if len(files) != 1 {
+		return c.usageTextf(usageText, "toktape publish: expected one tape file")
+	}
+	if *f.noText && *f.withText {
+		return c.usagef("toktape publish: --no-text and --with-text say opposite things")
 	}
 
 	tp, err := tape.Read(files[0])
@@ -116,7 +132,18 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 		}
 	}
 
-	opts := publish.Options{Text: textPolicy(f, cfg), Private: *f.private, Author: author, Title: title, Note: note}
+	// The bio travels only on a token-owned publish: an anonymous run has
+	// no home to show it on, so without a token it is left off here (and
+	// the uploader drops it again, so a hand-built Options cannot send it
+	// either).
+	var bio string
+	if cfg.Token != "" && cfg.ProfileBio != "" {
+		if bio, err = publish.ValidateBio(cfg.ProfileBio); err != nil {
+			return c.usagef("toktape publish: %v", err)
+		}
+	}
+
+	opts := publish.Options{Text: textPolicy(f, cfg), Private: *f.private, Author: author, Title: title, Note: note, Bio: bio}
 	view := publish.PublicView(tp, opts.Text)
 	idx := publish.IndexOf(view)
 	preview := publish.Preview(view, idx, opts)
@@ -153,6 +180,82 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 		})
 	}
 	return c.publishReceipt(receipt)
+}
+
+// runPublishEdit changes one owned run instead of uploading (TTP-127).
+//
+// The run is named by id or by its /r/<id> link. Only the flags given
+// travel — a flag left off leaves its field alone — and the journal token
+// in the config is the only key: an anonymous run cannot be edited and a
+// delete token cannot edit. On success the run's link goes to stdout, the
+// same product an upload prints.
+func runPublishEdit(ctx context.Context, c *cli, f *publishFlags, cfg *config.Config) int {
+	if *f.dryRun {
+		return c.usagef("toktape publish: --dry-run prints what would be uploaded, and --edit uploads nothing")
+	}
+	if *f.private && *f.public {
+		return c.usagef("toktape publish: --private and --public say opposite things")
+	}
+	if *f.title == "" && *f.note == "" && *f.noteFile == "" && !*f.private && !*f.public {
+		return c.usagef("toktape publish: --edit changes nothing without --title, --note or --private/--public")
+	}
+	if cfg.Token == "" {
+		return c.usagef("toktape publish --edit needs a journal token in config.toml; an anonymous run cannot be edited")
+	}
+
+	id := editTargetID(*f.edit)
+	if id == "" {
+		return c.usagef("toktape publish: --edit wants a run id or its /r/<id> link")
+	}
+
+	var e publish.Edit
+	if *f.title != "" {
+		title := *f.title
+		e.Title = &title
+	}
+	if *f.note != "" || *f.noteFile != "" {
+		note, err := noteText(f)
+		if err != nil {
+			return c.usagef("toktape publish: %v", err)
+		}
+		e.Note = &note
+	}
+	if *f.private || *f.public {
+		private := *f.private
+		e.Private = &private
+	}
+
+	client := &publish.Client{
+		BaseURL:   *f.url,
+		Token:     cfg.Token,
+		UserAgent: "toktape/" + version,
+	}
+	receipt, err := client.Edit(ctx, id, e)
+	if err != nil {
+		return c.fail(failure{
+			code: exitPublish,
+			msg:  fmt.Sprintf("toktape: %v", err),
+			hint: "only the journal token that owns the run can change it",
+		})
+	}
+	return c.publishReceipt(receipt)
+}
+
+// editTargetID takes the id or the link: a bare id travels as-is, and a
+// /r/<id> URL gives up everything before /r/ and one trailing extension
+// (.json, .tape, .toktape, .png — the page, the record, the card).
+func editTargetID(arg string) string {
+	s := arg
+	if i := strings.LastIndex(s, "/r/"); i >= 0 {
+		s = s[i+len("/r/"):]
+	}
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.LastIndex(s, "."); i > 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
 }
 
 // noteText resolves the lab-note's body to one string. --note and
