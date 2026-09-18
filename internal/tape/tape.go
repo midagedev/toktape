@@ -11,7 +11,11 @@
 // docs/research/00-handover-brief.md, "What this machine taught us"):
 //
 //  1. Rates come from the server's timings object. Client-side rates are a
-//     cross-check and must agree within RateTolerance.
+//     cross-check and must agree within RateTolerance. On an engine that
+//     reports no timings (ServerOpenAI, 2026-09-19, TTP-99) the client's
+//     clock is the only record: TimingsSummary.Source says so, the card
+//     says so beside the headline, and a token count that is not the
+//     server's usage figure yields no rate at all — chunks are not tokens.
 //  2. A decode rate is not reported as "decode" below MinDecodeTokens.
 //     Prompt-cache hits are recorded next to every rate.
 //  3. RSS is not "loaded". NeverLoadedBytes comes from the GGUF header, never
@@ -181,8 +185,26 @@ const (
 	// from a process name. Its model, placement and flags come from that same
 	// engine block (EngineSource), not from a GGUF or an argv.
 	ServerExLlamaV3 ServerKind = "exllamav3"
-	ServerUnknown   ServerKind = "unknown"
+	// ServerOpenAI is any server that speaks the OpenAI chat-completions
+	// protocol and nothing llama-server-specific: no /props, no timings
+	// object, no slots (2026-09-19, TTP-99 — vLLM, SGLang, TabbyAPI, LM
+	// Studio, mlx-lm and the rest). The kind names the protocol that was
+	// observed, not the engine, which the server did not say; what the user
+	// claims about the engine goes in ServerInfo.EngineClaim and is printed
+	// as a claim. Nothing llama.cpp-shaped is run over such a server: no
+	// ParseFlags, no GGUF header, no slot poll, no /apply-template.
+	ServerOpenAI  ServerKind = "openai"
+	ServerUnknown ServerKind = "unknown"
 )
+
+// SpeaksLlamaProtocol reports whether k answered /props — the llama.cpp
+// family and the shims that imitate it. ServerOpenAI is the one kind that
+// did not, and every reader of /props-derived fields (slots, ctx_size,
+// build_info, the flag vocabulary) branches on this rather than on a list of
+// kinds, so a kind added later lands on the right side by construction.
+func (k ServerKind) SpeaksLlamaProtocol() bool {
+	return k != ServerOpenAI
+}
 
 // SelfDeclared reports whether k was taken from a /props engine object — the
 // engine named itself, in the one field that exists for saying so.
@@ -218,6 +240,11 @@ type ServerInfo struct {
 	Flags   ServerFlags `json:"flags"`
 	NSlots  int         `json:"n_slots,omitempty"`
 	CtxSize int         `json:"ctx_size,omitempty"` // n_ctx from /props
+	// EngineClaim is what the user said the engine is (`--engine "vLLM
+	// 0.11"`) on a ServerOpenAI server, which does not say. A claim, not an
+	// observation: every surface prints it with that word beside it, and it
+	// never fills Kind, Build or Commit (2026-09-19, TTP-99).
+	EngineClaim string `json:"engine_claim,omitempty"`
 }
 
 // ServerFlags are the flags the card must always print (the five
@@ -541,6 +568,19 @@ type TimingsSummary struct {
 	ITLp99Ms float64 `json:"itl_p99_ms,omitempty"`
 	// EffectiveBandwidthBytesPerSec = ActiveBytesPerToken * PredictedPerSecond.
 	EffectiveBandwidthBytesPerSec int64 `json:"effective_bw_bps,omitempty"`
+
+	// Source is where the headline rates came from: "" (the server's timings
+	// object — every tape before 2026-09-19 and every llama-server tape) or
+	// "client" (the recorder's own clock, because the server reported no
+	// timings; ServerOpenAI). With "client" the server fields above are
+	// zero and PredictedPerSecond is a copy of ClientPredictedPerSecond so
+	// every reader of the headline sees one figure; the card labels it.
+	Source string `json:"source,omitempty"`
+	// PredictedNSource is how PredictedN was counted on a client-timed
+	// stream: "" (the server said), "usage" (the final chunk's
+	// usage.completion_tokens) or "chunks" (SSE deltas were counted — not a
+	// token count, so no rate is derived from it; lesson 1).
+	PredictedNSource string `json:"predicted_n_source,omitempty"`
 }
 
 // AggregateTimings is the server-wide view of a concurrent run. With
