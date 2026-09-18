@@ -4,8 +4,9 @@
   "type": "module",
   "description": "The Cloudflare Worker behind tape.midagedev.com. The Worker never parses a tape; see ../internal/publish/client.go.",
   "scripts": {
-    "dev": "wrangler dev --var PUBLIC_BASE_URL:http://127.0.0.1:8787 --var RATE_SALT:local-dev-salt",
-    "deploy": "wrangler deploy",
+    "dev": "./player/build.sh && wrangler dev --var PUBLIC_BASE_URL:http://127.0.0.1:8787 --var RATE_SALT:local-dev-salt",
+    "build:player": "./player/build.sh",
+    "deploy": "./player/build.sh && wrangler deploy",
     "migrate:local": "wrangler d1 migrations apply toktape --local",
     "migrate:remote": "wrangler d1 migrations apply toktape --remote"
   },

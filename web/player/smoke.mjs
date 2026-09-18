@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const dist = join(here, "dist");
+const dist = join(here, "dist", "player");
 
 let failures = 0;
 function check(name, ok, detail) {

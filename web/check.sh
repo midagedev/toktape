@@ -41,6 +41,13 @@ die() { printf 'web/check.sh: %s\n' "$1" >&2; exit 1; }
 say "building the client"
 go build -o "$work/toktape" "$repo/cmd/toktape"
 
+say "building the player"
+# The player is served out of player/dist as static assets, and wrangler
+# refuses to start without that directory. Building it here also puts the
+# size budget and the node smoke in front of every run of this gate.
+./player/build.sh >"$work/player.log" 2>&1 || { cat "$work/player.log"; die "the player did not build"; }
+tail -n 12 "$work/player.log"
+
 say "local D1"
 npx wrangler d1 migrations apply toktape --local >"$work/migrate.log" 2>&1 ||
   { cat "$work/migrate.log"; die "migrations failed"; }
@@ -105,6 +112,22 @@ grep -q "og:image\" content=\"$base/r/$id.png" "$work/page.html" ||
   { grep -o 'og:image[^>]*' "$work/page.html"; die "the page has no absolute og:image"; }
 curl -fsS "$base/r/$id.json" >"$work/row.json"
 grep -q '"schema": *1' "$work/row.json" || { cat "$work/row.json"; die "the index row is not there"; }
+
+say "the player is served"
+grep -q 'data-tape="/r/'"$id"'.tape"' "$work/page.html" || die "the page does not name the record for Replay"
+grep -q 'src="/player/host.js"' "$work/page.html" || die "the page does not load the player"
+# application/wasm is what lets the browser compile while it downloads; the
+# wrong type is not an error, it is a slower page, so it is checked here.
+ctype=$(curl -fsS -o "$work/player.wasm" -w '%{content_type}' "$base/player/toktape.wasm")
+case "$ctype" in application/wasm*) ;; *) die "the wasm is served as $ctype" ;; esac
+[ "$(wc -c <"$work/player.wasm")" -gt 1000000 ] || die "what came back from /player/toktape.wasm is too small to be the player"
+curl -fsS "$base/player/wasm_exec.js" | grep -q 'globalThis.Go' || die "wasm_exec.js is not served"
+curl -fsS "$base/player/host.js" | grep -q 'data-tape' || die "host.js is not served"
+# A path under /player/ that is not an asset falls through to the Worker
+# rather than into the asset handler's own 404, so a stale asset directory
+# cannot swallow a route this code owns.
+code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/player/nothing-here")
+grep -q 'no such path' "$work/body" || { cat "$work/body"; die "an unknown asset path did not reach the Worker (got $code)"; }
 
 say "the search"
 curl -fsS "$base/api/v1/runs" >"$work/list.json"

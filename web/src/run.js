@@ -1,10 +1,10 @@
 // GET /r/<id> — one published run, and /r/<id>.toktape — the record itself.
 //
 // The page is built from the index row the client uploaded, which is the
-// only thing this side is allowed to read. The card and the replay are not
-// here yet: the card is a PNG the client will upload beside the tape, and
-// the replay is wasm (TTP-116). Until then the page is the figures and the
-// download, and it says so rather than showing an empty frame.
+// only thing this side is allowed to read. The card is the PNG the client
+// uploaded beside the tape, and Replay is the renderer compiled to wasm
+// (web/player), which fetches the record and draws it in the page — this
+// side still never opens a tape.
 //
 // A private run is served here. Unlisted means out of the search, not behind
 // a door — the id is the secret (§9.3).
@@ -148,12 +148,22 @@ function runPage(row, idx, base) {
         : ""
     }`,
     style: PAGE_STYLE,
-    body: `${
+    body: `<div class="stage" data-tape="/r/${esc(row.id)}${esc(row.tape_ext)}">
+${
       row.card_key
         ? `<img class="card" src="/r/${esc(row.id)}.png" width="1200" height="675"
      alt="The toktape card for this run: ${esc(summaryLine(idx))}">`
-        : ""
+        : `<div class="card nocard"></div>`
     }
+<button class="replay" type="button">▶ Replay</button>
+<pre class="screen"></pre>
+<p class="status" hidden></p>
+<div class="controls">
+  <button class="toggle" type="button">Pause</button>
+  <input class="scrub" type="range" min="0" max="0" value="0" step="1" aria-label="position">
+  <span class="clock num">0:00 / 0:00</span>
+</div>
+</div>
 <h1>${esc(title)}</h1>
 <p class="sub">${esc(summaryLine(idx))}${row.private === 1 ? " · unlisted" : ""}</p>
 
@@ -177,17 +187,50 @@ ${caveatBlock(idx)}
 <a href="/r/${esc(row.id)}${esc(row.tape_ext)}">Download the record</a> · ${row.tape_bytes} bytes ·
 published ${esc(row.created_at)}<br>
 The record is the original: everything on this page was derived from it before
-it was uploaded, and <code>toktape card ${esc(row.id)}${esc(row.tape_ext)}</code>
+it was uploaded, Replay draws it again in your browser with the same renderer
+the terminal uses, and <code>toktape card ${esc(row.id)}${esc(row.tape_ext)}</code>
 draws the card from the same file.
-</footer>`,
+</footer>
+<script src="/player/wasm_exec.js"></script>
+<script src="/player/host.js"></script>`,
   });
 }
 
 const PAGE_STYLE = `
 /* The card is the page's first sentence: it is what the link previews as,
    and it settles the argument before any of the table is read. */
+.stage { position: relative; margin: 0 0 2rem; }
 .card { width: 100%; height: auto; display: block; border-radius: 8px;
-  border: 1px solid #1b1f26; margin: 0 0 2rem; }
+  border: 1px solid #1b1f26; }
+.nocard { aspect-ratio: 16 / 9; background: #0a0c10; }
+/* Replay sits on the card the way a play button sits on a poster: the card
+   is the still, the run is the motion, and one click swaps them. */
+.replay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  font: 600 1rem/1 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+  color: #eef1f5; background: rgba(14, 16, 20, .82); border: 1px solid #3a4150;
+  border-radius: 999px; padding: .85rem 1.5rem; cursor: pointer;
+  backdrop-filter: blur(4px); letter-spacing: .01em; }
+.replay:hover { background: rgba(30, 34, 42, .92); border-color: #7aa2f7; }
+.replay:disabled { opacity: .6; cursor: default; }
+/* The terminal, sized by host.js so 120 columns fill the stage; the height
+   follows from 36 lines of it. The background is the theme's own. */
+.screen { display: none; margin: 0; padding: 0; width: 100%; overflow: hidden;
+  line-height: 1.25; background: #101412; border-radius: 8px;
+  border: 1px solid #1b1f26; color: #e6e2d8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre; cursor: pointer; user-select: none; }
+.status { position: absolute; left: 0; right: 0; bottom: 3.2rem; text-align: center;
+  margin: 0; font-size: .85rem; color: #d7dae0; text-shadow: 0 1px 3px #000; }
+.controls { display: none; align-items: center; gap: .8rem; margin-top: .6rem;
+  font-size: .8rem; color: #7d848f; }
+.controls .toggle { font: inherit; color: #d7dae0; background: #161a21;
+  border: 1px solid #262b35; border-radius: 6px; padding: .3rem .7rem; cursor: pointer;
+  min-width: 4.5rem; }
+.controls .toggle:hover { border-color: #7aa2f7; }
+.controls .scrub { flex: 1; accent-color: #86c2b3; }
+.stage.live .card, .stage.live .replay { display: none; }
+.stage.live .screen { display: block; }
+.stage.live .controls { display: flex; }
 .figures { display: flex; flex-wrap: wrap; gap: 2.5rem; margin: 0 0 2.5rem; }
 .figure .n { font: 600 1.9rem/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #eef1f5; }

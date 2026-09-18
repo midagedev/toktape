@@ -16,12 +16,18 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 repo="$(cd ../.. && pwd)"
-out="dist"
+# dist/ is the Worker's static-asset directory (web/wrangler.jsonc "assets"),
+# and everything in it is built: the wasm, the loader copied out of the
+# toolchain, and host.js copied from beside this script so the three ship as
+# one set. Nothing under dist/ is committed.
+out="dist/player"
 budget=1600000
 
 version="$(cd "$repo" && git describe --tags --always --dirty 2>/dev/null || echo dev)"
 
+rm -rf dist
 mkdir -p "$out"
+cp host.js "$out/host.js"
 GOOS=js GOARCH=wasm go build \
   -ldflags "-s -w -X main.version=$version" \
   -o "$out/toktape.wasm" .

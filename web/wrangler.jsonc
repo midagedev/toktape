@@ -36,6 +36,14 @@
     }
   ],
 
+  // The browser player, served as static assets under /player/: the wasm,
+  // Go's wasm_exec.js and host.js, all written by web/player/build.sh. A
+  // request for a path that is not in the directory falls through to the
+  // Worker, so /r/<id> and the API are unaffected; a request for one that is
+  // never reaches the Worker, which is what lets the wasm be sent with the
+  // right content type and brotli without this code knowing about either.
+  "assets": { "directory": "player/dist" },
+
   // R2 holds the record itself and, later, the PNG card. It is the original:
   // if the normalisation table turns out to be wrong, the index is re-derived
   // from what is here and nothing is lost (§9.4, rule 3).
