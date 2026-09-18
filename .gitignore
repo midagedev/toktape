@@ -11,3 +11,4 @@
 /web/node_modules/
 # wrangler's local state: the miniflare R2 and D1 the e2e harness runs against.
 /web/.wrangler/
+/web/player/dist/
