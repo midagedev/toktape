@@ -34,6 +34,33 @@ const (
 	// one of them above tape.MinDecodeTokens, so every one of them is a decode
 	// rate and not a sample. It is also a clip a reader sits through: a 20 s
 	// run is a 25 s clip, 31 s with --open.
+	//
+	// It is not sized to contain a reasoning model's thought, and it will not
+	// be (TTP-139, 2026-09-20). An R1-class model thinks three to eight
+	// thousand tokens, so a default run against one ends mid-thought and the
+	// card says so — "2800 out · 2800 thinking" beside an answer-cut caveat
+	// that names --for. That reads like a defect and is not one: what a
+	// default run measures is a decode rate, and a reasoning model's tokens
+	// are decode tokens at that rate — the server counts reasoning_content in
+	// predicted_n exactly like an answer token (tape.TokenRecord.Reasoning).
+	// The rate is the same measurement whether the model thought or answered.
+	// An answer in the transcript is a nicer artifact, not a better figure.
+	//
+	// Two ways of buying that artifact were rejected, and are recorded here
+	// so the next reader meets the argument at the constant:
+	//
+	//   - Raise this. Every non-reasoning run — the majority — pays a two to
+	//     three times longer default and clip for a benefit it does not get,
+	//     and no number delivers the guarantee anyway: 60 s holds a 3k
+	//     thought at 140 tok/s and holds nothing at 40. A fixed time cannot
+	//     contain a variable-length thought on a variable-speed box, which is
+	//     the same mismatch the paragraph above uses against a token count.
+	//   - Raise it only for a reasoning model. That needs a length nobody
+	//     observed and a tape field saying the budget was defaulted, which is
+	//     the shape this project rejected the same day.
+	//
+	// A reader who wants the answer asks for it: --for buys wall clock and
+	// --think-budget caps the thinking, and answerCutWarning names them.
 	DefaultFor = 20 * time.Second
 	// DefaultMaxTokens is the per-stream cap a request carries when the user
 	// named none. It is a runaway guard, not a target: what ends a default run

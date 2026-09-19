@@ -121,7 +121,7 @@ Examples:
   toktape
 
   # Aim the run at a clip length: a clip is the run at 1:1 plus 6s of frame,
-  # 12s with --open, so --for 18s makes a ~30s one. EOS usually arrives first
+  # 12s with --open, so --for 18s makes a ~30s one. EOS often arrives first
   # and the run is then shorter — the prompt's doing, not the machine's.
   toktape --for 18s
 

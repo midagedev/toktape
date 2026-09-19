@@ -59,6 +59,13 @@ Careful: a run generates for twenty seconds by default
   its own, so --for 5s on a slow box ends later than it says. There is no flag
   for that floor; the tape records it as limit.min_tokens.
 
+  Twenty seconds does not contain a reasoning model's thought, and is not
+  meant to. Those models think for thousands of tokens, so a default run ends
+  mid-thought and the card says so. The rate is still the rate — the server
+  counts a thinking token like any other, so it is a decode token measured at
+  the decode speed — and what the run has no answer to show for it is what
+  --for and --think-budget are for. The card names them.
+
 Careful: -n is tokens, not streams
   -n is --n-predict: tokens per stream, which is what llama-bench's -n means.
   The number of streams sent at once is --sessions N, and it has no short
