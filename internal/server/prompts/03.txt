@@ -1,0 +1,15 @@
+Using the incident timeline below, write a blameless postmortem for the engineering team.
+
+~~~
+14:02 deploy of api v2.31 starts, canary at 5% of traffic
+14:09 canary error rate 0.4%, inside the 1% threshold; rollout continues
+14:21 rollout reaches 100%
+14:26 p99 latency on /checkout rises from 180 ms to 2.4 s
+14:31 on-call paged by the latency alert; first suspects the database
+14:44 database CPU normal; connection pools on api pods saturated at 50/50
+14:52 v2.31 found to open a new pooled connection on every payment retry
+15:03 rollback to v2.30 started
+15:11 latency back to normal; 3,912 checkouts failed during the window
+~~~
+
+Include a summary, the customer impact with numbers, the root cause, and the contributing factors — among them why a 5% canary with a healthy error rate missed a problem that appears only once retries pile up. Say what went well and badly in the response, then list at least six action items, each with an owner role and a way to verify it.

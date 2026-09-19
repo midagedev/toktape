@@ -1,0 +1,18 @@
+Implement the cache interface below in TypeScript without any library.
+
+~~~ts
+interface Cache<K, V> {
+  get(key: K): V | undefined; // marks the entry as recently used
+  set(key: K, value: V, ttlMs?: number): void;
+  delete(key: K): boolean;
+  readonly size: number;
+}
+
+// - capacity is fixed at construction; a set past it evicts the least recently used
+// - an expired entry is never returned and does not count toward size
+// - get, set and delete are O(1)
+// - onEvict(key, value, reason), reason "capacity" | "expired" | "deleted"
+// - the clock is injectable, so tests never sleep
+~~~
+
+Explain the data structure you choose, and whether a plain Map alone is enough given that it keeps insertion order. Write the implementation with comments on the subtle parts, especially how expired entries are kept out of size without a timer. Then write a Jest suite with an injected fake clock, and close with what would change if many async callers shared the cache and computed missing values on a miss.

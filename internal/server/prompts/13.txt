@@ -1,0 +1,13 @@
+Our payments service on Kubernetes restarts roughly every forty minutes under normal load. It is a Spring Boot application on Java 21, and nothing in its own logs mentions an error before the restart.
+
+~~~
+Last State: Terminated  Reason: OOMKilled  Exit Code: 137  Limits: memory 1Gi
+
+03:14:07 INFO  Started PaymentsApplication in 11.2 seconds
+03:14:07 INFO  JVM flags: -XX:MaxRAMPercentage=90 -XX:+UseG1GC
+03:41:55 WARN  HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=48s)
+03:52:30 INFO  Exported 18204 settlement rows to object storage (buffered=true)
+03:53:02 WARN  GC pause (G1 Evacuation Pause) 2.9s, heap 880M->871M
+~~~
+
+Explain what is killing the container and why the JVM never throws OutOfMemoryError first. Show how the heap percentage, metaspace, thread stacks, code cache and direct buffers add up against the 1 GiB limit, and what the Hikari warning and the GC pause each tell you. Then give a plan to confirm it on a live pod and the changes you would make.

@@ -1,0 +1,17 @@
+Rustc rejects the function below with E0502, cannot borrow *words as mutable because it is also borrowed as immutable, pointing at the push call.
+
+~~~rust
+/// Appends an upper-cased copy of the longest word and returns the longest word.
+fn longest_word(words: &mut Vec<String>) -> &str {
+    let mut best = &words[0];
+    for w in words.iter() {
+        if w.len() > best.len() {
+            best = w;
+        }
+    }
+    words.push(best.to_uppercase());
+    best
+}
+~~~
+
+Explain, in terms of borrows and lifetimes, exactly why the compiler is right to reject it, and describe the memory bug it would allow if it were accepted. Then fix it three ways: returning an owned String, working with an index instead of a reference, and splitting it into two functions with a different signature. Say which you would choose and why, make every version handle an empty vector without panicking, and write unit tests for all three.

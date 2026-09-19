@@ -1,0 +1,13 @@
+Yesterday a teammate ran the commands below on a shared feature branch, and now three days of commits by two people are gone from it.
+
+~~~
+$ git pull
+hint: You have divergent branches and need to specify how to reconcile them.
+fatal: Need to specify how to reconcile divergent branches.
+$ git reset --hard origin/main
+HEAD is now at 4e1c9a2 Merge pull request #412 from ci/bump-node
+$ git push --force
+ + 9b07d31...4e1c9a2 feature/billing -> feature/billing (forced update)
+~~~
+
+Explain to them, as a patient senior engineer, what each command did to their local branch and to the remote one, and why the pull refused to run. Say where the lost commits still exist and for how long — their own reflog, the other author's clone, the hosting service — with the commands to recover from each. Then explain pull.rebase, pull.ff and push --force-with-lease, and how branch protection would have stopped this.

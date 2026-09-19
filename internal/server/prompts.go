@@ -1,7 +1,10 @@
 package server
 
 import (
+	"embed"
 	"fmt"
+	"io/fs"
+	"sort"
 
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -52,8 +55,7 @@ import (
 // not share a prefix and cannot hit each other's prompt cache, which would
 // make the measured prefill meaningless. Material comes first and the
 // instruction last, and nothing needs a tool, a file or the network, so any
-// instruction-tuned model can answer. Code is fenced with ~~~ so it can sit in
-// a Go raw string.
+// instruction-tuned model can answer.
 //
 // Five prompts joined the set on 2026-09-18 (TTP-112), because the set is now
 // also the comparison set for published runs (spec §9.5) and what it leaves
@@ -72,371 +74,46 @@ import (
 // `-n 1` is prompt 0 and only `-n 21` is all of them: the additions are placed
 // where the common runs meet them rather than appended, with the first Korean
 // at 6 and the Japanese at 14, and `-n 1` through `-n 4` left in English.
-var defaultPrompts = []string{
-	`Review this Go rate limiter, keyed by client IP and called from every request goroutine of an HTTP server. In production it panics with "concurrent map writes" and the process grows until it is killed.
+var defaultPrompts = loadPrompts()
 
-~~~go
-type Limiter struct {
-	buckets map[string]*bucket // bucket{tokens float64; last time.Time}
-	rate    float64            // tokens per second
-	burst   float64
-}
+// promptFiles holds the set as one file per prompt, in index order by name.
+//
+// They were Go raw strings until 2026-09-20 and moved out for two reasons
+// (TTP-144). The set is about to grow to thousands of tokens per prompt —
+// long enough that prefill is a throughput and not mostly fixed cost — and
+// a few hundred kilobytes of prose and code inside a source file is a file
+// nobody reads. And a prompt per file is a boundary: the material can be
+// written, reviewed and diffed one artifact at a time, which a single var
+// block of twenty-one raw strings cannot be.
+//
+// The contents are unchanged by the move — promptSetHash pins that, and it
+// did not move — so every tape published under this id still describes the
+// set it says it does.
+//
+//go:embed prompts/*.txt
+var promptFiles embed.FS
 
-func (l *Limiter) Allow(key string) bool {
-	b, ok := l.buckets[key]
-	if !ok {
-		b = &bucket{tokens: l.burst, last: time.Now()}
-		l.buckets[key] = b
+// loadPrompts reads the set at startup, in the order the filenames sort in,
+// which is the index order the set's own doc comment describes: a run sends
+// the first Concurrency prompts, so which prompt is at which index is part
+// of the set and not an implementation detail. A file that cannot be read is
+// a build that shipped without its prompts, which is not a condition to
+// degrade gracefully through.
+func loadPrompts() []string {
+	names, err := fs.Glob(promptFiles, "prompts/*.txt")
+	if err != nil {
+		panic("prompt set: " + err.Error())
 	}
-	now := time.Now()
-	b.tokens += now.Sub(b.last).Seconds() * l.rate
-	if b.tokens > l.burst {
-		b.tokens = l.burst
-	}
-	b.last = now
-	if b.tokens < 1 {
-		return false
-	}
-	b.tokens--
-	return true
-}
-~~~
-
-Find every bug and risk, the ones that do not cause the panic included, and explain each. Then write a concurrency-safe version that evicts idle keys, with a table-driven test covering refill, burst and many callers under the race detector.`,
-
-	`Below is an architecture decision record a team circulated last week. Three reviewers approved it without comment.
-
-Title: move background jobs off the database queue and onto a managed broker.
-
-Context: the job table holds nine million rows. Workers poll it every two hundred milliseconds with SELECT ... FOR UPDATE SKIP LOCKED, and on Monday mornings the queue depth peaks near forty thousand. Two of our four read replicas now spend most of their time on queue traffic, not on customer queries.
-
-Decision: publish each job to the broker on commit and let the broker own retries and dead-lettering. Drop the job table once the backlog drains.
-
-Consequences: a job stops being visible to the transaction that created it, so it may run before the row it refers to is committed. We accept this and will make every job re-read its inputs.
-
-Name the assumptions this record leaves unstated. Say which of them the numbers above actually support and which they do not, and for each unsupported one, describe the smallest measurement that would settle it.`,
-	`Diagnose why this PostgreSQL 16 query went from 40 ms to 9 s after a nightly import added forty thousand customers and two million orders.
-
-~~~
-SELECT c.id, c.name, sum(o.total) AS spent
-FROM customers c JOIN orders o ON o.customer_id = c.id
-WHERE o.created_at >= now() - interval '30 days' AND c.region = 'EU'
-GROUP BY c.id, c.name ORDER BY spent DESC LIMIT 20;
-
--> HashAggregate (rows=3) (actual rows=48211 loops=1)
-     -> Nested Loop (rows=12) (actual rows=1203311 loops=1)
-          -> Seq Scan on customers c (rows=3) (actual rows=48211 loops=1)
-               Filter: (region = 'EU')
-          -> Index Scan using orders_customer_id_idx (rows=4) (actual rows=25 loops=48211)
-               Rows Removed by Filter: 212
-               Buffers: shared hit=402113 read=1893022
-Execution Time: 9121.0 ms
-~~~
-
-Walk through the plan and say what each gap between estimated and actual rows tells you. Rank the likely causes, give the commands that confirm each, and propose the index or query change you would make, with the plan you expect after it.`,
-
-	`Using the incident timeline below, write a blameless postmortem for the engineering team.
-
-~~~
-14:02 deploy of api v2.31 starts, canary at 5% of traffic
-14:09 canary error rate 0.4%, inside the 1% threshold; rollout continues
-14:21 rollout reaches 100%
-14:26 p99 latency on /checkout rises from 180 ms to 2.4 s
-14:31 on-call paged by the latency alert; first suspects the database
-14:44 database CPU normal; connection pools on api pods saturated at 50/50
-14:52 v2.31 found to open a new pooled connection on every payment retry
-15:03 rollback to v2.30 started
-15:11 latency back to normal; 3,912 checkouts failed during the window
-~~~
-
-Include a summary, the customer impact with numbers, the root cause, and the contributing factors — among them why a 5% canary with a healthy error rate missed a problem that appears only once retries pile up. Say what went well and badly in the response, then list at least six action items, each with an owner role and a way to verify it.`,
-
-	`A vendor published the benchmark summary below to claim their inference server is 3.4 times faster than the open-source one, and a colleague forwarded it as the reason we should switch.
-
-Both servers ran on one eight-card node with the same 70B model in 4-bit. The vendor's server was given all eight cards. The open-source server was started from the vendor's published example, which places the model on four. Each test sent two hundred requests of roughly nine hundred prompt tokens and recorded the mean time to the last token: 11.2 seconds for the vendor, 38.1 for the alternative. Each configuration was run once, back to back, on a machine the vendor describes as otherwise idle. The report gives no per-request figures, no token counts for the answers, and no time to the first token.
-
-Write the reply I should send. Separate what these numbers can support from what they cannot, and list the specific figures I should ask for before the comparison means anything.`,
-	`Refactor this Python script, which summarises a 40 GB nginx access log into request counts and 95th percentile latency per route. Run by hand on a small VM, it is killed by the kernel before it prints anything.
-
-~~~python
-def p95(values):
-    values.sort()
-    return values[int(len(values) * 0.95)]
-
-def main(path):
-    lines = open(path).readlines()
-    by_route = {}
-    for line in lines:
-        m = re.match(r'(\S+) \S+ \S+ \[(.*?)\] "(\w+) (\S+) \S+" (\d+) (\d+) (\d+)ms', line)
-        if not m:
-            continue
-        route = m.group(4).split("?")[0]
-        by_route.setdefault(route, []).append(int(m.group(7)))
-    for route, times in by_route.items():
-        print(route, len(times), p95(times))
-~~~
-
-Turn it into a streaming tool that uses bounded memory, keeps the output format but sorts it, and takes options to filter by route prefix and status class. Explain each change, including why this percentile is wrong for small samples. Finish with pytest cases for one value, twenty values and all values equal.`,
-
-	`어제 오후 결제 서비스가 주문 확정 요청의 절반을 실패시켰다. 아래는 당직자가 남긴 기록이다.
-
-14:02 재고 서비스 응답 시간 경보. 평균 80밀리초에서 1.9초로.
-14:07 결제 서비스의 스레드 풀이 전부 대기 상태. 신규 요청은 큐에 쌓임.
-14:14 사용자 문의가 들어오기 시작. 상태 페이지는 여전히 정상으로 표시됨.
-14:31 재고 서비스를 재시작. 응답 시간 회복.
-14:38 큐가 한 번에 소진되며 실패한 요청이 동시에 재시도됨. 재고 서비스가 다시 느려짐.
-15:02 재고 서비스의 커넥션 풀을 두 배로 늘린 뒤 안정됨.
-
-전날 밤 배포에는 재고 조회 타임아웃을 3초에서 30초로 늘린 변경이 들어 있었다.
-
-이 기록으로 책임을 묻지 않는 사후 분석을 작성하라. 무엇이 원인이고 무엇이 증상인지 구분하고, 같은 일이 다시 일어났을 때 더 빨리 알아차릴 방법을 제안하라.`,
-	`The search box in our React app sometimes shows results for an earlier query than the one the user typed, and the network tab shows a request for almost every keystroke.
-
-~~~tsx
-export function SearchBox() {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Result[]>([]);
-
-  useEffect(() => {
-    const id = setTimeout(async () => {
-      const res = await fetch("/api/search?q=" + query);
-      setResults(await res.json());
-    }, 300);
-  }, [query]);
-
-  return (
-    <>
-      <input value={query} onChange={e => setQuery(e.target.value)} />
-      <ul>{results.map(r => <li>{r.title}</li>)}</ul>
-    </>
-  );
-}
-~~~
-
-Explain every bug in it, and give the sequence of keystrokes and response timings that shows the stale results. Then rewrite it with debounce cleanup, cancellation through AbortController, URL encoding, and loading and error states. Finish with React Testing Library tests on fake timers that reproduce the race.`,
-
-	`Intermittent 502s started after we put nginx in front of a Node.js API. About one request in two thousand fails, and it is always one that reuses an upstream connection that sat idle for a few seconds.
-
-~~~
-# nginx error.log
-[error] 311#311: *918273 upstream prematurely closed connection while reading
-response header from upstream, request: "POST /v1/orders HTTP/1.1"
-
-# nginx.conf
-upstream api { server 10.0.9.3:3000; keepalive 64; }
-location /v1/ {
-    proxy_pass http://api;
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
-}
-
-# server.js
-const server = app.listen(3000); // keepAliveTimeout left at its default
-~~~
-
-Explain step by step the race that produces this error, including which side closes the idle connection and why nginx does not retry the POST on another one. Give the settings on both sides that fix it and the rule for choosing their values, then describe how you would reproduce the failure deterministically before and after the change.`,
-
-	`Rustc rejects the function below with E0502, cannot borrow *words as mutable because it is also borrowed as immutable, pointing at the push call.
-
-~~~rust
-/// Appends an upper-cased copy of the longest word and returns the longest word.
-fn longest_word(words: &mut Vec<String>) -> &str {
-    let mut best = &words[0];
-    for w in words.iter() {
-        if w.len() > best.len() {
-            best = w;
-        }
-    }
-    words.push(best.to_uppercase());
-    best
-}
-~~~
-
-Explain, in terms of borrows and lifetimes, exactly why the compiler is right to reject it, and describe the memory bug it would allow if it were accepted. Then fix it three ways: returning an owned String, working with an index instead of a reference, and splitting it into two functions with a different signature. Say which you would choose and why, make every version handle an empty vector without panicking, and write unit tests for all three.`,
-
-	`아래는 사내 파일 업로드 API의 설명서다. 이 문서만 읽고 구현한 팀이 지난달에 두 번 장애를 냈다.
-
-업로드는 두 단계다. 먼저 /uploads에 파일 이름과 크기를 보내면 업로드 URL과 토큰을 받는다. 그다음 그 URL로 파일 본문을 보낸다. 토큰은 일정 시간이 지나면 만료된다. 같은 파일을 다시 올리면 기존 것을 덮어쓴다. 업로드 도중 연결이 끊기면 처음부터 다시 보내야 한다. 완료되면 서버가 체크섬을 확인하고, 맞지 않으면 실패로 처리한다. 실패한 업로드는 하루 뒤에 정리된다.
-
-이 설명서에서 구현자마다 다르게 읽을 수 있는 대목을 전부 찾아라. 각각에 대해 어떤 두 가지 해석이 가능한지, 그중 무엇을 고르면 어떤 장애로 이어지는지 쓰고, 그 뒤에 설명서를 다시 작성하라.`,
-	`Design the PostgreSQL schema for a meeting room booking service.
-
-- An organisation has offices, each in its own time zone, and each office has rooms with a capacity and equipment such as a screen or a phone.
-- A booking reserves one room from a start to an end time for an organiser, with a title and invited people who can accept or decline.
-- Two bookings for the same room must never overlap, even when two people press the button at the same moment on different servers.
-- Bookings repeat weekly or on chosen weekdays until an end date, and one occurrence can be moved or cancelled without touching the rest.
-- Cancelled bookings are kept a year for auditing and must not block the room.
-
-Give the DDL with every constraint, and explain how the schema itself, not application code, makes a double booking impossible under concurrent transactions. Show the SQL for finding free rooms in a slot, listing a person's week, and moving one occurrence, with the indexes each needs.`,
-
-	`Harden this nightly backup script, which runs from cron as root. Last week the NFS mount was missing when it ran, and it deleted files from a directory nobody expected it to touch.
-
-~~~bash
-#!/bin/bash
-SRC=$1
-DEST=/mnt/backup/$(hostname)
-KEEP=7
-
-mkdir $DEST/tmp
-tar czf $DEST/tmp/backup-$(date +%F).tar.gz $SRC
-mv $DEST/tmp/* $DEST/
-rm -rf $DEST/tmp
-
-cd $DEST
-ls -t | tail -n +$KEEP | xargs rm -rf
-echo "backup of $SRC done"
-~~~
-
-List every way this script can fail or do damage, with the condition that triggers each one, including how many backups it really keeps. Then rewrite it defensively: strict mode, quoting, a check that the mount is really there, a lock so two runs cannot overlap, an exit status cron can act on, and retention that cannot delete anything outside the backup directory.`,
-
-	`Our payments service on Kubernetes restarts roughly every forty minutes under normal load. It is a Spring Boot application on Java 21, and nothing in its own logs mentions an error before the restart.
-
-~~~
-Last State: Terminated  Reason: OOMKilled  Exit Code: 137  Limits: memory 1Gi
-
-03:14:07 INFO  Started PaymentsApplication in 11.2 seconds
-03:14:07 INFO  JVM flags: -XX:MaxRAMPercentage=90 -XX:+UseG1GC
-03:41:55 WARN  HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=48s)
-03:52:30 INFO  Exported 18204 settlement rows to object storage (buffered=true)
-03:53:02 WARN  GC pause (G1 Evacuation Pause) 2.9s, heap 880M->871M
-~~~
-
-Explain what is killing the container and why the JVM never throws OutOfMemoryError first. Show how the heap percentage, metaspace, thread stacks, code cache and direct buffers add up against the 1 GiB limit, and what the Hikari warning and the GC pause each tell you. Then give a plan to confirm it on a live pod and the changes you would make.`,
-
-	`次のリリースノートは、社内の管理画面に入る検索機能について書かれたものです。公開前のレビューをお願いします。
-
-今回のリリースから、注文一覧の検索が新しくなります。これまでは注文番号の完全一致だけでしたが、これからは顧客名、メールアドレス、電話番号でも探せます。入力した文字がどこかに含まれていれば見つかります。検索の結果は新しい順に並び、一度に五十件まで表示されます。件数が多いときは続きを読み込めます。権限のない注文は結果に出ません。対象は過去二年分です。
-
-この文章のうち、読む人によって解釈が分かれるところをすべて挙げてください。それぞれについて、どの二通りに読めるのか、どちらを選ぶと利用者がどう困るのかを説明し、そのうえで全文を書き直してください。`,
-	`Implement the cache interface below in TypeScript without any library.
-
-~~~ts
-interface Cache<K, V> {
-  get(key: K): V | undefined; // marks the entry as recently used
-  set(key: K, value: V, ttlMs?: number): void;
-  delete(key: K): boolean;
-  readonly size: number;
-}
-
-// - capacity is fixed at construction; a set past it evicts the least recently used
-// - an expired entry is never returned and does not count toward size
-// - get, set and delete are O(1)
-// - onEvict(key, value, reason), reason "capacity" | "expired" | "deleted"
-// - the clock is injectable, so tests never sleep
-~~~
-
-Explain the data structure you choose, and whether a plain Map alone is enough given that it keeps insertion order. Write the implementation with comments on the subtle parts, especially how expired entries are kept out of size without a timer. Then write a Jest suite with an injected fake clock, and close with what would change if many async callers shared the cache and computed missing values on a miss.`,
-
-	`Yesterday a teammate ran the commands below on a shared feature branch, and now three days of commits by two people are gone from it.
-
-~~~
-$ git pull
-hint: You have divergent branches and need to specify how to reconcile them.
-fatal: Need to specify how to reconcile divergent branches.
-$ git reset --hard origin/main
-HEAD is now at 4e1c9a2 Merge pull request #412 from ci/bump-node
-$ git push --force
- + 9b07d31...4e1c9a2 feature/billing -> feature/billing (forced update)
-~~~
-
-Explain to them, as a patient senior engineer, what each command did to their local branch and to the remote one, and why the pull refused to run. Say where the lost commits still exist and for how long — their own reflog, the other author's clone, the hosting service — with the commands to recover from each. Then explain pull.rebase, pull.ff and push --force-with-lease, and how branch protection would have stopped this.`,
-
-	`Audit this ring buffer from a UART driver. ring_put runs in the receive interrupt handler and ring_get in the main loop, on a single-core Cortex-M4. Every few hours a byte stream arrives corrupted and, once, the board hard-faulted.
-
-~~~c
-#define CAP 64
-
-struct ring { char buf[CAP]; int head; int tail; };
-
-int ring_put(struct ring *r, char c) {
-    if ((r->head + 1) % CAP == r->tail)
-        return -1;
-    r->buf[r->head++] = c;
-    if (r->head > CAP)
-        r->head = 0;
-    return 0;
-}
-
-int ring_get(struct ring *r, char *c) {
-    if (r->head == r->tail)
-        return -1;
-    *c = r->buf[r->tail];
-    r->tail = (r->tail + 1) % CAP;
-    return 0;
-}
-~~~
-
-Explain every defect, the out-of-bounds write and what it overwrites included, whether sharing head and tail between the interrupt and the main loop is safe without disabling interrupts, and what volatile does and does not fix. Give a corrected implementation with a power-of-two capacity and a host-side test harness that fills, drains and wraps it.`,
-
-	`This Django view renders the order history page. It takes four seconds for customers with many orders, and the database log shows 1,300 queries for a page load.
-
-~~~python
-def order_history(request):
-    orders = Order.objects.filter(customer=request.user.customer).order_by("-created_at")
-    rows = []
-    for order in orders:
-        items = order.items.all()
-        rows.append({
-            "id": order.id,
-            "date": order.created_at,
-            "total": sum(i.price * i.quantity for i in items),
-            "status": order.shipment.status if order.shipment else "pending",
-            "products": [i.product.name for i in items],
-        })
-    return render(request, "orders/history.html", {"rows": rows})
-~~~
-
-Explain where each query comes from and how the count grows with the orders and items. Point out the bug in the shipment line when Shipment has a OneToOneField to Order. Rewrite the view with select_related, prefetch_related and pagination, and show a test that fails if the query count regresses.`,
-
-	`Port this Python function to idiomatic Go, returning a time.Duration and an error, without time.ParseDuration.
-
-~~~python
-def parse_duration(s: str) -> float:
-    """Parse "1h30m", "45s", "2.5m" or "500ms" into seconds."""
-    units = {"h": 3600, "m": 60, "s": 1, "ms": 0.001}
-    total, num, i = 0.0, "", 0
-    while i < len(s):
-        ch = s[i]
-        if ch.isdigit() or ch == ".":
-            num += ch
-            i += 1
-            continue
-        unit = s[i:i+2] if s[i:i+2] == "ms" else ch
-        if unit not in units or not num:
-            raise ValueError(f"bad duration: {s!r}")
-        total += float(num) * units[unit]
-        num = ""
-        i += len(unit)
-    if num:
-        raise ValueError(f"missing unit in {s!r}")
-    return total
-~~~
-
-First list the inputs on which the Python version behaves questionably — "1.2.3s", non-ASCII digits that isdigit accepts, an empty string — and say what the Go version should do instead. Then write the port, table-driven tests for every case, and a fuzz test that it never panics.`,
-
-	`Write a complete test file for the Go function below, which a log shipper uses to split text into batches.
-
-~~~go
-// ChunkLines splits text into chunks of at most max bytes, breaking only
-// after a newline. A single line longer than max becomes its own chunk.
-func ChunkLines(text string, max int) []string {
-	var chunks []string
-	var cur strings.Builder
-	for _, line := range strings.SplitAfter(text, "\n") {
-		if cur.Len()+len(line) > max && cur.Len() > 0 {
-			chunks = append(chunks, cur.String())
-			cur.Reset()
+	sort.Strings(names)
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		b, err := promptFiles.ReadFile(n)
+		if err != nil {
+			panic("prompt set: " + err.Error())
 		}
-		cur.WriteString(line)
+		out = append(out, string(b))
 	}
-	if cur.Len() > 0 {
-		chunks = append(chunks, cur.String())
-	}
-	return chunks
-}
-~~~
-
-Use table-driven cases for empty input, a trailing newline, no newline at all, a line of exactly max bytes, a line longer than max, a max of zero or less, and multi-byte UTF-8. Add property tests that joining the chunks gives back the input and that no chunk exceeds max unless it is one line. For each case, state what the code does today and where it contradicts its doc comment.`,
+	return out
 }
 
 // PromptSetID names this set, and every request DefaultPrompts returns

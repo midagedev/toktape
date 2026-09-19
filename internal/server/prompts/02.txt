@@ -1,0 +1,19 @@
+Diagnose why this PostgreSQL 16 query went from 40 ms to 9 s after a nightly import added forty thousand customers and two million orders.
+
+~~~
+SELECT c.id, c.name, sum(o.total) AS spent
+FROM customers c JOIN orders o ON o.customer_id = c.id
+WHERE o.created_at >= now() - interval '30 days' AND c.region = 'EU'
+GROUP BY c.id, c.name ORDER BY spent DESC LIMIT 20;
+
+-> HashAggregate (rows=3) (actual rows=48211 loops=1)
+     -> Nested Loop (rows=12) (actual rows=1203311 loops=1)
+          -> Seq Scan on customers c (rows=3) (actual rows=48211 loops=1)
+               Filter: (region = 'EU')
+          -> Index Scan using orders_customer_id_idx (rows=4) (actual rows=25 loops=48211)
+               Rows Removed by Filter: 212
+               Buffers: shared hit=402113 read=1893022
+Execution Time: 9121.0 ms
+~~~
+
+Walk through the plan and say what each gap between estimated and actual rows tells you. Rank the likely causes, give the commands that confirm each, and propose the index or query change you would make, with the plan you expect after it.

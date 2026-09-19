@@ -1,0 +1,20 @@
+Intermittent 502s started after we put nginx in front of a Node.js API. About one request in two thousand fails, and it is always one that reuses an upstream connection that sat idle for a few seconds.
+
+~~~
+# nginx error.log
+[error] 311#311: *918273 upstream prematurely closed connection while reading
+response header from upstream, request: "POST /v1/orders HTTP/1.1"
+
+# nginx.conf
+upstream api { server 10.0.9.3:3000; keepalive 64; }
+location /v1/ {
+    proxy_pass http://api;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+}
+
+# server.js
+const server = app.listen(3000); // keepAliveTimeout left at its default
+~~~
+
+Explain step by step the race that produces this error, including which side closes the idle connection and why nginx does not retry the POST on another one. Give the settings on both sides that fix it and the rule for choosing their values, then describe how you would reproduce the failure deterministically before and after the change.

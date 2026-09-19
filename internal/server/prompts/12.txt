@@ -1,0 +1,19 @@
+Harden this nightly backup script, which runs from cron as root. Last week the NFS mount was missing when it ran, and it deleted files from a directory nobody expected it to touch.
+
+~~~bash
+#!/bin/bash
+SRC=$1
+DEST=/mnt/backup/$(hostname)
+KEEP=7
+
+mkdir $DEST/tmp
+tar czf $DEST/tmp/backup-$(date +%F).tar.gz $SRC
+mv $DEST/tmp/* $DEST/
+rm -rf $DEST/tmp
+
+cd $DEST
+ls -t | tail -n +$KEEP | xargs rm -rf
+echo "backup of $SRC done"
+~~~
+
+List every way this script can fail or do damage, with the condition that triggers each one, including how many backups it really keeps. Then rewrite it defensively: strict mode, quoting, a check that the mount is really there, a lock so two runs cannot overlap, an exit status cron can act on, and retention that cannot delete anything outside the backup directory.

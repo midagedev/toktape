@@ -1,0 +1,25 @@
+Port this Python function to idiomatic Go, returning a time.Duration and an error, without time.ParseDuration.
+
+~~~python
+def parse_duration(s: str) -> float:
+    """Parse "1h30m", "45s", "2.5m" or "500ms" into seconds."""
+    units = {"h": 3600, "m": 60, "s": 1, "ms": 0.001}
+    total, num, i = 0.0, "", 0
+    while i < len(s):
+        ch = s[i]
+        if ch.isdigit() or ch == ".":
+            num += ch
+            i += 1
+            continue
+        unit = s[i:i+2] if s[i:i+2] == "ms" else ch
+        if unit not in units or not num:
+            raise ValueError(f"bad duration: {s!r}")
+        total += float(num) * units[unit]
+        num = ""
+        i += len(unit)
+    if num:
+        raise ValueError(f"missing unit in {s!r}")
+    return total
+~~~
+
+First list the inputs on which the Python version behaves questionably — "1.2.3s", non-ASCII digits that isdigit accepts, an empty string — and say what the Go version should do instead. Then write the port, table-driven tests for every case, and a fuzz test that it never panics.

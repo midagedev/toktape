@@ -1,0 +1,30 @@
+Review this Go rate limiter, keyed by client IP and called from every request goroutine of an HTTP server. In production it panics with "concurrent map writes" and the process grows until it is killed.
+
+~~~go
+type Limiter struct {
+	buckets map[string]*bucket // bucket{tokens float64; last time.Time}
+	rate    float64            // tokens per second
+	burst   float64
+}
+
+func (l *Limiter) Allow(key string) bool {
+	b, ok := l.buckets[key]
+	if !ok {
+		b = &bucket{tokens: l.burst, last: time.Now()}
+		l.buckets[key] = b
+	}
+	now := time.Now()
+	b.tokens += now.Sub(b.last).Seconds() * l.rate
+	if b.tokens > l.burst {
+		b.tokens = l.burst
+	}
+	b.last = now
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
+}
+~~~
+
+Find every bug and risk, the ones that do not cause the panic included, and explain each. Then write a concurrency-safe version that evicts idle keys, with a table-driven test covering refill, burst and many callers under the race detector.

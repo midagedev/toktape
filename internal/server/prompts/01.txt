@@ -1,0 +1,11 @@
+Below is an architecture decision record a team circulated last week. Three reviewers approved it without comment.
+
+Title: move background jobs off the database queue and onto a managed broker.
+
+Context: the job table holds nine million rows. Workers poll it every two hundred milliseconds with SELECT ... FOR UPDATE SKIP LOCKED, and on Monday mornings the queue depth peaks near forty thousand. Two of our four read replicas now spend most of their time on queue traffic, not on customer queries.
+
+Decision: publish each job to the broker on commit and let the broker own retries and dead-lettering. Drop the job table once the backlog drains.
+
+Consequences: a job stops being visible to the transaction that created it, so it may run before the row it refers to is committed. We accept this and will make every job re-read its inputs.
+
+Name the assumptions this record leaves unstated. Say which of them the numbers above actually support and which they do not, and for each unsupported one, describe the smallest measurement that would settle it.

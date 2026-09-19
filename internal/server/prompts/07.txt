@@ -1,0 +1,24 @@
+The search box in our React app sometimes shows results for an earlier query than the one the user typed, and the network tab shows a request for almost every keystroke.
+
+~~~tsx
+export function SearchBox() {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Result[]>([]);
+
+  useEffect(() => {
+    const id = setTimeout(async () => {
+      const res = await fetch("/api/search?q=" + query);
+      setResults(await res.json());
+    }, 300);
+  }, [query]);
+
+  return (
+    <>
+      <input value={query} onChange={e => setQuery(e.target.value)} />
+      <ul>{results.map(r => <li>{r.title}</li>)}</ul>
+    </>
+  );
+}
+~~~
+
+Explain every bug in it, and give the sequence of keystrokes and response timings that shows the stale results. Then rewrite it with debounce cleanup, cancellation through AbortController, URL encoding, and loading and error states. Finish with React Testing Library tests on fake timers that reproduce the race.

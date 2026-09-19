@@ -1,0 +1,23 @@
+Write a complete test file for the Go function below, which a log shipper uses to split text into batches.
+
+~~~go
+// ChunkLines splits text into chunks of at most max bytes, breaking only
+// after a newline. A single line longer than max becomes its own chunk.
+func ChunkLines(text string, max int) []string {
+	var chunks []string
+	var cur strings.Builder
+	for _, line := range strings.SplitAfter(text, "\n") {
+		if cur.Len()+len(line) > max && cur.Len() > 0 {
+			chunks = append(chunks, cur.String())
+			cur.Reset()
+		}
+		cur.WriteString(line)
+	}
+	if cur.Len() > 0 {
+		chunks = append(chunks, cur.String())
+	}
+	return chunks
+}
+~~~
+
+Use table-driven cases for empty input, a trailing newline, no newline at all, a line of exactly max bytes, a line longer than max, a max of zero or less, and multi-byte UTF-8. Add property tests that joining the chunks gives back the input and that no chunk exceeds max unless it is one line. For each case, state what the code does today and where it contradicts its doc comment.

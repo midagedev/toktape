@@ -1,0 +1,9 @@
+Design the PostgreSQL schema for a meeting room booking service.
+
+- An organisation has offices, each in its own time zone, and each office has rooms with a capacity and equipment such as a screen or a phone.
+- A booking reserves one room from a start to an end time for an organiser, with a title and invited people who can accept or decline.
+- Two bookings for the same room must never overlap, even when two people press the button at the same moment on different servers.
+- Bookings repeat weekly or on chosen weekdays until an end date, and one occurrence can be moved or cancelled without touching the rest.
+- Cancelled bookings are kept a year for auditing and must not block the room.
+
+Give the DDL with every constraint, and explain how the schema itself, not application code, makes a double booking impossible under concurrent transactions. Show the SQL for finding free rooms in a slot, listing a person's week, and moving one occurrence, with the indexes each needs.

@@ -1,0 +1,5 @@
+A vendor published the benchmark summary below to claim their inference server is 3.4 times faster than the open-source one, and a colleague forwarded it as the reason we should switch.
+
+Both servers ran on one eight-card node with the same 70B model in 4-bit. The vendor's server was given all eight cards. The open-source server was started from the vendor's published example, which places the model on four. Each test sent two hundred requests of roughly nine hundred prompt tokens and recorded the mean time to the last token: 11.2 seconds for the vendor, 38.1 for the alternative. Each configuration was run once, back to back, on a machine the vendor describes as otherwise idle. The report gives no per-request figures, no token counts for the answers, and no time to the first token.
+
+Write the reply I should send. Separate what these numbers can support from what they cannot, and list the specific figures I should ask for before the comparison means anything.

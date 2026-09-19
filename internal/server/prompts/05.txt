@@ -1,0 +1,21 @@
+Refactor this Python script, which summarises a 40 GB nginx access log into request counts and 95th percentile latency per route. Run by hand on a small VM, it is killed by the kernel before it prints anything.
+
+~~~python
+def p95(values):
+    values.sort()
+    return values[int(len(values) * 0.95)]
+
+def main(path):
+    lines = open(path).readlines()
+    by_route = {}
+    for line in lines:
+        m = re.match(r'(\S+) \S+ \S+ \[(.*?)\] "(\w+) (\S+) \S+" (\d+) (\d+) (\d+)ms', line)
+        if not m:
+            continue
+        route = m.group(4).split("?")[0]
+        by_route.setdefault(route, []).append(int(m.group(7)))
+    for route, times in by_route.items():
+        print(route, len(times), p95(times))
+~~~
+
+Turn it into a streaming tool that uses bounded memory, keeps the output format but sorts it, and takes options to filter by route prefix and status class. Explain each change, including why this percentile is wrong for small samples. Finish with pytest cases for one value, twenty values and all values equal.

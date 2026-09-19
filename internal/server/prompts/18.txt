@@ -1,0 +1,19 @@
+This Django view renders the order history page. It takes four seconds for customers with many orders, and the database log shows 1,300 queries for a page load.
+
+~~~python
+def order_history(request):
+    orders = Order.objects.filter(customer=request.user.customer).order_by("-created_at")
+    rows = []
+    for order in orders:
+        items = order.items.all()
+        rows.append({
+            "id": order.id,
+            "date": order.created_at,
+            "total": sum(i.price * i.quantity for i in items),
+            "status": order.shipment.status if order.shipment else "pending",
+            "products": [i.product.name for i in items],
+        })
+    return render(request, "orders/history.html", {"rows": rows})
+~~~
+
+Explain where each query comes from and how the count grows with the orders and items. Point out the bug in the shipment line when Shipment has a OneToOneField to Order. Rewrite the view with select_related, prefetch_related and pagination, and show a test that fails if the query count regresses.

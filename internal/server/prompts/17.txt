@@ -1,0 +1,26 @@
+Audit this ring buffer from a UART driver. ring_put runs in the receive interrupt handler and ring_get in the main loop, on a single-core Cortex-M4. Every few hours a byte stream arrives corrupted and, once, the board hard-faulted.
+
+~~~c
+#define CAP 64
+
+struct ring { char buf[CAP]; int head; int tail; };
+
+int ring_put(struct ring *r, char c) {
+    if ((r->head + 1) % CAP == r->tail)
+        return -1;
+    r->buf[r->head++] = c;
+    if (r->head > CAP)
+        r->head = 0;
+    return 0;
+}
+
+int ring_get(struct ring *r, char *c) {
+    if (r->head == r->tail)
+        return -1;
+    *c = r->buf[r->tail];
+    r->tail = (r->tail + 1) % CAP;
+    return 0;
+}
+~~~
+
+Explain every defect, the out-of-bounds write and what it overwrites included, whether sharing head and tail between the interrupt and the main loop is safe without disabling interrupts, and what volatile does and does not fix. Give a corrected implementation with a power-of-two capacity and a host-side test harness that fills, drains and wraps it.
