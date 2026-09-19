@@ -507,7 +507,12 @@ function workloadRow(idx) {
   if (idx.prompt_n) io.push(`${idx.prompt_n} in`);
   if (idx.predicted_n) io.push(`${idx.predicted_n} out`);
   if (io.length) parts.push(io.join(" / "));
-  if (idx.min_predicted_n) parts.push(`min ${idx.min_predicted_n}`);
+  // The shortest stream, only when it differs from the mean: on a single
+  // stream the two are the same number, and printing it twice says nothing
+  // (lead, 2026-09-19 — every one-stream run on the site read "238 out ·
+  // min 238"). When they differ, the minimum is the one that decides whether
+  // the rate is a rate at all.
+  if (idx.min_predicted_n && idx.min_predicted_n !== idx.predicted_n) parts.push(`min ${idx.min_predicted_n}`);
   if (idx.reasoning_n) parts.push(`${idx.reasoning_n} thinking`);
   const cache = cacheLabel(idx.cache_hit_ratio, idx.prompt_n);
   if (cache) parts.push(cache);

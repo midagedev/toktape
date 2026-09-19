@@ -376,9 +376,17 @@ done
 # The run page rows. tape_key is none like the mixed rig — the page is built
 # from the index row, never the record, so it still renders.
 curl -fsS "$base/r/figsrow0000000000000" >"$work/figs.html"
-for want in '>workload<' '>context<' '>config<' '>machine<' '32768 window' '281 of 300 W'; do
+for want in '>workload<' '>context<' '>config<' '>machine<' '32768 window' '281 of 300 W' 'min 12'; do
   grep -q "$want" "$work/figs.html" || die "the figures run page carries no $want"
 done
+# The shortest stream is only worth a word when it differs from the mean
+# (lead, 2026-09-19): a one-stream run had every page reading "238 out · min
+# 238". Same row, patched to agree, and the clause must disappear.
+npx wrangler d1 execute toktape --local --command \
+  "UPDATE runs SET min_predicted_n = 128, index_json = json_set(index_json, '\$.min_predicted_n', 128) WHERE id = 'figsrow0000000000000'" \
+  >"$work/figs-min.log" 2>&1 || { cat "$work/figs-min.log"; die "could not patch the figures harness row"; }
+curl -fsS "$base/r/figsrow0000000000000" >"$work/figsmin.html"
+grep -q 'min ' "$work/figsmin.html" && die "the run page printed a minimum equal to the mean"
 # The new boxes on the front page.
 curl -fsS "$base/" >"$work/fetched" && grep -q '<select name="model"' "$work/fetched" || die "the front page has no model box"
 grep -q 'name="size"' "$work/fetched" || die "the front page has no size box"
