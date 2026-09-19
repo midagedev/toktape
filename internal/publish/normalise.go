@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/midagedev/toktape/internal/placement"
+	"github.com/midagedev/toktape/internal/placement/gguf"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -140,17 +141,32 @@ var vendorNoise = map[string]bool{
 // It is a slug, not a name: a model whose fields are empty — every non-GGUF
 // engine, and every file whose name is outside the convention — gets "" and
 // search falls back to the raw file name beside it.
-func ModelID(m tape.ModelInfo) string {
-	base := slug(m.BaseName)
-	if base == "" {
-		return ""
+//
+// The source comes back with the id because the two are not equally strong:
+// "gguf" was read out of the header and "filename" out of a name, and a name
+// carries no fine-tune. A tape that recorded no convention parts at all is
+// read one more time here, through the same parser the recorder uses (lead,
+// 2026-09-19): every run published before TTP-119 landed carries a file name
+// and nothing else, so without this the model dropdown is empty on exactly
+// the runs the site already has. Reading a name that is in the record is
+// observing, not guessing — the parser refuses a name outside the convention
+// — and it is what makes `toktape reindex` able to repair the model axis of
+// a run recorded by an older binary.
+func ModelID(m tape.ModelInfo) (id, source string) {
+	base, size, fine, src := slug(m.BaseName), slug(m.SizeLabel), slug(m.FineTune), m.NameSource
+	if base == "" && m.FileName != "" {
+		b, s := gguf.NameFromFileName(m.FileName)
+		base, size, fine, src = slug(b), slug(s), "", "filename"
 	}
-	for _, part := range []string{slug(m.SizeLabel), slug(m.FineTune)} {
+	if base == "" {
+		return "", ""
+	}
+	for _, part := range []string{size, fine} {
 		if part != "" && !hasComponent(base, part) {
 			base += "-" + part
 		}
 	}
-	return base
+	return base, src
 }
 
 // hasComponent reports whether want appears in s as a whole run of

@@ -351,17 +351,21 @@ grep -q 'unknown size' "$work/body" || { cat "$work/body"; die "the size refusal
 code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?min_predicted=x")
 [ "$code" = "400" ] || { cat "$work/body"; die "a non-integer min_predicted was not refused (got $code)"; }
 # The bands are over active_params: 3B active sits in band 0, not band 35.
-# Oldest-first, like the mixed rig: the harness row's created_at is old on
-# purpose, so a newest-first page 1 ends long before it.
-curl -fsS "$base/api/v1/runs?size=0&limit=100" >"$work/figs0.json" && grep -q 'figsrow0000000000000' "$work/figs0.json" ||
+# Oldest-first, like the mixed rig, on every one of these: the harness row's
+# created_at is old on purpose, and the local D1 outlives one run of this
+# gate — each run publishes the hero again, and the hero is itself a 3B-active
+# MoE, so a newest-first page of 100 fills with hero copies and never reaches
+# the row under test (lead, 2026-09-19: moe=1 failed exactly this way once the
+# local D1 had enough of them).
+curl -fsS "$base/api/v1/runs?size=0&sort=oldest&limit=100" >"$work/figs0.json" && grep -q 'figsrow0000000000000' "$work/figs0.json" ||
   die "filtering by size=0 missed the figures row"
-curl -fsS "$base/api/v1/runs?size=35&limit=100" >"$work/figs35.json" && grep -q 'figsrow0000000000000' "$work/figs35.json" &&
+curl -fsS "$base/api/v1/runs?size=35&sort=oldest&limit=100" >"$work/figs35.json" && grep -q 'figsrow0000000000000' "$work/figs35.json" &&
   die "filtering by size=35 kept a 3B-active row"
-curl -fsS "$base/api/v1/runs?moe=1&limit=100" >"$work/figsmoe.json" && grep -q 'figsrow0000000000000' "$work/figsmoe.json" ||
+curl -fsS "$base/api/v1/runs?moe=1&sort=oldest&limit=100" >"$work/figsmoe.json" && grep -q 'figsrow0000000000000' "$work/figsmoe.json" ||
   die "filtering by moe=1 missed the figures row"
-curl -fsS "$base/api/v1/runs?min_predicted=200&limit=100" >"$work/figs200.json" && grep -q 'figsrow0000000000000' "$work/figs200.json" &&
+curl -fsS "$base/api/v1/runs?min_predicted=200&sort=oldest&limit=100" >"$work/figs200.json" && grep -q 'figsrow0000000000000' "$work/figs200.json" &&
   die "a min_predicted=200 floor kept a 128-out row"
-curl -fsS "$base/api/v1/runs?min_predicted=100&limit=100" >"$work/figs100.json" && grep -q 'figsrow0000000000000' "$work/figs100.json" ||
+curl -fsS "$base/api/v1/runs?min_predicted=100&sort=oldest&limit=100" >"$work/figs100.json" && grep -q 'figsrow0000000000000' "$work/figs100.json" ||
   die "a min_predicted=100 floor dropped a 128-out row"
 # The row's chips, read off an oldest-first page where the harness row sits
 # near the front.

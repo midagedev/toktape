@@ -153,9 +153,7 @@ func IndexOf(t *tape.Tape) Index {
 	// is why internal/placement/gguf refuses to read one from a name). An
 	// id that came from a name can therefore merge two fine-tunes of a model,
 	// and a consumer that must not do that has the field to tell it.
-	if idx.ModelID = ModelID(s.Model); idx.ModelID != "" {
-		idx.ModelIDSource = s.Model.NameSource
-	}
+	idx.ModelID, idx.ModelIDSource = ModelID(s.Model)
 	idx.QuantID, idx.QuantBits = QuantID(s.Model.Quant)
 
 	idx.GPUsRaw = make([]string, len(s.Host.GPUs))

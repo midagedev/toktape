@@ -160,10 +160,45 @@ func TestModelID(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			m := tape.ModelInfo{BaseName: c.base, SizeLabel: c.size, FineTune: c.fine}
-			if got := ModelID(m); got != c.want {
+			m := tape.ModelInfo{BaseName: c.base, SizeLabel: c.size, FineTune: c.fine, NameSource: "gguf"}
+			if got, _ := ModelID(m); got != c.want {
 				t.Errorf("ModelID(%q, %q, %q) = %q, want %q", c.base, c.size, c.fine, got, c.want)
 			}
 		})
+	}
+}
+
+// A tape with no convention parts is read through the file name, which is
+// what every run published before TTP-119 carries (lead, 2026-09-19). The
+// source says so, and a name outside the convention still gets nothing.
+func TestModelIDFromTheFileName(t *testing.T) {
+	for _, c := range []struct {
+		name, file, wantID, wantSrc string
+	}{
+		// The parser's own answer, not ours: it reads the size label as "35B"
+		// and leaves the MoE's active-size suffix behind, so a header-sourced
+		// id for the same model ("qwen3.6-35b-a3b", from general.size_label)
+		// is the longer one. That gap is the parser's and predates this
+		// fallback (the recorder already takes the same path for a remote
+		// run); model_id_source is what tells the two apart. TTP-131.
+		{"the convention in a file name", "Qwen3.6-35B-A3B-UD-Q6_K.gguf", "qwen3.6-35b", "filename"},
+		{"a name outside it is not an id", "ggml-model-f16.gguf", "", ""},
+		{"no name at all", "", "", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			id, src := ModelID(tape.ModelInfo{FileName: c.file})
+			if id != c.wantID || src != c.wantSrc {
+				t.Errorf("ModelID(FileName=%q) = %q/%q, want %q/%q", c.file, id, src, c.wantID, c.wantSrc)
+			}
+		})
+	}
+}
+
+// The header wins when the tape has it: the file name is only consulted for
+// a tape that recorded no parts, never as a second opinion about one that did.
+func TestModelIDPrefersTheRecordedParts(t *testing.T) {
+	m := tape.ModelInfo{BaseName: "Qwen3", SizeLabel: "0.6B", NameSource: "gguf", FileName: "Something-Else-70B-Q4_K_M.gguf"}
+	if id, src := ModelID(m); id != "qwen3-0.6b" || src != "gguf" {
+		t.Errorf("ModelID = %q/%q, want qwen3-0.6b/gguf", id, src)
 	}
 }

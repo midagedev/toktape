@@ -25,6 +25,12 @@ func TestIndexOfSingleStream(t *testing.T) {
 		RecordedAt:     time.Date(2026, 9, 13, 14, 25, 30, 0, time.UTC),
 
 		ModelRaw: "DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
+		// Read out of that name, because the fixture recorded no convention
+		// parts (lead, 2026-09-19): the id and its source both arrive where
+		// the old ModelID returned nothing. FAIL-first: this want fails on
+		// the previous derivation, which had no file-name fallback.
+		ModelID:       "deepseek-r1-distill-llama-70b",
+		ModelIDSource: "filename",
 		// ModelID: empty. The card's fixture carries no naming-convention
 		// fields, and the id is assembled from those alone — never from the
 		// file name sitting right there (TTP-119). TestIndexOfModelIdentity
@@ -351,22 +357,27 @@ func TestIndexOfModelIdentity(t *testing.T) {
 		},
 		id: "qwen3-0.6b", source: "filename",
 	}, {
-		// An exl3 model has no GGUF and no convention, but its directory can
-		// still sit under a snapshot.
-		name: "a non-GGUF engine: the repo without a slug",
+		// An exl3 model has no GGUF header, but its directory name follows
+		// the same convention, and reading it is how such a run becomes
+		// reachable on the model axis at all (lead, 2026-09-19). The source
+		// says the id came from a name, which is the whole guard.
+		name: "a non-GGUF engine: the repo, and an id read off the name",
 		model: tape.ModelInfo{
 			FileName: "Llama-3.1-8B-exl3", Format: "exl3",
 			Repo: "turboderp/Llama-3.1-8B-exl3", RepoSource: "hf-cache",
 		},
-		repo: "turboderp/Llama-3.1-8B-exl3",
+		repo: "turboderp/Llama-3.1-8B-exl3", id: "llama-3.1-8b", source: "filename",
 	}, {
 		// The guard that matters: a repo with nothing behind it was guessed,
 		// and the search reads this field as exact.
+		// The guard is about the repo alone: the id still comes, off the
+		// file name, and says so (lead, 2026-09-19).
 		name: "a repo with no source never reaches the row",
 		model: tape.ModelInfo{
 			FileName: "Qwen3-0.6B-Q8_0.gguf",
 			Repo:     "unsloth/Qwen3-0.6B-GGUF",
 		},
+		id: "qwen3-0.6b", source: "filename",
 	}}
 
 	for _, c := range cases {
