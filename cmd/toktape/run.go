@@ -48,6 +48,8 @@ Usage:
   toktape log [--out DIR]         the experiment ledger of every run
   toktape compare <a> <b>         diff two runs
   toktape publish <tape> [flags]  upload a run and print its link
+  toktape runs [flags]            list published runs on the service
+  toktape show <id|url> [flags]   read one published run
   toktape version                 print the version
   toktape help agents             the contract a script or coding agent needs
 
@@ -192,6 +194,10 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		return runCompare(c, rest)
 	case "publish":
 		return runPublish(ctx, c, rest)
+	case "runs":
+		return runRuns(ctx, c, rest)
+	case "show":
+		return runShow(ctx, c, rest)
 	case "profile":
 		return runProfile(c, rest)
 	default:
@@ -204,7 +210,7 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 // `toktape` and `toktape --url ...` both record.
 var verbs = map[string]bool{
 	"record": true, "card": true, "play": true, "render": true,
-	"ls": true, "log": true, "compare": true, "publish": true, "profile": true, "version": true,
+	"ls": true, "log": true, "compare": true, "publish": true, "runs": true, "show": true, "profile": true, "version": true,
 }
 
 // splitVerb picks the verb out of the argument list.

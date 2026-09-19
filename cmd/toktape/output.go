@@ -63,6 +63,12 @@ var verbOutputs = map[string][]outputFormat{
 	// delete token. The ledger formats would have to invent a row for
 	// something that is not a measurement, so it takes json alone.
 	"publish": {outputJSON, outputJSONL},
+	// runs reads the service's listing: the table by default, the
+	// service's own body under -o json, one run object per line under
+	// -o jsonl. show reads one run: the summary, or the service's body
+	// under -o json.
+	"runs": {outputJSON, outputJSONL},
+	"show": {outputJSON},
 }
 
 // outputRefusals is why a format another verb takes is not one this verb

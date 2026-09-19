@@ -60,6 +60,20 @@ const UploadPath = "/api/v1/runs"
 //	clears a field, absent leaves it, unknown keys are refused. 200 answers
 //	the same shape as /r/<id>.json.
 //
+//	GET {base}/api/v1/runs?… — the search (List). Only the filters that are
+//	set travel; sort travels only when it is not ""/"newest", so an older
+//	server sees the request it always saw. scope=mine reads the token's own
+//	runs and needs the Authorization header. GET {base}/u/<handle>.json
+//	reads one user home instead: the same rows under the token's profile.
+//	200 answers {"scope","runs","next"} on the search and
+//	{"handle","name"?,…,"runs","next"} on a home; unknown is null/absent.
+//
+//	GET {base}/r/<id>.json — one published run (Run): {"id",
+//	"published_at","private","tape","tape_bytes","card"|null,"owned",
+//	"index","author"?,"title"?,"note"?}, the index being the Index the
+//	uploader wrote. GET {base}/r/<id>.tape downloads the record itself
+//	(Download): the gzip bytes, so a download is a run file.
+//
 //	201 Created, application/json:
 //	  {"id":"...","url":"https://.../r/<id>","delete_token":"..."}
 //

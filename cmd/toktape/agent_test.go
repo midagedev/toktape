@@ -329,8 +329,14 @@ func TestHelpAgentsTopic(t *testing.T) {
 // which is itself the decision: --help has been the one place this CLI's
 // contract is stated, and a publishing verb documented somewhere else would
 // be the first exception. 118 keeps three lines of headroom.
+//
+// It was 118 until `runs` and `show` (2026-09-19), and the text is 120 —
+// FAIL-first: the two Usage lines fail the old budget before this raise.
+// Two verbs that only read are what it buys, one Usage line each, and their
+// flags live behind `help runs` / `help show` the way render's do, so the
+// scannable text pays nothing per flag. 122 keeps two lines of headroom.
 func TestHelpStaysScannable(t *testing.T) {
-	const maxLines = 118
+	const maxLines = 122
 	if n := strings.Count(usageText, "\n"); n > maxLines {
 		t.Errorf("--help is %d lines, over the %d-line budget; move detail into a help topic", n, maxLines)
 	}

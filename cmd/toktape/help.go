@@ -35,7 +35,16 @@ The contract
 Careful: the default verb generates load
   ` + "`toktape`" + ` with no verb is ` + "`toktape record`" + `: it attaches to a running
   llama-server and sends it real requests. To look without recording, use
-  ` + "`toktape --help`" + `, ` + "`toktape ls`" + ` or ` + "`toktape log`" + `.
+  ` + "`toktape --help`" + `, ` + "`toktape ls`" + `, ` + "`toktape log`" + `,
+  ` + "`toktape runs`" + ` or ` + "`toktape show <id>`" + `.
+
+Reading the site
+  ` + "`toktape runs`" + ` lists published runs and ` + "`toktape show <id>`" + ` reads
+  one, the id bare or as its /r/<id> link. Both honour -o json: the
+  service's own body verbatim, so there is one parse path and not two.
+  ` + "`runs --sort decode`" + ` and ` + "`--sort oldest`" + ` travel as a sort the
+  server may not know yet; an older server refuses with a 400, printed
+  verbatim.
 
 Careful: a run generates for twenty seconds by default
   --for is the run's wall-clock budget and defaults to 20s, measured from the
@@ -263,6 +272,12 @@ func usageFor(verb string) string {
 	}
 	if verb == "profile" {
 		return profileUsage
+	}
+	if verb == "runs" {
+		return runsUsage
+	}
+	if verb == "show" {
+		return showUsage
 	}
 	return usageText
 }
