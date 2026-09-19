@@ -961,6 +961,25 @@ type ProbeSummary struct {
 	FixedMs float64 `json:"fixed_ms,omitempty"`
 	// Replay is the second send of the longer prompt, when it was made.
 	Replay *ReplayProbe `json:"replay,omitempty"`
+	// MajFaults is how many major page faults the server took while the pass
+	// ran, and MajFaultsPerToken that over the prompt tokens it evaluated
+	// (TTP-143, lead, 2026-09-19).
+	//
+	// The pass sends the first prompts a cold server ever sees, so it pays
+	// the faults the run would otherwise have paid. Without these fields that
+	// cost is simply gone: MemorySummary's counters start after the pass, so
+	// a genuinely cold server now reads warm and `cold_cache` — which a
+	// reader trusts to say "the weights arrived from disk while it decoded" —
+	// quietly stops firing.
+	//
+	// Recording them here does not restore the old measurement, it improves
+	// on it. The probe's prompts are a known length on a server nothing else
+	// has touched, so this is the cold-start cost measured on a clean
+	// instrument rather than inferred from a decode window that is also busy
+	// generating. 0 = not observed: no /proc view, no probe, or a platform
+	// that does not report faults.
+	MajFaults         uint64  `json:"maj_faults,omitempty"`
+	MajFaultsPerToken float64 `json:"maj_faults_per_token,omitempty"`
 }
 
 // PrefillPoint is one probe request: how many prompt tokens went out and what
