@@ -888,27 +888,6 @@ type SamplingSummary struct {
 	// (TTP-103), so the row and the caveat speak when this is above zero and
 	// stay silent otherwise.
 	ThoughtAnyway int `json:"thought_anyway,omitempty"`
-	// ThinkingDefaulted says the switch in Thinking was the recorder's
-	// choice and not the user's (TTP-139, lead, 2026-09-20).
-	//
-	// It exists because "thinking off" on a card nobody asked it of reads as
-	// the tool lying. A reader who typed `toktape --url …` and nothing else
-	// is owed the difference between a condition they set and one that was
-	// set for them — the same debt LimitSummary.MaxTokensNamed pays on the
-	// cap, for the same reason, and the renderers may use it the same way.
-	//
-	// Only true asserts anything. False is either a switch the user named or
-	// a tape written before this field, which a renderer cannot tell apart
-	// and so must not: it says "defaulted" when this is true and says
-	// nothing when it is not, rather than claiming the user chose it.
-	//
-	// Why a run-level field and not a per-request one: PromptRecord.Thinking
-	// is read off the assembled body on purpose, so that a user who wrote
-	// the switch by hand with --param records the same thing as one who
-	// typed --no-think. The tape describes the request, not the spelling
-	// that produced it, and who decided is not a property of the request at
-	// all — it is a property of the run.
-	ThinkingDefaulted bool `json:"thinking_defaulted,omitempty"`
 }
 
 // LimitSummary is what was allowed to end the generation, and what did
