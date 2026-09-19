@@ -12,7 +12,7 @@ English · [한국어](README.ko.md) · [日本語](README.ja.md)
 <img src="docs/mascot.png" align="right" width="150" alt="the toktape mascot: a small chibi in headphones, eyes closed, hugging a cassette tape">
 
 toktape attaches to a llama-server you already have running, records one run
-into a `.tape` file, and prints a card that says where the model sits, what the
+into a `.toktape` file, and prints a card that says where the model sits, what the
 process actually touched, and how fast the request really was — for one
 stream or for eight at once.
 
@@ -135,7 +135,7 @@ toktape
 3. **Prompt** — send one request from a fixed prompt set with
    `timings_per_token` and `return_progress` on, and stream the answer while
    sampling major faults, RSS and GPU state.
-4. **Tape** — write the whole run to `~/.toktape/runs/<id>.tape`.
+4. **Tape** — write the whole run to `~/.toktape/runs/<id>.toktape`.
 5. **Card** — print the 72-column card, save it beside the tape, and print the
    line that tells you how to share it.
 
@@ -165,15 +165,15 @@ toktape --sessions 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
 **Share it:**
 
 ```sh
-toktape card ~/.toktape/runs/<id>.tape -o png          # 1200×675 image next to the tape
-toktape card ~/.toktape/runs/<id>.tape -o md --copy    # card + llama-bench table, on the clipboard
+toktape card ~/.toktape/runs/<id>.toktape -o png          # 1200×675 image next to the tape
+toktape card ~/.toktape/runs/<id>.toktape -o md --copy    # card + llama-bench table, on the clipboard
 toktape render                                          # the newest run as a GIF
 ```
 
 **Replay it** on the live screen, at any speed:
 
 ```sh
-toktape play ~/.toktape/runs/<id>.tape --speed 2
+toktape play ~/.toktape/runs/<id>.toktape --speed 2
 ```
 
 ## What the card shows
@@ -258,9 +258,11 @@ side by side. Each field is there because it settles an argument.
 | `render` | render a run as GIF, mp4, asciicast or PNG frames | `toktape render <tape> --mp4 clip.mp4` |
 | `ls` | list recorded runs | `toktape ls` |
 | `log` | the experiment ledger of every run | `toktape log --sort decode` |
-| `compare` | diff two runs, metrics and flags | `toktape compare a.tape b.tape` |
+| `compare` | diff two runs, metrics and flags | `toktape compare a.toktape b.toktape` |
 | `publish` | upload a run and print its link | `toktape publish <tape>` |
 | `profile` | name the author every publish carries | `toktape profile --name NAME --link URL --avatar FILE --bio TEXT` |
+| `runs` | list what is published, filtered and ordered like the site | `toktape runs --gpu rtx-3090 --sort decode` |
+| `show` | read one published run; `--save` fetches its record | `toktape show <id> --save run.toktape` |
 | `version` | print the version | `toktape version` |
 
 **How long a run is.** A recording ends on the clock: twenty seconds by
@@ -352,6 +354,9 @@ The short version:
 - **Two flags decide whether it fits your timeout.** `--wait` defaults to ten
   minutes, because a server loading a 450 GB model is worth waiting for;
   `--for` decides how long the generation itself runs.
+- **Reading is free; recording is not.** `toktape runs -o json` and
+  `toktape show <id> -o json` read the published record without touching a
+  server; the bare verb records.
 
 ## Experiment log
 
@@ -380,8 +385,8 @@ The image at the top of this page is not a screen recording. It is a tape,
 replayed frame by frame, and any tape you have renders the same way:
 
 ```sh
-toktape render ~/.toktape/runs/<id>.tape
-toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
+toktape render ~/.toktape/runs/<id>.toktape
+toktape render ~/.toktape/runs/<id>.toktape --mp4 clip.mp4 --cast clip.cast
 ```
 
 A clip opens on the screen at the run's start, plays the whole run at real
@@ -407,8 +412,8 @@ uploads the run and prints its link, and the link is the card, the run
 replayed in the browser, the transcript, the mp4 and the record itself.
 
 ```sh
-toktape publish ~/.toktape/runs/<id>.tape --dry-run
-toktape publish ~/.toktape/runs/<id>.tape
+toktape publish ~/.toktape/runs/<id>.toktape --dry-run
+toktape publish ~/.toktape/runs/<id>.toktape
 ```
 
 `--dry-run` prints, field by field, exactly what would go up, and uploads
@@ -434,6 +439,25 @@ rewrites what the page shows. Every journal token has a user home at
 `/u/<handle>` showing the profile, the bio and that user's public runs;
 the profile follows the token, so the newest publish's name and avatar are
 what the home shows.
+
+The site is a search, not a leaderboard: newest first, every row with the
+caveats its card would print, filters for model, quantisation, engine, GPU,
+host and VRAM — a GPU filter reaches a rig with two kinds of card by either
+of them — and, when you ask, an order: oldest first or fastest decode first.
+Each row replays its run in place, one at a time; on a phone the list is a
+feed, on a desktop a grid of two or three across with the one under the
+pointer playing. All of it is readable from the terminal too:
+
+```sh
+toktape runs --gpu rtx-3090 --sort decode      # what the site lists, as a table
+toktape runs --mine -o json                     # your own runs, the API's body verbatim
+toktape show <id> --save run.toktape               # one run's summary, and its record
+toktape card run.toktape                           # the card, drawn locally from that record
+```
+
+`runs` takes the site's filters as flags and `--user HANDLE` for one home;
+`show` takes a bare id or any of the run's links. Under `-o json` both print
+the service's own body, so a script has one shape to parse.
 
 Hostnames and absolute paths are removed whatever the visibility is — the
 server's argv keeps its flags and loses its paths, the model keeps its file
@@ -533,7 +557,7 @@ Roadmap: a macOS collector without sudo, an Ollama offload card from
 `/api/ps`, and `toktape ab URL1 URL2` — two servers, one prompt, side by
 side.
 
-## The `.tape` format
+## The `.toktape` format
 
 Gzipped JSON, one file per run, schema version 1; plain JSON is read too, so a
 tape stays greppable after `gunzip`. It holds the run summary the card is
@@ -546,7 +570,7 @@ toktape renders the same card from it.
 ## Contributing
 
 Issues and pull requests are welcome. Bug reports are most useful with the
-tape attached: a run is fully described by its `.tape`, so "here is the card
+tape attached: a run is fully described by its `.toktape`, so "here is the card
 I got" and "here is the file" are the same thing.
 
 `./scripts/check.sh` is the gate — gofmt, build, vet, a Linux cross-build,

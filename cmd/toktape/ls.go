@@ -36,13 +36,13 @@ func runLs(c *cli, args []string) int {
 
 	var rows [][]string
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != tape.Ext {
+		if e.IsDir() || !tape.IsRunFile(e.Name()) {
 			continue
 		}
 		path := filepath.Join(*outDir, e.Name())
 		tp, err := tape.Read(path)
 		if err != nil {
-			rows = append(rows, []string{strings.TrimSuffix(e.Name(), tape.Ext), "unreadable", "", "", "", ""})
+			rows = append(rows, []string{tape.TrimExt(e.Name()), "unreadable", "", "", "", ""})
 			continue
 		}
 		s := tp.Summary

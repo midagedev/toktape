@@ -34,7 +34,7 @@ const UploadPath = "/api/v1/runs"
 //	Authorization: Bearer <token>        (only when the machine has one)
 //	User-Agent: toktape/<version>
 //
-//	part "tape"   application/gzip, filename "run.tape" — exactly the bytes
+//	part "tape"   application/gzip, filename "run.toktape" — exactly the bytes
 //	              tape.Write puts on disk, so a download is a run file
 //	part "index"  application/json — one publish.Index, schema IndexSchema
 //	part "card"   image/png, filename "card.png" — the 1200×675 share card,

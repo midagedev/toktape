@@ -48,8 +48,10 @@ func TestColumnsAreUnique(t *testing.T) {
 func TestFromTapeSingleStream(t *testing.T) {
 	tp := tapeOf(card.Example())
 	want := map[string]string{
-		"id":   "20260913-142530-r1-distill-llama-70b",
-		"tape": "20260913-142530-r1-distill-llama-70b.tape",
+		"id": "20260913-142530-r1-distill-llama-70b",
+		// .toktape since 2026-09-19 (spec §9.7, TTP-111); the old .tape want
+		// failed first on the renamed tape.Ext.
+		"tape": "20260913-142530-r1-distill-llama-70b.toktape",
 		// 2026-09-15 (user: "모델이 다 실제값으로 찍혀야해"): the model column is
 		// the file-based name, so the GGUF header's "R1 Distill Llama 70B"
 		// gave way to the file's stem. FAIL-first: the old code printed the

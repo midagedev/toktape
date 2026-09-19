@@ -11,8 +11,8 @@ stops being true.
 **Recording is not a probe.** `toktape` with no verb records a run: it sends
 real requests to a real server and makes the machine work for as long as the
 generation takes. Do not run it to find out what it does — run `toktape
---help`, `toktape ls`, or `toktape card <tape>` on a file that already
-exists.
+--help`, `toktape ls`, `toktape runs`, `toktape show <id>`, or `toktape card
+<tape>` on a file that already exists.
 
 **Do not benchmark a machine you are also using.** If you are compiling,
 indexing, or running another model in the same session, the numbers describe
@@ -36,6 +36,8 @@ toktape --wait 0                         # fail fast instead of waiting for a lo
 toktape card <tape> -o json              # re-read a recording; touches no server
 toktape log -o jsonl                     # every run recorded here, one object per line
 toktape log -o sql | sqlite3 runs.db     # the same runs as a SQLite table
+toktape runs --sort decode -o json       # the site's listing, the API's body verbatim
+toktape show <id> -o json                # one published run; touches no server
 ```
 
 Two flags decide whether an invocation fits inside your own timeout.

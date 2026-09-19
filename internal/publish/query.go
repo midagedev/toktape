@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/midagedev/toktape/internal/tape"
 )
 
 // ListQuery is one search over the published runs. Only the fields that are
@@ -303,13 +305,13 @@ func (c *Client) Run(ctx context.Context, id string) (*RunDetail, error) {
 	return out, nil
 }
 
-// Download fetches the record itself: GET /r/<id>.tape, the gzip bytes
+// Download fetches the record itself: GET /r/<id>.toktape, the gzip bytes
 // tape.Write puts on disk, so a download is a run file. It returns the
 // byte count. A refusal writes nothing to w — the status is checked first,
 // because a 404's sentence must never land in a file that reads as a tape.
 func (c *Client) Download(ctx context.Context, id string, w io.Writer) (int64, error) {
 	base := strings.TrimRight(c.baseURL(), "/")
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/r/"+id+".tape", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/r/"+id+tape.Ext, nil)
 	if err != nil {
 		return 0, fmt.Errorf("publish: %w", err)
 	}

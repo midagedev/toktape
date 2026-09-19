@@ -136,12 +136,12 @@ Examples:
 
   # Re-render the card of a run you already have. Costs nothing and touches
   # no server.
-  toktape card ~/.toktape/runs/20260914-070458-my-model.tape
+  toktape card ~/.toktape/runs/20260914-070458-my-model.toktape
 
   # A clip of that run. --for aims the run when you record; render --duration
   # is not the same flag — it squeezes the run you have into the time you
   # name. toktape help render has the arithmetic.
-  toktape render ~/.toktape/runs/20260914-070458-my-model.tape --mp4 run.mp4 --open
+  toktape render ~/.toktape/runs/20260914-070458-my-model.toktape --mp4 run.mp4 --open
 
 Exit codes:
   0  ok
@@ -250,7 +250,7 @@ func splitVerb(args []string) (verb string, rest []string) {
 // parseArgs parses flags that are interspersed with positional arguments and
 // returns the positional ones.
 //
-// Go's flag package stops at the first non-flag, so `toktape card run.tape
+// Go's flag package stops at the first non-flag, so `toktape card run.toktape
 // -o md` would otherwise leave -o unparsed and silently print the plain
 // card. Every verb here takes its file arguments before its flags, because
 // that is the order a person types them.

@@ -11,7 +11,7 @@
 
 <img src="docs/mascot.png" align="right" width="150" alt="the toktape mascot: a small chibi in headphones, eyes closed, hugging a cassette tape">
 
-toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.tape` 파일로
+toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.toktape` 파일로
 녹화하고, 카드 한 장을 출력합니다. 모델이 어디에 올라가 있는지, 프로세스가
 실제로 무엇을 건드렸는지, 요청이 정말 얼마나 빨랐는지가 그 한 장에 담깁니다.
 스트림 하나든 동시에 여덟이든 같은 방식으로 기록합니다.
@@ -133,7 +133,7 @@ toktape
 3. **프롬프트** — 고정 프롬프트 세트에서 요청 하나를 `timings_per_token`과
    `return_progress`를 켜서 보내고, 답이 스트리밍되는 동안 메이저 폴트, RSS,
    GPU 상태를 샘플링합니다.
-4. **테이프** — 실행 전체를 `~/.toktape/runs/<id>.tape`에 씁니다.
+4. **테이프** — 실행 전체를 `~/.toktape/runs/<id>.toktape`에 씁니다.
 5. **카드** — 72칸 카드를 출력하고 테이프 옆에 저장한 뒤, 공유 방법을 한 줄로
    알려 줍니다.
 
@@ -163,15 +163,15 @@ toktape --sessions 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
 **공유하기:**
 
 ```sh
-toktape card ~/.toktape/runs/<id>.tape -o png          # 1200×675 image next to the tape
-toktape card ~/.toktape/runs/<id>.tape -o md --copy    # card + llama-bench table, on the clipboard
+toktape card ~/.toktape/runs/<id>.toktape -o png          # 1200×675 image next to the tape
+toktape card ~/.toktape/runs/<id>.toktape -o md --copy    # card + llama-bench table, on the clipboard
 toktape render                                          # the newest run as a GIF
 ```
 
 **다시 재생하기.** 라이브 화면에서 원하는 속도로 돌려 봅니다.
 
 ```sh
-toktape play ~/.toktape/runs/<id>.tape --speed 2
+toktape play ~/.toktape/runs/<id>.toktape --speed 2
 ```
 
 ## 카드에 담기는 것
@@ -251,9 +251,11 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 | `render` | GIF, mp4, asciicast, PNG 프레임으로 렌더합니다 | `toktape render <tape> --mp4 clip.mp4` |
 | `ls` | 녹화된 실행 목록 | `toktape ls` |
 | `log` | 모든 실행의 실험 장부 | `toktape log --sort decode` |
-| `compare` | 두 실행의 지표와 플래그를 비교합니다 | `toktape compare a.tape b.tape` |
+| `compare` | 두 실행의 지표와 플래그를 비교합니다 | `toktape compare a.toktape b.toktape` |
 | `publish` | 실행을 올리고 링크를 찍습니다 | `toktape publish <tape>` |
 | `profile` | 올릴 때마다 붙는 작성자 정보를 정합니다 | `toktape profile --name NAME --link URL --avatar FILE --bio TEXT` |
+| `runs` | 올라간 실행 목록. 사이트와 같은 필터와 순서 | `toktape runs --gpu rtx-3090 --sort decode` |
+| `show` | 올라간 실행 하나를 읽습니다. `--save`로 기록도 받습니다 | `toktape show <id> --save run.toktape` |
 | `version` | 버전 출력 | `toktape version` |
 
 **녹화는 몇 초짜리인가.** 실행은 시계로 끝납니다. 기본 20초이고,
@@ -341,6 +343,9 @@ toktape를 실제로 돌리는 쪽은 대개 사람이 아니라 Claude Code나 
 - **타임아웃 안에 들어오는지는 플래그 두 개가 정합니다.** `--wait`의 기본은
   10분입니다. 450 GB 모델을 올리는 중인 서버는 기다릴 값어치가 있으니까요.
   생성 자체의 길이는 `--for`가 정합니다.
+- **읽기는 공짜고 녹화는 아닙니다.** `toktape runs -o json`과 `toktape show
+  <id> -o json`은 서버를 건드리지 않고 올라간 기록을 읽습니다. 동사 없는
+  `toktape`는 녹화합니다.
 
 ## 실험 장부
 
@@ -369,8 +374,8 @@ duckdb -c "select tag, decode_tok_s from read_csv('~/.toktape/runs/runs.tsv')"
 그린 것이고, 여러분의 테이프도 똑같이 렌더됩니다.
 
 ```sh
-toktape render ~/.toktape/runs/<id>.tape
-toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
+toktape render ~/.toktape/runs/<id>.toktape
+toktape render ~/.toktape/runs/<id>.toktape --mp4 clip.mp4 --cast clip.cast
 ```
 
 클립은 실행이 시작되는 화면에서 열리고, 실행 전체를 실제 속도로 재생한 뒤
@@ -394,8 +399,8 @@ toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
 mp4이고, 기록 원본입니다.
 
 ```sh
-toktape publish ~/.toktape/runs/<id>.tape --dry-run
-toktape publish ~/.toktape/runs/<id>.tape
+toktape publish ~/.toktape/runs/<id>.toktape --dry-run
+toktape publish ~/.toktape/runs/<id>.toktape
 ```
 
 `--dry-run`은 올라갈 내용을 필드 하나하나 그대로 찍고, 아무것도 올리지
@@ -421,6 +426,25 @@ TEXT`(또는 `--note-file FILE`)는 실행 하나에 실험 노트를 붙입니�
 프로필과 소개(`--bio`), 그 사람의 공개 실행만 모아 보여 줍니다. 프로필은
 토큰을 따라가므로 가장 최근에 올릴 때 보낸 이름과 아바타가 홈에 보이는
 것입니다.
+
+사이트는 검색이고 순위표가 아닙니다. 기본은 최신순, 행마다 카드가 찍을
+caveat이 그대로 붙고, 모델·양자화·엔진·GPU·호스트·VRAM으로 좁힙니다. GPU
+필터는 카드 두 종류를 섞어 쓴 기계도 어느 쪽 카드로든 찾아냅니다. 순서는
+원할 때만 바꿉니다. 오래된 순, 또는 decode 빠른 순. 행마다 그 실행이 제자리에서
+다시 재생되는데 한 번에 하나만 돕니다. 폰에서는 목록이 피드고, 데스크톱에서는
+한 줄에 두세 개씩 놓인 격자에서 포인터가 올라간 것이 돕니다. 이 전부를
+터미널에서도 읽을 수 있습니다.
+
+```sh
+toktape runs --gpu rtx-3090 --sort decode      # what the site lists, as a table
+toktape runs --mine -o json                     # your own runs, the API's body verbatim
+toktape show <id> --save run.toktape               # one run's summary, and its record
+toktape card run.toktape                           # the card, drawn locally from that record
+```
+
+`runs`는 사이트의 필터를 플래그로 받고 `--user HANDLE`로 홈 하나를 읽습니다.
+`show`는 id만 주어도, 그 실행의 링크 어느 것을 주어도 됩니다. `-o json`이면
+둘 다 서비스가 보낸 본문을 그대로 찍으니, 스크립트가 파싱할 모양은 하나입니다.
 
 호스트명과 절대 경로는 공개 여부와 상관없이 지워집니다. 서버 argv는 플래그를
 남기고 경로만 잃고, 모델은 파일명을 남기고 디렉터리를 잃습니다. 페이지 맨 위의
@@ -511,7 +535,7 @@ pid도 같은 보고에 적어 줍니다. 그래야 메모리와 페이지 폴�
 로드맵: sudo 없는 macOS 수집기, `/api/ps` 기반 Ollama 오프로드 카드,
 `toktape ab URL1 URL2`(서버 둘, 프롬프트 하나, 나란히).
 
-## `.tape` 형식
+## `.toktape` 형식
 
 gzip된 JSON, 실행당 파일 하나, 스키마 버전 1. 평문 JSON도 읽으므로 `gunzip`
 뒤에도 grep이 됩니다. 카드를 그리는 실행 요약, 토큰별 타임스탬프와 텍스트, 샘플
@@ -522,7 +546,7 @@ gzip된 JSON, 실행당 파일 하나, 스키마 버전 1. 평문 JSON도 읽으
 ## 기여하기
 
 이슈와 풀 리퀘스트를 환영합니다. 버그 리포트에는 테이프를 붙여 주시면 가장
-좋습니다. 실행은 `.tape` 하나로 완전히 기술되므로 "이런 카드가 나왔다"와 "파일은
+좋습니다. 실행은 `.toktape` 하나로 완전히 기술되므로 "이런 카드가 나왔다"와 "파일은
 이것이다"가 같은 말입니다.
 
 게이트는 `./scripts/check.sh`입니다. gofmt, 빌드, vet, Linux 크로스 빌드,

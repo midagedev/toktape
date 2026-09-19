@@ -51,5 +51,5 @@ Recorded with:
 
     toktape --url http://127.0.0.1:8080 --sessions 8 --n-predict 307
 
-Tape: `20260913-150210-r1-distill-llama-70b.tape` (attach it and anyone can `toktape play` it)
+Tape: `20260913-150210-r1-distill-llama-70b.toktape` (attach it and anyone can `toktape play` it)
 </details>

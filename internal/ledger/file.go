@@ -92,7 +92,7 @@ func Rebuild(dir string) (Result, error) {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != tape.Ext {
+		if e.IsDir() || !tape.IsRunFile(e.Name()) {
 			continue
 		}
 		names = append(names, e.Name())

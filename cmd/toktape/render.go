@@ -224,7 +224,7 @@ func runRender(c *cli, args []string) int {
 	// The zero-flag path is the product: `toktape render <tape>` gives you the
 	// thing you can drag into a post, named after the run it came from.
 	if *gifOut == "" && *mp4Out == "" && *castOut == "" && *framesTo == "" {
-		*gifOut = strings.TrimSuffix(tapePath, tape.Ext) + ".gif"
+		*gifOut = tape.TrimExt(tapePath) + ".gif"
 	}
 
 	// Cheapest first, so a run that is going to fail on ffmpeg has already
@@ -366,7 +366,7 @@ func newestTape(dir string) string {
 	}
 	best := ""
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != tape.Ext {
+		if e.IsDir() || !tape.IsRunFile(e.Name()) {
 			continue
 		}
 		if best == "" || e.Name() > best {

@@ -243,7 +243,7 @@ func TestRunID(t *testing.T) {
 		id,
 		"https://tape.midagedev.com/r/" + id,
 		"https://tape.midagedev.com/r/" + id + ".json",
-		"https://tape.midagedev.com/r/" + id + ".tape",
+		"https://tape.midagedev.com/r/" + id + ".toktape",
 		"https://tape.midagedev.com/r/" + id + ".png",
 		"http://localhost:8787/r/" + id + ".json",
 	} {
@@ -270,8 +270,8 @@ func TestRunID(t *testing.T) {
 func TestDownload(t *testing.T) {
 	want := bytes.Repeat([]byte{0x1f, 0x8b, 0x08, 0x00}, 512)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/r/abc.tape" {
-			t.Errorf("path = %q, want /r/abc.tape", r.URL.Path)
+		if r.URL.Path != "/r/abc.toktape" {
+			t.Errorf("path = %q, want /r/abc.toktape", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/gzip")
 		_, _ = w.Write(want)

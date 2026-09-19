@@ -12,7 +12,7 @@
 <img src="docs/mascot.png" align="right" width="150" alt="the toktape mascot: a small chibi in headphones, eyes closed, hugging a cassette tape">
 
 toktape は、すでに起動している llama-server にアタッチし、1 回の実行を
-`.tape` ファイルに記録して、カードを 1 枚出力します。モデルがどこに載っているか、
+`.toktape` ファイルに記録して、カードを 1 枚出力します。モデルがどこに載っているか、
 プロセスが実際に何に触れたか、リクエストが本当にどれだけ速かったか。
 それが 1 枚に収まります。1 ストリームでも同時 8 ストリームでも、記録の仕方は
 同じです。
@@ -137,7 +137,7 @@ toktape
 3. **プロンプト** — 固定プロンプト集から 1 リクエストを `timings_per_token` と
    `return_progress` を有効にして送り、応答をストリーミングしながらメジャー
    フォールト、RSS、GPU 状態をサンプリングします。
-4. **テープ** — 実行全体を `~/.toktape/runs/<id>.tape` に書き出します。
+4. **テープ** — 実行全体を `~/.toktape/runs/<id>.toktape` に書き出します。
 5. **カード** — 72 桁のカードを出力し、テープの隣に保存して、共有方法を 1 行で
    示します。
 
@@ -168,15 +168,15 @@ toktape --sessions 8 --tui --grid 2x2     # four tiles per page, ←/→ to page
 **共有する:**
 
 ```sh
-toktape card ~/.toktape/runs/<id>.tape -o png          # 1200×675 image next to the tape
-toktape card ~/.toktape/runs/<id>.tape -o md --copy    # card + llama-bench table, on the clipboard
+toktape card ~/.toktape/runs/<id>.toktape -o png          # 1200×675 image next to the tape
+toktape card ~/.toktape/runs/<id>.toktape -o md --copy    # card + llama-bench table, on the clipboard
 toktape render                                          # the newest run as a GIF
 ```
 
 **リプレイする。** ライブ画面で、好きな速度で再生します。
 
 ```sh
-toktape play ~/.toktape/runs/<id>.tape --speed 2
+toktape play ~/.toktape/runs/<id>.toktape --speed 2
 ```
 
 ## カードに載るもの
@@ -259,9 +259,11 @@ toktape play ~/.toktape/runs/<id>.tape --speed 2
 | `render` | GIF、mp4、asciicast、PNG フレームとして書き出す | `toktape render <tape> --mp4 clip.mp4` |
 | `ls` | 記録した実行の一覧 | `toktape ls` |
 | `log` | 全実行の実験台帳 | `toktape log --sort decode` |
-| `compare` | 2 つの実行の指標とフラグを比較する | `toktape compare a.tape b.tape` |
+| `compare` | 2 つの実行の指標とフラグを比較する | `toktape compare a.toktape b.toktape` |
 | `publish` | 実行をアップロードしてリンクを出す | `toktape publish <tape>` |
 | `profile` | 公開のたびに付く作者情報を決める | `toktape profile --name NAME --link URL --avatar FILE --bio TEXT` |
+| `runs` | 公開済みの実行を一覧する。サイトと同じフィルタと順序 | `toktape runs --gpu rtx-3090 --sort decode` |
+| `show` | 公開済みの実行をひとつ読む。`--save` で記録も取る | `toktape show <id> --save run.toktape` |
 | `version` | バージョンを表示する | `toktape version` |
 
 **1 回の記録は何秒か。** 実行は時計で終わります。既定は 20 秒で、
@@ -352,6 +354,9 @@ toktape を実際に叩くのは、多くの場合、人ではなく Claude Code
 - **タイムアウトに収まるかは二つのフラグが決める。** `--wait` の既定は 10 分。
   450 GB のモデルを読み込み中のサーバーは待つ価値があるからです。生成そのものの
   長さは `--for` が決めます。
+- **読むのは無料、記録はそうではない。** `toktape runs -o json` と
+  `toktape show <id> -o json` はサーバーに触れずに公開済みの記録を読みます。
+  動詞なしの `toktape` は記録します。
 
 ## 実験台帳
 
@@ -380,8 +385,8 @@ duckdb -c "select tag, decode_tok_s from read_csv('~/.toktape/runs/runs.tsv')"
 もので、あなたのテープも同じように描き出せます。
 
 ```sh
-toktape render ~/.toktape/runs/<id>.tape
-toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
+toktape render ~/.toktape/runs/<id>.toktape
+toktape render ~/.toktape/runs/<id>.toktape --mp4 clip.mp4 --cast clip.cast
 ```
 
 クリップは実行が始まる画面から始まり、実行全体を実速度で再生して、結果で
@@ -406,8 +411,8 @@ toktape render ~/.toktape/runs/<id>.tape --mp4 clip.mp4 --cast clip.cast
 あり、mp4 であり、記録そのものです。
 
 ```sh
-toktape publish ~/.toktape/runs/<id>.tape --dry-run
-toktape publish ~/.toktape/runs/<id>.tape
+toktape publish ~/.toktape/runs/<id>.toktape --dry-run
+toktape publish ~/.toktape/runs/<id>.toktape
 ```
 
 `--dry-run` は上がる内容をフィールドごとにそのまま出し、何もアップロードしません。
@@ -433,6 +438,26 @@ toktape publish ~/.toktape/runs/<id>.tape
 `/u/<handle>` があり、プロフィールと自己紹介（`--bio`）、その人の公開実行だけを
 並べます。プロフィールはトークンに付いて回るので、いちばん新しい公開で送った
 名前とアバターがホームに出ます。
+
+サイトは検索であって、ランキングではありません。既定は新しい順、どの行にも
+カードが出すはずの caveat がそのまま付き、モデル・量子化・エンジン・GPU・ホスト・
+VRAM で絞れます。GPU フィルタは二種類のカードを混ぜたマシンも、どちらのカード
+からでも見つけます。順序は頼んだときだけ変わります。古い順、あるいは decode の
+速い順。各行はその実行をその場でリプレイし、動くのは一度にひとつです。スマート
+フォンでは一覧がフィードになり、デスクトップでは一行に二つか三つ並ぶグリッドで、
+ポインタの下のものが動きます。これらはすべて端末からも読めます。
+
+```sh
+toktape runs --gpu rtx-3090 --sort decode      # what the site lists, as a table
+toktape runs --mine -o json                     # your own runs, the API's body verbatim
+toktape show <id> --save run.toktape               # one run's summary, and its record
+toktape card run.toktape                           # the card, drawn locally from that record
+```
+
+`runs` はサイトのフィルタをフラグとして受け取り、`--user HANDLE` でホームを
+ひとつ読みます。`show` は id だけでも、その実行のどのリンクでも受け付けます。
+`-o json` ならどちらもサービスが返した本文をそのまま出すので、スクリプトが
+パースする形はひとつです。
 
 ホスト名と絶対パスは公開かどうかに関係なく取り除かれます。サーバーの argv は
 フラグを残してパスだけ失い、モデルはファイル名を残してディレクトリを失います。
@@ -528,7 +553,7 @@ HTTP スロット、プレフィックスキャッシュの再利用、キュー
 ロードマップ: sudo 不要の macOS コレクター、`/api/ps` に基づく Ollama オフロード
 カード、`toktape ab URL1 URL2`（サーバー 2 台、プロンプト 1 つ、並べて表示）。
 
-## `.tape` フォーマット
+## `.toktape` フォーマット
 
 gzip された JSON、実行ごとに 1 ファイル、スキーマバージョン 1。プレーン JSON も
 読めるので、`gunzip` した後も grep できます。カードを描くための実行サマリー、
@@ -540,7 +565,7 @@ gzip された JSON、実行ごとに 1 ファイル、スキーマバージョ�
 ## コントリビュート
 
 Issue と Pull Request を歓迎します。バグ報告にはテープを添えていただけると
-いちばん助かります。実行は `.tape` 1 つで完全に記述されるので、「このカードが
+いちばん助かります。実行は `.toktape` 1 つで完全に記述されるので、「このカードが
 出た」と「ファイルはこれ」は同じことです。
 
 ゲートは `./scripts/check.sh` です。gofmt、ビルド、vet、Linux クロスビルド、

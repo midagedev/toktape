@@ -84,13 +84,13 @@ Careful: one invocation can block for ten minutes
 
 -o json on success
   ` + "`record -o json`" + ` and ` + "`card <tape> -o json`" + ` print the run summary — the
-  same object the .tape file stores under "summary". ` + "`-o jsonl`" + ` prints the
+  same object the .toktape file stores under "summary". ` + "`-o jsonl`" + ` prints the
   same object on one line and nothing else on it, so runs appended to one
   file stay one object per line. It has no "error" key; that is how a reader
   tells success from failure. Pin the shape with "toktape_version". The
   fields most callers want:
 
-    id                            the run id, and the .tape file's basename
+    id                            the run id, and the .toktape file's basename
     toktape_version               the build that recorded it
     concurrency                   streams sent at once (--sessions)
     model.name                    the model's own name, when it declared one

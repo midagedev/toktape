@@ -114,7 +114,7 @@ func TestWriteSQLUnknownIsNull(t *testing.T) {
 		case "id":
 			want = "'20260101-000000-x'"
 		case "tape":
-			want = "'20260101-000000-x.tape'"
+			want = "'20260101-000000-x.toktape'"
 		case "concurrency":
 			want = "1"
 		case "warnings":

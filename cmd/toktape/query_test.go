@@ -44,7 +44,7 @@ func queryFixture(t *testing.T) *httptest.Server {
 			`"author":{"name":"Lab Rat","link":"https://example.com"},` +
 			`"title":"smoke test","note":"first paragraph\n\nsecond paragraph"}`))
 	})
-	mux.HandleFunc("/r/fullrun.tape", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/r/fullrun.toktape", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
 		_, _ = w.Write([]byte("tape-bytes-here"))
 	})

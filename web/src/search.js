@@ -126,7 +126,7 @@ ${q.next ? `<p class="more"><a href="${esc(withParam(url, "cursor", q.next))}">O
 Newest first unless you choose another order; there is still no rank column
 and no score. Every row carries the caveats the card would print, because a
 result set without them is a leaderboard with the sorting taken out.<br>
-<code>toktape publish &lt;run.tape&gt;</code> puts one here.
+<code>toktape publish &lt;run.toktape&gt;</code> puts one here.
 <a href="https://github.com/midagedev/toktape">toktape on GitHub</a>
 </footer>
 <script src="/player/wasm_exec.js"></script>
@@ -656,7 +656,7 @@ export function filterForm(url, facets) {
 async function emptyState(env, url, scope) {
   const filtered = [...url.searchParams.keys()].some((k) => k !== "cursor");
   if (!filtered) {
-    return `${EMPTY_FIGURE}<p class="empty">No runs published yet. <code>toktape publish &lt;run.tape&gt;</code> puts the first one here.</p>`;
+    return `${EMPTY_FIGURE}<p class="empty">No runs published yet. <code>toktape publish &lt;run.toktape&gt;</code> puts the first one here.</p>`;
   }
   const back = (await wayBack(env, url, scope)).join(" · ");
   return `${EMPTY_FIGURE}<p class="empty">No published run matches that. The filters are exact; the search box falls back to the names as they were recorded.${back ? `<br>Try ${back}.` : ""}</p>`;

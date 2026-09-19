@@ -162,7 +162,7 @@ grep -q 'class="avatar"' "$work/page4.html" && die "a --no-profile page carries 
 grep -q 'Lab Rat' "$work/page4.html" && die "a --no-profile page names the profile"
 
 say "the record comes back as a run file"
-curl -fsS "$base/r/$id.tape" -o "$work/downloaded.tape"
+curl -fsS "$base/r/$id.toktape" -o "$work/downloaded.tape"
 "$work/toktape" card "$work/downloaded.tape" >"$work/card.txt" 2>&1 ||
   { cat "$work/card.txt"; die "the downloaded record does not load"; }
 # The public view is what was uploaded, so the place the run happened must
@@ -222,7 +222,7 @@ grep -q 'class="act load"' "$work/page.html" ||
   die "the Details section has no Load button"
 
 say "the player is served"
-grep -q 'data-tape="/r/'"$id"'.tape"' "$work/page.html" || die "the page does not name the record for Replay"
+grep -q 'data-tape="/r/'"$id"'.toktape"' "$work/page.html" || die "the page does not name the record for Replay"
 grep -q 'src="/player/host.js"' "$work/page.html" || die "the page does not load the player"
 # application/wasm is what lets the browser compile while it downloads; the
 # wrong type is not an error, it is a slower page, so it is checked here.
@@ -271,6 +271,25 @@ grep -q 'no such path' "$work/body" || { cat "$work/body"; die "an unknown asset
 say "the search"
 curl -fsS "$base/api/v1/runs" >"$work/list.json"
 grep -q "\"id\":\"$id\"" "$work/list.json" || { cat "$work/list.json"; die "the run is not in the listing"; }
+# The same listing from the terminal (TTP-129, 2026-09-19): `toktape runs`
+# is the real binary reading the real Worker, and `show --save` round-trips
+# the record so `toktape card` can draw it again from what came back.
+"$work/toktape" runs --url "$base" --limit 5 >"$work/runs.txt" 2>"$work/runs.err" ||
+  { cat "$work/runs.err"; die "toktape runs failed against the local Worker"; }
+grep -q "^$id " "$work/runs.txt" || { cat "$work/runs.txt"; die "toktape runs does not list the hero"; }
+grep -q 'DECODE tok/s' "$work/runs.txt" || die "toktape runs prints no table header"
+"$work/toktape" runs --url "$base" --limit 2 -o json >"$work/runs.json" 2>"$work/runs.err" ||
+  { cat "$work/runs.err"; die "toktape runs -o json failed"; }
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["scope"]=="public" and len(d["runs"])==2, d' "$work/runs.json" ||
+  die "toktape runs -o json is not the service body"
+"$work/toktape" show "$base/r/$id" --url "$base" --save "$work/fetched.tape" >"$work/show.txt" 2>"$work/show.err" ||
+  { cat "$work/show.err"; die "toktape show failed against the local Worker"; }
+grep -q '^decode: ' "$work/show.txt" || { cat "$work/show.txt"; die "toktape show prints no decode line"; }
+# Not the file on disk: publish uploads the view with hostnames and paths
+# removed, so the saved record is compared with what the service serves.
+curl -fsS "$base/r/$id.toktape" -o "$work/served.tape"
+cmp -s "$work/fetched.tape" "$work/served.tape" || die "show --save did not return the bytes the service serves"
+"$work/toktape" card "$work/fetched.tape" >"$work/fetched-card.txt" 2>&1 || { cat "$work/fetched-card.txt"; die "the fetched record does not draw a card"; }
 # Every row carries the qualification the card prints (§9.4).
 grep -q '"caveat_count"' "$work/list.json" || die "a listing row dropped its caveat count"
 # A GPU filter that reaches a mixed rig (TTP-124, 2026-09-19). There is no
@@ -401,7 +420,7 @@ curl -fsS "$base/api/v1/runs?q=Qwen3.6" >"$work/fetched" && grep -q "\"id\":\"$i
   die "free text did not fall back to the name as recorded"
 curl -fsS "$base/" >"$work/fetched" && grep -q 'ik_llama.cpp' "$work/fetched" || die "the front page does not list the run"
 # Each listed run carries its stage, so a phone can play it in place.
-curl -fsS "$base/" >"$work/fetched" && grep -q 'class="stage feed" href="/r/'"$id"'" data-tape="/r/'"$id"'.tape"' "$work/fetched" ||
+curl -fsS "$base/" >"$work/fetched" && grep -q 'class="stage feed" href="/r/'"$id"'" data-tape="/r/'"$id"'.toktape"' "$work/fetched" ||
   die "the front page row does not carry the run for the feed"
 curl -fsS "$base/" >"$work/fetched" && grep -q 'src="/player/host.js"' "$work/fetched" || die "the front page does not load the player"
 # The run leads its row and the words follow as its caption (2026-09-19):

@@ -561,9 +561,13 @@ func previousTape(outDir string, tp *tape.Tape) string {
 	if slug == "" {
 		return ""
 	}
+	// Both extensions: the previous run may predate the .toktape name.
 	matches, err := filepath.Glob(filepath.Join(outDir, "*-"+slug+tape.Ext))
 	if err != nil {
 		return ""
+	}
+	if legacy, err := filepath.Glob(filepath.Join(outDir, "*-"+slug+tape.LegacyExt)); err == nil {
+		matches = append(matches, legacy...)
 	}
 	current := filepath.Join(outDir, tp.Summary.ID+tape.Ext)
 	best := ""

@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/midagedev/toktape/internal/bandwidth"
 	"github.com/midagedev/toktape/internal/card"
@@ -125,7 +124,7 @@ func explainCard(w io.Writer, s *tape.RunSummary) {
 // path is printed to stdout so a script can pick it up.
 func writeCardPNG(c *cli, tapePath, outPath string, s *tape.RunSummary) int {
 	if outPath == "" {
-		outPath = strings.TrimSuffix(tapePath, tape.Ext) + ".card.png"
+		outPath = tape.TrimExt(tapePath) + ".card.png"
 	}
 	if err := png.Write(outPath, s); err != nil {
 		return c.usagef("toktape: %v", err)

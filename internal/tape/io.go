@@ -11,8 +11,30 @@ import (
 	"strings"
 )
 
-// Ext is the run file extension. Files are gzip'd JSON.
-const Ext = ".tape"
+// Ext is the run file extension: gzip'd JSON. It was ".tape" until
+// 2026-09-19 (spec §9.7, TTP-111): Charm VHS uses .tape for the opposite
+// kind of file — a script of what to type — and a record that says "this
+// really happened" cannot wear the extension that means staging. Writing
+// uses Ext; reading accepts LegacyExt too, because ~/.toktape/runs already
+// holds files under the old name.
+const Ext = ".toktape"
+
+// LegacyExt is the extension runs were written under before Ext.
+const LegacyExt = ".tape"
+
+// IsRunFile reports whether a file name carries either run extension.
+func IsRunFile(name string) bool {
+	ext := filepath.Ext(name)
+	return ext == Ext || ext == LegacyExt
+}
+
+// TrimExt drops whichever run extension the name carries.
+func TrimExt(name string) string {
+	if strings.HasSuffix(name, Ext) {
+		return strings.TrimSuffix(name, Ext)
+	}
+	return strings.TrimSuffix(name, LegacyExt)
+}
 
 // Write serialises t to path atomically (temp file + rename).
 func Write(path string, t *Tape) error {
