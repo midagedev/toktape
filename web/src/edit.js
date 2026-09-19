@@ -25,10 +25,18 @@ import { checkNote, checkTitle } from "./upload.js";
 
 const KNOWN_KEYS = ["title", "note", "private", "index"];
 
-export async function editRun(id, request, env) {
+// The journal-token preamble the owner paths that are not a delete share —
+// this route and the card-replace one (card.js): 401 without a bearer
+// token, 404 without the run, 403 unless the token owns it, checked in
+// that order so a caller without the key learns nothing about whether the
+// run exists. `what` names the act for the refusals ("editing a run",
+// "replacing a run's card"). Exported rather than copied, for the same
+// reason tokenOwns is: two copies of this ladder would answer "whose run
+// is this" differently one day. Returns the run's row, or the refusal.
+export async function requireJournalOwner(id, request, env, what) {
   const auth = request.headers.get("Authorization") || "";
   if (!auth.startsWith("Bearer ")) {
-    return fail(401, "editing a run needs the journal token that owns it as `Authorization: Bearer <token>`");
+    return fail(401, `${what} needs the journal token that owns the run as \`Authorization: Bearer <token>\``);
   }
   const presented = auth.slice("Bearer ".length).trim();
   if (presented === "") {
@@ -41,11 +49,17 @@ export async function editRun(id, request, env) {
   }
 
   const hash = await sha256Hex(presented);
-  // Journal token only: a delete token opens the delete path, never this
-  // one, and a run with no owner has no title to defend.
+  // Journal token only: a delete token opens the delete path, never one of
+  // these, and a run with no owner has nothing to defend.
   if (row.owner_token === null || !(await tokenOwns(env, hash, row.owner_token))) {
-    return fail(403, "editing needs the journal token that owns this run");
+    return fail(403, `${what} needs the journal token that owns this run`);
   }
+  return row;
+}
+
+export async function editRun(id, request, env) {
+  const row = await requireJournalOwner(id, request, env, "editing a run");
+  if (row instanceof Response) return row;
 
   let body;
   try {

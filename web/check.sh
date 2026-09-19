@@ -809,6 +809,16 @@ grep -q 'colour' "$work/body" || { cat "$work/body"; die "the refusal does not n
 code=$(curl -s -o "$work/body" -w '%{http_code}' -X PATCH "$base/api/v1/runs/$jid" \
   -H 'Content-Type: application/json' -d '{"title":"x"}')
 [ "$code" = "401" ] || { cat "$work/body"; die "an edit with no token was not refused (got $code)"; }
+# The card-replace route (PUT /api/v1/runs/<id>/card) is gated exactly like
+# the edit path, so this probe is read-only on purpose: no token is a 401 —
+# never a 404 or a 405, which would say the route or the method was the
+# problem — and nothing is uploaded to the service. The behaviour gates
+# (wrong token, a non-PNG, over-limit, a run gaining a card) are unit
+# tests in test/card.test.mjs, because exercising them here would mean
+# writing a card to a run.
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X PUT "$base/api/v1/runs/$jid/card" \
+  -H 'Content-Type: image/png' --data-binary 'not a png')
+[ "$code" = "401" ] || { cat "$work/body"; die "a card PUT with no token was not refused (got $code)"; }
 code=$(curl -s -o "$work/body" -w '%{http_code}' -X PATCH "$base/api/v1/runs/$jid" \
   -H "Authorization: Bearer $jt" -H 'Content-Type: application/json' -d '{"private":"yes"}')
 [ "$code" = "400" ] || { cat "$work/body"; die "a string for private was not refused (got $code)"; }

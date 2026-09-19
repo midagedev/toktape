@@ -61,6 +61,13 @@ const UploadPath = "/api/v1/runs"
 //	every indexed column; null clears a field, absent leaves it, unknown keys
 //	are refused. 200 answers the same shape as /r/<id>.json.
 //
+//	PUT {base}/api/v1/runs/<id>/card
+//	Authorization: Bearer <token>        (the journal token that owns the run)
+//	Content-Type: image/png — the 1200×675 share card, redrawn from the same
+//	public view the index is derived from (ReplaceCard, the other half of a
+//	reindex). The server stores the bytes and never renders one itself
+//	(§9.6). 200 answers the same shape as /r/<id>.json.
+//
 //	GET {base}/api/v1/runs?… — the search (List). Only the filters that are
 //	set travel; sort travels only when it is not ""/"newest", so an older
 //	server sees the request it always saw. scope=mine reads the token's own
@@ -190,7 +197,7 @@ func (c *Client) Upload(ctx context.Context, view *tape.Tape, idx Index, opts Op
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		return nil, uploadError(base, resp)
+		return nil, refusalError(base, "run", resp)
 	}
 	var r Receipt
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&r); err != nil {
@@ -259,34 +266,97 @@ func (c *Client) Edit(ctx context.Context, id string, e Edit) (*Receipt, error) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, editError(base, resp)
+		return nil, refusalError(base, "edit", resp)
 	}
 	// The answer is the run's own JSON shape — the same object /r/<id>.json
 	// serves, with no link in it — so the link is built from the service
 	// that was just talked to, the way Upload reads it out of the receipt.
+	runID, err := runIDOf(base, "edit", resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return &Receipt{ID: runID, URL: base + "/r/" + runID}, nil
+}
+
+// ReplaceCard redraws a published run's share card — the other half of a
+// reindex. The card is drawn here from view, the same public view the
+// index was derived from and for the same reason uploadBody's card part
+// gives: a card rendered from anything else would paint into an image what
+// the view had taken out. The PNG travels as the body itself and is put to
+// the run's card route, which stores it and never renders one. It needs
+// the journal token that owns the run in c.Token, exactly like Edit, and
+// its 200 answers the same shape.
+func (c *Client) ReplaceCard(ctx context.Context, id string, view *tape.Tape) (*Receipt, error) {
+	if view == nil {
+		return nil, fmt.Errorf("publish: no view to draw a card from")
+	}
+	var card bytes.Buffer
+	if err := png.Encode(&card, &view.Summary); err != nil {
+		return nil, fmt.Errorf("publish: render card: %w", err)
+	}
+
+	base := strings.TrimRight(c.baseURL(), "/")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, base+"/api/v1/runs/"+id+"/card", bytes.NewReader(card.Bytes()))
+	if err != nil {
+		return nil, fmt.Errorf("publish: %w", err)
+	}
+	req.Header.Set("Content-Type", "image/png")
+	req.Header.Set("Accept", "application/json")
+	if c.UserAgent != "" {
+		req.Header.Set("User-Agent", c.UserAgent)
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+
+	resp, err := c.http().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("publish: %s: %w", base, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, refusalError(base, "card", resp)
+	}
+	runID, err := runIDOf(base, "card", resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return &Receipt{ID: runID, URL: base + "/r/" + runID}, nil
+}
+
+// runIDOf reads the run an owner request's 200 answer names. Every owner
+// route answers the run's own JSON shape — /r/<id>.json's object, with no
+// link in it — so the caller builds the link from the service it just
+// talked to, the way Upload reads it out of the receipt.
+func runIDOf(base, what string, body io.Reader) (string, error) {
 	var got struct {
 		ID string `json:"id"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&got); err != nil {
-		return nil, fmt.Errorf("publish: %s accepted the edit but its answer was unreadable: %w", base, err)
+	if err := json.NewDecoder(io.LimitReader(body, 1<<20)).Decode(&got); err != nil {
+		return "", fmt.Errorf("publish: %s accepted the %s but its answer was unreadable: %w", base, what, err)
 	}
 	if got.ID == "" {
-		return nil, fmt.Errorf("publish: %s accepted the edit without naming the run", base)
+		return "", fmt.Errorf("publish: %s accepted the %s without naming the run", base, what)
 	}
-	return &Receipt{ID: got.ID, URL: base + "/r/" + got.ID}, nil
+	return got.ID, nil
 }
 
-// editError quotes a refused edit the way uploadError quotes a refused
-// upload: the status and the server's short text body.
-func editError(base string, resp *http.Response) error {
+// refusalError turns a refusal into a sentence a publisher can act on. The
+// first thing they need to know is whose problem it is, so the status line
+// and a short text body are both quoted rather than summarised — and a
+// server's own JSON error is passed through as it is, because its wording
+// is more specific than anything that could be written here. `what` names
+// what was refused: the run, the edit, the card.
+func refusalError(base, what string, resp *http.Response) error {
 	msg := strings.TrimSpace(readShort(resp.Body))
 	if msg != "" {
 		if len(msg) > 400 {
 			msg = msg[:400] + "…"
 		}
-		return fmt.Errorf("publish: %s refused the edit (%s): %s", base, resp.Status, msg)
+		return fmt.Errorf("publish: %s refused the %s (%s): %s", base, what, resp.Status, msg)
 	}
-	return fmt.Errorf("publish: %s refused the edit (%s)", base, resp.Status)
+	return fmt.Errorf("publish: %s refused the %s (%s)", base, what, resp.Status)
 }
 
 func (c *Client) baseURL() string {
@@ -448,22 +518,6 @@ func partHeader(disposition, contentType string) textproto.MIMEHeader {
 	h.Set("Content-Disposition", disposition)
 	h.Set("Content-Type", contentType)
 	return h
-}
-
-// uploadError turns a refusal into a sentence a publisher can act on. The
-// first thing they need to know is whose problem it is, so the status line
-// and a short text body are both quoted rather than summarised.
-func uploadError(base string, resp *http.Response) error {
-	msg := strings.TrimSpace(readShort(resp.Body))
-	// A server's own JSON error is passed through as it is: its wording is
-	// more specific than anything that could be written here.
-	if msg != "" {
-		if len(msg) > 400 {
-			msg = msg[:400] + "…"
-		}
-		return fmt.Errorf("publish: %s refused the run (%s): %s", base, resp.Status, msg)
-	}
-	return fmt.Errorf("publish: %s refused the run (%s)", base, resp.Status)
 }
 
 func readShort(r io.Reader) string {

@@ -731,9 +731,12 @@ func machineLine(idx publish.Index) string {
 
 // runReindex rewrites published rows from their tapes with this build's
 // figures (TTP-130): each run is downloaded, decoded, re-indexed and
-// patched back. It needs the journal token exactly like publish --edit —
-// an anonymous run cannot be edited. A run that fails is named on stderr
-// and skipped, and the exit is publish when any was.
+// patched back, and its card is redrawn from the same view and PUT beside
+// it — reindex means re-deriving from the tape everything the service
+// shows that is derived from the tape, and the card is that too. It needs
+// the journal token exactly like publish --edit — an anonymous run cannot
+// be edited. A run that fails is named on stderr and skipped, and the
+// exit is publish when any was.
 func runReindex(ctx context.Context, c *cli, args []string) int {
 	fs := newFlagSet("reindex")
 	output := declareOutputFlag(fs)
@@ -793,8 +796,18 @@ func runReindex(ctx context.Context, c *cli, args []string) int {
 		// already the view its publisher chose, and re-applying the policy
 		// here would let a reindex silently strip a body the publisher
 		// meant to share.
-		idx := publish.IndexOf(publish.PublicView(tp, publish.WithText))
+		view := publish.PublicView(tp, publish.WithText)
+		idx := publish.IndexOf(view)
 		if _, err := client.Edit(ctx, id, publish.Edit{Index: &idx}); err != nil {
+			fmt.Fprintf(c.stderr, "toktape reindex %s: %v\n", id, err)
+			failed = true
+			continue
+		}
+		// The card comes from that same view, so the row and the pixels
+		// beside it cannot disagree after the renderer changed. A failure
+		// here fails the run: the index went up without this build's card,
+		// and a half-refresh is exactly the state a reindex exists to end.
+		if _, err := client.ReplaceCard(ctx, id, view); err != nil {
 			fmt.Fprintf(c.stderr, "toktape reindex %s: %v\n", id, err)
 			failed = true
 			continue
@@ -803,7 +816,7 @@ func runReindex(ctx context.Context, c *cli, args []string) int {
 		if idx.CtxSize > 0 {
 			ctxS = ctxCell(&idx.CtxSize)
 		}
-		fmt.Fprintf(c.stdout, "%s  reindexed · P%d/G%d · ctx %s · kv %s · %s\n",
+		fmt.Fprintf(c.stdout, "%s  reindexed · card redrawn · P%d/G%d · ctx %s · kv %s · %s\n",
 			id, idx.PromptN, idx.PredictedN, ctxS, orUnknown(idx.KVCache),
 			paramsChip(idx.MoE, idx.Params, idx.ActiveParams))
 	}

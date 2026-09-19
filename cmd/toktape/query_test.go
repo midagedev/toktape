@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -394,6 +396,8 @@ func TestReindexRoundTrip(t *testing.T) {
 	}
 	var patchBody map[string]any
 	var patchAuth, patchMethod, patchPath string
+	var cardBody []byte
+	var cardAuth, cardCT, cardMethod, cardPath string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/r/herorun.toktape", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/gzip")
@@ -402,6 +406,12 @@ func TestReindexRoundTrip(t *testing.T) {
 	mux.HandleFunc("/api/v1/runs/herorun", func(w http.ResponseWriter, r *http.Request) {
 		patchMethod, patchAuth, patchPath = r.Method, r.Header.Get("Authorization"), r.URL.Path
 		_ = json.NewDecoder(r.Body).Decode(&patchBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"herorun"}`))
+	})
+	mux.HandleFunc("/api/v1/runs/herorun/card", func(w http.ResponseWriter, r *http.Request) {
+		cardMethod, cardAuth, cardPath, cardCT = r.Method, r.Header.Get("Authorization"), r.URL.Path, r.Header.Get("Content-Type")
+		cardBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"herorun"}`))
 	})
@@ -439,8 +449,28 @@ func TestReindexRoundTrip(t *testing.T) {
 	if got["ctx_size"] != float64(16384) {
 		t.Errorf("index.ctx_size = %v, want the hero's 16384", got["ctx_size"])
 	}
+	// The same reindex redraws the card from the same public view and PUTs
+	// it beside the index (a reindex re-derives everything the service
+	// shows): the journal token travels, and the bytes are the 1200×675
+	// PNG a publish uploads.
+	if cardMethod != http.MethodPut || cardPath != "/api/v1/runs/herorun/card" {
+		t.Errorf("card = %s %s, want PUT /api/v1/runs/herorun/card", cardMethod, cardPath)
+	}
+	if cardAuth != "Bearer tk_journal" {
+		t.Errorf("the reindex card PUT carried %q, want the journal token", cardAuth)
+	}
+	if cardCT != "image/png" {
+		t.Errorf("the reindex card PUT is %q, want image/png", cardCT)
+	}
+	cfg, err := png.DecodeConfig(bytes.NewReader(cardBody))
+	if err != nil {
+		t.Fatalf("the reindex card PUT sent bytes that are not a PNG: %v", err)
+	}
+	if cfg.Width != 1200 || cfg.Height != 675 {
+		t.Errorf("the reindex card is %d×%d, want 1200×675", cfg.Width, cfg.Height)
+	}
 	// The hero is dense at 70.55 B params: the chip rounds to whole billions.
-	want := "herorun  reindexed · P512/G320 · ctx 16k · kv q8_0 · 71B"
+	want := "herorun  reindexed · card redrawn · P512/G320 · ctx 16k · kv q8_0 · 71B"
 	if !strings.Contains(stdout, want) {
 		t.Errorf("stdout = %q, want it to contain %q", stdout, want)
 	}

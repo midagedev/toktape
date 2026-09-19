@@ -31,7 +31,9 @@ const TAPE_EXTS = [".toktape", ".tape"];
 
 // The card is 1200×675 and comes out of internal/card/png at around 92 KB.
 // A megabyte is room for it to grow and still not be something else.
-const MAX_CARD_BYTES = 1024 * 1024;
+// Exported for the card-replace route (card.js), which refuses exactly
+// what this refuses: one limit in one place, or the two drift apart.
+export const MAX_CARD_BYTES = 1024 * 1024;
 
 // The author profile and the lab-note (TTP-125). Every limit mirrors the
 // client's refusal in internal/publish/avatar.go — the client refusing
@@ -414,8 +416,10 @@ export async function uploadRun(request, env) {
 }
 
 // The PNG signature. Two bytes settle gzip; a PNG's is eight and all eight
-// are checked because this one is handed to browsers as an image.
-function isPNG(b) {
+// are checked because this one is handed to browsers as an image. Exported
+// with MAX_CARD_BYTES for the card-replace route (card.js), for the same
+// reason the title/note checks are: one refusal in one place.
+export function isPNG(b) {
   const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
   if (b.byteLength < sig.length) return false;
   return sig.every((v, i) => b[i] === v);

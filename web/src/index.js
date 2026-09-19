@@ -14,6 +14,7 @@
 // against those, never the other way round.
 
 import { serveAvatar } from "./author.js";
+import { replaceCard } from "./card.js";
 import { deleteRun } from "./del.js";
 import { editRun } from "./edit.js";
 import { fail, json, publicBase } from "./http.js";
@@ -31,6 +32,10 @@ const RUN_JSON = /^\/r\/([a-z0-9]{8,64})\.json$/;
 const RUN_CARD = /^\/r\/([a-z0-9]{8,64})\.png$/;
 const RUN_PAGE = /^\/r\/([a-z0-9]{8,64})$/;
 const RUN_API = /^\/api\/v1\/runs\/([a-z0-9]{8,64})$/;
+// The owner replacing a published run's card with one its client redrew
+// from the record (a reindex's other half, card.js). The Worker still never
+// renders one: the bytes arrive drawn and are copied through.
+const RUN_CARD_API = /^\/api\/v1\/runs\/([a-z0-9]{8,64})\/card$/;
 // A user home. The handle is URL-safe by construction on this side: a token
 // id that does not match has no home page, and the lookup 404s it.
 const USER_JSON = /^\/u\/([a-z0-9][a-z0-9-]{1,31})\.json$/;
@@ -112,6 +117,10 @@ async function route(request, env) {
     return fail(405, "a run is read at /r/<id>, changed with PATCH and deleted with DELETE here", {
       Allow: "DELETE, PATCH",
     });
+  }
+  if ((m = RUN_CARD_API.exec(path))) {
+    if (request.method === "PUT") return replaceCard(m[1], request, env);
+    return fail(405, "a run's card is replaced with PUT here", { Allow: "PUT" });
   }
   if ((m = TAPE_SUFFIX.exec(path))) return serveTape(m[1], env);
   if ((m = RUN_JSON.exec(path))) return serveRunJSON(m[1], env);
