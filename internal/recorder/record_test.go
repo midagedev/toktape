@@ -49,6 +49,16 @@ const propsJSON = `{
 // SSE stream for every chat request.
 func fakeServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	srv := httptest.NewServer(fakeMux(t))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// fakeMux is fakeServer's routes as a bare mux, so a test can add its own
+// (the probe gates add /completion) and still exercise everything else a
+// plain run touches.
+func fakeMux(t *testing.T) *http.ServeMux {
+	t.Helper()
 	sse, err := os.ReadFile(sseFile)
 	if err != nil {
 		t.Fatalf("read SSE fixture: %v", err)
@@ -98,9 +108,7 @@ func fakeServer(t *testing.T) *httptest.Server {
 			time.Sleep(time.Millisecond)
 		}
 	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv
+	return mux
 }
 
 // fakeGPU serves the two nvidia-smi queries from fixture CSVs.

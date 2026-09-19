@@ -114,6 +114,9 @@ func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 		rounds[k] = flat[k*n : (k+1)*n]
 	}
 	r.emitAttached()
+	// The prefill probe pass (TTP-137), once per tape: before round one's
+	// first request, so no round's cache picture or fault baseline sees it.
+	r.prefillProbe(ctx)
 
 	startedAt := r.opts.Clock.Now()
 	recs, st, err := r.streamRounds(ctx, rounds)

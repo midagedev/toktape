@@ -7,6 +7,9 @@
 # committed so `go run ./internal/render/cmd/hero` regenerates the README's
 # image from the repo alone (2026-09-14).
 !/assets/hero.tape
+# A tape that is a test input, not a run's output (TTP-137, 2026-09-19): the
+# old-decode gate reads it, and a clone without it fails the recorder suite.
+!/internal/recorder/testdata/no-probe.tape
 /assets/out/
 /web/node_modules/
 # wrangler's local state: the miniflare R2 and D1 the e2e harness runs against.

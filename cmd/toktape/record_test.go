@@ -526,20 +526,31 @@ func TestRecordVerbRawEndpoint(t *testing.T) {
 	}
 
 	sent := bodies()
-	if len(sent) != 1 {
-		t.Fatalf("got %d requests, want 1", len(sent))
+	// The prefill probe pass (TTP-137, 2026-09-19) sends its own /completion
+	// requests before the run's first one, so the log holds theirs too; the
+	// run's request is the one carrying the run's prompt, and there must be
+	// exactly one of those. FAIL-first against the pre-probe code: the count
+	// below was len(sent) != 1.
+	var runSent []map[string]any
+	for _, b := range sent {
+		if b["prompt"] == "Explain mmap." {
+			runSent = append(runSent, b)
+		}
 	}
-	if sent[0]["prompt"] != "Explain mmap." {
-		t.Fatalf("server saw prompt %v, want the text verbatim", sent[0]["prompt"])
+	if len(runSent) != 1 {
+		t.Fatalf("got %d requests for the run's prompt, want 1 (%d bodies total)", len(runSent), len(sent))
 	}
-	if sent[0]["temperature"] != float64(0) {
-		t.Fatalf("temperature %v, want 0 on the wire", sent[0]["temperature"])
+	if runSent[0]["prompt"] != "Explain mmap." {
+		t.Fatalf("server saw prompt %v, want the text verbatim", runSent[0]["prompt"])
 	}
-	if sent[0]["n_predict"] != float64(320) {
-		t.Fatalf("n_predict %v, want 320", sent[0]["n_predict"])
+	if runSent[0]["temperature"] != float64(0) {
+		t.Fatalf("temperature %v, want 0 on the wire", runSent[0]["temperature"])
 	}
-	if _, ok := sent[0]["messages"]; ok {
-		t.Fatalf("the raw path sent messages: %+v", sent[0])
+	if runSent[0]["n_predict"] != float64(320) {
+		t.Fatalf("n_predict %v, want 320", runSent[0]["n_predict"])
+	}
+	if _, ok := runSent[0]["messages"]; ok {
+		t.Fatalf("the raw path sent messages: %+v", runSent[0])
 	}
 
 	tapes, err := filepath.Glob(filepath.Join(out, "*"+tape.Ext))

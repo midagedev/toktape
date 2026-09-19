@@ -85,17 +85,28 @@ func TestRecordOnTheRawPath(t *testing.T) {
 	}
 
 	bodies := log.all()
-	if len(bodies) != 1 {
-		t.Fatalf("got %d requests, want 1", len(bodies))
+	// The prefill probe pass (TTP-137, 2026-09-19) sends its own /completion
+	// requests before the run's first one, so the log holds theirs too; the
+	// run's request is the one carrying the run's prompt, and there must be
+	// exactly one of those. FAIL-first against the pre-probe code: the count
+	// below was len(bodies) != 1.
+	var runBodies []map[string]any
+	for _, b := range bodies {
+		if b["prompt"] == "Explain mmap." {
+			runBodies = append(runBodies, b)
+		}
 	}
-	if bodies[0]["prompt"] != "Explain mmap." {
-		t.Fatalf("server saw prompt %v", bodies[0]["prompt"])
+	if len(runBodies) != 1 {
+		t.Fatalf("got %d requests for the run's prompt, want 1 (%d bodies total)", len(runBodies), len(bodies))
 	}
-	if bodies[0]["n_predict"] != float64(320) {
-		t.Fatalf("n_predict %v, want 320", bodies[0]["n_predict"])
+	if runBodies[0]["prompt"] != "Explain mmap." {
+		t.Fatalf("server saw prompt %v", runBodies[0]["prompt"])
 	}
-	if bodies[0]["temperature"] != float64(0) {
-		t.Fatalf("temperature %v, want 0", bodies[0]["temperature"])
+	if runBodies[0]["n_predict"] != float64(320) {
+		t.Fatalf("n_predict %v, want 320", runBodies[0]["n_predict"])
+	}
+	if runBodies[0]["temperature"] != float64(0) {
+		t.Fatalf("temperature %v, want 0", runBodies[0]["temperature"])
 	}
 
 	if len(tp.Requests) != 1 {

@@ -1,0 +1,478 @@
+package recorder_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"math"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/midagedev/toktape/internal/gpu"
+	"github.com/midagedev/toktape/internal/recorder"
+	"github.com/midagedev/toktape/internal/tape"
+)
+
+// The prefill probe gates (TTP-137, 2026-09-19). The fake /completion route
+// plants a per-token and a fixed cost, so the two-point fit is asserted
+// against numbers the test chose; its stateful half serves a repeat prompt
+// from the prefix-cache shape, which is what the replay probe observes.
+
+// probeCosts is the cost model the fake /completion answers with.
+type probeCosts struct {
+	fixedMs  float64
+	perTokMs float64
+	// inverted makes longer prompts answer faster, the shape a cache hit or
+	// a broken measurement would produce: a fit the probe must refuse.
+	inverted bool
+	// nFor overrides the token count reported for a prompt. nil reports
+	// len(prompt)/5, a planted conversion that cancels in the slope.
+	nFor func(prompt string) int
+}
+
+// probeSeen records what the /completion route was asked for, so the gates
+// can assert on the prompts the pass generated and the caps it sent.
+type probeSeen struct {
+	mu      sync.Mutex
+	prompts []string
+	caps    []int
+}
+
+func (s *probeSeen) add(prompt string, cap int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prompts = append(s.prompts, prompt)
+	s.caps = append(s.caps, cap)
+}
+
+func (s *probeSeen) snapshot() ([]string, []int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.prompts...), append([]int(nil), s.caps...)
+}
+
+// probeMux is fakeMux plus the /completion route the probe pass sends to.
+func probeMux(t *testing.T, costs probeCosts) (*http.ServeMux, *probeSeen) {
+	t.Helper()
+	mux := fakeMux(t)
+	seen := &probeSeen{}
+	served := map[string]bool{}
+	mux.HandleFunc("/completion", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Prompt   string `json:"prompt"`
+			NPredict *int   `json:"n_predict"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		cap := 0
+		if in.NPredict != nil {
+			cap = *in.NPredict
+		}
+		seen.add(in.Prompt, cap)
+		_, hit := served[in.Prompt]
+		served[in.Prompt] = true
+
+		n := len(in.Prompt) / 5
+		if costs.nFor != nil {
+			n = costs.nFor(in.Prompt)
+		}
+		ms := costs.fixedMs + costs.perTokMs*float64(n)
+		if costs.inverted {
+			ms = costs.fixedMs + costs.perTokMs*float64(2600-n)
+		}
+		cacheN := 0
+		if hit {
+			// The prefix-cache shape: everything reused, almost nothing
+			// spent. timings.prompt_n is what the server evaluated.
+			cacheN, ms, n = n, 2.0, 0
+		}
+		writeCompletion(w, n, cacheN, ms)
+	})
+	return mux, seen
+}
+
+// writeCompletion answers one /completion request in llama-server's own
+// stream shape: one content chunk, then the stop chunk that carries the
+// final timings. The 2 ms pause gives the client a TTFT to measure.
+func writeCompletion(w http.ResponseWriter, promptN, cacheN int, promptMs float64) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	time.Sleep(2 * time.Millisecond)
+	pps := 0.0
+	if promptMs > 0 {
+		pps = float64(promptN) / (promptMs / 1000)
+	}
+	fmt.Fprintf(w, "data: {\"content\":\"ok\",\"stop\":false}\n\n")
+	fmt.Fprintf(w, "data: {\"content\":\"\",\"stop\":true,\"stop_type\":\"limit\",\"timings\":{\"prompt_n\":%d,\"prompt_ms\":%s,\"prompt_per_second\":%s,\"predicted_n\":1,\"predicted_ms\":5.0,\"predicted_per_second\":200.0,\"cache_n\":%d}}\n\n",
+		promptN, strconv.FormatFloat(promptMs, 'f', -1, 64), strconv.FormatFloat(pps, 'f', -1, 64), cacheN)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// probeOpts is the plain one-stream run the probe gates record.
+func probeOpts(t *testing.T, srv *httptest.Server) recorder.Options {
+	t.Helper()
+	return recorder.Options{
+		BaseURL:        srv.URL,
+		FSRoot:         t.TempDir(),
+		GPU:            gpu.Null{},
+		SampleInterval: 50 * time.Millisecond,
+		Clock:          fixedClock{time.Date(2026, 9, 19, 8, 0, 0, 0, time.UTC)},
+	}
+}
+
+// near is a relative-tolerance comparison for the planted figures.
+func near(got, want, tol float64) bool {
+	return math.Abs(got-want) <= tol*math.Abs(want)
+}
+
+// Gate 1: the slope through two planted points is the machine's prefill rate
+// and the intercept is the server's fixed cost — not the single-point
+// average either of them hides in.
+func TestProbeFitsTheMachinesPrefillRate(t *testing.T) {
+	mux, seen := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	p := tp.Summary.Probe
+	if p == nil {
+		t.Fatal("Summary.Probe = nil, the pass did not record anything")
+	}
+	if len(p.Prefill) != 2 {
+		t.Fatalf("Prefill points = %d, want 2: %+v", len(p.Prefill), p.Prefill)
+	}
+	short, long := p.Prefill[0], p.Prefill[1]
+	if short.PromptN >= long.PromptN {
+		t.Errorf("points not in send order (short first): %+v then %+v", short, long)
+	}
+	if short.PromptN < 100 || short.PromptN > 200 {
+		t.Errorf("short point = %d tokens, want about 128", short.PromptN)
+	}
+	if long.PromptN < 1700 || long.PromptN > 2400 {
+		t.Errorf("long point = %d tokens, want about 2048", long.PromptN)
+	}
+	if short.TTFTMs <= 0 || long.TTFTMs <= 0 {
+		t.Errorf("TTFT not recorded beside the server figures: %+v %+v", short, long)
+	}
+	// perTokMs 0.5 is 2000 tok/s at the margin; fixedMs 30 is the intercept.
+	if !near(p.PrefillPerSecond, 2000, 0.01) {
+		t.Errorf("PrefillPerSecond = %v, want the slope 2000 (planted 0.5 ms/token)", p.PrefillPerSecond)
+	}
+	if !near(p.FixedMs, 30, 0.01) {
+		t.Errorf("FixedMs = %v, want the planted intercept 30", p.FixedMs)
+	}
+	// The replay: the longer prompt a second time, reported as it happened.
+	prompts, caps := seen.snapshot()
+	if len(prompts) != 3 {
+		t.Fatalf("probe sent %d requests, want 3 (short, long, replay)", len(prompts))
+	}
+	if prompts[2] != prompts[1] {
+		t.Error("the replay did not resend the longer prompt")
+	}
+	if p.Replay == nil {
+		t.Fatal("Replay = nil, the second send of the long prompt was not recorded")
+	}
+	if p.Replay.PromptN != 0 || p.Replay.CacheN != long.PromptN || !near(p.Replay.PromptMs, 2.0, 0.01) {
+		t.Errorf("Replay = %+v, want the server's own words (0 evaluated, %d reused, 2 ms)", *p.Replay, long.PromptN)
+	}
+	// Every probe request asked for exactly one token.
+	for i, c := range caps {
+		if c != 1 {
+			t.Errorf("probe request %d asked for n_predict %d, want 1", i, c)
+		}
+	}
+	// The pass is silent on success.
+	for _, w := range tp.Summary.Warnings {
+		if strings.Contains(strings.ToLower(w), "probe") {
+			t.Errorf("warning about the probe on a healthy pass: %q", w)
+		}
+	}
+}
+
+// Gate 2: a fit the probe cannot trust is refused — rates 0, points kept —
+// never clamped into a plausible number.
+func TestProbeRefusesAFitItCannotTrust(t *testing.T) {
+	cases := []struct {
+		name  string
+		costs probeCosts
+	}{
+		{"longer prompt answered faster, the cache-hit shape", probeCosts{fixedMs: 30, perTokMs: 0.5, inverted: true}},
+		{"both points the same length, no slope", probeCosts{fixedMs: 30, perTokMs: 0.5, nFor: func(string) int { return 100 }}},
+		{"negative intercept", probeCosts{fixedMs: -30, perTokMs: 0.5}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mux, _ := probeMux(t, tc.costs)
+			srv := httptest.NewServer(mux)
+			t.Cleanup(srv.Close)
+
+			tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
+			if err != nil {
+				t.Fatalf("Record: %v", err)
+			}
+			p := tp.Summary.Probe
+			if p == nil {
+				t.Fatal("Summary.Probe = nil, the pass did not record anything")
+			}
+			if len(p.Prefill) != 2 {
+				t.Fatalf("Prefill points = %d, a refused fit keeps them: %+v", len(p.Prefill), p.Prefill)
+			}
+			if p.PrefillPerSecond != 0 || p.FixedMs != 0 {
+				t.Errorf("refused fit produced figures: %v tok/s, fixed %v ms", p.PrefillPerSecond, p.FixedMs)
+			}
+		})
+	}
+}
+
+// Gates 3 and 4: the two probe prompts differ from their first tokens, and
+// the pass leaves the run it measured alone — the run's own cache picture
+// is built from the run's requests, probe requests included nowhere.
+func TestProbePromptsAreTheirOwnAndLeaveTheRunsCacheAlone(t *testing.T) {
+	mux, seen := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	prompts, _ := seen.snapshot()
+	if len(prompts) < 2 {
+		t.Fatalf("probe sent %d prompts, want at least the two fit points", len(prompts))
+	}
+	const head = 160 // about 32 tokens at the set's own 5 characters a token
+
+	// Gate 3: the two fit prompts do not share a prefix, so the second
+	// point's prefill cannot be cache-served by the first one's.
+	if firstChars(prompts[0], head) == firstChars(prompts[1], head) {
+		t.Error("the two probe prompts share their first tokens; the long point's prefill would be cache-served and the slope meaningless")
+	}
+
+	// Gate 4: no probe prompt shares a prefix with any prompt the run sent,
+	// so the pass cannot poison the set's prefix cache, and the summary's
+	// cache picture is untouched by the probe's own cache hit.
+	for i, rec := range tp.Requests {
+		runPrompt := rec.Prompt.Messages[0].Content
+		for j, pp := range prompts {
+			if firstChars(runPrompt, head) == firstChars(pp, head) {
+				t.Errorf("run prompt %d shares its first tokens with probe prompt %d", i, j)
+			}
+		}
+	}
+	if tp.Summary.Probe == nil || tp.Summary.Probe.Replay == nil || tp.Summary.Probe.Replay.CacheN == 0 {
+		t.Fatal("the probe's replay did not observe a cache hit, so the check below has no teeth")
+	}
+	if tp.Summary.Cache.HitTokens != 0 || tp.Summary.Cache.HitRatio != 0 {
+		t.Errorf("summary.Cache = %+v, want zero hits: the probe's replay must not land in the run's cache picture", tp.Summary.Cache)
+	}
+}
+
+func firstChars(s string, n int) string {
+	if len(s) < n {
+		return s
+	}
+	return s[:n]
+}
+
+// Gate 5: a tape from before the probe field decodes unchanged — no Probe
+// key, every other field exactly as it was.
+func TestOldTapeWithoutProbeKeyDecodes(t *testing.T) {
+	tp, err := tape.Read("testdata/no-probe.tape")
+	if err != nil {
+		t.Fatalf("tape.Read: %v", err)
+	}
+	if tp.Schema != 1 {
+		t.Errorf("Schema = %d, want 1", tp.Schema)
+	}
+	if tp.Summary.Probe != nil {
+		t.Errorf("Probe = %+v, want nil on a tape with no probe key", tp.Summary.Probe)
+	}
+	if tp.Summary.ID != "20260913-071500-old" || tp.Summary.Concurrency != 1 {
+		t.Errorf("summary drifted: id %q, concurrency %d", tp.Summary.ID, tp.Summary.Concurrency)
+	}
+	if tp.Summary.Timings.PromptN != 283 || tp.Summary.Cache.Label != tape.CacheWarm {
+		t.Errorf("pinned fields drifted: prompt_n %d, label %q", tp.Summary.Timings.PromptN, tp.Summary.Cache.Label)
+	}
+	// Round-trip: writing it back keeps the field absent.
+	path := filepath.Join(t.TempDir(), "again.tape")
+	if err := tape.Write(path, tp); err != nil {
+		t.Fatalf("tape.Write: %v", err)
+	}
+	again, err := tape.Read(path)
+	if err != nil {
+		t.Fatalf("tape.Read: %v", err)
+	}
+	if again.Summary.Probe != nil {
+		t.Errorf("Probe = %+v after a round trip, want nil", again.Summary.Probe)
+	}
+}
+
+// Gate 6: the KV cache size comes from the server's own load log, and every
+// miss is a silent "not observed".
+const kvLogLines = `INFO  sys  : n_threads = 16
+llama_init_from_model: KV self size = 640.00 MiB, K (f16): 320.00 MiB, V (f16): 320.00 MiB
+llama_init_from_model: CPU output buffer size = 0.12 MiB
+`
+
+// kvFixture builds a /proc tree whose pid 1234 runs the fixture model, with
+// the given fd links under /proc/1234/fd, inside root — the same chroot the
+// log fixture writes into, so an fd target like /logs/server.log resolves
+// under it the way FSRoot does.
+func kvFixture(t *testing.T, root string, fds map[int]string) string {
+	t.Helper()
+	proc := filepath.Join(root, "proc", "1234")
+	if len(fds) > 0 {
+		if err := os.MkdirAll(filepath.Join(proc, "fd"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := os.MkdirAll(proc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proc, "cmdline"),
+		[]byte("llama-server\x00-m\x00"+modelPath+"\x00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for fd, target := range fds {
+		if err := os.Symlink(target, filepath.Join(proc, "fd", strconv.Itoa(fd))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// kvLogFixture writes the log a redirected server leaves behind, inside the
+// fixture tree at /logs/server.log, and returns its absolute-in-fixture
+// target for an fd link.
+func kvLogFixture(t *testing.T, root, text string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "logs", "server.log")
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return "/logs/server.log"
+}
+
+func TestVRAMKVFromTheServersOwnLog(t *testing.T) {
+	cases := []struct {
+		name string
+		fds  func(t *testing.T, root string) map[int]string
+		want int64
+	}{
+		{
+			name: "stdout redirected to a log",
+			fds: func(t *testing.T, root string) map[int]string {
+				return map[int]string{1: kvLogFixture(t, root, kvLogLines)}
+			},
+			want: 671088640, // 640.00 MiB, the engine's own words
+		},
+		{
+			name: "stderr carries it when stdout is not a file",
+			fds: func(t *testing.T, root string) map[int]string {
+				log := kvLogFixture(t, root, kvLogLines)
+				return map[int]string{1: "/logs", 2: log} // /logs is a directory, not a regular file
+			},
+			want: 671088640,
+		},
+		{
+			name: "no fd directory at all",
+			fds: func(t *testing.T, root string) map[int]string {
+				return nil
+			},
+			want: 0,
+		},
+		{
+			name: "the link points nowhere",
+			fds: func(t *testing.T, root string) map[int]string {
+				return map[int]string{1: "/logs/missing.log", 2: "/logs/missing-too.log"}
+			},
+			want: 0,
+		},
+		{
+			name: "the log has no KV line",
+			fds: func(t *testing.T, root string) map[int]string {
+				return map[int]string{1: kvLogFixture(t, root, "main: server is listening\n")}
+			},
+			want: 0,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mux, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5})
+			srv := httptest.NewServer(mux)
+			t.Cleanup(srv.Close)
+
+			// One chroot for the whole case: the /proc tree and the log its
+			// fd links point at both live under root, the way FSRoot sees
+			// one filesystem.
+			root := t.TempDir()
+			procRoot := kvFixture(t, root, tc.fds(t, root))
+			opts := probeOpts(t, srv)
+			opts.FSRoot = procRoot
+
+			tp, err := recorder.Record(context.Background(), opts)
+			if err != nil {
+				t.Fatalf("Record: %v", err)
+			}
+			s := tp.Summary
+			if s.Placement.VRAMKVBytes != tc.want {
+				t.Errorf("Placement.VRAMKVBytes = %d, want %d", s.Placement.VRAMKVBytes, tc.want)
+			}
+			if s.Placement.Source != "unknown" {
+				t.Errorf("Placement.Source = %q, want it left alone (unknown)", s.Placement.Source)
+			}
+			for _, w := range s.Warnings {
+				if low := strings.ToLower(w); strings.Contains(low, "kv") || strings.Contains(low, "vram") || strings.Contains(low, "log") {
+					t.Errorf("a miss is not the user's fault and must not be said: %q", w)
+				}
+			}
+		})
+	}
+}
+
+// Gate 6, engine priority: an engine that reported its own KV size is the
+// record; the log scan never overwrites it.
+func TestVRAMKVEngineFigureWinsOverTheLog(t *testing.T) {
+	inner, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/props", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+		  "model_path": "` + modelPath + `",
+		  "total_slots": 4,
+		  "engine": {"name": "shimx", "version": "1.0", "model": {"format": "exl3"},
+		             "placement": {"devices": [], "vram_kv_bytes": 12345678}}
+		}`))
+	})
+	mux.Handle("/", inner)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	root := t.TempDir()
+	procRoot := kvFixture(t, root, map[int]string{1: kvLogFixture(t, root, kvLogLines)})
+	opts := probeOpts(t, srv)
+	opts.FSRoot = procRoot
+
+	tp, err := recorder.Record(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if got := tp.Summary.Placement.VRAMKVBytes; got != 12345678 {
+		t.Errorf("Placement.VRAMKVBytes = %d, want the engine's own 12345678", got)
+	}
+}

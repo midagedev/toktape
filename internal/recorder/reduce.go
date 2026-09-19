@@ -98,8 +98,12 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		// is 0 unless the clock actually ended something, so a reader tells a
 		// cut run from a completed one by that field alone, and CutAt > For
 		// says the floor held the cut back past the budget.
-		Limit:     limitOf(r.limit, r.cutAt),
-		Template:  r.template,
+		Limit:    limitOf(r.limit, r.cutAt),
+		Template: r.template,
+		// The prefill pass's own figures, whole as it measured them
+		// (TTP-137). nil on a run that did not probe, which is every tape
+		// from before the pass existed.
+		Probe:     r.prefill,
 		Sampling:  samplingOf(recs),
 		GPUsAtEnd: gpusAtEnd,
 		Warnings:  r.warnings,
@@ -383,6 +387,10 @@ func (r *run) narrowPlacement(gpusAtEnd []tape.GPUSample) {
 	sum, warns := placement.EstimateVerbose(r.tensors, r.flags, len(r.host.GPUs), false,
 		placement.WithModel(r.model),
 		placement.WithGPUIndices(inPlay))
+	// The re-estimate spreads tensors and knows nothing about the KV cache —
+	// placement never derives one — so whatever collectVRAMKV read from the
+	// server's own log must survive the replace below (TTP-137).
+	sum.VRAMKVBytes = r.place.VRAMKVBytes
 	r.place = sum
 	// The re-estimate runs over the same tensors and flags as the first one,
 	// so its warnings are the sentences collectPlacement already appended; a

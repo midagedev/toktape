@@ -59,6 +59,11 @@ type run struct {
 	// did not all come from one (TTP-112). Read where the requests are built
 	// because that is the only place that knows.
 	promptSet string
+	// prefill is the prefill measurement pass's own figures (TTP-137), nil
+	// when the run did not make one. Named for the pass, not the schema
+	// type, because run already has a probe method — the attach gate.
+	// It is reduced into the summary whole; the run's requests never see it.
+	prefill *tape.ProbeSummary
 }
 
 // Record performs one run end to end: attach, collect the static picture,
@@ -98,6 +103,10 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 		}
 	}()
 	r.collectPlacement()
+	// After the placement estimate and before anything is planned: the KV
+	// cache size comes from the server's own load log (TTP-137), and only
+	// where placement itself did not observe one.
+	r.collectVRAMKV()
 	// A --spec-n-max sweep becomes rounds here, once the argv says whether a
 	// draft model is loaded (TTP-35).
 	r.planSweep()
@@ -115,6 +124,10 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	r.promptSet = promptSetOf(reqs)
 	r.collectTemplate(ctx, reqs)
 	r.emitAttached()
+	// The prefill probe pass (TTP-137): two prompts the set never used,
+	// before the first run request, so the run's own timeline and the
+	// sampler's fault baseline start clean after it.
+	r.prefillProbe(ctx)
 
 	startedAt := opts.Clock.Now()
 	recs, st, err := r.stream(ctx, reqs)
