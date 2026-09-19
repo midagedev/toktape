@@ -67,3 +67,27 @@ out of every tape it publishes.
 
 Cloudflare's rate-limiting binding was tried first and measured not to count
 in production — see `src/ratelimit.js`.
+
+## If the database is lost
+
+R2 holds every record and card, so the bytes a publisher uploaded are never
+the thing at risk. D1 holds what R2 cannot say: that a row exists, who owns
+it (the delete token), and when it was published. Two paths back, in order:
+
+```sh
+npx wrangler d1 time-travel info toktape                  # the current bookmark
+npx wrangler d1 time-travel restore toktape --bookmark=<bookmark>
+npx wrangler d1 export toktape --remote --output <file>   # a snapshot, before anything risky
+```
+
+Time Travel is on by default and reaches back 30 days, so it answers a bad
+migration or a wrong `DELETE` — the failures that actually happen. It does
+not answer a loss older than that, which is what the export is for: take one
+before a migration, and keep it out of the repo, because the `runs` table
+carries owner tokens.
+
+Restoring rows recovers existence and ownership. The index columns beside
+them are derived, not authored, so a publisher can rebuild their own with
+`toktape reindex <id>...`: it reads each record back, re-derives every index
+field through the same public view the client publishes, and patches the row
+with the journal token that owns it.

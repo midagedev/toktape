@@ -102,59 +102,81 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **A rig with four GPUs fits on the screen, and every figure is printed
-    once.** On a four-card machine the headline rate — the reason the big
-    scoreboard exists — did not render at all.
+    **The record has a home on the web.** `toktape publish` puts a run at
+    tape.midagedev.com, where it replays in the browser from the record itself
+    — not a video of it — and the card that qualifies the figure rides along.
 
-    The right column's height was a function of the card count. PLACEMENT
-    grew a VRAM bar per device and RESOURCES a header and a graph per device,
-    so each card cost two rows and the layout paid for them out of whatever
-    was left. Measured on the README's recording at the 120x36 the clip is
-    drawn in: two cards kept the scoreboard by taking every resource graph
-    down to nothing, and three gave up the scoreboard instead.
+    The run file's extension changed with it. A recording is now `run.toktape`,
+    because Charm's VHS uses `.tape` for the opposite kind of file, a script of
+    what to type, and a record that says "this really happened" cannot wear the
+    extension that means staging. Both are read everywhere, so a `~/.toktape/runs`
+    full of the old name keeps working and nothing has to be renamed.
 
-    The devices are one table now. A row per card carries that card's VRAM
-    bar, its bytes, its utilisation and its temperature, over a single graph
-    they share — the mean across the cards that reported a utilisation, so a
-    card nobody could read is left out of the mean rather than counted as
-    idle, and still prints `?` for what was not measured. The column grows one
-    row per card instead of two, and a four-card rig keeps the headline and
-    the graphs together.
+    **What the site is.** The listing is a feed at every width: each run leads its
+    row and replays in place as it scrolls past, one across on a phone and two or
+    three on a desktop. Newest first, with no rank column and no score — a
+    run's caveats travel with it, and a search result that drops them is a
+    leaderboard with the sorting removed. An order is there when you ask for it
+    (`?sort=decode`), and the total line says in words that it is putting
+    different models, streams and quantisations side by side.
 
-    PLACEMENT is left with what the word means, where the model itself sits: a
-    card's used VRAM is a live nvidia-smi reading and was never a placement.
-    An offloaded run reads better for it — the host row and the VRAM row are
-    adjacent now, with nothing between them, so the balance is one glance.
+    **The figures behind a rate.** A row used to carry the rate and the hardware,
+    which is not enough to say why two runs of one model on one GPU differ. It now
+    carries the workload (`P238 · G214 · cache 0%`), the configuration (`fa on ·
+    kv q8_0`, `offload partial`), the size (`35B · 3.5B active`) and, beside the
+    measured prompt and deliberately quieter than it, the context window the
+    server reserved. That order is the point: a research pass found the
+    reservation is near the bottom of what moves a decode rate on a short prompt,
+    and the things above it are stream count, generated length, spill, weight
+    bits, speculative acceptance, throttling and a cold mmap.
 
-    **The headline was on screen twice**, five rows apart and in two sizes:
-    the scoreboard and SPEED's first row drew the same number. The word that
-    row had and the board did not — decode against sample — moves onto the
-    board's unit line, and the row returns only on a screen too short for the
-    board, where it is the one place the figure appears. The per-stream mean
-    left the column too, since every stream's own tile already leads with it.
+    Size bands stand on active parameters, so a 35B mixture that touches 3.5B per
+    token is searched as the 3.5B model a decode experiences, not grouped with
+    dense 35B weights it has nothing in common with.
 
-    **The card, the same rule.** Three figures were printed twice on it, and
-    the Streams row's whole first line was one of them. Each figure now
-    appears in the row whose label names what it is about: the decode rates
-    are Decode's, the prefill rates and where the wait went are Prefill's,
-    and on a concurrent run TTFT sits beside its own p95 in Streams. That took
-    `N × per-stream = aggregate` with it — and what the equation was standing
-    in for survives as words, because when the streams did not share a decode
-    window the row now says so: `4 streams · not all decoding at once`. It is
-    the card's first account of why four streams at 42.1 tok/s are not 144.
+    **Read it from the terminal.** `toktape runs` prints the site's listing as a
+    table and takes the same filters, `toktape show <id> --save run.toktape`
+    fetches one record so `toktape card` can draw it again locally, and
+    `toktape reindex <id>` recomputes a published run's search row from the record
+    the service already holds — which is how a run published last week gains the
+    fields a newer toktape knows how to derive. Reading is free and needs no
+    token; recording is not.
 
-    Nothing was re-recorded: the README's clip is the same run drawn through
-    the new column.
+    **Any OpenAI-compatible server.** A server that does not answer `/props` is
+    attached through `/v1/models` (`--engine-kind auto|llama|openai`), and when it
+    reports no timings of its own the recorder's clock becomes the record and says
+    so — `client-timed` on the card and a caveat on the run. Chunks are not tokens,
+    so the count comes from the final chunk's `usage`; without one the rate prints
+    `?` rather than a number derived from chunk arrivals.
+
+    **What does not go up.** The published view was already dropping the machine's
+    name, the listening host and every absolute path — including the parsed copy of
+    argv that the card actually prints, which is where a model path escaped once.
+    It now also drops the UTC offset: the instant is published, the time zone is
+    not. `+09:00` beside a GPU model and a quantisation narrows a person further
+    than any of them alone, and nobody typed it — `time.Time` carried it. A
+    publisher who wants "benchmarked at 2am local" in the record writes it in the
+    title, which is the same test the host label passes. `toktape publish
+    --dry-run` prints the whole record that would go up, field by field.
+
+    **The card qualifies three figures it used to leave quotable.** A prefill
+    rate is a measurement of a prefill, and a prompt the server had already
+    cached is not one — a run whose prompt came back mostly out of the prefix
+    cache now says which part of it did, beside the rate rather than in another
+    row. A concurrent run whose streams did not share a decode window says so at
+    the Decode row itself, where the arithmetic is: four streams at 42.1 tok/s
+    are not the 144 aggregate, and the sentence that explains it is now next to
+    both numbers instead of five rows away. And a p50 beside a p95 computed from
+    two samples prints as one figure, because two percentiles of two samples are
+    a pair only in the typography.
 
     New since v0.2.4 or earlier? The
+    [v0.2.6 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.6)
+    cover the four-card layout and the de-duplicated figures, the
     [v0.2.5 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.5)
-    cover engines that name themselves, a server that can name the process
-    doing the work, and the Windows zips; the
-    [v0.2.2 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.2)
-    describe recording a server that is not llama.cpp, and the
+    engines that name themselves and the Windows zips, and the
     [v0.2.0 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.0)
     the release where `-n` changed meaning.
-
   footer: |
     ## Install
 
