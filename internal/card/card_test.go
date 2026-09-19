@@ -535,20 +535,32 @@ func TestQueuedStreamsAreNamed(t *testing.T) {
 // count lives on tape.PromptRecord — so this tests the formatter directly and
 // the row itself will start printing it the moment reasoningTokens can read a
 // real figure (TTP-20, 2026-09-13).
+//
+// 2026-09-19 (TTP-135): re-pinned for the cap clause — the existing cases
+// pass 0/0 for capped/endings and their wanted strings are unchanged, which
+// is the assertion that the clause prints nothing when the tape cannot say.
+// The capped cases extend the table; the FAIL-first evidence for the clause
+// is context_cap_test.go's row-level gates, which failed against the
+// four-argument signature of the same day.
 func TestContextString(t *testing.T) {
 	cases := []struct {
 		name                   string
 		ctx, in, out, thinking int
+		capped, endings        int
 		want                   string
 	}{
-		{"no thinking", 16384, 43, 96, 0, "16384 (43 in / 96 out)"},
-		{"all thinking", 16384, 43, 96, 96, "16384 (43 in / 96 out · 96 thinking)"},
-		{"some thinking", 16384, 43, 240, 96, "16384 (43 in / 240 out · 96 thinking)"},
-		{"unknown ctx", 0, 43, 96, 0, "? (43 in / 96 out)"},
+		{"no thinking", 16384, 43, 96, 0, 0, 0, "16384 (43 in / 96 out)"},
+		{"all thinking", 16384, 43, 96, 96, 0, 0, "16384 (43 in / 96 out · 96 thinking)"},
+		{"some thinking", 16384, 43, 240, 96, 0, 0, "16384 (43 in / 240 out · 96 thinking)"},
+		{"unknown ctx", 0, 43, 96, 0, 0, 0, "? (43 in / 96 out)"},
+		{"all four capped", 16384, 43, 96, 0, 4, 4, "16384 (43 in / 96 out · 4 of 4 hit the cap)"},
+		{"one of four capped", 16384, 43, 96, 0, 1, 4, "16384 (43 in / 96 out · 1 of 4 hit the cap)"},
+		{"capped but no endings observed", 16384, 43, 96, 0, 4, 0, "16384 (43 in / 96 out)"},
+		{"thinking and capped together", 16384, 43, 96, 96, 4, 4, "16384 (43 in / 96 out · 96 thinking · 4 of 4 hit the cap)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := contextString(tc.ctx, tc.in, tc.out, tc.thinking); got != tc.want {
+			if got := contextString(tc.ctx, tc.in, tc.out, tc.thinking, tc.capped, tc.endings); got != tc.want {
 				t.Errorf("contextString = %q, want %q", got, tc.want)
 			}
 		})

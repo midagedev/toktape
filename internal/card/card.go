@@ -380,13 +380,17 @@ func speedSection(s *tape.RunSummary) []string {
 
 	promptTotal := PromptTokens(s)
 	out = append(out, field("Prefill", speedLabelW, " · ", prefillParts(s, promptTotal)...)...)
+	if line := probeLine(s); line != "" {
+		out = append(out, labelled("", speedLabelW, []string{line})...)
+	}
 
 	if parts := draftParts(s); len(parts) > 0 {
 		out = append(out, field("Draft", speedLabelW, " · ", parts...)...)
 	}
 
 	out = append(out, labelled("Context", speedLabelW, []string{
-		contextString(s.Server.CtxSize, promptTotal, t.PredictedN, reasoningTokens(s)),
+		contextString(s.Server.CtxSize, promptTotal, t.PredictedN, reasoningTokens(s),
+			s.Limit.CappedStreams, s.Limit.EndingsObserved),
 	})...)
 
 	out = append(out, labelled("Prefix cache", speedLabelW, []string{cacheString(s.Cache)})...)
@@ -426,6 +430,31 @@ func decodeParts(s *tape.RunSummary) []string {
 	// number that was measured.
 	if t.PredictedNSource == "chunks" {
 		parts = append(parts, unknown)
+	} else if s.Concurrency > 1 && s.Aggregate.ConcurrentPredictedPerSecond > 0 {
+		// TTP-138 (2026-09-19): when the tape carries the window in which
+		// every stream decoded at once, that window's figure is the one this
+		// row leads with — the place the whole-wall aggregate occupies and
+		// under the same word. The whole-wall figure averages a ragged tail
+		// into the rate: it stops being one concurrency the moment a stream
+		// finishes, and the same box capped so the streams end together
+		// reports the window's number.
+		//
+		// Both figures come from that window (lead, 2026-09-19). The
+		// per-stream mean is NOT the same number whichever wall it is read
+		// against: a stream that outlives the others gets more of the
+		// machine, so its own mean sits above the rate it held while they
+		// were running. Printing the window aggregate beside it would put
+		// two spans in one row and hand the reader a product the card never
+		// printed — which is the arithmetic `ragged_aggregate` disputes,
+		// reappearing inside the row meant to settle it. With both from the
+		// window, N x each == aggregate by construction. The whole-wall
+		// figure the lead no longer prints is carried by that caveat.
+		//
+		// Zero here (one stream, a tape older than the field, streams that
+		// never overlapped) takes the branch below, today's row exactly.
+		parts = append(parts,
+			formatRateUnit(s.Aggregate.ConcurrentPredictedPerSecond)+" aggregate",
+			formatRateUnit(s.Aggregate.ConcurrentPerStreamPredictedPerSecond)+" each")
 	} else if s.Concurrency > 1 && s.Aggregate.AggregatePredictedPerSecond > 0 {
 		parts = append(parts,
 			formatRateUnit(s.Aggregate.AggregatePredictedPerSecond)+" aggregate",
@@ -504,6 +533,35 @@ func prefillParts(s *tape.RunSummary, promptTotal int) []string {
 		enginePrefillPart(s),
 		queueWaitPart(s),
 	)
+}
+
+// probeLine is the probe pass's own measurement, as an additional line under
+// the Prefill row (TTP-137, 2026-09-19): the machine's prefill rate at the
+// margin, on one stream, and the server's fixed cost per request — the two
+// figures the two-point fit separates and no single rate on the row can
+// show. The row's own figures stay untouched: they say what this run's
+// prompts did at this run's concurrency, and this line says what the machine
+// itself does, which is the number that does not move with the stream count
+// — the same run measured 1182 tok/s on one stream and 69.3 each at four,
+// and only the first of those is a fact about the box.
+//
+// Present only when the fit produced figures. A refused fit (both 0, the
+// points kept) and no probe at all are each "not observed", and print
+// nothing — never a "?" for a figure this row never asked about.
+func probeLine(s *tape.RunSummary) string {
+	p := s.Probe
+	if p == nil || p.PrefillPerSecond <= 0 {
+		return ""
+	}
+	// Led by "probe" because on a single-stream run the row above is also
+	// one stream (vision, 2026-09-19), so "on one stream" separates nothing
+	// and the row becomes two prefill rates a factor apart with no clause
+	// between them — the defect this card exists to prevent. What differs is
+	// where each figure came from: the row's is this run's prompts with the
+	// per-request fixed cost inside it, the probe's is the machine's rate at
+	// the margin with that cost named beside it.
+	return fmt.Sprintf("probe %s on one stream · %s fixed",
+		formatRateUnit(p.PrefillPerSecond), formatProbeMs(p.FixedMs))
 }
 
 // enginePrefillPart is the engine's own prompt-evaluation time: the server's
@@ -977,10 +1035,22 @@ func DraftNMax(s *tape.RunSummary) string {
 // different fact from 96 tokens of answer, and the reader cannot tell the two
 // apart from the number alone. It is omitted when thinking is 0, which is both
 // "not a thinking model" and "did not think" — neither is worth a clause.
-func contextString(ctxSize, in, out, thinking int) string {
+//
+//	TTP-135 (2026-09-19) added the cap clause: when the token cap ended
+//	streams, the parens name how many against the endings observed — "4 of 4
+//	hit the cap" — because a bare "1024 out" is exactly what a run that wrote
+//
+// 1024 tokens and stopped looks like, and a reader asking "was the whole run
+// guillotined or one long-winded stream" needs the denominator. Endings
+// observed == 0 means the engine never said why streams stopped: nothing is
+// added and nothing is guessed, and the row reads exactly as it did.
+func contextString(ctxSize, in, out, thinking, capped, endings int) string {
 	used := fmt.Sprintf("%s in / %s out", formatInt(in), formatInt(out))
 	if thinking > 0 {
 		used += " · " + formatInt(thinking) + " thinking"
+	}
+	if capped > 0 && endings > 0 {
+		used += fmt.Sprintf(" · %s of %s hit the cap", formatInt(capped), formatInt(endings))
 	}
 	return fmt.Sprintf("%s (%s)", formatInt(ctxSize), used)
 }

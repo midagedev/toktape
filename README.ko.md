@@ -55,7 +55,8 @@ toktape는 이미 떠 있는 llama-server에 붙어서 한 번의 실행을 `.to
 │          -c 32768 --jinja -np 4 --jinja --host 127.0.0.1 --port 8012 │
 ├──────────────────────────────────────────────────────────────────────┤
 │ ! 2 caveats — ragged run: 4 × 42.1 is 168, not the 144 aggregate —   │
-│   the streams did not all decode across the same window · recorded   │
+│   the run had a tail on fewer streams, and this tape cannot say how  │
+│   long it was · recorded                                             │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │
 └──────────────────────────────────────────────────────────────────────┘

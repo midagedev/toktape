@@ -106,6 +106,15 @@ type legendEntry struct {
 type pill struct {
 	text string
 	col  color.RGBA
+	// bg overrides the fill, which is otherwise the text colour at low
+	// alpha. Only the cap pill sets it (vision, 2026-09-19): a warm fill
+	// beside four cool ones was the card's only warm pixel anywhere — 111 of
+	// them, all inside that one box, against 0 on a card without it — and
+	// three signals stacked (a colour family the card uses nowhere else, a
+	// brighter fill than its neighbours, and the last seat in a row of
+	// all-clear readings) read as an alarm rather than a finding. The text
+	// keeps the colour; the box rejoins the row.
+	bg color.RGBA
 }
 
 // build derives the whole card from the summary. Nothing measures at build
@@ -173,11 +182,33 @@ func (c *content) buildHero(s *tape.RunSummary) {
 		if streams == 0 {
 			streams = s.Concurrency
 		}
+		// TTP-138 (2026-09-19): the window figure is the headline when the
+		// tape carries one — the whole-wall aggregate averages a ragged tail
+		// into the rate, and the same box capped so the streams end together
+		// reports the window's number. Zero (a tape older than the field,
+		// streams that never overlapped) keeps today's figure, and the text
+		// card's Decode row makes the same choice through its own branch.
+		//
+		// The per-stream line moves with it (lead, 2026-09-19). This column
+		// spells the multiplication out — "4 × 17.4 per stream" — so a
+		// headline taken over the window beside a per-stream figure taken
+		// over the whole wall does not merely permit the wrong product, it
+		// prints the invitation. Both figures come from the same span or
+		// neither does.
+		number := formatRate(a.AggregatePredictedPerSecond)
+		each := a.PerStreamPredictedPerSecond
+		if a.ConcurrentPredictedPerSecond > 0 {
+			number = formatRate(a.ConcurrentPredictedPerSecond)
+			each = a.ConcurrentPerStreamPredictedPerSecond
+			if a.ConcurrentStreams > 0 {
+				streams = a.ConcurrentStreams
+			}
+		}
 		perStream := fmt.Sprintf("%d × %s per stream",
-			streams, formatRateUnit(a.PerStreamPredictedPerSecond))
+			streams, formatRateUnit(each))
 		c.left = heroCol{
 			eyebrow: decodeEyebrow(s, "aggregate "+label),
-			number:  formatRate(a.AggregatePredictedPerSecond),
+			number:  number,
 			unit:    "tok/s",
 			// The queue note rides on the per-stream line because that is
 			// the figure it qualifies: streams that waited for a slot were
@@ -306,15 +337,41 @@ func (c *content) buildHero(s *tape.RunSummary) {
 			),
 		}
 	} else {
+		// TTP-137 (2026-09-19): the probe's own figures ride this sub-line —
+		// the machine's rate at the margin, the one figure here that does
+		// not move with the stream count. The frame is fixed, so the clause
+		// takes this line rather than adding one, and its fallbacks give up
+		// the older, narrower element first: measured at stBody, the full
+		// line is 630 px against the 504 px column, and the prompt count
+		// beside the clause is 492. ctx 16384 is on the text card's Context
+		// row; the machine's own rate is on nothing else the reader sees.
+		sub1 := "TTFT " + formatMs(t.TTFTMs)
+		sub2 := joinParts(" · ",
+			formatInt(prompt)+" prompt tokens",
+			contextString(s),
+		)
+		var sub2Fallbacks []string
+		if probe := probeString(s); probe != "" {
+			// The probe's pair takes the line to itself, and the prompt
+			// count moves up beside the TTFT (vision, 2026-09-19). Three
+			// clauses on one sub-line left the column bottom-heavy against
+			// a nearly empty line above it, and the shared middle dot made
+			// the machine's rate read as one more context figure. ctx is
+			// what yields: it is already on the engine line at the foot of
+			// the card, and the probe's rate is on nothing else the reader
+			// sees.
+			sub1 = joinParts(" · ", sub1, formatInt(prompt)+" prompt tokens")
+			sub2 = probe
+		}
 		c.right = heroCol{
 			eyebrow: prefillEyebrow(s, "prefill"),
 			number:  formatRate(t.PromptPerSecond),
 			unit:    "tok/s",
-			sub1:    "TTFT " + formatMs(t.TTFTMs),
-			sub2: joinParts(" · ",
-				formatInt(prompt)+" prompt tokens",
-				contextString(s),
-			),
+			sub1:    sub1,
+			sub2:    sub2,
+			// What goes when the column is full is the local fact, not the
+			// machine's rate — the ordering above, made explicit.
+			sub2Fallbacks: sub2Fallbacks,
 		}
 	}
 }
@@ -382,6 +439,31 @@ func contextString(s *tape.RunSummary) string {
 		return ""
 	}
 	return "ctx " + strconv.Itoa(s.Server.CtxSize)
+}
+
+// probeString is the probe pass's own measurement for the prefill column
+// (TTP-137, 2026-09-19): the machine's prefill rate at the margin, on one
+// stream, and the server's fixed cost per request — the two figures the
+// two-point fit separates, the number that does not move with the stream
+// count. Mirrors internal/card's probeLine word for word; the two renderings
+// settle the same argument with the same numbers. Empty when there was no
+// probe or the fit was refused — never a "?" for a figure this column never
+// asked about.
+func probeString(s *tape.RunSummary) string {
+	p := s.Probe
+	if p == nil || p.PrefillPerSecond <= 0 {
+		return ""
+	}
+	// "probe" is the word that separates the two prefill figures on a
+	// single-stream card (vision, 2026-09-19): there the headline is also
+	// one stream, so "on one stream" divides nothing and the reader is left
+	// with two rates a factor apart and no clause saying why. The row's
+	// figure is what this run's prompts cost, fixed cost included; the
+	// probe's is the machine's rate at the margin with that cost named
+	// separately. Provenance is the condition that differs, so provenance
+	// is what leads.
+	return fmt.Sprintf("probe %s on one stream · %s fixed",
+		formatRateUnit(p.PrefillPerSecond), formatProbeMs(p.FixedMs))
 }
 
 // thinkingString is the decode column's "96 thinking" clause: how many of the
@@ -486,9 +568,22 @@ func verifyBandwidthString(s *tape.RunSummary) (full, withoutRatio string) {
 // ask, so the image qualifies the same figure the same way. "" when the
 // arithmetic holds, so joinParts drops it and the line is what it always
 // was.
+//
+// On a tape that carries the window the clause names it instead (vision,
+// 2026-09-19). This clause sits directly beside the figures, and once the
+// headline is the window's own rate, "not all decoding at once" denies the
+// number it is attached to: 66.7 is by definition the span in which all
+// four were decoding. In `ragged.png` the clause did its job, explaining
+// why 4 × 17.4 is not 58.0; with the window leading, the product holds and
+// what the reader needs instead is how long that span was — the one fact
+// the image has nowhere else, since the PNG has no caveat band.
 func raggedString(s *tape.RunSummary) string {
 	if !card.RaggedAggregate(s) {
 		return ""
+	}
+	if a := s.Aggregate; a.ConcurrentWindowMs > 0 && a.ConcurrentStreams > 0 {
+		return fmt.Sprintf("all %d overlapped for %s",
+			a.ConcurrentStreams, formatSeconds(a.ConcurrentWindowMs))
 	}
 	return "not all decoding at once"
 }
@@ -716,11 +811,37 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 	// reader to finish it wrongly. It gives up its trailing parts whole,
 	// through pickWidest against the width drawPills leaves; the shape word
 	// leads, so it is the last thing standing.
-	sumParts := []string{placedStr + " placed", "host RSS " + rss}
-	if word := layoutWord(s.Placement); word != "" {
-		sumParts = append([]string{word}, sumParts...)
+	//
+	// It gives up the word before it gives up the number (vision,
+	// 2026-09-19). A fifth pill pushes the row 178 px left, leaving 89 px
+	// where "· 46.6 GiB placed" needs 143 — and the line dropped the clause
+	// whole although "· 46.6 GiB" fits in 80, with no ellipsis, so a reader
+	// of that card cannot tell a figure was ever there. A measured figure is
+	// not surrendered to make room for a derived pill while a shorter
+	// spelling of it would fit. The steps are written out rather than
+	// derived by trailingPartsLine, which only knows how to drop whole
+	// parts.
+	placedPart := placedStr + " placed"
+	word := layoutWord(s.Placement)
+	var spellings []string
+	add := func(parts ...string) {
+		if len(parts) > 0 && parts[0] == "" {
+			parts = parts[1:]
+		}
+		if len(parts) == 0 {
+			return
+		}
+		spellings = append(spellings, strings.Join(parts, " · "))
 	}
-	c.sum = trailingPartsLine(sumParts)
+	add(word, placedPart, "host RSS "+rss)
+	add(word, placedPart)
+	if placed > 0 {
+		// The number without its noun. Not offered when the figure is "?":
+		// a bare "?" on this line names nothing.
+		add(word, placedStr)
+	}
+	add(word)
+	c.sum = fallbackLine{preferred: spellings[0], fallbacks: spellings[1:]}
 
 	c.pills = []pill{majFaultPill(s, c.hasProcMem), cachePill(s.Cache), contendedPill(s.Contention)}
 	// The throttle verdict and the conditions clause are the environment
@@ -740,6 +861,12 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 		// Only when it happened, so the ordinary card keeps three pills and
 		// its layout. This is the PNG's form of the text card's
 		// "! answer cut" warning line (TTP-20, 2026-09-13).
+		c.pills = append(c.pills, p)
+	}
+	if p, ok := cappedPill(s); ok {
+		// TTP-135 (2026-09-19): the text card's Context row carries the
+		// clause; the pill is the PNG's form of it. Only when endings were
+		// observed, so the ordinary card keeps its pill count.
 		c.pills = append(c.pills, p)
 	}
 }
@@ -809,6 +936,34 @@ func answerCutPill(s *tape.RunSummary) (pill, bool) {
 		return pill{}, false
 	}
 	return pill{text: "answer cut", col: colBad}, true
+}
+
+// cappedPill counts the streams the token cap ended, against the endings
+// observed (TTP-135, 2026-09-19) — "4 of 4 hit the cap", the text card's
+// Context row clause in the pill row's voice, not a bare flag: a reader
+// asking "was the whole run guillotined or one long-winded stream" needs
+// the denominator. Warn rather than Bad: the capped tokens are real tokens,
+// truncated by a limit the user set — a caution about where the run stopped,
+// not a defect in the figures beside it. Silent when EndingsObserved is 0:
+// an engine that never said why streams stopped leaves the count unreadable,
+// and no pill may invent it.
+func cappedPill(s *tape.RunSummary) (pill, bool) {
+	if s.Limit.CappedStreams <= 0 || s.Limit.EndingsObserved <= 0 {
+		return pill{}, false
+	}
+	// "cap 4 of 4", not the text card's whole sentence (lead, 2026-09-19).
+	// The other four pills are a label and a value — maj/tok 0.0, cache warm
+	// 25% hit, contended no, throttled no — and a sentence among them reads
+	// as an alarm rather than a reading, on a card that states conditions
+	// and does not warn. It is also the shortest form that keeps the
+	// denominator, which the pill row needs: the row shares its line with
+	// the placement summary, and the sentence pushed "46.6 GiB placed" —
+	// an observed figure — off the card to make room for itself.
+	return pill{
+		text: fmt.Sprintf("cap %d of %d", s.Limit.CappedStreams, s.Limit.EndingsObserved),
+		col:  colWarn,
+		bg:   alpha(colDim, 0x2b),
+	}, true
 }
 
 func majFaultPill(s *tape.RunSummary, hasProc bool) pill {

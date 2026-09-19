@@ -43,6 +43,11 @@ func fixtures() map[string]*tape.RunSummary {
 		// TTP-31: six prompt rounds; the hero's first decode line is the
 		// median over them.
 		"rounds": card.ExampleRounds(),
+		// TTP-138/TTP-137 (2026-09-19): the window figure leading the decode
+		// column and the probe clause riding the prefill sub-line — the two
+		// new hero lines, registered so the fit tests hold them to the frame.
+		"window": card.ExampleWindow(),
+		"probed": card.ExampleProbed(),
 	}
 }
 

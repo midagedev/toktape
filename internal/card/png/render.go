@@ -282,7 +282,11 @@ func (c *canvas) drawPills(idPrefix string, pills []pill, rightX, top int) int {
 	baseline := top + memPillHeight - 9
 	for i, p := range pills {
 		r := image.Rect(x, top, x+widths[i], top+memPillHeight)
-		c.roundRect(fmt.Sprintf("%s%d.bg", idPrefix, i), r, float32(memPillHeight)/2, alpha(p.col, 0x2b))
+		fill := alpha(p.col, 0x2b)
+		if p.bg.A != 0 {
+			fill = p.bg
+		}
+		c.roundRect(fmt.Sprintf("%s%d.bg", idPrefix, i), r, float32(memPillHeight)/2, fill)
 		c.record(fmt.Sprintf("%s%d", idPrefix, i), "pill", r, p.text)
 		c.text(textOpts{
 			id: fmt.Sprintf("%s%d.text", idPrefix, i), s: p.text,

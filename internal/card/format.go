@@ -95,6 +95,15 @@ func formatMs(v float64) string {
 	return strconv.FormatFloat(v, 'f', 0, 64) + " ms"
 }
 
+// formatProbeMs renders the probe fit's fixed cost, where zero is a reading
+// rather than an unknown: the intercept is observed, and a server whose
+// fixed cost measures 0 ms is the interesting case, not a missing one
+// (TTP-137, 2026-09-19). queueWaitPart holds the same rule for its observed
+// wait; formatMs's "?" belongs to figures this run may simply not have.
+func formatProbeMs(v float64) string {
+	return strconv.FormatFloat(v, 'f', 0, 64) + " ms"
+}
+
 // formatDuration renders a wall-clock budget the way the operator typed it:
 // "20s", "1m30s". The value is rounded to a tenth of a second first, because
 // the only durations the card prints are a `--for` budget and the moment the

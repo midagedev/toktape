@@ -94,6 +94,15 @@ func formatMs(v float64) string {
 	return strconv.FormatFloat(v, 'f', 0, 64) + " ms"
 }
 
+// formatProbeMs mirrors internal/card.formatProbeMs (this file keeps the
+// card's formatters by design): the probe fit's fixed cost, where zero is a
+// reading — the intercept is observed, and a server with no measurable fixed
+// cost is the interesting case — not the "?" a figure nobody measured
+// would print (TTP-137, 2026-09-19).
+func formatProbeMs(v float64) string {
+	return strconv.FormatFloat(v, 'f', 0, 64) + " ms"
+}
+
 // formatSeconds renders a wall-clock duration given in milliseconds.
 func formatSeconds(ms float64) string {
 	if ms <= 0 {

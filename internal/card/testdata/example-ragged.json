@@ -210,7 +210,7 @@
     {
       "code": "ragged_aggregate",
       "severity": "figure",
-      "text": "ragged run: 4 × 17.4 is 69.6, not the 58.0 aggregate — the streams did not all decode across the same window"
+      "text": "ragged run: 4 × 17.4 is 69.6, not the 58.0 aggregate — the run had a tail on fewer streams, and this tape cannot say how long it was"
     }
   ]
 }

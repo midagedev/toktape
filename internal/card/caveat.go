@@ -71,6 +71,13 @@ const (
 	// the arithmetic named — a reader who multiplies the "each" figure by
 	// the stream count gets a number the card printed nowhere, and no
 	// sentence explained the one it did.
+	//
+	// Re-authored 2026-09-19 with the window figure (TTP-138), the same
+	// change that made the Decode row lead with it: the sentence now says
+	// what actually happened — the run had a tail in which fewer streams
+	// were running — and, on a tape that carries the window, how much of
+	// the wall that tail was. The predicate and the rank are untouched;
+	// only the sentence learned to name the mechanism.
 	CodeRaggedAggregate = "ragged_aggregate"
 	// CodePlacementContradicted: the placement ESTIMATE puts weights on a GPU
 	// the run's own reading says held (almost) nothing (lead, 2026-09-15).
@@ -398,17 +405,39 @@ func RaggedAggregate(s *tape.RunSummary) bool {
 	return !streamsMultiply(s.Aggregate, streamsSent(s))
 }
 
-// raggedAggregateText is the sentence for CodeRaggedAggregate: the
-// arithmetic it disputes, with every number the reader needs to check it —
-// the stream count, the per-stream rate, their product, and the aggregate
-// the card printed instead.
+// raggedAggregateText is the sentence for CodeRaggedAggregate: what
+// actually happened — the run had a tail in which fewer streams were
+// running — with every number the reader needs to check it.
+//
+// Re-authored 2026-09-19 (TTP-138), the change that gave the Decode row a
+// window figure to lead with. The old sentence said only that the streams
+// "did not all decode across the same window", which stopped being the whole
+// story the moment the card could say which window they did share: on a tape
+// that carries the window, the sentence names that window against the wall —
+// the tail's length, in the only two figures that measure it — and both
+// rates, so the gap between the window figure the row now prints and the
+// whole-wall figure the wall deserves is explained at the site of the
+// arithmetic. On a tape that does not carry one (recorded before the field,
+// or streams that never overlapped), the arithmetic the old sentence named
+// still holds exactly and stays: the stream count, the per-stream rate,
+// their product, and the aggregate the card printed instead — now with the
+// mechanism named and the tail's length honestly declared unknown, rather
+// than the old sentence's shrug that said nothing about the shape at all.
 func raggedAggregateText(s *tape.RunSummary) string {
 	n := streamsSent(s)
-	per := s.Aggregate.PerStreamPredictedPerSecond
+	a := s.Aggregate
+	if a.ConcurrentWindowMs > 0 {
+		return fmt.Sprintf(
+			"ragged run: all %d decoded together for only %s of the %s wall — %s over the whole wall, %s while they overlapped",
+			n, formatMs(a.ConcurrentWindowMs), formatMs(a.WallMs),
+			formatRate(a.AggregatePredictedPerSecond),
+			formatRate(a.ConcurrentPredictedPerSecond))
+	}
+	per := a.PerStreamPredictedPerSecond
 	return fmt.Sprintf(
-		"ragged run: %d × %s is %s, not the %s aggregate — the streams did not all decode across the same window",
+		"ragged run: %d × %s is %s, not the %s aggregate — the run had a tail on fewer streams, and this tape cannot say how long it was",
 		n, formatRate(per), formatRate(float64(n)*per),
-		formatRate(s.Aggregate.AggregatePredictedPerSecond))
+		formatRate(a.AggregatePredictedPerSecond))
 }
 
 // shortStreamText says how much of the per-stream rate is a sample.
@@ -481,6 +510,23 @@ func cachedPrefill(s *tape.RunSummary) bool {
 		return false
 	}
 	return cacheHitCached(s.Cache.HitTokens, s.Cache.PromptTotal)
+}
+
+// probeCold reports whether the probe pass itself paged the weights in: its
+// fault figure at or above tape.ColdMajFaultsPerToken, the same threshold
+// the run's own reading is judged by (TTP-143, 2026-09-19).
+//
+// The pass measures the cold-start cost on a clean instrument — one stream,
+// known prompt lengths, nothing else in flight — where the run's reading was
+// inferred from a decode window that was also busy generating. 0 (no probe,
+// no /proc view, a platform without fault counters) is not observed and
+// never fires: a warm probe over a cold run falls to the label, which is
+// the pre-probe tape's own verdict.
+func probeCold(s *tape.RunSummary) bool {
+	if s == nil || s.Probe == nil {
+		return false
+	}
+	return s.Probe.MajFaultsPerToken >= tape.ColdMajFaultsPerToken
 }
 
 // cachedPrefillText is the sentence for CodeCachedPrefill: how much of the
@@ -652,7 +698,18 @@ func Caveats(s *tape.RunSummary) []Caveat {
 	if shortStream(s) && !tokensUncounted(s) {
 		add(CodeShortStream, SeverityFigure, shortStreamText(s))
 	}
-	if s.Cache.Label == tape.CacheCold {
+	// TTP-143 (2026-09-19): the probe pass sends the first prompts a cold
+	// server ever sees and pays its faults, and the run's sampler latches
+	// only after the pass — so the shape a cold box actually records is a
+	// cold probe figure over a run that reads warm. The probe's figure is
+	// the verdict when there is one; the recorded label, the run's own
+	// reading and every tape from before the probe existed, is it
+	// otherwise. One caveat either way: two sources, one fact.
+	if probeCold(s) {
+		add(CodeColdCache, SeverityFigure, fmt.Sprintf(
+			"cold run: weights arrived from disk while the probe prefilled, %s maj faults/token",
+			formatFloat1(s.Probe.MajFaultsPerToken)))
+	} else if s.Cache.Label == tape.CacheCold {
 		add(CodeColdCache, SeverityFigure, fmt.Sprintf(
 			"cold run: weights arrived from disk while it decoded, %s maj faults/token",
 			formatFloat1(s.Memory.MajFaultsPerToken)))
