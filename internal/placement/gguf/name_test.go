@@ -25,6 +25,17 @@ func TestNameFromFileName(t *testing.T) {
 		// name and the size label survive it, which is all this reads.
 		{"Qwen3-0.6B-UD-Q6_K_XL.gguf", "Qwen3", "0.6B"},
 		{"Qwen3-30B-A3B-Instruct-2507-UD-Q4_K_XL.gguf", "Qwen3", "30B-A3B"},
+		// The MoE half of the size label, which the upstream parser keeps or
+		// drops depending on the quantizer's tag and nothing else (lead,
+		// 2026-09-19): the first two come back "35B" from it, and
+		// withActiveSize reads the rest out of the name so one model cannot
+		// hold two ids. FAIL-first: both failed before that function existed.
+		{"Qwen3.6-35B-A3B-UD-Q6_K.gguf", "Qwen3.6", "35B-A3B"},
+		{"Qwen3-35B-A3B-UD-Q6_K.gguf", "Qwen3", "35B-A3B"},
+		{"Qwen3.6-35B-A3B-Q6_K.gguf", "Qwen3.6", "35B-A3B"},
+		// A dense model's label is returned untouched: there is no "-A…"
+		// after it to read.
+		{"Meta-Llama-3.1-70B-Instruct-Q5_K_M.gguf", "Meta Llama 3.1", "70B"},
 		// The convention separates base-name words with hyphens and the
 		// parser gives them back as spaces; normalisation, not this, puts
 		// them back.

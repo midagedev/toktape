@@ -8,6 +8,8 @@ package gguf
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	ggufparser "github.com/gpustack/gguf-parser-go"
 
@@ -101,7 +103,39 @@ func NameFromFileName(name string) (baseName, sizeLabel string) {
 	if f == nil {
 		return "", ""
 	}
-	return f.BaseName, f.SizeLabel
+	return f.BaseName, withActiveSize(name, f.SizeLabel)
+}
+
+// activeSize matches the MoE half of a size label — the "-A3B" in
+// "35B-A3B" — where it follows the size label the parser already found.
+var activeSize = regexp.MustCompile(`(?i)-(A\d+(?:\.\d+)?[BMK])(?:[-_.]|$)`)
+
+// withActiveSize puts back the active-parameter half of a MoE size label
+// when the upstream parser dropped it (lead, 2026-09-19).
+//
+// The parser is inconsistent about it, and what decides is the quantizer's
+// tag rather than anything about the model: "Qwen3-30B-A3B-UD-Q4_K_XL.gguf"
+// comes back "30B-A3B" while "Qwen3.6-35B-A3B-UD-Q6_K.gguf" comes back "35B".
+// A header for either writes general.size_label "30B-A3B", so without this
+// one model holds two ids — measured on the live site, where seven runs sat
+// under qwen3.6-35b and one under qwen3.6-35b-a3b (TTP-131). The suffix is
+// read out of the name immediately after the size label the parser found,
+// so this observes rather than guesses: a name that does not carry one is
+// returned unchanged, and the active half is never computed from the
+// weights (a byte ratio says 3.5B where the publisher wrote A3B).
+func withActiveSize(name, size string) string {
+	if size == "" || strings.Contains(strings.ToUpper(size), "-A") {
+		return size
+	}
+	i := strings.Index(strings.ToUpper(name), strings.ToUpper(size))
+	if i < 0 {
+		return size
+	}
+	m := activeSize.FindStringSubmatch(name[i+len(size):])
+	if m == nil || !strings.HasPrefix(strings.ToUpper(name[i+len(size):]), "-A") {
+		return size
+	}
+	return size + "-" + m[1]
 }
 
 // kvString reads a string metadata value, or "" when the key is absent or

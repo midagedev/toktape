@@ -175,13 +175,11 @@ func TestModelIDFromTheFileName(t *testing.T) {
 	for _, c := range []struct {
 		name, file, wantID, wantSrc string
 	}{
-		// The parser's own answer, not ours: it reads the size label as "35B"
-		// and leaves the MoE's active-size suffix behind, so a header-sourced
-		// id for the same model ("qwen3.6-35b-a3b", from general.size_label)
-		// is the longer one. That gap is the parser's and predates this
-		// fallback (the recorder already takes the same path for a remote
-		// run); model_id_source is what tells the two apart. TTP-131.
-		{"the convention in a file name", "Qwen3.6-35B-A3B-UD-Q6_K.gguf", "qwen3.6-35b", "filename"},
+		// The same id a header would give: general.size_label for this model
+		// is "35B-A3B", and gguf.NameFromFileName now reads the MoE half out
+		// of the name too, so the two sources cannot split one model in the
+		// dropdown (TTP-131, closed 2026-09-19).
+		{"the convention in a file name", "Qwen3.6-35B-A3B-UD-Q6_K.gguf", "qwen3.6-35b-a3b", "filename"},
 		{"a name outside it is not an id", "ggml-model-f16.gguf", "", ""},
 		{"no name at all", "", "", ""},
 	} {
