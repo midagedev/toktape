@@ -1,9 +1,13 @@
 package publish
 
 import (
+	"encoding/json"
 	"net/url"
 	"path"
+	"reflect"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
@@ -28,8 +32,9 @@ const (
 //
 // It is close to the identity function on purpose. The decision is that
 // publishing is public by default, so this removes only what could not have
-// been anyone's intent to publish — the machine's name, the URL's host, and
-// the absolute paths in front of file names. What to strip is not this
+// been anyone's intent to publish — the machine's name, the URL's host, the
+// absolute paths in front of file names, and the UTC offset off every
+// timestamp (a published tape tells the instant in UTC, TTP-120). What to strip is not this
 // function's judgement: the table in §9.3 is the rule and this is its
 // implementation. Anything not in that table is left alone, including the
 // user's own tag and note.
@@ -41,7 +46,7 @@ func PublicView(t *tape.Tape, policy TextPolicy) *tape.Tape {
 	if t == nil {
 		return nil
 	}
-	out := *t
+	out := deepCopy(t)
 	s := &out.Summary
 
 	// A label is something the user wrote in order to share it; a hostname
@@ -84,12 +89,109 @@ func PublicView(t *tape.Tape, policy TextPolicy) *tape.Tape {
 
 	if policy == WithoutText {
 		out.Requests = withoutText(out.Requests)
-	} else {
-		// Copied even when nothing changes: Requests is a slice, and a caller
-		// that later edits the view must not reach through into the original.
-		out.Requests = append([]tape.RequestRecord(nil), out.Requests...)
+	}
+	// A published tape tells the instant, never the time zone (§9.3,
+	// TTP-120): every time.Time becomes UTC, and the run id's leading local
+	// wall-clock gives way to the same UTC instant. Both run on the copy.
+	normaliseTimesToUTC(reflect.ValueOf(out))
+	rewritePublicID(out)
+	return out
+}
+
+// deepCopy duplicates a tape through its JSON shape: the struct is defined
+// by its JSON, so a marshal round trip copies every slice and map, and a
+// field added next year is copied the day it is added without anyone
+// thinking of it.
+//
+// PublicView cannot return an error, so on a marshal failure this falls
+// back to the shallow copy the function used to do and records nothing — a
+// tape that cannot marshal cannot be uploaded either, and the upload path
+// is where that error belongs.
+func deepCopy(t *tape.Tape) *tape.Tape {
+	raw, err := json.Marshal(t)
+	if err != nil {
+		out := *t
+		return &out
+	}
+	var out tape.Tape
+	if err := json.Unmarshal(raw, &out); err != nil {
+		shallow := *t
+		return &shallow
 	}
 	return &out
+}
+
+// utcTimeType is what the walk below recognises: the time.Time struct
+// itself, not an alias, so a Duration (an int64) never matches.
+var utcTimeType = reflect.TypeOf(time.Time{})
+
+// normaliseTimesToUTC rewrites every time.Time under v to UTC, in place.
+// The walk is structural — structs, pointers, interfaces, slices, arrays
+// and map values — so Summary.StartedAt, per-request and per-round stamps,
+// witness edges, GPU samples and anything added next year are all one rule,
+// and no hand-written field list can go stale. A map value is not
+// addressable, so the entry is rebuilt (m.SetMapIndex). Unexported fields
+// are skipped (CanSet).
+func normaliseTimesToUTC(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Struct:
+		if v.Type() == utcTimeType {
+			if v.CanSet() {
+				v.Set(reflect.ValueOf(v.Interface().(time.Time).UTC()))
+			}
+			return
+		}
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).PkgPath == "" {
+				normaliseTimesToUTC(v.Field(i))
+			}
+		}
+	case reflect.Ptr:
+		if !v.IsNil() {
+			normaliseTimesToUTC(v.Elem())
+		}
+	case reflect.Interface:
+		if !v.IsNil() {
+			if e := v.Elem(); e.Type() == utcTimeType && v.CanSet() {
+				v.Set(reflect.ValueOf(e.Interface().(time.Time).UTC()))
+			} else {
+				normaliseTimesToUTC(e)
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			normaliseTimesToUTC(v.Index(i))
+		}
+	case reflect.Map:
+		for _, k := range v.MapKeys() {
+			mv := v.MapIndex(k)
+			cp := reflect.New(mv.Type()).Elem()
+			cp.Set(mv)
+			normaliseTimesToUTC(cp)
+			v.SetMapIndex(k, cp)
+		}
+	}
+}
+
+// publicIDPrefix matches the leading "<yyyymmdd>-<hhmmss>-" of a recorder
+// run id (internal/tape/tape.go:114).
+var publicIDPrefix = regexp.MustCompile(`^[0-9]{8}-[0-9]{6}-`)
+
+// rewritePublicID moves the run id's leading time part from local
+// wall-clock to the UTC instant (§9.3, TTP-120): leaving it would publish
+// the offset the timestamps just lost — a reader subtracts the id's
+// 144056 from the UTC 05:40:56 and has +09:00. Both parts are derived from
+// Summary.StartedAt.UTC(), never by arithmetic on the string, so a UTC
+// date across midnight moves the date too. Only the two leading groups
+// change; the slug tail travels byte for byte. An id this function does
+// not understand — including "" — and a zero StartedAt leave the id
+// exactly as it is.
+func rewritePublicID(out *tape.Tape) {
+	s := &out.Summary
+	if s.StartedAt.IsZero() || len(s.ID) <= 16 || !publicIDPrefix.MatchString(s.ID) {
+		return
+	}
+	s.ID = s.StartedAt.UTC().Format("20060102-150405") + s.ID[15:]
 }
 
 // sentTheSet reports whether these requests are the published prompt set,

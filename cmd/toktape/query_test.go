@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/publish"
@@ -383,6 +384,11 @@ func TestReindexRoundTrip(t *testing.T) {
 
 	var gz bytes.Buffer
 	tp := &tape.Tape{Schema: tape.SchemaVersion, Summary: *card.Example()}
+	// A record uploaded before the public view learned to drop the zone
+	// (§9.3, TTP-120): its stamps carry an offset, and the row a reindex
+	// writes must not. The assertion is on recorded_at below.
+	kst := time.FixedZone("KST", 9*60*60)
+	tp.Summary.StartedAt = time.Date(2026, 9, 17, 14, 40, 56, 0, kst)
 	if err := tape.Encode(&gz, tp); err != nil {
 		t.Fatalf("encode the hero: %v", err)
 	}
@@ -422,6 +428,13 @@ func TestReindexRoundTrip(t *testing.T) {
 	}
 	if got["schema"] != float64(1) {
 		t.Errorf("index.schema = %v, want 1", got["schema"])
+	}
+	// The index a reindex writes is the index a publish today would write:
+	// derived through PublicView, so an old record's offset does not reach
+	// the row the site displays (TTP-120, lead 2026-09-19). FAIL-first: this
+	// read "+09:00" when reindex called IndexOf on the record directly.
+	if rec, _ := got["recorded_at"].(string); !strings.HasSuffix(rec, "Z") {
+		t.Errorf("index.recorded_at = %q, want a UTC instant with no offset", rec)
 	}
 	if got["ctx_size"] != float64(16384) {
 		t.Errorf("index.ctx_size = %v, want the hero's 16384", got["ctx_size"])

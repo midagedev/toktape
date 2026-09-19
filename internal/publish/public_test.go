@@ -1,12 +1,15 @@
 package publish
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/server"
@@ -302,6 +305,208 @@ func looksLikeAPlace(word string) bool {
 	}
 	word = strings.TrimRight(word, ".,;:")
 	return strings.HasPrefix(word, "/") || strings.HasPrefix(word, "~/") || strings.Contains(word, `\`)
+}
+
+// loadHeroTape reads the repo's own published recording, which carries a
+// +09:00 offset on its timestamps (TTP-120, 2026-09-19).
+func loadHeroTape(t *testing.T) *tape.Tape {
+	t.Helper()
+	tp, err := tape.Read(filepath.Join("..", "..", "assets", "hero.tape"))
+	if err != nil {
+		t.Fatalf("load hero tape: %v", err)
+	}
+	return tp
+}
+
+// offsetPattern matches any JSON timestamp still carrying a numeric UTC
+// offset — the thing §9.3 forbids a published tape to contain. "Z" does not
+// match; "+09:00" and "-04:00" do.
+var offsetPattern = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T[^"]*[+-]\d{2}:\d{2}`)
+
+// TestPublicViewCarriesNoTimezoneOffset is the recurrence gate for TTP-120:
+// a published tape tells the instant, never the time zone. The assertion is
+// structural — a regexp over the marshalled view — so a time.Time field
+// added next year is covered the day it is added, without anyone thinking
+// of it.
+func TestPublicViewCarriesNoTimezoneOffset(t *testing.T) {
+	tp := loadHeroTape(t)
+	raw, err := json.Marshal(tp)
+	if err != nil {
+		t.Fatalf("marshal hero: %v", err)
+	}
+	if !strings.Contains(string(raw), "+09:00") {
+		t.Fatalf("fixture carries no offset, so this gate proves nothing: %s", tp.Summary.StartedAt.Format(time.RFC3339))
+	}
+
+	view := PublicView(tp, WithText)
+	out, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal public view: %v", err)
+	}
+	if m := offsetPattern.Find(out); m != nil {
+		t.Errorf("published view still carries a UTC offset: %s", m)
+	}
+
+	// The search row is derived from the view (cmd/toktape/publish.go), so
+	// recorded_at follows automatically — asserted, not assumed.
+	idxRaw, err := json.Marshal(IndexOf(view))
+	if err != nil {
+		t.Fatalf("marshal index: %v", err)
+	}
+	if m := offsetPattern.Find(idxRaw); m != nil {
+		t.Errorf("published index still carries a UTC offset: %s", m)
+	}
+}
+
+// TestPublicViewDeepCopiesNestedSlices: the doc comment promises the input
+// is never modified, and a shallow copy keeps every slice and map as the
+// caller's memory. A timestamp walk writing into those would break it.
+func TestPublicViewDeepCopiesNestedSlices(t *testing.T) {
+	kst := time.FixedZone("KST", 9*3600)
+	started := time.Date(2026, 9, 17, 14, 40, 56, 0, kst)
+	in := fullTape()
+	in.Summary.StartedAt = started
+	in.Summary.FinishedAt = started.Add(time.Minute)
+	in.Summary.ID = "20260917-144056-slug"
+	in.Samples = []tape.RunSample{{
+		T:        time.Second,
+		LoadAvg1: 1.5,
+		GPUs:     []tape.GPUSample{{Index: 0, UsedBytes: 7}},
+	}}
+	in.Summary.Host.GPUs = []tape.GPUInfo{{Index: 0, Name: "RTX 5090", VRAMBytes: 1}}
+	in.Summary.GPUsAtEnd = []tape.GPUSample{{Index: 0, UsedBytes: 7}}
+	in.Summary.Placement.Devices = []tape.DevicePlacement{{
+		Device:  tape.DeviceCPU,
+		Classes: map[tape.TensorClass]int64{tape.ClassFFN: 3},
+	}}
+	in.Summary.PerRound = []tape.RoundSummary{{Index: 0, Streams: 1}}
+
+	view := PublicView(in, WithText)
+	view.Requests[0].Prompt.Completion = "changed"
+	view.Requests[0].Tokens[0].Text = "changed"
+	view.Samples[0].GPUs[0].UsedBytes = 999
+	view.Summary.Host.GPUs[0].Name = "changed"
+	view.Summary.GPUsAtEnd[0].UsedBytes = 999
+	view.Summary.Placement.Devices[0].Classes[tape.ClassFFN] = 999
+	view.Summary.PerRound[0].Streams = 999
+
+	if in.Requests[0].Prompt.Completion != "hi there" {
+		t.Errorf("view write reached the input's requests: %q", in.Requests[0].Prompt.Completion)
+	}
+	if in.Requests[0].Tokens[0].Text != "hi" {
+		t.Errorf("view write reached the input's tokens: %q", in.Requests[0].Tokens[0].Text)
+	}
+	if in.Samples[0].GPUs[0].UsedBytes != 7 {
+		t.Errorf("view write reached the input's samples: %d", in.Samples[0].GPUs[0].UsedBytes)
+	}
+	if in.Summary.Host.GPUs[0].Name != "RTX 5090" {
+		t.Errorf("view write reached the input's GPUs: %q", in.Summary.Host.GPUs[0].Name)
+	}
+	if in.Summary.GPUsAtEnd[0].UsedBytes != 7 {
+		t.Errorf("view write reached the input's end GPUs: %d", in.Summary.GPUsAtEnd[0].UsedBytes)
+	}
+	if in.Summary.Placement.Devices[0].Classes[tape.ClassFFN] != 3 {
+		t.Errorf("view write reached the input's placement map: %d", in.Summary.Placement.Devices[0].Classes[tape.ClassFFN])
+	}
+	if in.Summary.PerRound[0].Streams != 1 {
+		t.Errorf("view write reached the input's per-round: %d", in.Summary.PerRound[0].Streams)
+	}
+	// And the input's own timestamps still carry their offset.
+	if _, off := in.Summary.StartedAt.Zone(); off != 9*3600 {
+		t.Errorf("the input's StartedAt lost its offset: %s", in.Summary.StartedAt.Format(time.RFC3339))
+	}
+}
+
+// TestPublicViewKeepsTheInstantInUTC: normalising the zone must move the
+// clock's label, never the moment it names.
+func TestPublicViewKeepsTheInstantInUTC(t *testing.T) {
+	kst := time.FixedZone("KST", 9*3600)
+	in := fullTape()
+	in.Summary.StartedAt = time.Date(2026, 9, 17, 14, 40, 56, 891876495, kst)
+	in.Summary.FinishedAt = time.Date(2026, 9, 17, 14, 41, 8, 633343253, kst)
+
+	view := PublicView(in, WithText)
+	for _, c := range []struct {
+		name string
+		got  time.Time
+		want time.Time
+	}{
+		{"started", view.Summary.StartedAt, in.Summary.StartedAt},
+		{"finished", view.Summary.FinishedAt, in.Summary.FinishedAt},
+	} {
+		if !c.got.Equal(c.want) {
+			t.Errorf("%s moved the instant: %s, want %s", c.name, c.got.Format(time.RFC3339Nano), c.want.Format(time.RFC3339Nano))
+		}
+		if c.got.Location() != time.UTC {
+			t.Errorf("%s is in %s, want UTC", c.name, c.got.Location())
+		}
+	}
+}
+
+// TestPublicViewRewritesIDToUTC: the run id's leading time part is local
+// wall-clock, which would publish the offset the timestamps just lost — a
+// reader subtracts the id's 144056 from the UTC 05:40:56 and has +09:00.
+func TestPublicViewRewritesIDToUTC(t *testing.T) {
+	kst := time.FixedZone("KST", 9*3600)
+	for _, c := range []struct {
+		name    string
+		id      string
+		started time.Time
+		want    string
+	}{
+		{
+			name:    "the hero's own id",
+			id:      "20260917-144056-qwen3-6-35b-a3b-ud-q6-k",
+			started: time.Date(2026, 9, 17, 14, 40, 56, 0, kst),
+			want:    "20260917-054056-qwen3-6-35b-a3b-ud-q6-k",
+		},
+		{
+			name:    "UTC crosses midnight backwards, so the date moves too",
+			id:      "20260917-083000-slug",
+			started: time.Date(2026, 9, 17, 8, 30, 0, 0, kst),
+			want:    "20260916-233000-slug",
+		},
+		{
+			name:    "an id this function does not understand is untouched",
+			id:      "my-custom-run",
+			started: time.Date(2026, 9, 17, 14, 40, 56, 0, kst),
+			want:    "my-custom-run",
+		},
+		{
+			name:    "an empty id stays empty",
+			id:      "",
+			started: time.Date(2026, 9, 17, 14, 40, 56, 0, kst),
+			want:    "",
+		},
+		{
+			name:    "a zero StartedAt leaves the id alone",
+			id:      "20260917-144056-slug",
+			started: time.Time{},
+			want:    "20260917-144056-slug",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := fullTape()
+			in.Summary.ID = c.id
+			in.Summary.StartedAt = c.started
+			if got := PublicView(in, WithText).Summary.ID; got != c.want {
+				t.Errorf("ID = %q, want %q", got, c.want)
+			}
+			if in.Summary.ID != c.id {
+				t.Errorf("the input's ID moved: %q, want %q", in.Summary.ID, c.id)
+			}
+		})
+	}
+}
+
+// TestDeepCopyIsFaithful: the JSON round trip the public view copies through
+// must lose no field — a published tape already losing one would be the
+// defect, not the test.
+func TestDeepCopyIsFaithful(t *testing.T) {
+	tp := loadHeroTape(t)
+	if got := deepCopy(tp); !reflect.DeepEqual(tp, got) {
+		t.Errorf("deepCopy lost a field of the hero tape")
+	}
 }
 
 func walkStrings(v reflect.Value, path string, fn func(path, s string)) {

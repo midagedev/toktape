@@ -783,7 +783,17 @@ func runReindex(ctx context.Context, c *cli, args []string) int {
 			failed = true
 			continue
 		}
-		idx := publish.IndexOf(tp)
+		// Through the public view, exactly as publish derives it
+		// (cmd/toktape/publish.go). The record in R2 is whatever the toktape
+		// that uploaded it produced, and an older one carried a local-time
+		// offset on every stamp (§9.3, TTP-120). Deriving straight from it
+		// would copy that offset into the row the site displays, so the
+		// view runs first and the index a reindex writes is the index a
+		// publish today would write. WithText: the record on the service is
+		// already the view its publisher chose, and re-applying the policy
+		// here would let a reindex silently strip a body the publisher
+		// meant to share.
+		idx := publish.IndexOf(publish.PublicView(tp, publish.WithText))
 		if _, err := client.Edit(ctx, id, publish.Edit{Index: &idx}); err != nil {
 			fmt.Fprintf(c.stderr, "toktape reindex %s: %v\n", id, err)
 			failed = true
