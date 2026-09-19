@@ -15,6 +15,12 @@ main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
 a { color: #7aa2f7; text-decoration: none; }
 a:hover { text-decoration: underline; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
+/* TTP-126: a run id inside inline code is one unbreakable token; without a
+   break rule it pushes the prose past main's 52rem column (and, on a wide
+   viewport, over the margin figure). Scoped to prose wrappers only — the
+   run page's footer is the paperwork paragraph — never pre/.screen, where a
+   monospace block is meant to scroll. */
+.sub code, .details code, .note code, footer code { overflow-wrap: anywhere; }
 .brand { display: flex; align-items: center; gap: .6rem; margin-bottom: 2rem; }
 .brand a { color: #eef1f5; font-weight: 600; letter-spacing: -.01em; }
 .brand span { color: #6b727d; font-size: .8rem; }

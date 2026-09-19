@@ -186,6 +186,11 @@ head -c 8 "$work/card.png" | od -An -tx1 | tr -d ' \n' | grep -q '^89504e470d0a1
 say "the page and the row"
 curl -fsS "$base/r/$id" >"$work/page.html"
 grep -q '<title>' "$work/page.html" || die "/r/<id> is not a page"
+# TTP-126: the paperwork paragraph carries a run id inside inline code — one
+# unbreakable token. Without a break rule scoped to the prose it pushes past
+# the column (and over the margin figure on a wide viewport).
+grep -q 'footer code.*overflow-wrap: anywhere' "$work/page.html" ||
+  die "inline code in the run page's prose can overflow its column again (TTP-126)"
 # An og:image must be absolute or a crawler will not fetch it.
 grep -q "og:image\" content=\"$base/r/$id.png" "$work/page.html" ||
   { grep -o 'og:image[^>]*' "$work/page.html"; die "the page has no absolute og:image"; }
