@@ -39,44 +39,85 @@ const USER_PAGE = /^\/u\/([a-z0-9][a-z0-9-]{1,31})$/;
 // before touching R2.
 const AVATAR = /^\/a\/([0-9a-f]{64})\.png$/;
 
+// The two headers every response carries, set in one place because a header
+// added at each `return` is a header missing from the next one somebody
+// writes. Both are answers to a question this service does actually raise:
+//
+//   nosniff — anonymous uploads become bytes we serve back. An avatar is
+//     stored only after its PNG signature matches (upload.js:isPNG) and a
+//     record is served as application/json, but a browser that sniffs a
+//     content type reintroduces the hole the signature check closed.
+//   Referrer-Policy — a run page's URL carries a run id, and the search
+//     page's carries whatever the visitor typed into `q`. Neither belongs
+//     in an outbound Referer when a reader clicks an author's link, which
+//     is a stranger's URL on a page full of strangers' URLs.
+//
+// No Content-Security-Policy yet: every filter <select> on the search page
+// calls an inline `onchange`, so a policy strict enough to be worth having
+// would need 'unsafe-hashes' or those handlers moved to addEventListener.
+// That is a change with a breakage surface, and it is filed rather than
+// rushed (TTP-132). Without CSP these two still do their own jobs.
+const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+};
+
+// Headers on a Response this Worker constructed are mutable; the guard is
+// for a response that ever comes from somewhere else (a cache, a subrequest),
+// where set() throws and the answer is a copy rather than a dropped header.
+function secured(resp) {
+  try {
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) resp.headers.set(k, v);
+    return resp;
+  } catch {
+    const headers = new Headers(resp.headers);
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) headers.set(k, v);
+    return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
+  }
+}
+
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
-    const path = url.pathname;
-
-    // "Is the hostname ours" and "is the service up" are separate questions,
-    // so this answers before anything that needs a binding.
-    if (path === "/healthz") {
-      return json({ ok: true, service: "toktape-hub", live: true });
-    }
-
-    if (path === "/api/v1/runs") {
-      if (request.method === "POST") return uploadRun(request, env);
-      if (request.method === "GET") return searchAPI(request, env);
-      return fail(405, "a run is published with POST and the listing is a GET", { Allow: "GET, POST" });
-    }
-
-    let m;
-    if ((m = RUN_API.exec(path))) {
-      if (request.method === "DELETE") return deleteRun(m[1], request, env);
-      if (request.method === "PATCH") return editRun(m[1], request, env);
-      return fail(405, "a run is read at /r/<id>, changed with PATCH and deleted with DELETE here", {
-        Allow: "DELETE, PATCH",
-      });
-    }
-    if ((m = TAPE_SUFFIX.exec(path))) return serveTape(m[1], env);
-    if ((m = RUN_JSON.exec(path))) return serveRunJSON(m[1], env);
-    if ((m = RUN_CARD.exec(path))) return serveCard(m[1], env);
-    if ((m = AVATAR.exec(path))) return serveAvatar(m[1], env);
-    if ((m = RUN_PAGE.exec(path))) return serveRunPage(m[1], env, publicBase(request, env));
-    if ((m = USER_JSON.exec(path))) return serveUserJSON(m[1], request, env);
-    if ((m = USER_PAGE.exec(path))) return serveUserPage(m[1], request, env);
-
-    // The front page is the search: the thing a visitor came for is other
-    // people's runs, not an explanation of the service.
-    if (path === "/") return searchPage(request, env);
-    if (path === "/robots.txt") return robots(publicBase(request, env));
-    if (path === "/sitemap.xml") return sitemap(env, publicBase(request, env));
-    return fail(404, "no such path on this service");
+    return secured(await route(request, env));
   },
 };
+
+async function route(request, env) {
+  const url = new URL(request.url);
+  const path = url.pathname;
+
+  // "Is the hostname ours" and "is the service up" are separate questions,
+  // so this answers before anything that needs a binding.
+  if (path === "/healthz") {
+    return json({ ok: true, service: "toktape-hub", live: true });
+  }
+
+  if (path === "/api/v1/runs") {
+    if (request.method === "POST") return uploadRun(request, env);
+    if (request.method === "GET") return searchAPI(request, env);
+    return fail(405, "a run is published with POST and the listing is a GET", { Allow: "GET, POST" });
+  }
+
+  let m;
+  if ((m = RUN_API.exec(path))) {
+    if (request.method === "DELETE") return deleteRun(m[1], request, env);
+    if (request.method === "PATCH") return editRun(m[1], request, env);
+    return fail(405, "a run is read at /r/<id>, changed with PATCH and deleted with DELETE here", {
+      Allow: "DELETE, PATCH",
+    });
+  }
+  if ((m = TAPE_SUFFIX.exec(path))) return serveTape(m[1], env);
+  if ((m = RUN_JSON.exec(path))) return serveRunJSON(m[1], env);
+  if ((m = RUN_CARD.exec(path))) return serveCard(m[1], env);
+  if ((m = AVATAR.exec(path))) return serveAvatar(m[1], env);
+  if ((m = RUN_PAGE.exec(path))) return serveRunPage(m[1], env, publicBase(request, env));
+  if ((m = USER_JSON.exec(path))) return serveUserJSON(m[1], request, env);
+  if ((m = USER_PAGE.exec(path))) return serveUserPage(m[1], request, env);
+
+  // The front page is the search: the thing a visitor came for is other
+  // people's runs, not an explanation of the service.
+  if (path === "/") return searchPage(request, env);
+  if (path === "/robots.txt") return robots(publicBase(request, env));
+  if (path === "/sitemap.xml") return sitemap(env, publicBase(request, env));
+  return fail(404, "no such path on this service");
+}

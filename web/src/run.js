@@ -362,10 +362,14 @@ td.v { word-break: break-word; }
 `;
 
 // The byline under the sub line: the avatar (24 px, round, only when one
-// travels) and the name — a link with rel="nofollow noopener" when the one
+// travels) and the name — a link with rel="nofollow ugc noopener" when the one
 // link is set, plain otherwise. When no author travels there is no byline
 // element at all. Everything stored was accepted verbatim and is escaped on
-// output; nothing stored is HTML.
+// output; nothing stored is HTML. The rel is all three words on purpose: the
+// scheme is already refused at upload (upload.js), so what is left is the
+// reason a stranger would fill the field at all — `nofollow ugc` says this
+// is a visitor's link and passes no ranking, `noopener` keeps the opened
+// page away from this one.
 // anonBadge marks a run nobody owns. The common case — a publish from a
 // machine with a journal token — wears nothing (user, 2026-09-19: a
 // "token-owned" chip on every row was too much); the one-off upload is the
@@ -389,11 +393,11 @@ function byline(row) {
   if (row.owner_token) {
     if (row.author_name) who = `<a href="/u/${esc(row.owner_token)}">${esc(row.author_name)}</a>`;
   } else if (row.author_name && row.author_link) {
-    who = `<a rel="nofollow noopener" href="${esc(row.author_link)}">${esc(row.author_name)}</a>`;
+    who = `<a rel="nofollow ugc noopener" href="${esc(row.author_link)}">${esc(row.author_name)}</a>`;
   } else if (row.author_name) {
     who = esc(row.author_name);
   } else if (row.author_link) {
-    who = `<a rel="nofollow noopener" href="${esc(row.author_link)}">${esc(row.author_link)}</a>`;
+    who = `<a rel="nofollow ugc noopener" href="${esc(row.author_link)}">${esc(row.author_link)}</a>`;
   }
   return `<p class="byline">${img}${img && who ? " " : ""}${who}${anonBadge(row.owned === 1)}</p>`;
 }

@@ -116,7 +116,10 @@ grep -q '<h1>First ik_llama sweep</h1>' "$work/page2.html" || die "the note's ti
 grep -q 'class="avatar"' "$work/page2.html" || die "the byline carries no avatar"
 grep -q 'href="https://github.com/example"' "$work/page2.html" || die "the byline does not link the author"
 grep -q '<p>Second paragraph.</p>' "$work/page2.html" || die "the note's second paragraph is not rendered"
-grep -q 'rel="nofollow noopener"' "$work/page2.html" || die "the author link carries no rel"
+# 2026-09-19: `ugc` joined the rel. The assertion moved with the code rather
+# than being widened — an author link is a stranger's URL typed into an
+# anonymous upload, and `nofollow ugc` is how a page says so to a crawler.
+grep -q 'rel="nofollow ugc noopener"' "$work/page2.html" || die "the author link carries no rel"
 # The row and the API carry the author, the title and the note beside them.
 curl -fsS "$base/api/v1/runs" >"$work/list2.json"
 grep -q '"title":"First ik_llama sweep"' "$work/list2.json" || { cat "$work/list2.json"; die "the listing carries no title"; }
@@ -209,6 +212,21 @@ curl -fsS "$base/robots.txt" >"$work/fetched" && grep -q "^Sitemap: $base/sitema
 curl -fsS "$base/sitemap.xml" >"$work/fetched" && grep -q "<loc>$base/r/$id</loc>" "$work/fetched" || die "the sitemap does not list the run"
 curl -fsS "$base/r/$id.json" >"$work/row.json"
 grep -q '"schema": *1' "$work/row.json" || { cat "$work/row.json"; die "the index row is not there"; }
+
+say "the security headers"
+# Set once around the router (web/src/index.js:secured), so the thing worth
+# asserting is not "the front page has them" but "no path answers without
+# them" — a header added per handler is a header the next handler forgets.
+# Every shape of response this service produces is probed: HTML, JSON, a
+# PNG out of R2, the record itself, an API listing, and a 404, which is the
+# one a per-handler approach always misses.
+for p in "/" "/r/$id" "/r/$id.json" "/r/$id.png" "/r/$id.toktape" "/api/v1/runs" "/healthz" "/no/such/path"; do
+  curl -sS -D "$work/headers" -o /dev/null "$base$p"
+  grep -qi '^x-content-type-options: nosniff' "$work/headers" ||
+    { cat "$work/headers"; die "$p answers without X-Content-Type-Options"; }
+  grep -qi '^referrer-policy: strict-origin-when-cross-origin' "$work/headers" ||
+    { cat "$work/headers"; die "$p answers without Referrer-Policy"; }
+done
 
 say "the actions under the stage"
 # The copy button carries the public link (absolute, from PUBLIC_BASE_URL),

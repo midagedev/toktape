@@ -661,7 +661,7 @@ function whoLine(r) {
   if (r.owner_token) {
     if (r.author_name) who = `<a href="/u/${esc(r.owner_token)}">${esc(r.author_name)}</a>`;
   } else if (r.author_name && r.author_link) {
-    who = `<a rel="nofollow noopener" href="${esc(r.author_link)}">${esc(r.author_name)}</a>`;
+    who = `<a rel="nofollow ugc noopener" href="${esc(r.author_link)}">${esc(r.author_name)}</a>`;
   } else {
     who = esc(r.author_name || "");
   }
