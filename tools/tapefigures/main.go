@@ -72,15 +72,38 @@ func one(path string) error {
 		fmt.Printf(" · stored window ? (recorded before the field)")
 	}
 	fmt.Println()
-	fmt.Printf("  endings          %d capped of %d observed",
-		s.Limit.CappedStreams, s.Limit.EndingsObserved)
+	// All three counts raw (lead, 2026-09-19), never a derived one: the
+	// schema's contract is that the two limit counts are disjoint and a
+	// renderer never subtracts, so the tool that exists to check the
+	// reducer prints what the tape holds and leaves the sum to the reader.
+	// A capped + exhausted that exceeds observed is a reducer bug, and this
+	// line is where it becomes visible.
+	fmt.Printf("  endings          %d capped · %d ran out of context · %d observed",
+		s.Limit.CappedStreams, s.Limit.ContextExhaustedStreams, s.Limit.EndingsObserved)
 	if s.Limit.EndingsObserved == 0 {
 		fmt.Printf("  (this tape cannot say)")
 	}
 	fmt.Println()
 	if p := s.Probe; p != nil {
-		fmt.Printf("  probe            %.0f tok/s + %.0f ms fixed, from %d points\n",
-			p.PrefillPerSecond, p.FixedMs, len(p.Prefill))
+		// Each point's cache_n beside its length (lead, 2026-09-19), so
+		// "why did this box get no fit" is answerable with this one line:
+		// a refusal whose long point shows "(300 cached)" was the prefix
+		// cache, and two "(0 cached)" point somewhere else. A 0-figure pair
+		// over recorded points is the fit's refusal, not a measurement of
+		// zero — printed as "?", never as a rate nobody observed.
+		rate := fmt.Sprintf("%.0f tok/s + %.0f ms fixed", p.PrefillPerSecond, p.FixedMs)
+		if p.PrefillPerSecond == 0 && len(p.Prefill) > 0 {
+			rate = "? (fit refused)"
+		}
+		fmt.Printf("  probe            %s, from %d points", rate, len(p.Prefill))
+		for i, pt := range p.Prefill {
+			sep := ":"
+			if i > 0 {
+				sep = ","
+			}
+			fmt.Printf("%s %d tok (%d cached)", sep, pt.PromptN, pt.CacheN)
+		}
+		fmt.Println()
 	} else {
 		fmt.Printf("  probe            ? (this run did not probe)\n")
 	}

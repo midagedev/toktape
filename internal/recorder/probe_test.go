@@ -34,6 +34,14 @@ type probeCosts struct {
 	// nFor overrides the token count reported for a prompt. nil reports
 	// len(prompt)/5, a planted conversion that cancels in the slope.
 	nFor func(prompt string) int
+	// longPartialCache is the cache_n reported for the long fit point's own
+	// first send: a partial prefix-cache hit, prompt_n > 0 with cache_n > 0
+	// together, the shape a scheduler routing the request to the slot with
+	// the longest common prefix serves. The point costs only the tokens it
+	// evaluated, so through the pair the cache's discount masquerades as the
+	// machine's speed — which is why the fit must refuse on the flag, not on
+	// the arithmetic (lead, 2026-09-19).
+	longPartialCache int
 }
 
 // probeSeen records what the /completion route was asked for, so the gates
@@ -63,6 +71,7 @@ func probeMux(t *testing.T, costs probeCosts) (*http.ServeMux, *probeSeen) {
 	mux := fakeMux(t)
 	seen := &probeSeen{}
 	served := map[string]bool{}
+	first := true
 	mux.HandleFunc("/completion", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Prompt   string `json:"prompt"`
@@ -93,7 +102,15 @@ func probeMux(t *testing.T, costs probeCosts) (*http.ServeMux, *probeSeen) {
 			// The prefix-cache shape: everything reused, almost nothing
 			// spent. timings.prompt_n is what the server evaluated.
 			cacheN, ms, n = n, 2.0, 0
+		} else if !first && costs.longPartialCache > 0 && n > costs.longPartialCache {
+			// The long fit point's own first send, served partly from cache:
+			// the point evaluates only what was not reused, and its timings
+			// say so — the pair of figures a cold-only fit would misread.
+			cacheN = costs.longPartialCache
+			n -= cacheN
+			ms = costs.fixedMs + costs.perTokMs*float64(n)
 		}
+		first = false
 		writeCompletion(w, n, cacheN, ms)
 	})
 	return mux, seen
@@ -234,6 +251,61 @@ func TestProbeRefusesAFitItCannotTrust(t *testing.T) {
 				t.Errorf("refused fit produced figures: %v tok/s, fixed %v ms", p.PrefillPerSecond, p.FixedMs)
 			}
 		})
+	}
+}
+
+// Gate 2b (lead, 2026-09-19): a probe point the prefix cache served must not
+// be fitted. A partial hit has prompt_n > 0 with cache_n > 0 together — the
+// st.PromptN > 0 guard only catches the total hit — and fitted as if cold it
+// reports the cache's discount as the machine's prefill rate. The fit refuses
+// on the flag; the points stay recorded with their CacheN so a reader can see
+// why, and the same cost model with no hit still fits, which is the clause
+// that makes this a refusal and not a regression.
+func TestProbeRefusesAFitThroughACacheHit(t *testing.T) {
+	record := func(longPartialCache int) *tape.ProbeSummary {
+		mux, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5, longPartialCache: longPartialCache})
+		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
+		tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
+		if err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+		if tp.Summary.Probe == nil {
+			t.Fatal("Summary.Probe = nil, the pass did not record anything")
+		}
+		return tp.Summary.Probe
+	}
+
+	// Cold: both points cache_n == 0, and the fit is the planted machine —
+	// 0.5 ms/token is 2000 tok/s at the margin, 30 ms the fixed cost.
+	cold := record(0)
+	if len(cold.Prefill) != 2 {
+		t.Fatalf("cold probe: %d points, want 2: %+v", len(cold.Prefill), cold.Prefill)
+	}
+	for i, pt := range cold.Prefill {
+		if pt.CacheN != 0 {
+			t.Errorf("cold point %d carries cache_n %d, want 0", i, pt.CacheN)
+		}
+	}
+	if !near(cold.PrefillPerSecond, 2000, 0.01) || !near(cold.FixedMs, 30, 0.01) {
+		t.Errorf("cold probe fit = %v tok/s, fixed %v ms; want the planted 2000 and 30 (a refusal here would be a regression)",
+			cold.PrefillPerSecond, cold.FixedMs)
+	}
+
+	// Partial hit on the long point: the fit refuses, the points stay.
+	cached := record(300)
+	if len(cached.Prefill) != 2 {
+		t.Fatalf("cache-hit probe: %d points, want the pair kept: %+v", len(cached.Prefill), cached.Prefill)
+	}
+	if got := cached.Prefill[1].CacheN; got != 300 {
+		t.Errorf("long point CacheN = %d, want the server's own 300: the hit was dropped on the floor", got)
+	}
+	if cached.Prefill[0].CacheN != 0 {
+		t.Errorf("short point CacheN = %d, want 0: only the long point was served from cache", cached.Prefill[0].CacheN)
+	}
+	if cached.PrefillPerSecond != 0 || cached.FixedMs != 0 {
+		t.Errorf("a fit through a cache-served point produced figures: %v tok/s, fixed %v ms; want the refusal's 0/0",
+			cached.PrefillPerSecond, cached.FixedMs)
 	}
 }
 

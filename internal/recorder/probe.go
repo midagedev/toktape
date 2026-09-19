@@ -153,11 +153,14 @@ func (r *run) prefillProbe(ctx context.Context) {
 	st, ttft, ok := r.probeSend(ctx, probePrompt(probeLeadShort, probeCycleShort, probeShortTokens))
 	if ok && st.PromptN > 0 {
 		// A point with no evaluated tokens is not a cost measurement
-		// (a cache-served prompt), so it is not recorded as one.
+		// (a cache-served prompt), so it is not recorded as one. A partial
+		// hit is recorded — with its CacheN, so the fit can refuse on it
+		// rather than read the cache's discount as the machine's speed.
 		p.Prefill = append(p.Prefill, tape.PrefillPoint{
 			PromptN:  st.PromptN,
 			PromptMs: st.PromptMs,
 			TTFTMs:   ttft,
+			CacheN:   st.CacheN,
 		})
 	}
 	if long := probeLongLength(st); long > 0 {
@@ -166,6 +169,7 @@ func (r *run) prefillProbe(ctx context.Context) {
 				PromptN:  st.PromptN,
 				PromptMs: st.PromptMs,
 				TTFTMs:   ttft,
+				CacheN:   st.CacheN,
 			})
 		}
 		// The replay resends the prompt the long point actually used, never a
@@ -265,10 +269,16 @@ func (r *run) probeSend(ctx context.Context, prompt string) (st server.ServerTim
 // A fit it cannot trust is refused, never clamped into a plausible number:
 // a longer prompt that answered faster is a cache hit or a broken
 // measurement, not a rate; two prompts of one length have no slope; a
-// negative intercept is a fixed cost the points do not support. Every
-// refusal leaves both figures 0 — the schema's "not observed" — while the
-// points stay recorded, so a suspicious probe can be taken apart without
-// re-running it.
+// negative intercept is a fixed cost the points do not support; and a point
+// the prefix cache served — CacheN > 0, a partial hit included — is not a
+// cold prefill, which is what both points here are supposed to be. A cached
+// point reports the cost of only the tokens it evaluated, so a pair through
+// one measures the cache's discount as if it were the machine's speed, and
+// the intercept that comes out is not the server's fixed cost (lead,
+// 2026-09-19). Every refusal leaves both figures 0 — the schema's "not
+// observed" — while the points stay recorded, so a suspicious probe can be
+// taken apart without re-running it; tapefigures prints each point's cache_n
+// for exactly that question.
 func fitPrefill(points []tape.PrefillPoint) (perSecond, fixedMs float64) {
 	if len(points) != 2 {
 		return 0, 0
@@ -276,6 +286,9 @@ func fitPrefill(points []tape.PrefillPoint) (perSecond, fixedMs float64) {
 	lo, hi := points[0], points[1]
 	if hi.PromptN < lo.PromptN {
 		lo, hi = hi, lo
+	}
+	if lo.CacheN > 0 || hi.CacheN > 0 {
+		return 0, 0 // a cache-served point: not a cold cost curve
 	}
 	if lo.PromptN == hi.PromptN {
 		return 0, 0 // one length: the slope is undefined
