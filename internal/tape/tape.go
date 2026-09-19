@@ -169,6 +169,34 @@ type RunSummary struct {
 	// the tape says whether they did. Empty is not a defect; it means this
 	// run is not in a comparison set, which is the truth about most runs.
 	PromptSet string `json:"prompt_set,omitempty"`
+	// PromptTrimChars is how many characters of each set prompt this run
+	// actually sent, when it sent a prefix rather than the whole thing
+	// (TTP-144, lead, 2026-09-20). 0 means no trim: the prompts went whole.
+	//
+	// The set's prompts are longer than any one box should send. A prefill
+	// figure is a throughput only when the per-request fixed cost is a small
+	// share of it, and the length at which that holds is a property of the
+	// machine and not of the set: 4096 tokens is 3.5 s of prefill on the
+	// reference box and 157 s on one this project has measured at 26 tok/s.
+	// So the run sizes the prefix from what the probe observed and records
+	// the size here, and two cards with different lengths are two boxes
+	// answering the same question rather than two runs contradicting.
+	//
+	// It is in characters, not tokens, for a reason that is not convenience.
+	// A verifier re-derives what this run sent by trimming its own copy of
+	// the set to this number (publish.sentTheSet), and that has to give the
+	// same bytes on a machine that never saw the model: token boundaries are
+	// the tokenizer's and the tokenizer is the model's, while a character
+	// prefix is the same everywhere. The run's target is in tokens — that is
+	// the unit the fixed-cost ratio is argued in — and the conversion is the
+	// characters-per-token the probe measured on this model, recorded on the
+	// probe's own points. So the tape carries the reproducible unit and the
+	// reasoning that chose it, separately.
+	//
+	// It trims from the front, so a prompt's opening words are what survive
+	// and the streams stay distinct from their first token. A prompt shorter
+	// than this is sent whole; the number is a cap, not a pad.
+	PromptTrimChars int `json:"prompt_trim_chars,omitempty"`
 	// Tag and Note label the experiment this run belongs to (`--tag ngl=40
 	// --note "fa on"`). They are the user's words, recorded so the run ledger
 	// (`toktape log`) can group a sweep; empty when not given.
