@@ -151,8 +151,14 @@ type RunSummary struct {
 	// recorded per request; renderers read a RunSummary and nothing else.
 	Sampling SamplingSummary `json:"sampling,omitempty"`
 	// Limit is what could end this run's generation and what did (TTP-76).
-	Limit     LimitSummary `json:"limit,omitempty"`
-	GPUsAtEnd []GPUSample  `json:"gpus_at_end,omitempty"`
+	Limit LimitSummary `json:"limit,omitempty"`
+	// Probe is the measurement pass that runs before the prompt set, on one
+	// stream (TTP-137, 2026-09-19). A pointer, like Spread, so that a tape
+	// without one is byte-identical to a tape from before the field existed:
+	// nil is "not observed", it costs no key, and no golden moves for runs
+	// that do not probe.
+	Probe     *ProbeSummary `json:"probe,omitempty"`
+	GPUsAtEnd []GPUSample   `json:"gpus_at_end,omitempty"`
 
 	// PromptSet is the published prompt set every stream of this run came
 	// from (server.PromptSetID, "prompts@v1"), and "" when any of them did
@@ -865,6 +871,67 @@ type LimitSummary struct {
 	// until the slowest live stream had MinTokens, so on that box the run is
 	// longer than was asked for and the card should say so.
 	CutAt time.Duration `json:"cut_at,omitempty"`
+}
+
+// ProbeSummary is what the run measured about itself before it measured the
+// machine: a short pass on a single stream, sent ahead of the prompt set.
+//
+// It exists because the figure the card called "prefill" was not one. Measured
+// 2026-09-19 on the same server and model, minutes apart: 1182 tok/s at
+// --sessions 1 and 69.3 tok/s each at --sessions 4. The concurrent figure is
+// not wrong — four prefills through one -ub 512 batch really do take that
+// long, and for an agent workload it is the number that matters — but it is
+// throughput under queueing, and the card printed it under the same word as
+// the machine's prefill rate. Seventeen times apart, one label.
+//
+// A single point cannot separate them, because one measurement of one prompt
+// length carries the server's fixed cost inside it. Two lengths can: the slope
+// through them is the marginal cost of a prompt token, which is the machine's,
+// and the intercept is what the server spends before it reads the first one.
+//
+// A nil *ProbeSummary is a run that did not probe, and every field inside one
+// is zero when that particular figure was not observed — the same `?` the rest
+// of the card means by it. A tape recorded before this field decodes unchanged
+// and renders exactly as it did.
+type ProbeSummary struct {
+	// Prefill are the raw points, in the order they were sent, kept so a
+	// suspicious fit can be taken apart without re-running. Two points is the
+	// fit; one is recorded but does not fit; none is a pass that did not run.
+	Prefill []PrefillPoint `json:"prefill,omitempty"`
+	// PrefillPerSecond is the slope through Prefill — prompt tokens per
+	// second at the margin, on one stream. This is the machine's prefill
+	// rate. Timings.PromptPerSecond stays what it has always been: what this
+	// run's own prompts did, at this run's own concurrency.
+	PrefillPerSecond float64 `json:"prefill_per_second,omitempty"`
+	// FixedMs is the intercept — what the server spends per request before it
+	// touches the prompt. Small on a healthy llama.cpp (about 28 ms measured
+	// on the hero box) and the honest home for the part of TTFT that no token
+	// count explains.
+	FixedMs float64 `json:"fixed_ms,omitempty"`
+	// Replay is the second send of the longer prompt, when it was made.
+	Replay *ReplayProbe `json:"replay,omitempty"`
+}
+
+// PrefillPoint is one probe request: how many prompt tokens went out and what
+// the server said it cost. Server figures, like everything else on this side.
+type PrefillPoint struct {
+	PromptN  int     `json:"prompt_n"`
+	PromptMs float64 `json:"prompt_ms"`
+	TTFTMs   float64 `json:"ttft_ms,omitempty"`
+}
+
+// ReplayProbe is the longer probe prompt sent a second time, to see what this
+// server's prefix cache does with a prompt it has already read.
+//
+// It reports what happened, not what the server supports. With -np > 1 the
+// scheduler picks the slot, so a repeated prompt can land on a cold one and
+// hit nothing; that is a fact about the run and not a fact about caching, and
+// the card must not upgrade it into one. CacheN is the server's own count of
+// reused tokens — 0 with a full PromptN is a miss, and both are honest.
+type ReplayProbe struct {
+	PromptN  int     `json:"prompt_n"`
+	CacheN   int     `json:"cache_n"`
+	PromptMs float64 `json:"prompt_ms"`
 }
 
 // PromptRecord is the request as sent and the answer as received.
