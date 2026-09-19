@@ -37,9 +37,13 @@ func TestIndexOfSingleStream(t *testing.T) {
 		EngineKind:    "llama-server",
 		EngineVersion: "b3650",
 
-		OS:        "linux",
-		GPUsRaw:   []string{"NVIDIA GeForce RTX 3090", "NVIDIA GeForce RTX 3090"},
-		GPUID:     "rtx-3090",
+		OS:      "linux",
+		GPUsRaw: []string{"NVIDIA GeForce RTX 3090", "NVIDIA GeForce RTX 3090"},
+		GPUID:   "rtx-3090",
+		// The membership axis beside the shared id: one entry per card.
+		// (Extended 2026-09-19 for the new GPUIDs field — the want grew a
+		// field, no assertion was loosened.)
+		GPUIDs:    []string{"rtx-3090", "rtx-3090"},
 		GPUCount:  2,
 		VRAMBytes: 2 * 25769803776,
 		RAMBytes:  68719476736,
@@ -206,7 +210,7 @@ func TestIndexJSONRoundTrip(t *testing.T) {
 		"toktape_version", "repo", "model_raw", "model_id", "model_id_source",
 		"model_dir", "params", "moe",
 		"quant_raw", "quant_id", "quant_bits", "engine_kind", "engine_version",
-		"os", "gpus_raw", "gpu_id", "gpu_count", "vram_bytes", "ram_bytes",
+		"os", "gpus_raw", "gpu_id", "gpu_ids", "gpu_count", "vram_bytes", "ram_bytes",
 		"host_class", "sessions", "prompt_set", "decode_per_sec",
 		"prefill_per_sec", "ttft_p50_ms", "caveats", "caveat_count",
 	}
@@ -307,6 +311,54 @@ func TestIndexOfModelIdentity(t *testing.T) {
 			// The raw string is always there for search to fall back on.
 			if idx.ModelRaw != c.model.FileName {
 				t.Errorf("ModelRaw = %q, want %q", idx.ModelRaw, c.model.FileName)
+			}
+		})
+	}
+}
+
+// GPUIDs is the membership axis a mixed rig is reachable by (TTP-124,
+// 2026-09-19): one id per card in card order, empty ids dropped, while
+// GPUID/HostClass stay exactly as they were for their other consumers.
+func TestIndexOfGPUIDs(t *testing.T) {
+	cases := []struct {
+		name string
+		gpus []tape.GPUInfo
+		want []string
+		id   string
+	}{{
+		name: "a mixed rig keeps one id per card and no shared id",
+		gpus: []tape.GPUInfo{
+			{Name: "NVIDIA RTX A6000"},
+			{Name: "NVIDIA GeForce RTX 3090"},
+		},
+		want: []string{"rtx-a6000", "rtx-3090"},
+	}, {
+		name: "a single kind repeats its id once per card",
+		gpus: []tape.GPUInfo{
+			{Name: "NVIDIA GeForce RTX 4090"},
+			{Name: "NVIDIA GeForce RTX 4090"},
+		},
+		want: []string{"rtx-4090", "rtx-4090"},
+		id:   "rtx-4090",
+	}, {
+		name: "a name that was only vendor noise is not a card",
+		gpus: []tape.GPUInfo{
+			{Name: "NVIDIA GeForce RTX 4090"},
+			{Name: "NVIDIA"},
+		},
+		want: []string{"rtx-4090"},
+	}}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			idx := IndexOf(&tape.Tape{Summary: tape.RunSummary{
+				Host: tape.HostInfo{GPUs: c.gpus},
+			}})
+			if !reflect.DeepEqual(idx.GPUIDs, c.want) {
+				t.Errorf("GPUIDs = %v, want %v", idx.GPUIDs, c.want)
+			}
+			if idx.GPUID != c.id {
+				t.Errorf("GPUID = %q, want %q", idx.GPUID, c.id)
 			}
 		})
 	}

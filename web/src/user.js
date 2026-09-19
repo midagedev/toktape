@@ -36,6 +36,7 @@ export async function serveUserJSON(handle, request, env) {
   const url = new URL(request.url);
   const scope = { name: "user", owner: handle };
   const q = await query(env, url, scope, pageSize(url));
+  if (q.error) return q.error;
   const out = { handle };
   if (t.name) out.name = t.name;
   if (t.link) out.link = t.link;
@@ -60,6 +61,7 @@ export async function serveUserPage(handle, request, env) {
   const scope = { name: "user", owner: handle };
   const limit = pageSize(url);
   const q = await query(env, url, scope, limit);
+  if (q.error) return q.error;
   const facets = await distinctFacets(env, url, scope);
   const active = activeFilters(url);
   const n = await countTotal(env, url, scope);

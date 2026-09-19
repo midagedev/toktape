@@ -1,11 +1,13 @@
 // The search (docs/toktape-spec.ko.md §9.4).
 //
 // **It is not a leaderboard, and the code says so in one place:** there is no
-// sort parameter. Newest first is the only order, here and in the API, and a
-// caller cannot ask for anything else. Adding one would take five minutes and
-// would turn every published run into an entry — which is the one thing the
-// user ruled out twice ("리더보드 만들고 싶은건 아냐 다만 사양과 모델 등으로
-// 검색해 볼 수 있게는 하고 싶어", 2026-09-18).
+// rank column and no score. The listing does have a sort parameter — newest
+// first unless asked otherwise (`oldest`, `decode`) — because filters plus an
+// order are how runs get found. Turning every published run into a ranked
+// entry is the one thing the user ruled out twice ("리더보드 만들고 싶은건 아냐
+// 다만 사양과 모델 등으로 검색해 볼 수 있게는 하고 싶어", 2026-09-18), and the
+// sort itself arrived when the user reversed the no-sort decision on
+// 2026-09-19 ("리스트에 정렬 옵션 넣자 필터랑 정렬로 쉽게 볼 수 있게").
 //
 // The second half of the same decision: every row carries its caveat count.
 // The card qualifies its own numbers with `! 3 caveats`, and a result set
@@ -35,7 +37,7 @@ const GB = 1024 ** 3;
 // needs the handle, not just the fact of ownership. apiRow leaves it out
 // the way it leaves out every column the API does not print.
 const SELECT = `SELECT id, created_at, recorded_at, model_id, model_raw, repo,
-    quant_id, quant_raw, engine_kind, engine_version, os, gpu_id, gpus_raw,
+    quant_id, quant_raw, engine_kind, engine_version, os, gpu_id, gpu_ids, gpus_raw,
     gpu_count, vram_bytes, host_class, sessions, prompt_set, decode_per_sec,
     caveat_count, tape_ext, card_key, author_name, author_link, avatar_key,
     title, note, owner_token, owner_token IS NOT NULL AS owned
@@ -50,7 +52,10 @@ const FILTERS = [
   ["repo", "repo"],
   ["quant", "quant_id"],
   ["engine", "engine_kind"],
-  ["gpu", "gpu_id"],
+  // The gpu axis is membership, not equality (TTP-124): which card models
+  // took part. A null column marks it for the special case in whereFor; it
+  // stays in this list so the active line and the facet keep their order.
+  ["gpu", null],
   ["host", "host_class"],
   ["os", "os"],
   ["set", "prompt_set"],
@@ -67,8 +72,10 @@ export async function searchAPI(request, env) {
   if (scope.error) return scope.error;
 
   const q = await query(env, url, scope, pageSize(url));
+  if (q.error) return q.error;
   return json({
     scope: scope.name,
+    sort: q.sort,
     runs: q.rows.map(apiRow),
     // A cursor rather than a page number: rows arrive newest first and new
     // ones land at the front, so an offset would show the same run twice
@@ -84,6 +91,7 @@ export async function searchPage(request, env) {
 
   const limit = pageSize(url);
   const q = await query(env, url, scope, limit);
+  if (q.error) return q.error;
   const facets = await distinctFacets(env, url, scope);
   const active = activeFilters(url);
   // With 0 rows the empty state speaks instead of the total: a bare
@@ -115,8 +123,8 @@ ${active}
 ${mid}
 ${q.next ? `<p class="more"><a href="${esc(withParam(url, "cursor", q.next))}">Older runs →</a></p>` : ""}
 <footer>
-Newest first, and that is the only order there is — no rank column, by
-decision. Every row carries the caveats the card would print, because a
+Newest first unless you choose another order; there is still no rank column
+and no score. Every row carries the caveats the card would print, because a
 result set without them is a leaderboard with the sorting taken out.<br>
 <code>toktape publish &lt;run.tape&gt;</code> puts one here.
 <a href="https://github.com/midagedev/toktape">toktape on GitHub</a>
@@ -158,11 +166,19 @@ export function whereFor(url, scope, skipParam) {
 
   for (const [param, column] of FILTERS) {
     if (param === skipParam) continue;
+    if (column === null) continue; // the gpu axis: membership, special-cased below
     const v = url.searchParams.get(param);
     if (v) {
       where.push(`${column} = ?`);
       args.push(column === "sessions" ? Number(v) : v);
     }
+  }
+  // The GPU filter is membership in the per-card ids (TTP-124): a mixed rig
+  // is reachable by either of its cards. Skipped under its own name like
+  // every other axis, so the facet still lists the alternatives.
+  if (skipParam !== "gpu" && url.searchParams.get("gpu")) {
+    where.push("EXISTS (SELECT 1 FROM json_each(runs.gpu_ids) WHERE value = ?)");
+    args.push(url.searchParams.get("gpu"));
   }
   if (skipParam !== "min_vram" && url.searchParams.get("min_vram")) {
     where.push("vram_bytes >= ?");
@@ -185,20 +201,61 @@ export function whereFor(url, scope, skipParam) {
   return { where, args };
 }
 
+// The listing order. Absent means newest: today's order, unchanged. Anything
+// outside the three named values is a 400, never a silent fallback — a caller
+// asking for an order that is not there must hear so.
+const SORT_LABEL = { newest: "newest first", oldest: "oldest first", decode: "fastest decode first" };
+
+export function sortOf(url) {
+  const v = url.searchParams.get("sort");
+  // Absent and empty both mean "not asked": a form that submits `sort=`
+  // with nothing chosen is not asking for an order that does not exist.
+  if (v === null || v === "" || v === "newest") return { sort: "newest" };
+  if (v === "oldest" || v === "decode") return { sort: v };
+  return { error: fail(400, `unknown sort: ${v}; one of newest, oldest, decode`) };
+}
+
 export async function query(env, url, scope, limit) {
+  const s = sortOf(url);
+  if (s.error) return s;
+  const { sort } = s;
   const { where, args } = whereFor(url, scope, null);
   const cursor = decodeCursor(url.searchParams.get("cursor"));
-  if (cursor) {
-    where.push("(created_at < ? OR (created_at = ? AND id < ?))");
-    args.push(cursor.created_at, cursor.created_at, cursor.id);
-  }
-
   // created_at, never recorded_at: ordering on a field out of the upload
   // would make the listing trust the uploader's clock, and its UTC offset is
   // still an open question (TTP-120).
+  let order;
+  if (sort === "oldest") {
+    if (cursor) {
+      where.push("(created_at > ? OR (created_at = ? AND id > ?))");
+      args.push(cursor.created_at, cursor.created_at, cursor.id);
+    }
+    order = "ORDER BY created_at ASC, id ASC";
+  } else if (sort === "decode") {
+    // NULLs are one well-defined value: -1 sorts below every measured
+    // figure, so a run with no figure comes last, never first — in the
+    // ORDER BY and in the cursor comparison alike.
+    if (cursor) {
+      const raw = cursor.sortKey === "" ? -1 : Number(cursor.sortKey);
+      const key = Number.isFinite(raw) ? raw : -1;
+      where.push(
+        "(COALESCE(decode_per_sec, -1) < ? OR (COALESCE(decode_per_sec, -1) = ? AND " +
+          "(created_at < ? OR (created_at = ? AND id < ?))))",
+      );
+      args.push(key, key, cursor.created_at, cursor.created_at, cursor.id);
+    }
+    order = "ORDER BY COALESCE(decode_per_sec, -1) DESC, created_at DESC, id DESC";
+  } else {
+    if (cursor) {
+      where.push("(created_at < ? OR (created_at = ? AND id < ?))");
+      args.push(cursor.created_at, cursor.created_at, cursor.id);
+    }
+    order = "ORDER BY created_at DESC, id DESC";
+  }
+
   const sql = `${SELECT}
     ${where.length ? "WHERE " + where.join(" AND ") : ""}
-    ORDER BY created_at DESC, id DESC
+    ${order}
     LIMIT ?`;
 
   // One extra row, only to learn whether there is a next page.
@@ -207,7 +264,8 @@ export async function query(env, url, scope, limit) {
   const last = rows[rows.length - 1];
   return {
     rows,
-    next: results.length > limit && last ? encodeCursor(last) : null,
+    next: results.length > limit && last ? encodeCursor(last, sort) : null,
+    sort,
   };
 }
 
@@ -228,7 +286,15 @@ export async function countTotal(env, url, scope) {
 
 export async function totalLine(env, url, scope, limit, hasNext) {
   const n = await countTotal(env, url, scope);
-  return `<p class="total"><b>${n}</b> run${n === 1 ? "" : "s"}, newest first${hasNext ? ` · showing the first ${limit}` : ""}</p>`;
+  // The sort was validated by query() before this runs; an unknown value
+  // here falls back to the label only and never to an order.
+  const sort = url.searchParams.get("sort") || "newest";
+  const label = SORT_LABEL[sort] || SORT_LABEL.newest;
+  const caveat =
+    sort === "decode"
+      ? " — different models, streams and quants side by side; every row keeps its caveats."
+      : "";
+  return `<p class="total"><b>${n}</b> run${n === 1 ? "" : "s"}, ${label}${hasNext ? ` · showing the first ${limit}` : ""}${caveat}</p>`;
 }
 
 export async function distinctFacets(env, url, scope) {
@@ -245,10 +311,24 @@ export async function distinctFacets(env, url, scope) {
       .all();
     return { rows: results.slice(0, 20), more: results.length > 20 };
   };
+  // The gpu facet counts rows per member id (TTP-124): a mixed rig raises
+  // the count of each of its cards. Rows with no gpu_ids take no part —
+  // they are what the fallback chip is for, not this dropdown.
+  const gpuFacet = (async () => {
+    const { where, args } = whereFor(url, scope, "gpu");
+    const { results } = await env.DB.prepare(
+      `SELECT j.value AS v, COUNT(DISTINCT runs.id) AS n FROM runs, json_each(runs.gpu_ids) j
+       WHERE ${where.join(" AND ")}
+       GROUP BY v ORDER BY n DESC, v ASC LIMIT 21`,
+    )
+      .bind(...args)
+      .all();
+    return { rows: results.slice(0, 20), more: results.length > 20 };
+  })();
   const [engine, quant, gpu, host] = await Promise.all([
     one("engine", "engine_kind"),
     one("quant", "quant_id"),
-    one("gpu", "gpu_id"),
+    gpuFacet,
     one("host", "host_class"),
   ]);
   return { engine, quant, gpu, host };
@@ -277,16 +357,28 @@ export function pageSize(url) {
   return Math.min(Math.floor(n), MAX_PAGE_SIZE);
 }
 
-function encodeCursor(row) {
-  return btoa(`${row.created_at}|${row.id}`).replace(/=+$/, "");
+// The keyset cursor: (sortKey, created_at, id), where sortKey is the sort
+// column's value on the last row — "" outside the decode order, which has no
+// other column of its own. Always three parts, so a cursor minted before the
+// sort parameter still decodes (two parts: newest's window).
+function encodeCursor(row, sort) {
+  const key = sort === "decode" ? String(row.decode_per_sec ?? -1) : "";
+  return btoa(`${key}|${row.created_at}|${row.id}`).replace(/=+$/, "");
 }
 
 function decodeCursor(s) {
   if (!s) return null;
   try {
-    const [created_at, id] = atob(s).split("|");
+    const parts = atob(s).split("|");
+    if (parts.length === 2) {
+      const [created_at, id] = parts;
+      if (!created_at || !id) return null;
+      return { sortKey: "", created_at, id };
+    }
+    if (parts.length !== 3) return null;
+    const [sortKey, created_at, id] = parts;
     if (!created_at || !id) return null;
-    return { created_at, id };
+    return { sortKey, created_at, id };
   } catch {
     return null;
   }
@@ -316,6 +408,7 @@ export function apiRow(r) {
     gpu_id: r.gpu_id,
     gpus_raw: r.gpus_raw,
     gpu_count: r.gpu_count,
+    ...(parseGpuIds(r.gpu_ids).length ? { gpu_ids: parseGpuIds(r.gpu_ids) } : {}),
     vram_bytes: r.vram_bytes,
     host_class: r.host_class,
     sessions: r.sessions,
@@ -348,11 +441,7 @@ export function resultRow(r, url) {
   const facts = [
     { shown: r.engine_kind, suffix: r.engine_version || null, param: "engine", value: r.engine_kind },
     { shown: r.quant_raw || r.quant_id, param: r.quant_id ? "quant" : null, value: r.quant_id },
-    {
-      shown: r.gpu_id ? (r.gpu_count > 1 ? `${r.gpu_count}× ${r.gpu_id}` : r.gpu_id) : r.gpus_raw,
-      param: r.gpu_id ? "gpu" : null,
-      value: r.gpu_id,
-    },
+    ...gpuFacts(r),
     { shown: r.os, param: "os", value: r.os },
     {
       shown: r.sessions ? `${r.sessions} stream${r.sessions === 1 ? "" : "s"}` : null,
@@ -406,6 +495,43 @@ function whoLine(r) {
     who = esc(r.author_name || "");
   }
   return `<div class="who">${img}${img && who ? " " : ""}${who}${anonBadge(r.owned === 1)}</div>`;
+}
+
+// The GPU chips: one per card model that took part (TTP-124). A single kind
+// keeps today's count prefix (`2× rtx-4090`); a mixed rig gets one chip per
+// distinct id with no prefix. Without gpu_ids, today's fallback: the shared
+// id's chip, else the raw names unlinked. Each chip is a filter link through
+// the existing chip(), so the active one renders as .fact.on like the rest.
+function gpuFacts(r) {
+  const ids = parseGpuIds(r.gpu_ids);
+  if (ids.length) {
+    const distinct = [...new Set(ids)];
+    if (distinct.length === 1) {
+      const shown = r.gpu_count > 1 ? `${r.gpu_count}× ${distinct[0]}` : distinct[0];
+      return [{ shown, param: "gpu", value: distinct[0] }];
+    }
+    return distinct.map((id) => ({ shown: id, param: "gpu", value: id }));
+  }
+  return [
+    {
+      shown: r.gpu_id ? (r.gpu_count > 1 ? `${r.gpu_count}× ${r.gpu_id}` : r.gpu_id) : r.gpus_raw,
+      param: r.gpu_id ? "gpu" : null,
+      value: r.gpu_id,
+    },
+  ];
+}
+
+// gpu_ids arrives as the TEXT the migration stored (a JSON array); a row
+// from before the migration has NULL and keeps the fallback above.
+function parseGpuIds(v) {
+  if (Array.isArray(v)) return v.filter((x) => typeof x === "string" && x !== "");
+  if (typeof v !== "string" || v === "") return [];
+  try {
+    const a = JSON.parse(v);
+    return Array.isArray(a) ? a.filter((x) => typeof x === "string" && x !== "") : [];
+  } catch {
+    return [];
+  }
 }
 
 // A fact that is also a filter is a link to that filter, so narrowing a
@@ -498,7 +624,22 @@ export function filterForm(url, facets) {
       .join("");
     return `<select name="min_vram" onchange="this.form.submit()">${opts}</select>`;
   })();
-  return `<form class="filters" method="get" action="/">
+  // The order is page furniture, not a filter: it never joins the active
+  // line, and the form carries it the way the URL does.
+  const sortSel = (() => {
+    const current = url.searchParams.get("sort") || "newest";
+    const opts = [
+      ["newest", "newest first"],
+      ["oldest", "oldest first"],
+      ["decode", "fastest decode first"],
+    ]
+      .map(([v, label]) => `<option value="${v}"${v === current ? " selected" : ""}>${label}</option>`)
+      .join("");
+    return `<select name="sort" onchange="this.form.submit()">${opts}</select>`;
+  })();
+  // The current path, not "/": on /u/<handle> the filters used to submit to
+  // the front page (2026-09-19).
+  return `<form class="filters" method="get" action="${esc(url.pathname)}">
   <input type="search" name="q" value="${esc(url.searchParams.get("q") || "")}"
     placeholder="model, repo, GPU, engine…" autocomplete="off">
   <kbd title="press / to search">/</kbd>
@@ -507,6 +648,7 @@ export function filterForm(url, facets) {
   ${sel("gpu", "any GPU", facets.gpu)}
   ${sel("host", "any host", facets.host)}
   ${vram}
+  ${sortSel}
   <button type="submit">Search</button>
 </form>`;
 }

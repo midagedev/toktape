@@ -273,10 +273,125 @@ curl -fsS "$base/api/v1/runs" >"$work/list.json"
 grep -q "\"id\":\"$id\"" "$work/list.json" || { cat "$work/list.json"; die "the run is not in the listing"; }
 # Every row carries the qualification the card prints (§9.4).
 grep -q '"caveat_count"' "$work/list.json" || die "a listing row dropped its caveat count"
-# There is no sort parameter and asking for one changes nothing: newest
-# first is the only order, by decision, and this is where that is enforced.
-curl -fsS "$base/api/v1/runs?sort=decode_per_sec" >"$work/sorted.json"
-cmp -s "$work/list.json" "$work/sorted.json" || die "a sort parameter changed the listing"
+# A GPU filter that reaches a mixed rig (TTP-124, 2026-09-19). There is no
+# mixed-rig tape in the repo, so this one row is inserted straight into the
+# local D1 the way the harness mints tokens below — OR REPLACE, because the
+# local D1 outlives one run of this gate.
+npx wrangler d1 execute toktape --local --command \
+  "INSERT OR REPLACE INTO runs (id, created_at, tape_key, tape_ext, tape_bytes, index_schema, index_json, gpus_raw, gpu_count, gpu_ids, decode_per_sec, caveat_count) VALUES ('mixedrig000000000000', '2026-01-02T00:00:00Z', 'none', '.tape', 1, 1, '{}', 'NVIDIA RTX A6000 / NVIDIA GeForce RTX 3090', 2, '[\"rtx-a6000\",\"rtx-3090\"]', 12.5, 0)" \
+  >"$work/mixed.log" 2>&1 || { cat "$work/mixed.log"; die "could not insert the mixed-rig harness row"; }
+# Membership, not equality: either card reaches the rig. The rig's created_at
+# is old on purpose, so the a6000 fetch reads oldest-first: the local D1
+# outlives one run of this gate (140 rows on 2026-09-19) and a newest-first
+# page 1 ends long before the rig.
+curl -fsS "$base/api/v1/runs?gpu=rtx-3090&limit=100" >"$work/mixed3090.json" && grep -q 'mixedrig000000000000' "$work/mixed3090.json" ||
+  die "filtering by rtx-3090 missed the mixed rig"
+curl -fsS "$base/api/v1/runs?gpu=rtx-a6000&sort=oldest&limit=100" >"$work/mixeda6000.json" && grep -q 'mixedrig000000000000' "$work/mixeda6000.json" ||
+  die "filtering by rtx-a6000 missed the mixed rig"
+# The hero under its own GPU: read off list.json, never hardcoded — and when
+# that is one of the rig's cards the mixed rig rides along with it. The hero
+# is this run's newest row, so page 1 has it.
+hero_gpu="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(((r.get("gpu_id") or "") for r in d["runs"] if r["id"]==sys.argv[2]), ""))' "$work/list.json" "$id")"
+[ -n "$hero_gpu" ] || die "the hero row carries no gpu_id in list.json"
+curl -fsS "$base/api/v1/runs?gpu=$hero_gpu" >"$work/fetched" && grep -q "\"id\":\"$id\"" "$work/fetched" ||
+  die "filtering by $hero_gpu dropped the hero"
+case "$hero_gpu" in
+rtx-a6000) grep -q 'mixedrig000000000000' "$work/mixeda6000.json" || die "filtering by $hero_gpu missed the mixed rig" ;;
+rtx-3090) grep -q 'mixedrig000000000000' "$work/mixed3090.json" || die "filtering by $hero_gpu missed the mixed rig" ;;
+*) printf 'note: the hero runs on %s, outside the mixed rig; mixed reach is asserted above\n' "$hero_gpu" ;;
+esac
+# The dropdown lists both member ids, and the mixed row wears two GPU chips.
+# Same old-row reason: the chips are read off an oldest-first page, where the
+# rig is first. The dropdown counts the whole population on any page.
+curl -fsS "$base/?sort=oldest&limit=10" >"$work/fetched" && grep -q '<option value="rtx-3090"' "$work/fetched" ||
+  die "the GPU dropdown lists no rtx-3090"
+grep -q '<option value="rtx-a6000"' "$work/fetched" || die "the GPU dropdown lists no rtx-a6000"
+# A chip link accumulates the current URL's params, so the href carries the
+# page's own sort/limit beside the gpu — match the filter link, not the URL.
+grep -o '<a class="fact link" href="[^"]*"' "$work/fetched" | grep -q 'gpu=rtx-a6000' ||
+  die "the mixed row wears no rtx-a6000 chip"
+grep -o '<a class="fact link" href="[^"]*"' "$work/fetched" | grep -q 'gpu=rtx-3090' ||
+  die "the mixed row wears no rtx-3090 chip"
+# Harness row, harness cleanup: the listing below must see only real publishes.
+npx wrangler d1 execute toktape --local --command "DELETE FROM runs WHERE id = 'mixedrig000000000000'" \
+  >"$work/mixed-clean.log" 2>&1 || { cat "$work/mixed-clean.log"; die "could not clean up the mixed-rig harness row"; }
+# The sort parameter (2026-09-19: the user reversed the no-sort decision; a
+# sort parameter is now honoured and checked).
+curl -fsS "$base/api/v1/runs?sort=decode&limit=50" >"$work/decode.json"
+grep -q '"sort":"decode"' "$work/decode.json" || { cat "$work/decode.json"; die "the decode listing names no sort"; }
+python3 - "$work/decode.json" <<'EOF' || die "the decode listing is not fastest-first with unknowns last"
+import json, sys
+rows = json.load(open(sys.argv[1]))["runs"]
+vals = [r.get("decode_per_sec") for r in rows]
+present = [v for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool)]
+if any(b - a > 0 for a, b in zip(present, present[1:])):
+    sys.exit("not non-increasing: %r" % (present,))
+seen_null = False
+for v in vals:
+    if v is None:
+        seen_null = True
+    elif seen_null:
+        sys.exit("a null figure sorts before a present one")
+EOF
+curl -fsS "$base/api/v1/runs?sort=oldest&limit=50" >"$work/oldest.json"
+python3 - "$work/oldest.json" <<'EOF' || die "the oldest listing is not oldest-first"
+import json, sys
+rows = json.load(open(sys.argv[1]))["runs"]
+ts = [r["published_at"] for r in rows]
+if any(b < a for a, b in zip(ts, ts[1:])):
+    sys.exit("not non-decreasing: %r" % (ts,))
+EOF
+curl -fsS "$base/api/v1/runs?sort=newest&limit=50" >"$work/newest.json"
+curl -fsS "$base/api/v1/runs?limit=50" >"$work/plain.json"
+cmp -s "$work/newest.json" "$work/plain.json" || die "?sort=newest is not byte-identical to no param"
+code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?sort=bogus")
+[ "$code" = "400" ] || { cat "$work/body"; die "an unknown sort was not refused (got $code)"; }
+grep -q 'unknown sort' "$work/body" || { cat "$work/body"; die "the sort refusal does not name the sort"; }
+code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/?sort=bogus")
+[ "$code" = "400" ] || { cat "$work/body"; die "an unknown sort on the page was not refused (got $code)"; }
+# Paging under decode: two limit=1 pages tile the limit=2 page, in order.
+curl -fsS "$base/api/v1/runs?sort=decode&limit=1" >"$work/p1.json"
+eval "$(python3 - "$work/p1.json" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print("id1=%s" % d["runs"][0]["id"])
+print("nxt=%s" % d["next"])
+EOF
+)"
+[ -n "${nxt:-}" ] || die "the first decode page carries no cursor"
+curl -fsS --get --data-urlencode "cursor=$nxt" "$base/api/v1/runs?sort=decode&limit=1" >"$work/p2.json"
+id2="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runs"][0]["id"])' "$work/p2.json")"
+[ "$id1" != "$id2" ] || die "paging under decode repeated a row"
+curl -fsS "$base/api/v1/runs?sort=decode&limit=2" >"$work/p12.json"
+python3 - "$work/p12.json" "$id1" "$id2" <<'EOF' || die "two limit=1 decode pages do not tile the limit=2 page"
+import json, sys
+ids = [r["id"] for r in json.load(open(sys.argv[1]))["runs"][:2]]
+sys.exit(0 if ids == [sys.argv[2], sys.argv[3]] else "got %r" % (ids,))
+EOF
+# The sort box on the front page, and the order named above the rows.
+curl -fsS "$base/" >"$work/fetched" && grep -q '<select name="sort"' "$work/fetched" || die "the front page has no sort box"
+curl -fsS "$base/?sort=decode" >"$work/fetched" && grep -q 'class="total".*fastest decode first' "$work/fetched" ||
+  die "the decode page does not name its order in the total line"
+grep -q 'side by side' "$work/fetched" || die "the decode total carries no caveat sentence"
+# Paging under oldest tiles the same way (the ASC cursor branch).
+curl -fsS "$base/api/v1/runs?sort=oldest&limit=1" >"$work/o1.json"
+eval "$(python3 - "$work/o1.json" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print("oid1=%s" % d["runs"][0]["id"])
+print("onxt=%s" % d["next"])
+EOF
+)"
+[ -n "${onxt:-}" ] || die "the first oldest page carries no cursor"
+curl -fsS --get --data-urlencode "cursor=$onxt" "$base/api/v1/runs?sort=oldest&limit=1" >"$work/o2.json"
+oid2="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runs"][0]["id"])' "$work/o2.json")"
+[ "$oid1" != "$oid2" ] || die "paging under oldest repeated a row"
+curl -fsS "$base/api/v1/runs?sort=oldest&limit=2" >"$work/o12.json"
+python3 - "$work/o12.json" "$oid1" "$oid2" <<'EOF' || die "two limit=1 oldest pages do not tile the limit=2 page"
+import json, sys
+ids = [r["id"] for r in json.load(open(sys.argv[1]))["runs"][:2]]
+sys.exit(0 if ids == [sys.argv[2], sys.argv[3]] else "got %r" % (ids,))
+EOF
 # A filter on a normalised axis, and the raw fallback beside it.
 curl -fsS "$base/api/v1/runs?engine=ik_llama.cpp" >"$work/fetched" && grep -q "\"id\":\"$id\"" "$work/fetched" ||
   die "filtering by engine dropped the run"

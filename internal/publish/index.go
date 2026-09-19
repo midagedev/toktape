@@ -52,9 +52,13 @@ type Index struct {
 	EngineVersion string `json:"engine_version,omitempty"`
 
 	// Where it ran.
-	OS        string   `json:"os,omitempty"`
-	GPUsRaw   []string `json:"gpus_raw,omitempty"`
-	GPUID     string   `json:"gpu_id,omitempty"`
+	OS      string   `json:"os,omitempty"`
+	GPUsRaw []string `json:"gpus_raw,omitempty"`
+	GPUID   string   `json:"gpu_id,omitempty"`
+	// GPUIDs is one id per card in card order, empty ids dropped: the
+	// membership axis a mixed rig is reachable by (TTP-124). A name that
+	// was only vendor noise is not a card.
+	GPUIDs    []string `json:"gpu_ids,omitempty"`
 	GPUCount  int      `json:"gpu_count,omitempty"`
 	VRAMBytes int64    `json:"vram_bytes,omitempty"`
 	RAMBytes  int64    `json:"ram_bytes,omitempty"`
@@ -137,6 +141,13 @@ func IndexOf(t *tape.Tape) Index {
 		// One kind of card: the shared id is the row's gpu_id. A mixed rig
 		// keeps it empty and search falls back to gpus_raw.
 		idx.GPUID = gpuIDs[0]
+	}
+	// One id per card, in card order, empty ids dropped. GPUID/HostClass
+	// above are exactly as they were — other consumers read them.
+	for _, id := range gpuIDs {
+		if id != "" {
+			idx.GPUIDs = append(idx.GPUIDs, id)
+		}
 	}
 
 	// The rate choice is the one the rest of the repo already makes: above

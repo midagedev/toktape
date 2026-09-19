@@ -24,6 +24,9 @@ export const INDEX_COLUMNS = [
   "os",
   "gpus_raw",
   "gpu_id",
+  // One id per card that took part (TTP-124, 2026-09-19): the membership
+  // axis beside the shared gpu_id.
+  "gpu_ids",
   "gpu_count",
   "vram_bytes",
   "host_class",
@@ -50,6 +53,9 @@ export function columnValues(idx) {
     // there — so this is the only thing such a row can be found by (§9.4).
     Array.isArray(idx.gpus_raw) && idx.gpus_raw.length ? idx.gpus_raw.join(" / ") : null,
     str(idx.gpu_id),
+    // Copy only: the array the client derived, stored as JSON text for
+    // json_each. Never derived here (§9.6).
+    Array.isArray(idx.gpu_ids) && idx.gpu_ids.length ? JSON.stringify(idx.gpu_ids) : null,
     num(idx.gpu_count),
     num(idx.vram_bytes),
     str(idx.host_class),
