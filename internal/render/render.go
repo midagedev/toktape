@@ -28,8 +28,9 @@ import (
 
 // Defaults for Options. The frame size is the one the TUI is designed around
 // (tui.MinWidth × tui.MinHeight is the floor; 120×36 is the shape the panes
-// were laid out in). It is the default for the GIF, the asciicast and
-// FrameImage; the mp4 and the frame sequence default to VideoWidth×VideoHeight.
+// were laid out in). It is the default for the asciicast and FrameImage; the
+// GIF, the mp4 and the frame sequence default to VideoWidth×VideoHeight,
+// which is 16:9 — the card's shape.
 const (
 	DefaultWidth  = 120
 	DefaultHeight = 36
@@ -69,9 +70,16 @@ const (
 	// 16:9 as the video at a size a GIF can afford. It used to keep
 	// DefaultWidth×DefaultHeight because a 16:9 hero's body text was too small
 	// to read in a feed; the scoreboard carries the figure now, so that no
-	// longer decides it (internal/render/cmd/hero). The plain --gif default is
-	// still DefaultWidth×DefaultHeight, which is what a first run gets and what
-	// the help quotes.
+	// longer decides it (internal/render/cmd/hero).
+	//
+	// 2026-09-19: the plain --gif default came here too, so the clip a person
+	// gets for their own run is the shape of the card they post beside it
+	// (user: "png 요약카드가 toktape 재생 크기랑 다른것도 신경쓰여 딱
+	// 맞아야하는데"). It had stayed on the terminal grid for a byte budget that
+	// measurement did not support — on hero.tape at GIFFontSize, 120×36 is
+	// 1,818,343 bytes against 156×38's 1,756,292, because a GIF stores the
+	// rectangle that changed and the narrower layout changes more of it. See
+	// TestGIFDefaultsToTheVideoShape for what that leaves being paid.
 	VideoWidth  = 156
 	VideoHeight = 38
 )
@@ -139,10 +147,7 @@ func Canvas(o Options, video bool) (w, h int, err error) {
 	if video {
 		o = o.withVideoDefaults()
 	} else {
-		if o.FontSize <= 0 {
-			o.FontSize = GIFFontSize
-		}
-		o = o.withDefaults()
+		o = o.withGIFDefaults()
 	}
 	rs, err := newRasteriser(o.FontSize)
 	if err != nil {
@@ -169,9 +174,10 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-// withVideoDefaults is withDefaults for the video paths (MP4, Frames): an
-// unset size is VideoWidth×VideoHeight rather than the GIF's
-// DefaultWidth×DefaultHeight. A size the caller gave is used as given.
+// withVideoDefaults is withDefaults for the paths that draw a 16:9 frame —
+// MP4, Frames and, since 2026-09-19, GIF: an unset size is
+// VideoWidth×VideoHeight rather than the terminal's DefaultWidth×DefaultHeight.
+// A size the caller gave is used as given.
 func (o Options) withVideoDefaults() Options {
 	if o.Width == 0 {
 		o.Width = VideoWidth
@@ -180,6 +186,18 @@ func (o Options) withVideoDefaults() Options {
 		o.Height = VideoHeight
 	}
 	return o.withDefaults()
+}
+
+// withGIFDefaults is the GIF's resolution of the two axes that differ by
+// output. The grid is the video's, so a GIF is the same 16:9 as the card it
+// is posted beside; the cell stays GIFFontSize, because a GIF is still the
+// inline artifact with a file-size budget on it. The two used to move
+// together and did not have to.
+func (o Options) withGIFDefaults() Options {
+	if o.FontSize <= 0 {
+		o.FontSize = GIFFontSize
+	}
+	return o.withVideoDefaults()
 }
 
 // validate rejects a geometry the TUI cannot draw. A frame smaller than the

@@ -41,7 +41,7 @@ Flags:
   --duration D     length of the clip (default: derived from the run)
   --fps N          frame rate (default 30)
   --size WxH       terminal size in cells, not pixels (default 156x38 for
-                   --mp4/--frames, 120x36 for --gif/--cast; see Canvas)
+                   --gif/--mp4/--frames, 120x36 for --cast; see Canvas)
   --out DIR        where to look for the newest run (default ~/.toktape/runs)
 
 Clip length
@@ -92,6 +92,11 @@ Canvas, and cutting a window out of a clip
   frames. Each ✓ line prints the canvas it drew, and --font-size makes the
   outputs agree: --frames --font-size 13 --size 120x36 is the GIF's picture,
   frame for frame, for an encoder of your own.
+
+  Left alone, every picture of a run is 16:9 — the GIF 1280x720, the mp4 and
+  the frames 1920x1080, the card 1200x675 — so a clip and the card posted
+  beside it are the same shape. Only --cast keeps 120x36: an asciicast is
+  replayed in a terminal, where an aspect ratio means nothing.
 
   When you want part of a clip, cut the finished GIF rather than re-rendering
   or re-encoding it:

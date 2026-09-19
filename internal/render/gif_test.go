@@ -218,11 +218,12 @@ func TestGIFOfARunReplaysTheRenderedFrames(t *testing.T) {
 		t.Fatalf("GIF: %v", err)
 	}
 
-	want := opts
-	want.FontSize = GIFFontSize
-	want = want.withDefaults()
+	// The GIF's own resolution of the defaults, not a copy of it: this used to
+	// spell out "GIFFontSize, then withDefaults", which silently stopped
+	// describing GIF() when the grid moved to the video's (2026-09-19).
+	want := opts.withGIFDefaults()
 	// The renderer's own schedule, poster frame included (2026-09-14).
-	_, sched, err := prepare(tp, opts)
+	_, sched, err := prepare(tp, want)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,13 +29,12 @@ const histFrames = 24
 // is added to the previous frame's delay, so the three-second card hold is one
 // frame, not ninety.
 //
-// Options.FontSize defaults to GIFFontSize here rather than DefaultFontSize:
-// see the constant.
+// The size defaults are withGIFDefaults: the video's cell grid, so a GIF is
+// the same 16:9 as the card posted beside it, at GIFFontSize rather than
+// DefaultFontSize because this is the artifact with a byte budget. A size the
+// caller gave is used as given.
 func GIF(tp *tape.Tape, opts Options, out string) error {
-	if opts.FontSize <= 0 {
-		opts.FontSize = GIFFontSize
-	}
-	o, sched, err := prepare(tp, opts)
+	o, sched, err := prepare(tp, opts.withGIFDefaults())
 	if err != nil {
 		return err
 	}
