@@ -141,10 +141,16 @@ function runPage(row, idx, base) {
     ["model id", withSource(idx.model_id, idx.model_id_source)],
     ["repo", idx.repo || "—"],
     ["quantisation", idx.quant_raw ? `${idx.quant_raw}${idx.quant_bits ? ` · ${bits(idx.quant_bits)} bit` : ""}` : "?"],
+    ["size", sizeRow(idx)],
     ["engine", [idx.engine_kind, idx.engine_version].filter(Boolean).join(" ") || "?"],
     ["host", [idx.os, idx.host_class].filter(Boolean).join(" · ") || "?"],
     ["gpus", idx.gpus_raw && idx.gpus_raw.length ? idx.gpus_raw.join(" / ") : "—"],
     ["streams", idx.sessions ? String(idx.sessions) : "?"],
+    ["workload", workloadRow(idx)],
+    ["context", contextRow(idx)],
+    ["config", configRow(idx)],
+    ["draft", draftRow(idx)],
+    ["machine", machineRow(idx)],
     ["prompt set", idx.prompt_set || "not in a comparison set"],
     // The offset is left on, deliberately: whether recorded_at should be
     // normalised to UTC is still open (TTP-120), and hiding the offset while
@@ -478,6 +484,88 @@ function summaryLine(idx) {
 // figure like 6.5625 (a real UD-Q6_K measurement) does not pretend to four.
 function bits(b) {
   return Number(b).toFixed(2).replace(/\.?0+$/, "");
+}
+
+// The figure rows (TTP-130). Every part is copied from the index the client
+// derived — unknown parts are omitted, and a row with nothing known reads
+// `?` (size/workload/context/config) or is left out by the table's `—`
+// filter (draft/machine, which apply only sometimes).
+function sizeRow(idx) {
+  const parts = [];
+  if (idx.params) parts.push(`${fmtB(idx.params)} params`);
+  if (idx.moe === true && idx.active_params) parts.push(`${fmtB(idx.active_params)} active`);
+  if (idx.file_bytes) parts.push(`${(idx.file_bytes / 1e9).toFixed(1)} GB`);
+  if (idx.n_experts || idx.n_experts_used) {
+    parts.push(`MoE ${idx.n_experts || "?"}${idx.n_experts_used ? `/${idx.n_experts_used}` : ""}`);
+  }
+  return parts.length ? parts.join(" · ") : "?";
+}
+
+function workloadRow(idx) {
+  const parts = [];
+  const io = [];
+  if (idx.prompt_n) io.push(`${idx.prompt_n} in`);
+  if (idx.predicted_n) io.push(`${idx.predicted_n} out`);
+  if (io.length) parts.push(io.join(" / "));
+  if (idx.min_predicted_n) parts.push(`min ${idx.min_predicted_n}`);
+  if (idx.reasoning_n) parts.push(`${idx.reasoning_n} thinking`);
+  const cache = cacheLabel(idx.cache_hit_ratio, idx.prompt_n);
+  if (cache) parts.push(cache);
+  if (!parts.length) return "?";
+  let s = parts.join(" · ");
+  if (idx.sessions > 1) s += " · per stream";
+  return s;
+}
+
+function contextRow(idx) {
+  const parts = [];
+  if (idx.ctx_size) parts.push(`${idx.ctx_size} window`);
+  if (idx.n_slots) parts.push(`${idx.n_slots} slot${idx.n_slots === 1 ? "" : "s"}`);
+  return parts.length ? parts.join(" · ") : "?";
+}
+
+function configRow(idx) {
+  const parts = [];
+  if (idx.fa) parts.push(`fa ${idx.fa}`);
+  if (idx.kv_cache) parts.push(`kv ${idx.kv_cache}`);
+  if (idx.batch) parts.push(`b ${idx.batch}`);
+  if (idx.ubatch) parts.push(`ub ${idx.ubatch}`);
+  if (idx.ngl) parts.push(`ngl ${idx.ngl}`);
+  if (idx.offload) parts.push(`offload ${idx.offload}`);
+  return parts.length ? parts.join(" · ") : "?";
+}
+
+function draftRow(idx) {
+  if (!idx.draft_model) return "—";
+  if (idx.draft_accept) return `${idx.draft_model} · ${Math.round(idx.draft_accept * 100)}% accepted`;
+  return idx.draft_model;
+}
+
+function machineRow(idx) {
+  const parts = [];
+  if (idx.power_w && idx.power_limit_w) parts.push(`${trimNum(idx.power_w)} of ${trimNum(idx.power_limit_w)} W`);
+  else if (idx.power_w) parts.push(`${trimNum(idx.power_w)} W`);
+  if (idx.throttled === true) parts.push("throttled");
+  if (idx.cold === true) parts.push("cold cache");
+  return parts.length ? parts.join(" · ") : "—";
+}
+
+// fmtB and cacheLabel are duplicated from search.js on purpose: search.js
+// imports this file (anonBadge, authorOf), so the helpers cannot live in
+// only one place without a cycle. The two copies print the same strings.
+function fmtB(n) {
+  const b = n / 1e9;
+  return b >= 10 ? `${Math.round(b)}B` : `${Math.round(b * 10) / 10}B`;
+}
+
+function cacheLabel(ratio, prompt_n) {
+  if (ratio !== null && ratio !== undefined) return `cache ${Math.round(ratio * 100)}%`;
+  if (prompt_n > 0) return "cache 0%";
+  return null;
+}
+
+function trimNum(n) {
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
 }
 
 function kb(n) {

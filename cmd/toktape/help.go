@@ -44,7 +44,9 @@ Reading the site
   service's own body verbatim, so there is one parse path and not two.
   ` + "`runs --sort decode`" + ` and ` + "`--sort oldest`" + ` travel as a sort the
   server may not know yet; an older server refuses with a 400, printed
-  verbatim.
+  verbatim. ` + "`toktape reindex <id>`" + ` rewrites a published row from its
+  tape with this build's figures; it needs the journal token, like
+  ` + "`publish --edit`" + `.
 
 Careful: a run generates for twenty seconds by default
   --for is the run's wall-clock budget and defaults to 20s, measured from the
@@ -278,6 +280,9 @@ func usageFor(verb string) string {
 	}
 	if verb == "show" {
 		return showUsage
+	}
+	if verb == "reindex" {
+		return reindexUsage
 	}
 	return usageText
 }

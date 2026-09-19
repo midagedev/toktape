@@ -53,6 +53,23 @@ func TestIndexOfSingleStream(t *testing.T) {
 		DecodePerSec:  17.4, // single stream: the stream's own rate
 		PrefillPerSec: 610,
 		TTFTp50Ms:     630, // single stream: Timings.TTFTMs, the Prefill row's TTFT
+
+		// The figures behind a rate (extended 2026-09-19 for TTP-130 — the
+		// want grew fields, no assertion was loosened).
+		PromptN:       512, // Cache.PromptTotal, the card's "in" figure
+		PredictedN:    320,
+		CacheHitRatio: 0.25,
+		CtxSize:       16384,
+		NSlots:        8,
+		FA:            "on",
+		KVCache:       "q8_0", // ctk == ctv
+		Batch:         "2048",
+		UBatch:        "512",
+		NGL:           "99",
+		Offload:       "full", // two GPUs, no CPU device
+		PowerW:        650,    // 340 + 310 over GPUs with PowerW > 0
+		FileBytes:     45655502848,
+		ActiveParams:  70553706496, // dense: the whole model
 	}
 	if !reflect.DeepEqual(idx, want) {
 		t.Errorf("IndexOf(single-stream example):\n got  %+v\n want %+v", idx, want)
@@ -116,8 +133,59 @@ func TestIndexOfZeroTape(t *testing.T) {
 	if len(idx.GPUsRaw) != 0 || idx.GPUCount != 0 || idx.VRAMBytes != 0 || idx.RAMBytes != 0 {
 		t.Errorf("host fields on a zero tape: %+v", idx)
 	}
+	// The figures behind a rate (TTP-130, 2026-09-19): none of them may be
+	// invented on a tape that measured nothing.
+	for _, tt := range []struct {
+		field string
+		isSet bool
+	}{
+		{"PromptN", idx.PromptN != 0},
+		{"PredictedN", idx.PredictedN != 0},
+		{"MinPredictedN", idx.MinPredictedN != 0},
+		{"ReasoningN", idx.ReasoningN != 0},
+		{"CacheHitRatio", idx.CacheHitRatio != 0},
+		{"CtxSize", idx.CtxSize != 0},
+		{"NSlots", idx.NSlots != 0},
+		{"FA", idx.FA != ""},
+		{"KVCache", idx.KVCache != ""},
+		{"Batch", idx.Batch != ""},
+		{"UBatch", idx.UBatch != ""},
+		{"NGL", idx.NGL != ""},
+		{"Offload", idx.Offload != ""},
+		{"DraftModel", idx.DraftModel != ""},
+		{"DraftAccept", idx.DraftAccept != 0},
+		{"Throttled", idx.Throttled},
+		{"Cold", idx.Cold},
+		{"PowerW", idx.PowerW != 0},
+		{"PowerLimitW", idx.PowerLimitW != 0},
+		{"FileBytes", idx.FileBytes != 0},
+		{"ActiveParams", idx.ActiveParams != 0},
+		{"NExperts", idx.NExperts != 0},
+		{"NExpertsUsed", idx.NExpertsUsed != 0},
+	} {
+		if tt.isSet {
+			t.Errorf("%s is set on a zero tape", tt.field)
+		}
+	}
 	if idx.CaveatCount != len(idx.Caveats) {
 		t.Errorf("CaveatCount = %d, len(Caveats) = %d", idx.CaveatCount, len(idx.Caveats))
+	}
+	// ... and none of them may reach the wire, either: omitempty keeps an
+	// unset field absent from the JSON, never a zero with a key.
+	b, err := json.Marshal(idx)
+	if err != nil {
+		t.Fatalf("marshal zero index: %v", err)
+	}
+	for _, key := range []string{
+		"prompt_n", "predicted_n", "min_predicted_n", "reasoning_n",
+		"cache_hit_ratio", "ctx_size", "n_slots", "fa", "kv_cache",
+		"batch", "ubatch", "ngl", "offload", "draft_model", "draft_accept",
+		"throttled", "cold", "power_w", "power_limit_w", "file_bytes",
+		"active_params", "n_experts", "n_experts_used",
+	} {
+		if bytes.Contains(b, []byte(`"`+key+`"`)) {
+			t.Errorf("unset field %q present in zero-tape JSON: %s", key, b)
+		}
 	}
 }
 
@@ -213,6 +281,11 @@ func TestIndexJSONRoundTrip(t *testing.T) {
 		"os", "gpus_raw", "gpu_id", "gpu_ids", "gpu_count", "vram_bytes", "ram_bytes",
 		"host_class", "sessions", "prompt_set", "decode_per_sec",
 		"prefill_per_sec", "ttft_p50_ms", "caveats", "caveat_count",
+		"prompt_n", "predicted_n", "min_predicted_n", "reasoning_n",
+		"cache_hit_ratio", "ctx_size", "n_slots", "fa", "kv_cache",
+		"batch", "ubatch", "ngl", "offload", "draft_model", "draft_accept",
+		"throttled", "cold", "power_w", "power_limit_w", "file_bytes",
+		"active_params", "n_experts", "n_experts_used",
 	}
 	for _, key := range absent {
 		if bytes.Contains(sparse, []byte(`"`+key+`"`)) {
@@ -362,6 +435,211 @@ func TestIndexOfGPUIDs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The figures behind a rate (TTP-130): every contract field derived from
+// the tape side of the table, each pinned against a tape that carries it.
+func TestIndexOfFigures(t *testing.T) {
+	intptr := func(n int) *int { return &n }
+
+	t.Run("prompt_n is the card's in figure, cache total first", func(t *testing.T) {
+		s := tape.RunSummary{
+			Cache:   tape.CacheSummary{PromptTotal: 600},
+			Timings: tape.TimingsSummary{PromptN: 100, CacheN: 50},
+		}
+		if got := IndexOf(&tape.Tape{Summary: s}).PromptN; got != 600 {
+			t.Errorf("PromptN = %d, want 600 (Cache.PromptTotal, not 100+50)", got)
+		}
+		bare := tape.RunSummary{Timings: tape.TimingsSummary{PromptN: 100, CacheN: 50}}
+		if got, want := IndexOf(&tape.Tape{Summary: bare}).PromptN, card.PromptTokens(&bare); got != want || got != 150 {
+			t.Errorf("PromptN = %d, want card.PromptTokens = %d = 150 (the PromptN+CacheN fallback)", got, want)
+		}
+	})
+
+	t.Run("predicted, min and reasoning are copied", func(t *testing.T) {
+		s := tape.RunSummary{
+			Timings:   tape.TimingsSummary{PredictedN: 214, ReasoningN: 30},
+			Aggregate: tape.AggregateTimings{MinPredictedN: 12},
+		}
+		idx := IndexOf(&tape.Tape{Summary: s})
+		if idx.PredictedN != 214 || idx.MinPredictedN != 12 || idx.ReasoningN != 30 {
+			t.Errorf("got predicted/min/reasoning = %d/%d/%d, want 214/12/30",
+				idx.PredictedN, idx.MinPredictedN, idx.ReasoningN)
+		}
+	})
+
+	t.Run("cache ratio, ctx and slots", func(t *testing.T) {
+		s := tape.RunSummary{
+			Cache:  tape.CacheSummary{HitRatio: 0.5},
+			Server: tape.ServerInfo{CtxSize: 8192, NSlots: 4},
+		}
+		idx := IndexOf(&tape.Tape{Summary: s})
+		if idx.CacheHitRatio != 0.5 || idx.CtxSize != 8192 || idx.NSlots != 4 {
+			t.Errorf("got ratio/ctx/slots = %v/%d/%d, want 0.5/8192/4",
+				idx.CacheHitRatio, idx.CtxSize, idx.NSlots)
+		}
+	})
+
+	t.Run("fa, batch, ubatch and ngl travel verbatim", func(t *testing.T) {
+		s := tape.RunSummary{
+			Server: tape.ServerInfo{Flags: tape.ServerFlags{
+				FlashAttn: "auto", Batch: "2048", UBatch: "512", NGL: "99",
+			}},
+		}
+		idx := IndexOf(&tape.Tape{Summary: s})
+		if idx.FA != "auto" || idx.Batch != "2048" || idx.UBatch != "512" || idx.NGL != "99" {
+			t.Errorf("got fa/batch/ubatch/ngl = %q/%q/%q/%q, want auto/2048/512/99",
+				idx.FA, idx.Batch, idx.UBatch, idx.NGL)
+		}
+	})
+
+	t.Run("kv_cache joins the two cache types", func(t *testing.T) {
+		for _, c := range []struct {
+			name string
+			k, v string
+			want string
+		}{
+			{"agreeing pair is the one", "q8_0", "q8_0", "q8_0"},
+			{"a split pair is k/v", "q8_0", "q4_0", "q8_0/q4_0"},
+			{"only k is k", "q8_0", "", "q8_0"},
+			{"only v is v", "", "q4_0", "q4_0"},
+			{"neither is unknown", "", "", ""},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				s := tape.RunSummary{
+					Server: tape.ServerInfo{Flags: tape.ServerFlags{
+						CacheTypeK: c.k, CacheTypeV: c.v,
+					}},
+				}
+				if got := IndexOf(&tape.Tape{Summary: s}).KVCache; got != c.want {
+					t.Errorf("KVCache = %q, want %q", got, c.want)
+				}
+			})
+		}
+	})
+
+	t.Run("offload names where the weights sit", func(t *testing.T) {
+		gpu := func() tape.DevicePlacement {
+			return tape.DevicePlacement{Device: "GPU0", Classes: map[tape.TensorClass]int64{tape.ClassFFN: 100}}
+		}
+		for _, c := range []struct {
+			name string
+			devs []tape.DevicePlacement
+			want string
+		}{
+			{"gpus and no cpu is full", []tape.DevicePlacement{gpu()}, "full"},
+			{"gpus and weight bytes on cpu is partial", []tape.DevicePlacement{gpu(),
+				{Device: tape.DeviceCPU, Classes: map[tape.TensorClass]int64{tape.ClassFFN: 50}}}, "partial"},
+			// llama.cpp's token_embd lives on the host at every -ngl (lead,
+			// 2026-09-19): embeddings alone on CPU is still a full offload.
+			{"gpus and only embeddings on cpu is full", []tape.DevicePlacement{gpu(),
+				{Device: tape.DeviceCPU, Classes: map[tape.TensorClass]int64{tape.ClassEmbed: 50}}}, "full"},
+			{"no gpu is cpu", []tape.DevicePlacement{
+				{Device: tape.DeviceCPU, Classes: map[tape.TensorClass]int64{tape.ClassFFN: 50}}}, "cpu"},
+			{"no devices is unknown", nil, ""},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				s := tape.RunSummary{Placement: tape.PlacementSummary{Devices: c.devs}}
+				if got := IndexOf(&tape.Tape{Summary: s}).Offload; got != c.want {
+					t.Errorf("Offload = %q, want %q", got, c.want)
+				}
+			})
+		}
+	})
+
+	t.Run("draft_accept needs both halves and a drafted token", func(t *testing.T) {
+		draft, accepted := 100, 62
+		for _, c := range []struct {
+			name string
+			n, a *int
+			want float64
+		}{
+			{"62 of 100 is 0.62", intptr(draft), intptr(accepted), 0.62},
+			{"no draft count is unknown", nil, intptr(accepted), 0},
+			{"no accepted count is unknown", intptr(draft), nil, 0},
+			{"zero drafted is unknown, never a division", intptr(0), intptr(0), 0},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				s := tape.RunSummary{Timings: tape.TimingsSummary{DraftN: c.n, DraftNAccepted: c.a}}
+				if got := IndexOf(&tape.Tape{Summary: s}).DraftAccept; got != c.want {
+					t.Errorf("DraftAccept = %v, want %v", got, c.want)
+				}
+			})
+		}
+	})
+
+	t.Run("throttled fires on any gpu, power sums the readings", func(t *testing.T) {
+		s := tape.RunSummary{GPUsAtEnd: []tape.GPUSample{
+			{Index: 0, PowerW: 200, PowerLimitW: 300},
+			{Index: 1, PowerW: 81, PowerLimitW: 150, Throttled: true},
+			{Index: 2}, // no reading: contributes to neither sum
+		}}
+		idx := IndexOf(&tape.Tape{Summary: s})
+		if !idx.Throttled {
+			t.Error("Throttled = false, want true (one card throttled)")
+		}
+		// The card's narrow verdict, not the tape's wide bit (lead,
+		// 2026-09-19): a mask that only says "sw power cap" is a card at
+		// its own operating point, and the card prints "throttled: no".
+		capped := tape.RunSummary{GPUsAtEnd: []tape.GPUSample{{Throttled: true, ThrottleMask: 1 << 10}}}
+		if IndexOf(&tape.Tape{Summary: capped}).Throttled {
+			t.Error("Throttled = true for a sw-power-cap-only mask; the card says no")
+		}
+		if idx.PowerW != 281 || idx.PowerLimitW != 450 {
+			t.Errorf("power = %v of %v W, want 281 of 450", idx.PowerW, idx.PowerLimitW)
+		}
+		if got := IndexOf(&tape.Tape{}).Throttled; got {
+			t.Error("Throttled on a tape with no readings, want false")
+		}
+	})
+
+	t.Run("cold follows the cache label, draft model is the base name", func(t *testing.T) {
+		s := tape.RunSummary{
+			Cache:  tape.CacheSummary{Label: tape.CacheCold},
+			Server: tape.ServerInfo{Flags: tape.ServerFlags{DraftModel: "tiny-draft"}},
+		}
+		idx := IndexOf(&tape.Tape{Summary: s})
+		if !idx.Cold {
+			t.Error("Cold = false, want true (the cache label says cold)")
+		}
+		if idx.DraftModel != "tiny-draft" {
+			t.Errorf("DraftModel = %q, want the base name verbatim", idx.DraftModel)
+		}
+	})
+
+	t.Run("file_bytes and the experts ride along", func(t *testing.T) {
+		s := tape.RunSummary{Model: tape.ModelInfo{
+			FileBytes: 45655502848, NExperts: 128, NExpertsUsed: 8,
+		}}
+		idx := IndexOf(&tape.Tape{Summary: s})
+		if idx.FileBytes != 45655502848 || idx.NExperts != 128 || idx.NExpertsUsed != 8 {
+			t.Errorf("got file/experts/used = %d/%d/%d, want 45655502848/128/8",
+				idx.FileBytes, idx.NExperts, idx.NExpertsUsed)
+		}
+	})
+
+	t.Run("active_params is the params touched per token", func(t *testing.T) {
+		for _, c := range []struct {
+			name  string
+			model tape.ModelInfo
+			want  int64
+		}{
+			{"dense is the whole model", tape.ModelInfo{Params: 70553706496}, 70553706496},
+			{"moe scales by the byte share", tape.ModelInfo{
+				Params: 100_000_000_000, FileBytes: 50_000_000_000,
+				ActiveBytesPerToken: 10_000_000_000, NExperts: 128, NExpertsUsed: 8,
+			}, 20_000_000_000},
+			{"moe with no byte reading is unknown, not a fraction guess", tape.ModelInfo{
+				Params: 100_000_000_000, FileBytes: 50_000_000_000, NExperts: 128, NExpertsUsed: 8,
+			}, 0},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				if got := IndexOf(&tape.Tape{Summary: tape.RunSummary{Model: c.model}}).ActiveParams; got != c.want {
+					t.Errorf("ActiveParams = %d, want %d", got, c.want)
+				}
+			})
+		}
+	})
 }
 
 // The prompt set is passed through, never re-derived: it decides what a run is

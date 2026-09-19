@@ -256,6 +256,7 @@ toktape play ~/.toktape/runs/<id>.toktape --speed 2
 | `profile` | 올릴 때마다 붙는 작성자 정보를 정합니다 | `toktape profile --name NAME --link URL --avatar FILE --bio TEXT` |
 | `runs` | 올라간 실행 목록. 사이트와 같은 필터와 순서 | `toktape runs --gpu rtx-3090 --sort decode` |
 | `show` | 올라간 실행 하나를 읽습니다. `--save`로 기록도 받습니다 | `toktape show <id> --save run.toktape` |
+| `reindex` | 올라간 실행의 검색 행을 기록에서 다시 계산합니다. 새 toktape가 색인하는 수치가 옛 실행에도 붙습니다 | `toktape reindex <id>` |
 | `version` | 버전 출력 | `toktape version` |
 
 **녹화는 몇 초짜리인가.** 실행은 시계로 끝납니다. 기본 20초이고,

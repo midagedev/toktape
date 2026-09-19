@@ -264,6 +264,7 @@ toktape play ~/.toktape/runs/<id>.toktape --speed 2
 | `profile` | 公開のたびに付く作者情報を決める | `toktape profile --name NAME --link URL --avatar FILE --bio TEXT` |
 | `runs` | 公開済みの実行を一覧する。サイトと同じフィルタと順序 | `toktape runs --gpu rtx-3090 --sort decode` |
 | `show` | 公開済みの実行をひとつ読む。`--save` で記録も取る | `toktape show <id> --save run.toktape` |
+| `reindex` | 公開済みの実行の検索行を記録から作り直す。新しい toktape が索引する数値が古い実行にも付く | `toktape reindex <id>` |
 | `version` | バージョンを表示する | `toktape version` |
 
 **1 回の記録は何秒か。** 実行は時計で終わります。既定は 20 秒で、

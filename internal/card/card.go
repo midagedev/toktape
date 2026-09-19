@@ -379,7 +379,7 @@ func speedSection(s *tape.RunSummary) []string {
 	}
 	out = append(out, field(decodeLabel, speedLabelW, " · ", decodeParts(s)...)...)
 
-	promptTotal := promptTokens(s)
+	promptTotal := PromptTokens(s)
 	out = append(out, field("Prefill", speedLabelW, " · ", prefillParts(s, promptTotal)...)...)
 
 	if parts := draftParts(s); len(parts) > 0 {
@@ -988,8 +988,8 @@ func contextString(ctxSize, in, out, thinking int) string {
 // thinking model that answered without thinking.
 func reasoningTokens(s *tape.RunSummary) int { return s.Timings.ReasoningN }
 
-// promptTokens is the whole prompt the run sent, cached prefix included.
-func promptTokens(s *tape.RunSummary) int {
+// PromptTokens is the whole prompt the run sent, cached prefix included.
+func PromptTokens(s *tape.RunSummary) int {
 	if s.Cache.PromptTotal > 0 {
 		return s.Cache.PromptTotal
 	}

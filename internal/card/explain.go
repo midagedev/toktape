@@ -66,7 +66,7 @@ func ExplainCaveats(s *tape.RunSummary) string {
 		{CodeColdCache, fmt.Sprintf("cache label %q, %s maj faults/token",
 			s.Cache.Label, formatFloat1(s.Memory.MajFaultsPerToken))},
 		{CodeShortPromptForPrefill, fmt.Sprintf("%d prompt tokens, floor %d",
-			promptTokens(s), MinPrefillPromptTokens)},
+			PromptTokens(s), MinPrefillPromptTokens)},
 		// The per-stream count beside the run-level flag it now decides
 		// independently of (lead, 2026-09-15): the flag describes the means,
 		// so both numbers are needed to answer "why did this card warn" — and
@@ -102,7 +102,7 @@ func ExplainCaveats(s *tape.RunSummary) string {
 	// The figures the card qualifies, and which spelling it chose for each, so
 	// a card that prints a bandwidth nobody expected says where it came from.
 	fmt.Fprintf(&b, "  %-28s %s\n", "decode row", strings.Join(decodeParts(s), " · "))
-	fmt.Fprintf(&b, "  %-28s %s\n", "prefill row", strings.Join(prefillParts(s, promptTokens(s)), " · "))
+	fmt.Fprintf(&b, "  %-28s %s\n", "prefill row", strings.Join(prefillParts(s, PromptTokens(s)), " · "))
 	if parts := draftParts(s); len(parts) > 0 {
 		fmt.Fprintf(&b, "  %-28s %s\n", "draft row", strings.Join(parts, " · "))
 	}

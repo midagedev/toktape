@@ -10,6 +10,7 @@
 package publish
 
 import (
+	"math"
 	"time"
 
 	"github.com/midagedev/toktape/internal/card"
@@ -70,6 +71,34 @@ type Index struct {
 	DecodePerSec  float64 `json:"decode_per_sec,omitempty"`
 	PrefillPerSec float64 `json:"prefill_per_sec,omitempty"`
 	TTFTp50Ms     float64 `json:"ttft_p50_ms,omitempty"`
+
+	// The figures behind a rate (TTP-130). Every field is additive and
+	// omitempty: absent means unknown, and the reader prints ? or omits
+	// the chip. The JSON names are the contract with the Worker, which
+	// only copies them — neither side may rename or re-derive.
+	PromptN       int     `json:"prompt_n,omitempty"`
+	PredictedN    int     `json:"predicted_n,omitempty"`
+	MinPredictedN int     `json:"min_predicted_n,omitempty"`
+	ReasoningN    int     `json:"reasoning_n,omitempty"`
+	CacheHitRatio float64 `json:"cache_hit_ratio,omitempty"`
+	CtxSize       int     `json:"ctx_size,omitempty"`
+	NSlots        int     `json:"n_slots,omitempty"`
+	FA            string  `json:"fa,omitempty"`
+	KVCache       string  `json:"kv_cache,omitempty"`
+	Batch         string  `json:"batch,omitempty"`
+	UBatch        string  `json:"ubatch,omitempty"`
+	NGL           string  `json:"ngl,omitempty"`
+	Offload       string  `json:"offload,omitempty"`
+	DraftModel    string  `json:"draft_model,omitempty"`
+	DraftAccept   float64 `json:"draft_accept,omitempty"`
+	Throttled     bool    `json:"throttled,omitempty"`
+	Cold          bool    `json:"cold,omitempty"`
+	PowerW        float64 `json:"power_w,omitempty"`
+	PowerLimitW   float64 `json:"power_limit_w,omitempty"`
+	FileBytes     int64   `json:"file_bytes,omitempty"`
+	ActiveParams  int64   `json:"active_params,omitempty"`
+	NExperts      int     `json:"n_experts,omitempty"`
+	NExpertsUsed  int     `json:"n_experts_used,omitempty"`
 
 	// How much to trust it. The card's caveats travel with the row: a search
 	// result that drops them is a leaderboard with the sorting removed.
@@ -170,6 +199,47 @@ func IndexOf(t *tape.Tape) Index {
 		idx.TTFTp50Ms = s.Timings.TTFTMs
 	}
 
+	// The figures behind a rate (TTP-130): the card's "in" figure, its
+	// "out" figure, and everything that qualifies them. MinPredictedN lives
+	// on the aggregate, not the timings: Timings.PredictedN is the
+	// per-stream mean above one stream while the minimum is a whole-run
+	// figure (tape.AggregateTimings), so it has no per-stream home.
+	idx.PromptN = card.PromptTokens(&s)
+	idx.PredictedN = s.Timings.PredictedN
+	idx.MinPredictedN = s.Aggregate.MinPredictedN
+	idx.ReasoningN = s.Timings.ReasoningN
+	idx.CacheHitRatio = s.Cache.HitRatio
+	idx.CtxSize = s.Server.CtxSize
+	idx.NSlots = s.Server.NSlots
+	idx.FA = s.Server.Flags.FlashAttn
+	idx.KVCache = kvCache(s.Server.Flags.CacheTypeK, s.Server.Flags.CacheTypeV)
+	idx.Batch = s.Server.Flags.Batch
+	idx.UBatch = s.Server.Flags.UBatch
+	idx.NGL = s.Server.Flags.NGL
+	idx.Offload = offloadKind(s.Placement)
+	idx.DraftModel = s.Server.Flags.DraftModel
+	idx.DraftAccept = draftAcceptRate(s.Timings.DraftN, s.Timings.DraftNAccepted)
+	// card.GPUThrottled, not g.Throttled: the card's verdict is the narrow
+	// one (a card boosting into its own power cap is not "throttled"), and a
+	// row that said yes under a card that says no would be the two
+	// disagreeing about one run (lead, 2026-09-19 — the hero did exactly that).
+	for _, g := range s.GPUsAtEnd {
+		if card.GPUThrottled(g) {
+			idx.Throttled = true
+		}
+		if g.PowerW > 0 {
+			idx.PowerW += g.PowerW
+		}
+		if g.PowerLimitW > 0 {
+			idx.PowerLimitW += g.PowerLimitW
+		}
+	}
+	idx.Cold = s.Cache.Label == tape.CacheCold
+	idx.FileBytes = s.Model.FileBytes
+	idx.ActiveParams = activeParams(s.Model)
+	idx.NExperts = s.Model.NExperts
+	idx.NExpertsUsed = s.Model.NExpertsUsed
+
 	// The codes only — the sentences live on the card, and a code is the
 	// handle a consumer branches on (internal/card/caveat.go).
 	for _, c := range card.Caveats(&s) {
@@ -177,6 +247,85 @@ func IndexOf(t *tape.Tape) Index {
 	}
 	idx.CaveatCount = len(idx.Caveats)
 	return idx
+}
+
+// kvCache joins the k/v cache types verbatim: the one when both agree, "k/v"
+// when both are set and differ, the set one when only one is, "" when
+// neither. Never a default: unknown prints as ? downstream.
+func kvCache(k, v string) string {
+	switch {
+	case k != "" && v != "" && k == v:
+		return k
+	case k != "" && v != "":
+		return k + "/" + v
+	case k != "":
+		return k
+	default:
+		return v
+	}
+}
+
+// offloadKind names where the weights sit: full when GPUs exist and the CPU
+// device holds no weight bytes, partial when GPUs exist and it does, cpu
+// when no GPU device exists, "" when the placement names no device at all.
+//
+// Weight bytes are the Classes totals with bytes > 0, except the embedding
+// table (lead, 2026-09-19): llama.cpp keeps token_embd on the host at every
+// -ngl, as a lookup and not a matmul, so a fully offloaded run always shows
+// a few hundred MB of embeddings on CPU — the hero does — and counting them
+// would call every run "partial" and tell the reader nothing. The
+// TensorClass list carries no kv-cache or compute-buffer class, so every
+// other class present is weights.
+func offloadKind(p tape.PlacementSummary) string {
+	if len(p.Devices) == 0 {
+		return ""
+	}
+	hasGPU := false
+	var cpuWeights int64
+	for _, d := range p.Devices {
+		if d.Device == tape.DeviceCPU {
+			for class, b := range d.Classes {
+				if b > 0 && class != tape.ClassEmbed {
+					cpuWeights += b
+				}
+			}
+			continue
+		}
+		hasGPU = true
+	}
+	if !hasGPU {
+		return "cpu"
+	}
+	if cpuWeights > 0 {
+		return "partial"
+	}
+	return "full"
+}
+
+// draftAcceptRate is the speculative-decoding acceptance rate, 0..1, only
+// when the server reported both halves and drafted at least one token:
+// accepted/drafted over the pooled run-level totals.
+func draftAcceptRate(draftN, accepted *int) float64 {
+	if draftN == nil || accepted == nil || *draftN <= 0 {
+		return 0
+	}
+	return float64(*accepted) / float64(*draftN)
+}
+
+// activeParams is the parameter count the run actually read per token:
+// dense (no experts) is the whole model; MoE scales params by the share of
+// weight bytes touched, because bytes per parameter is the same everywhere,
+// and the tape's ActiveBytesPerToken already includes the shared and router
+// weights. 0 when the tape cannot answer — never the used/experts fraction,
+// which is a guess.
+func activeParams(m tape.ModelInfo) int64 {
+	if m.NExperts == 0 {
+		return m.Params
+	}
+	if m.ActiveBytesPerToken > 0 && m.FileBytes > 0 && m.Params > 0 {
+		return int64(math.Round(float64(m.Params) * float64(m.ActiveBytesPerToken) / float64(m.FileBytes)))
+	}
+	return 0
 }
 
 // engineVersion is the build when the server reported one, else the commit —

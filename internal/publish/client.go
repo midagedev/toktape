@@ -56,9 +56,10 @@ const UploadPath = "/api/v1/runs"
 //
 //	PATCH {base}/api/v1/runs/<id>
 //	Authorization: Bearer <token>        (the journal token that owns the run)
-//	Content-Type: application/json — {"title"?, "note"?, "private"?}; null
-//	clears a field, absent leaves it, unknown keys are refused. 200 answers
-//	the same shape as /r/<id>.json.
+//	Content-Type: application/json — {"title"?, "note"?, "private"?, "index"?};
+//	an "index" carries one full publish.Index (schema IndexSchema) and rewrites
+//	every indexed column; null clears a field, absent leaves it, unknown keys
+//	are refused. 200 answers the same shape as /r/<id>.json.
 //
 //	GET {base}/api/v1/runs?… — the search (List). Only the filters that are
 //	set travel; sort travels only when it is not ""/"newest", so an older
@@ -135,14 +136,17 @@ type Options struct {
 	Bio string
 }
 
-// Edit is one owner edit of a run's title, note and visibility (TTP-127).
-// A nil field is left alone; a non-nil Title or Note replaces the field,
-// and Private replaces the visibility. There is no way to clear a field
-// to empty here — an empty title is refused the way an upload refuses it.
+// Edit is one owner edit of a run's title, note and visibility (TTP-127),
+// or a reindex (TTP-130). A nil field is left alone; a non-nil Title or
+// Note replaces the field, and Private replaces the visibility. There is no
+// way to clear a field to empty here — an empty title is refused the way an
+// upload refuses it. A non-nil Index rewrites the row's every INDEX_COLUMNS
+// column from the marshalled Index, whose schema the server checks by name.
 type Edit struct {
 	Title   *string
 	Note    *string
 	Private *bool
+	Index   *Index
 }
 
 // authorWire is the "author" part's shape. Either field may be absent, so
@@ -222,6 +226,9 @@ func (c *Client) Edit(ctx context.Context, id string, e Edit) (*Receipt, error) 
 	}
 	if e.Private != nil {
 		body["private"] = *e.Private
+	}
+	if e.Index != nil {
+		body["index"] = e.Index
 	}
 	if len(body) == 0 {
 		return nil, fmt.Errorf("publish: nothing to change: name --title, --note or --private/--public")

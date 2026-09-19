@@ -334,6 +334,54 @@ grep -o '<a class="fact link" href="[^"]*"' "$work/fetched" | grep -q 'gpu=rtx-3
 # Harness row, harness cleanup: the listing below must see only real publishes.
 npx wrangler d1 execute toktape --local --command "DELETE FROM runs WHERE id = 'mixedrig000000000000'" \
   >"$work/mixed-clean.log" 2>&1 || { cat "$work/mixed-clean.log"; die "could not clean up the mixed-rig harness row"; }
+
+say "the figures reach the columns, the rows and the search"
+# One harness row straight into the local D1 (TTP-130): there is no
+# figures-carrying tape in the repo, so like the mixed rig this row is
+# inserted the way the harness mints tokens — OR REPLACE, because the local
+# D1 outlives one run of this gate. index_json carries the contract fields
+# and the columns beside it match, the way a publish would have stored them.
+npx wrangler d1 execute toktape --local --command \
+  "INSERT OR REPLACE INTO runs (id, created_at, tape_key, tape_ext, tape_bytes, index_schema, index_json, model_id, model_raw, prompt_n, predicted_n, min_predicted_n, cache_hit_ratio, ctx_size, n_slots, fa, kv_cache, offload, active_params, params, moe, n_experts, n_experts_used, prefill_per_sec, throttled, power_w, power_limit_w) VALUES ('figsrow0000000000000', '2026-01-03T00:00:00Z', 'none', '.tape', 1, 1, '{\"schema\":1,\"model_id\":\"harness-figs\",\"model_raw\":\"harness-figs.gguf\",\"prompt_n\":512,\"predicted_n\":128,\"min_predicted_n\":12,\"cache_hit_ratio\":0.41,\"ctx_size\":32768,\"n_slots\":4,\"fa\":\"on\",\"kv_cache\":\"q8_0\",\"offload\":\"partial\",\"active_params\":3000000000,\"params\":35000000000,\"moe\":true,\"n_experts\":128,\"n_experts_used\":8,\"prefill_per_sec\":1234.5,\"throttled\":true,\"power_w\":281,\"power_limit_w\":300}', 'harness-figs', 'harness-figs.gguf', 512, 128, 12, 0.41, 32768, 4, 'on', 'q8_0', 'partial', 3000000000, 35000000000, 1, 128, 8, 1234.5, 1, 281, 300)" \
+  >"$work/figs.log" 2>&1 || { cat "$work/figs.log"; die "could not insert the figures harness row"; }
+# Refusals: a band that is not there, and a floor that is not a number.
+code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?size=999")
+[ "$code" = "400" ] || { cat "$work/body"; die "an unknown size was not refused (got $code)"; }
+grep -q 'unknown size' "$work/body" || { cat "$work/body"; die "the size refusal does not name the size"; }
+code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?min_predicted=x")
+[ "$code" = "400" ] || { cat "$work/body"; die "a non-integer min_predicted was not refused (got $code)"; }
+# The bands are over active_params: 3B active sits in band 0, not band 35.
+# Oldest-first, like the mixed rig: the harness row's created_at is old on
+# purpose, so a newest-first page 1 ends long before it.
+curl -fsS "$base/api/v1/runs?size=0&limit=100" >"$work/figs0.json" && grep -q 'figsrow0000000000000' "$work/figs0.json" ||
+  die "filtering by size=0 missed the figures row"
+curl -fsS "$base/api/v1/runs?size=35&limit=100" >"$work/figs35.json" && grep -q 'figsrow0000000000000' "$work/figs35.json" &&
+  die "filtering by size=35 kept a 3B-active row"
+curl -fsS "$base/api/v1/runs?moe=1&limit=100" >"$work/figsmoe.json" && grep -q 'figsrow0000000000000' "$work/figsmoe.json" ||
+  die "filtering by moe=1 missed the figures row"
+curl -fsS "$base/api/v1/runs?min_predicted=200&limit=100" >"$work/figs200.json" && grep -q 'figsrow0000000000000' "$work/figs200.json" &&
+  die "a min_predicted=200 floor kept a 128-out row"
+curl -fsS "$base/api/v1/runs?min_predicted=100&limit=100" >"$work/figs100.json" && grep -q 'figsrow0000000000000' "$work/figs100.json" ||
+  die "a min_predicted=100 floor dropped a 128-out row"
+# The row's chips, read off an oldest-first page where the harness row sits
+# near the front.
+curl -fsS "$base/?sort=oldest&limit=100" >"$work/figsold.html"
+for want in 'P512 · G128' 'cache 41%' 'ctx 32k' 'fa on · kv q8_0' 'offload partial' '35B · 3B active' 'prefill 1235<span class="u"> tok/s'; do  # since 2026-09-19 the prefill goes through fmt like decode (no decimals at or above 100) and the unit is its own dimmed span
+  grep -q "$want" "$work/figsold.html" || die "the figures row carries no $want"
+done
+# The run page rows. tape_key is none like the mixed rig — the page is built
+# from the index row, never the record, so it still renders.
+curl -fsS "$base/r/figsrow0000000000000" >"$work/figs.html"
+for want in '>workload<' '>context<' '>config<' '>machine<' '32768 window' '281 of 300 W'; do
+  grep -q "$want" "$work/figs.html" || die "the figures run page carries no $want"
+done
+# The new boxes on the front page.
+curl -fsS "$base/" >"$work/fetched" && grep -q '<select name="model"' "$work/fetched" || die "the front page has no model box"
+grep -q 'name="size"' "$work/fetched" || die "the front page has no size box"
+grep -q 'name="moe"' "$work/fetched" || die "the front page has no MoE box"
+# Harness row, harness cleanup: the listing below must see only real publishes.
+npx wrangler d1 execute toktape --local --command "DELETE FROM runs WHERE id = 'figsrow0000000000000'" \
+  >"$work/figs-clean.log" 2>&1 || { cat "$work/figs-clean.log"; die "could not clean up the figures harness row"; }
 # The sort parameter (2026-09-19: the user reversed the no-sort decision; a
 # sort parameter is now honoured and checked).
 curl -fsS "$base/api/v1/runs?sort=decode&limit=50" >"$work/decode.json"
@@ -645,6 +693,24 @@ code=$(curl -s -o "$work/body" -w '%{http_code}' -X PATCH "$base/api/v1/runs/$ji
 [ "$code" = "400" ] || { cat "$work/body"; die "a 121-rune edit title was not refused (got $code)"; }
 curl -fsS "$base/sitemap.xml" >"$work/fetched" && grep -q "<loc>$base/u/harness</loc>" "$work/fetched" ||
   die "the sitemap does not list the user home"
+
+say "PATCH index reindexes the run"
+# The journal token replaces its run's index row wholesale (TTP-130): the
+# object travels verbatim into index_json and every index column is
+# rewritten from it in the same UPDATE. Combinable with the rest in one
+# body; a schema that is not 1 is refused by name.
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X PATCH "$base/api/v1/runs/$jid" \
+  -H "Authorization: Bearer $jt" -H 'Content-Type: application/json' -d '{"index":{"schema":1,"ctx_size":4096,"model_id":"harness-model"}}')
+[ "$code" = "200" ] || { cat "$work/body"; die "PATCH index did not reindex the run (got $code)"; }
+curl -fsS "$base/api/v1/runs?model=harness-model&limit=100" >"$work/fetched" && grep -q "\"id\":\"$jid\"" "$work/fetched" ||
+  die "the reindexed run is not under its new model"
+grep -q '"ctx_size":4096' "$work/fetched" || { cat "$work/fetched"; die "the reindexed row carries no ctx_size"; }
+curl -fsS "$base/" >"$work/fetched" && grep -q 'harness-model' "$work/fetched" ||
+  die "the model dropdown lists no harness-model"
+code=$(curl -s -o "$work/body" -w '%{http_code}' -X PATCH "$base/api/v1/runs/$jid" \
+  -H "Authorization: Bearer $jt" -H 'Content-Type: application/json' -d '{"index":{"schema":2}}')
+[ "$code" = "400" ] || { cat "$work/body"; die "an index schema of 2 was not refused (got $code)"; }
+grep -q 'schema' "$work/body" || { cat "$work/body"; die "the refusal does not name the schema"; }
 
 code=$(curl -s -o "$work/body" -w '%{http_code}' -X DELETE "$base/api/v1/runs/$jid" -H "Authorization: Bearer $jt")
 [ "$code" = "204" ] || { cat "$work/body"; die "the journal token did not take its own run down (got $code)"; }

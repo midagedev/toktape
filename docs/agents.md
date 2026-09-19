@@ -38,6 +38,7 @@ toktape log -o jsonl                     # every run recorded here, one object p
 toktape log -o sql | sqlite3 runs.db     # the same runs as a SQLite table
 toktape runs --sort decode -o json       # the site's listing, the API's body verbatim
 toktape show <id> -o json                # one published run; touches no server
+toktape reindex <id>                     # a run you own: its search row, recomputed from its record
 ```
 
 Two flags decide whether an invocation fits inside your own timeout.

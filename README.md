@@ -263,6 +263,7 @@ side by side. Each field is there because it settles an argument.
 | `profile` | name the author every publish carries | `toktape profile --name NAME --link URL --avatar FILE --bio TEXT` |
 | `runs` | list what is published, filtered and ordered like the site | `toktape runs --gpu rtx-3090 --sort decode` |
 | `show` | read one published run; `--save` fetches its record | `toktape show <id> --save run.toktape` |
+| `reindex` | recompute a published run's search row from its record — the figures a newer toktape indexes | `toktape reindex <id>` |
 | `version` | print the version | `toktape version` |
 
 **How long a run is.** A recording ends on the clock: twenty seconds by

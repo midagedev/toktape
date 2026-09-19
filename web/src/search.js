@@ -39,9 +39,57 @@ const GB = 1024 ** 3;
 const SELECT = `SELECT id, created_at, recorded_at, model_id, model_raw, repo,
     quant_id, quant_raw, engine_kind, engine_version, os, gpu_id, gpu_ids, gpus_raw,
     gpu_count, vram_bytes, host_class, sessions, prompt_set, decode_per_sec,
-    caveat_count, tape_ext, card_key, author_name, author_link, avatar_key,
+    caveat_count, prompt_n, predicted_n, min_predicted_n, reasoning_n,
+    cache_hit_ratio, ctx_size, n_slots, fa, kv_cache, batch, ubatch, ngl,
+    offload, draft_model, draft_accept, throttled, cold, power_w, power_limit_w,
+    file_bytes, active_params, n_experts, n_experts_used, params, moe,
+    quant_bits, prefill_per_sec, ttft_p50_ms,
+    tape_ext, card_key, author_name, author_link, avatar_key,
     title, note, owner_token, owner_token IS NOT NULL AS owned
   FROM runs`;
+
+// The params bands (TTP-130): over active_params, in billions. A row with
+// NULL active_params matches no band — every comparison below is false on
+// NULL, so that falls out without a special case. Both sides use the same
+// table; the Worker filters `active_params >= ? AND active_params < ?`.
+const SIZE_BANDS = [
+  [0, "≤4B", 0, 4e9],
+  [4, "4–10B", 4e9, 10e9],
+  [10, "10–35B", 10e9, 35e9],
+  [35, "35–100B", 35e9, 100e9],
+  [100, "100B+", 100e9, Infinity],
+];
+
+function sizeBandOf(n) {
+  for (const [lower, , lo, hi] of SIZE_BANDS) if (n >= lo && n < hi) return lower;
+  return null;
+}
+
+function sizeBandLabel(lower) {
+  return (SIZE_BANDS.find((b) => b[0] === lower) || [])[1] || null;
+}
+
+// A params figure the way the chip prints it: integer at 10B and above,
+// one decimal below (`35B`, `3.8B`).
+function fmtB(n) {
+  const b = n / 1e9;
+  return b >= 10 ? `${Math.round(b)}B` : `${Math.round(b * 10) / 10}B`;
+}
+
+// A context size the way the chip prints it: kilobytes when even (`32k`).
+function fmtK(n) {
+  return n >= 1024 && n % 1024 === 0 ? `${n / 1024}k` : String(n);
+}
+
+// The cache suffix, on a row or a run page alike: the ratio when it
+// travelled, else `cache 0%` only beside a prompt_n — 0 is "no hit or
+// unknown, the tape does not distinguish", so without a workload it prints
+// nothing rather than a zero nobody measured.
+function cacheLabel(ratio, prompt_n) {
+  if (ratio !== null && ratio !== undefined) return `cache ${Math.round(ratio * 100)}%`;
+  if (prompt_n > 0) return "cache 0%";
+  return null;
+}
 
 // The filters §9.4 names, each mapped to the column it narrows. A raw column
 // is listed beside its normalised one so a run whose normalisation came back
@@ -112,7 +160,7 @@ ${rowGrid(q.rows, url)}`;
       meta: head({
         title: "toktape — published LLM inference runs",
         description:
-          "Recorded llama.cpp and vLLM runs with their tok/s, the card that qualifies each figure, and a replay in the browser. Search by model, quant, GPU and engine.",
+          "Recorded llama.cpp and vLLM runs with their tok/s, the card that qualifies each figure, and a replay in the browser. Search by model, size, quant, prompt set, GPU and engine.",
         url: `${publicBase(request, env)}/`,
       }),
       style: PAGE_STYLE,
@@ -184,6 +232,42 @@ export function whereFor(url, scope, skipParam) {
     where.push("vram_bytes >= ?");
     args.push(Number(url.searchParams.get("min_vram")) * GB);
   }
+  // The params band (TTP-130): `size=<lower bound in B>` over
+  // active_params. Anything outside the five bounds is a 400, never a
+  // silent fallback — a caller asking for a band that is not there must
+  // hear so. Skipped under its own name like min_vram.
+  if (skipParam !== "size" && url.searchParams.has("size")) {
+    const raw = url.searchParams.get("size");
+    const band = SIZE_BANDS.find((b) => String(b[0]) === raw);
+    if (!band) return { where, args, error: fail(400, `unknown size: ${raw}; one of 0, 4, 10, 35, 100`) };
+    if (band[3] === Infinity) {
+      where.push("active_params >= ?");
+      args.push(band[2]);
+    } else {
+      where.push("active_params >= ? AND active_params < ?");
+      args.push(band[2], band[3]);
+    }
+  }
+  // MoE only vs dense only (TTP-130): `moe` travelled as 1/NULL, so dense
+  // is `moe IS NULL` — absent, never 0, the API's rule for unknown.
+  if (skipParam !== "moe" && url.searchParams.has("moe")) {
+    const raw = url.searchParams.get("moe");
+    if (raw === "1") where.push("moe = 1");
+    else if (raw === "0") where.push("moe IS NULL");
+    else return { where, args, error: fail(400, `unknown moe: ${raw}; one of 0, 1`) };
+  }
+  // The generated-tokens floor (TTP-130): a non-integer is a 400, the same
+  // way an unknown sort is. No `min_ctx` beside it: ctx_size is a
+  // reservation (-c), not a measured length, and research ruled the filter
+  // out.
+  if (skipParam !== "min_predicted" && url.searchParams.has("min_predicted")) {
+    const raw = url.searchParams.get("min_predicted");
+    if (!/^\d+$/.test(raw || "")) {
+      return { where, args, error: fail(400, `bad min_predicted: ${JSON.stringify(raw)}; an integer number of tokens travels`) };
+    }
+    where.push("predicted_n >= ?");
+    args.push(Number(raw));
+  }
   // Free text falls back across the raw strings, which is the whole reason
   // they are stored: a run whose model never normalised is still findable by
   // the file name that was observed (§9.4, rule 2).
@@ -219,7 +303,13 @@ export async function query(env, url, scope, limit) {
   const s = sortOf(url);
   if (s.error) return s;
   const { sort } = s;
-  const { where, args } = whereFor(url, scope, null);
+  // whereFor can refuse a filter the way sortOf refuses an order; the
+  // refusal is a response, returned the same way. (countTotal and
+  // distinctFacets run only after query() succeeded on the same URL, so
+  // they never meet it there.)
+  const w = whereFor(url, scope, null);
+  if (w.error) return { error: w.error };
+  const { where, args } = w;
   const cursor = decodeCursor(url.searchParams.get("cursor"));
   // created_at, never recorded_at: ordering on a field out of the upload
   // would make the listing trust the uploader's clock, and its UTC offset is
@@ -325,13 +415,15 @@ export async function distinctFacets(env, url, scope) {
       .all();
     return { rows: results.slice(0, 20), more: results.length > 20 };
   })();
-  const [engine, quant, gpu, host] = await Promise.all([
+  const [model, engine, quant, gpu, host, set] = await Promise.all([
+    one("model", "model_id"),
     one("engine", "engine_kind"),
     one("quant", "quant_id"),
     gpuFacet,
     one("host", "host_class"),
+    one("set", "prompt_set"),
   ]);
-  return { engine, quant, gpu, host };
+  return { model, engine, quant, gpu, host, set };
 }
 
 async function scopeOf(request, env, url) {
@@ -415,11 +507,52 @@ export function apiRow(r) {
     prompt_set: r.prompt_set,
     decode_per_sec: r.decode_per_sec,
     caveat_count: r.caveat_count,
+    // The figures (TTP-130), each under its contract name and present only
+    // when set — absent, not null, for unknown. Bools travelled as 1/NULL
+    // and read back as true/absent.
+    ...copyNum(r, [
+      "prompt_n",
+      "predicted_n",
+      "min_predicted_n",
+      "reasoning_n",
+      "cache_hit_ratio",
+      "ctx_size",
+      "n_slots",
+      "draft_accept",
+      "power_w",
+      "power_limit_w",
+      "file_bytes",
+      "active_params",
+      "n_experts",
+      "n_experts_used",
+      "params",
+      "quant_bits",
+      "prefill_per_sec",
+      "ttft_p50_ms",
+    ]),
+    ...copyStr(r, ["fa", "kv_cache", "batch", "ubatch", "ngl", "offload", "draft_model"]),
+    ...(r.throttled === 1 ? { throttled: true } : {}),
+    ...(r.cold === 1 ? { cold: true } : {}),
+    ...(r.moe === 1 ? { moe: true } : {}),
   };
   const { author, title, note } = authorOf(r);
   if (author) out.author = author;
   if (title) out.title = title;
   if (note) out.note = note;
+  return out;
+}
+
+// Absent, never null, for whatever is unset: the API's existing rule for
+// unknown, applied to the figures beside the older columns.
+function copyNum(r, names) {
+  const out = {};
+  for (const n of names) if (r[n] !== null && r[n] !== undefined) out[n] = r[n];
+  return out;
+}
+
+function copyStr(r, names) {
+  const out = {};
+  for (const n of names) if (typeof r[n] === "string" && r[n] !== "") out[n] = r[n];
   return out;
 }
 
@@ -441,6 +574,9 @@ export function resultRow(r, url) {
   const facts = [
     { shown: r.engine_kind, suffix: r.engine_version || null, param: "engine", value: r.engine_kind },
     { shown: r.quant_raw || r.quant_id, param: r.quant_id ? "quant" : null, value: r.quant_id },
+    // The figures (TTP-130), after the quant chip in contract order. Each
+    // omitted when unknown; only the params chip narrows (to its band).
+    ...figFacts(r),
     ...gpuFacts(r),
     { shown: r.os, param: "os", value: r.os },
     {
@@ -467,7 +603,9 @@ export function resultRow(r, url) {
      }<pre class="screen"></pre></a>
   <div class="rowhead">
     <a class="name" href="/r/${esc(r.id)}">${esc(r.title || model)}</a>
-    <span class="rate num">${fmt(r.decode_per_sec)}<span class="u"> tok/s</span></span>
+    <span class="rates"><span class="rate num">${fmt(r.decode_per_sec)}<span class="u"> tok/s</span></span>${
+      r.prefill_per_sec ? `<span class="rate sub num">prefill ${fmt(r.prefill_per_sec)}<span class="u"> tok/s</span></span>` : ""
+    }</span>
   </div>
   ${r.title ? `<div class="model">${esc(model)}</div>` : ""}
   <div class="facts">${facts.filter((f) => f.shown).map((f) => chip(f, url)).join("")}${caveatChip(r)}</div>
@@ -495,6 +633,62 @@ function whoLine(r) {
     who = esc(r.author_name || "");
   }
   return `<div class="who">${img}${img && who ? " " : ""}${who}${anonBadge(r.owned === 1)}</div>`;
+}
+
+// The figure chips (TTP-130): params, workload, context, config, offload,
+// after the quant chip in this order, each omitted when unknown. None is a
+// link except params, which narrows to the band its active_params falls in
+// (no link when active_params is unknown). None of these is derived: every
+// part is a column the client filled in.
+function figFacts(r) {
+  const out = [];
+  if (r.params !== null && r.params !== undefined) {
+    let shown = fmtB(r.params);
+    if (r.moe === 1 && r.active_params !== null && r.active_params !== undefined) {
+      shown += ` · ${fmtB(r.active_params)} active`;
+    }
+    const band = r.active_params !== null && r.active_params !== undefined ? sizeBandOf(r.active_params) : null;
+    out.push({ shown, param: band !== null ? "size" : null, value: band !== null ? String(band) : null });
+  } else if (r.active_params !== null && r.active_params !== undefined) {
+    const band = sizeBandOf(r.active_params);
+    out.push({
+      shown: fmtB(r.active_params),
+      param: band !== null ? "size" : null,
+      value: band !== null ? String(band) : null,
+    });
+  }
+  const load = [];
+  if (r.prompt_n !== null && r.prompt_n !== undefined) load.push(`P${r.prompt_n}`);
+  if (r.predicted_n !== null && r.predicted_n !== undefined) load.push(`G${r.predicted_n}`);
+  if (load.length) {
+    let shown = load.join(" · ");
+    const cache = cacheLabel(r.cache_hit_ratio, r.prompt_n);
+    if (cache) shown += ` · ${cache}`;
+    if (
+      r.min_predicted_n !== null &&
+      r.min_predicted_n !== undefined &&
+      r.predicted_n !== null &&
+      r.predicted_n !== undefined &&
+      r.min_predicted_n < r.predicted_n
+    ) {
+      shown += ` · min ${r.min_predicted_n}`;
+    }
+    out.push({ shown, param: null, value: null });
+  }
+  if (r.ctx_size !== null && r.ctx_size !== undefined) {
+    // De-emphasised: the reservation, not a measured length.
+    out.push({ shown: `ctx ${fmtK(r.ctx_size)}`, param: null, value: null, dim: true });
+  }
+  const cfg = [];
+  if (r.fa) cfg.push(`fa ${r.fa}`);
+  if (r.kv_cache) cfg.push(`kv ${r.kv_cache}`);
+  if (cfg.length) out.push({ shown: cfg.join(" · "), param: null, value: null });
+  // `full` is omitted: every GPU running the whole model is the default
+  // reading, and a chip for it would say nothing.
+  if (r.offload === "partial" || r.offload === "cpu") {
+    out.push({ shown: `offload ${r.offload}`, param: null, value: null });
+  }
+  return out;
 }
 
 // The GPU chips: one per card model that took part (TTP-124). A single kind
@@ -540,8 +734,9 @@ function parseGpuIds(v) {
 // of replacing each other; a chip whose filter is already active renders as
 // plain text, so the active narrowing is visible in the rows.
 function chip(f, url) {
+  const cls = f.dim ? "fact dim" : "fact";
   const inner = esc(f.shown) + (f.suffix ? `<span class="v">${esc(f.suffix)}</span>` : "");
-  if (!f.param || !f.value) return `<span class="fact">${inner}</span>`;
+  if (!f.param || !f.value) return `<span class="${cls}">${inner}</span>`;
   if (url.searchParams.get(f.param) === String(f.value)) return `<span class="fact on">${inner}</span>`;
   const u = new URL(url.href);
   u.searchParams.set(f.param, String(f.value));
@@ -562,12 +757,20 @@ function activeParams(url) {
   if ((url.searchParams.get("q") || "").trim()) out.push("q");
   for (const [param] of FILTERS) if (url.searchParams.get(param)) out.push(param);
   if (url.searchParams.get("min_vram")) out.push("min_vram");
+  // The figure filters (TTP-130) narrow like the rest, so they read in the
+  // active line and offer the same way back.
+  if (url.searchParams.has("size")) out.push("size");
+  if (url.searchParams.has("moe")) out.push("moe");
+  if (url.searchParams.has("min_predicted")) out.push("min_predicted");
   return out;
 }
 
 function filterLabel(param, url) {
   if (param === "q") return `\u201c${(url.searchParams.get("q") || "").trim()}\u201d`;
   if (param === "min_vram") return `vram: ${url.searchParams.get("min_vram")} GB+`;
+  if (param === "size") return `size: ${sizeBandLabel(Number(url.searchParams.get("size"))) || url.searchParams.get("size")}`;
+  if (param === "moe") return url.searchParams.get("moe") === "1" ? "MoE" : "dense";
+  if (param === "min_predicted") return `\u2265 ${url.searchParams.get("min_predicted")} generated`;
   return `${param}: ${url.searchParams.get(param)}`;
 }
 
@@ -637,17 +840,46 @@ export function filterForm(url, facets) {
       .join("");
     return `<select name="sort" onchange="this.form.submit()">${opts}</select>`;
   })();
+  // The params band (TTP-130): fixed options mirroring the VRAM box, over
+  // active_params — the same table both sides filter by.
+  const size = (() => {
+    const current = url.searchParams.get("size") || "";
+    const opts = [`<option value="">any size</option>`]
+      .concat(
+        SIZE_BANDS.map(
+          ([v, label]) => `<option value="${v}"${String(v) === current ? " selected" : ""}>${esc(label)}</option>`,
+        ),
+      )
+      .join("");
+    return `<select name="size" onchange="this.form.submit()">${opts}</select>`;
+  })();
+  // MoE only vs dense only (TTP-130): fixed options mirroring the VRAM box.
+  const moe = (() => {
+    const current = url.searchParams.get("moe") || "";
+    const opts = [
+      ["", "dense or MoE"],
+      ["1", "MoE only"],
+      ["0", "dense only"],
+    ]
+      .map(([v, label]) => `<option value="${v}"${v === current ? " selected" : ""}>${esc(label)}</option>`)
+      .join("");
+    return `<select name="moe" onchange="this.form.submit()">${opts}</select>`;
+  })();
   // The current path, not "/": on /u/<handle> the filters used to submit to
   // the front page (2026-09-19).
   return `<form class="filters" method="get" action="${esc(url.pathname)}">
   <input type="search" name="q" value="${esc(url.searchParams.get("q") || "")}"
     placeholder="model, repo, GPU, engine…" autocomplete="off">
   <kbd title="press / to search">/</kbd>
+  ${sel("model", "any model", facets.model)}
+  ${size}
   ${sel("engine", "any engine", facets.engine)}
   ${sel("quant", "any quantisation", facets.quant)}
   ${sel("gpu", "any GPU", facets.gpu)}
   ${sel("host", "any host", facets.host)}
   ${vram}
+  ${sel("set", "any prompt set", facets.set)}
+  ${moe}
   ${sortSel}
   <button type="submit">Search</button>
 </form>`;
@@ -729,7 +961,12 @@ kbd { font: .7rem ui-monospace, Menlo, monospace; color: #6b727d; border: 1px so
   gap: 2.25rem 1.5rem; margin-top: .75rem; }
 .row { display: flex; flex-direction: column; min-width: 0; }
 .rowhead { display: flex; align-items: baseline; gap: 1rem; justify-content: space-between; }
-.name { color: #eef1f5; font-weight: 600; font-size: 1rem; word-break: break-word; }
+/* The title yields to the figures but never to one letter a line: it wraps at
+   word boundaries with a floor of ten characters, and the figures stack
+   under each other on the right instead of pushing it (lead, 2026-09-19 —
+   the first prefill span squeezed a phone title into a column of letters). */
+.name { color: #eef1f5; font-weight: 600; font-size: 1rem; overflow-wrap: anywhere; min-width: 10ch; flex: 1 1 auto; }
+.rates { display: flex; flex-direction: column; align-items: flex-end; flex: 0 0 auto; }
 /* The model under a titled row, and the author under that: both small, both
    beside the date line's colour, so a titled row still reads as one run. */
 .model { font-size: .78rem; color: #6b727d; }
@@ -739,6 +976,12 @@ kbd { font: .7rem ui-monospace, Menlo, monospace; color: #6b727d; border: 1px so
 .rate { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #9ece6a; white-space: nowrap; }
 .rate .u { color: #6b727d; font-size: .78rem; }
+/* The prefill beside the decode: the same font, smaller and dimmer via
+   opacity — no new colour (TTP-130). */
+.rate.sub { font-size: .78rem; opacity: .7; line-height: 1.2; }
+/* The context chip: de-emphasised the same way — a reservation, not a
+   measured length, so it sits back (TTP-130). */
+.fact.dim { opacity: .7; }
 .facts { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0 .35rem; }
 .fact { font-size: .78rem; color: #99a0ab; background: #171b22; border: 1px solid #222832;
   border-radius: 999px; padding: .1rem .55rem; }

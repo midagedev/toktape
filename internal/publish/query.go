@@ -29,6 +29,11 @@ type ListQuery struct {
 	// gigabytes, the unit the service's own box offers.
 	Sessions  int
 	MinVRAMGB int
+	// Size is the active-params band's lower bound in billions — one of
+	// 0, 4, 10, 35, 100, the Worker's own table (search.js SIZE_BANDS); MinPredicted is a floor on the fewest tokens
+	// any stream generated. 0 and "" both mean absent and travel as nothing.
+	Size         string
+	MinPredicted int
 	// Sort is "", "newest", "oldest" or "decode". "" and "newest" both
 	// travel as nothing: newest first is the server's default order.
 	Sort string
@@ -75,17 +80,47 @@ type Row struct {
 	GPUID       string `json:"gpu_id,omitempty"`
 	// GPUsRaw is the one " / "-joined string the API serves, not the
 	// client's []string: the join already happened server-side.
-	GPUsRaw     string         `json:"gpus_raw,omitempty"`
-	GPUCount    *int           `json:"gpu_count,omitempty"`
-	VRAMBytes   *int64         `json:"vram_bytes,omitempty"`
-	HostClass   string         `json:"host_class,omitempty"`
-	Sessions    *int           `json:"sessions,omitempty"`
-	PromptSet   string         `json:"prompt_set,omitempty"`
-	DecodePerS  *float64       `json:"decode_per_sec,omitempty"`
-	CaveatCount *int           `json:"caveat_count,omitempty"`
-	Author      *AuthorProfile `json:"author,omitempty"`
-	Title       string         `json:"title,omitempty"`
-	Note        string         `json:"note,omitempty"`
+	GPUsRaw     string   `json:"gpus_raw,omitempty"`
+	GPUCount    *int     `json:"gpu_count,omitempty"`
+	VRAMBytes   *int64   `json:"vram_bytes,omitempty"`
+	HostClass   string   `json:"host_class,omitempty"`
+	Sessions    *int     `json:"sessions,omitempty"`
+	PromptSet   string   `json:"prompt_set,omitempty"`
+	DecodePerS  *float64 `json:"decode_per_sec,omitempty"`
+	PrefillPerS *float64 `json:"prefill_per_sec,omitempty"`
+	TTFTp50Ms   *float64 `json:"ttft_p50_ms,omitempty"`
+	QuantBits   *float64 `json:"quant_bits,omitempty"`
+	// The figures behind a rate (TTP-130): the same JSON names the index
+	// carries, read here as pointers so unknown stays null or absent.
+	PromptN       *int           `json:"prompt_n,omitempty"`
+	PredictedN    *int           `json:"predicted_n,omitempty"`
+	MinPredictedN *int           `json:"min_predicted_n,omitempty"`
+	ReasoningN    *int           `json:"reasoning_n,omitempty"`
+	CtxSize       *int           `json:"ctx_size,omitempty"`
+	NSlots        *int           `json:"n_slots,omitempty"`
+	NExperts      *int           `json:"n_experts,omitempty"`
+	NExpertsUsed  *int           `json:"n_experts_used,omitempty"`
+	CacheHitRatio *float64       `json:"cache_hit_ratio,omitempty"`
+	DraftAccept   *float64       `json:"draft_accept,omitempty"`
+	PowerW        *float64       `json:"power_w,omitempty"`
+	PowerLimitW   *float64       `json:"power_limit_w,omitempty"`
+	FileBytes     *int64         `json:"file_bytes,omitempty"`
+	ActiveParams  *int64         `json:"active_params,omitempty"`
+	Params        *int64         `json:"params,omitempty"`
+	FA            string         `json:"fa,omitempty"`
+	KVCache       string         `json:"kv_cache,omitempty"`
+	Batch         string         `json:"batch,omitempty"`
+	UBatch        string         `json:"ubatch,omitempty"`
+	NGL           string         `json:"ngl,omitempty"`
+	Offload       string         `json:"offload,omitempty"`
+	DraftModel    string         `json:"draft_model,omitempty"`
+	Throttled     *bool          `json:"throttled,omitempty"`
+	Cold          *bool          `json:"cold,omitempty"`
+	MoE           *bool          `json:"moe,omitempty"`
+	CaveatCount   *int           `json:"caveat_count,omitempty"`
+	Author        *AuthorProfile `json:"author,omitempty"`
+	Title         string         `json:"title,omitempty"`
+	Note          string         `json:"note,omitempty"`
 }
 
 // Listing is one page of the search, or one page of a user home. The
@@ -172,6 +207,10 @@ func (c *Client) List(ctx context.Context, q ListQuery) (*Listing, error) {
 	set("host", q.Host)
 	set("os", q.OS)
 	set("set", q.Set)
+	set("size", q.Size)
+	if q.MinPredicted > 0 {
+		vals.Set("min_predicted", fmt.Sprintf("%d", q.MinPredicted))
+	}
 	if q.Sessions > 0 {
 		vals.Set("sessions", fmt.Sprintf("%d", q.Sessions))
 	}

@@ -6,10 +6,12 @@
 // rewriting what it says, and an anonymous run has no title to defend —
 // either way the answer is 403, never a downgrade to something weaker.
 //
-//   Body: JSON {title?, note?, private?}. title/note are validated with the
-//   upload's own limits (upload.js) — `null` clears the field, absent leaves
-//   it. private must be a boolean and becomes 0/1. Unknown keys are refused
-//   by name, and an empty body is refused outright.
+//   Body: JSON {title?, note?, private?, index?}. title/note are validated
+//   with the upload's own limits (upload.js) — `null` clears the field,
+//   absent leaves it. private must be a boolean and becomes 0/1. index is a
+//   full index row (TTP-130): its schema must be the supported one, and it
+//   is stored verbatim with every index column rewritten from it. Unknown
+//   keys are refused by name, and an empty body is refused outright.
 //
 //   200 answers the same shape as /r/<id>.json, so a reader of the response
 //   holds the run as the API describes it everywhere else.
@@ -17,10 +19,11 @@
 import { tokenOwns } from "./del.js";
 import { fail } from "./http.js";
 import { sha256Hex } from "./ids.js";
+import { INDEX_COLUMNS, SUPPORTED_INDEX_SCHEMA, columnValues } from "./row.js";
 import { serveRunJSON } from "./run.js";
 import { checkNote, checkTitle } from "./upload.js";
 
-const KNOWN_KEYS = ["title", "note", "private"];
+const KNOWN_KEYS = ["title", "note", "private", "index"];
 
 export async function editRun(id, request, env) {
   const auth = request.headers.get("Authorization") || "";
@@ -55,11 +58,11 @@ export async function editRun(id, request, env) {
   }
   const keys = Object.keys(body);
   if (keys.length === 0) {
-    return fail(400, "the edit names nothing to change: title, note or private");
+    return fail(400, "the edit names nothing to change: title, note, private or index");
   }
   for (const k of keys) {
     if (!KNOWN_KEYS.includes(k)) {
-      return fail(400, `the edit names no field ${JSON.stringify(k)}: only title, note and private travel`);
+      return fail(400, `the edit names no field ${JSON.stringify(k)}: only title, note, private and index travel`);
     }
   }
 
@@ -94,6 +97,27 @@ export async function editRun(id, request, env) {
     if (typeof body.private !== "boolean") return fail(400, "private is not a boolean: true unlists the run, false lists it");
     sets.push("private = ?");
     args.push(body.private ? 1 : 0);
+  }
+  if ("index" in body) {
+    // A reindex (TTP-130): the owner replaces the run's index row wholesale
+    // — PATCH /api/v1/runs/<id> with {"index": {...full Index JSON...}}.
+    // The object is stored verbatim as index_json and every INDEX_COLUMNS
+    // column is rewritten from it in the same UPDATE, so the JSON and the
+    // columns cannot drift apart. Combinable with title/note/private in one
+    // body. Auth is unchanged: the journal token that owns the run.
+    const idx = body.index;
+    if (idx === null || typeof idx !== "object" || Array.isArray(idx)) {
+      return fail(400, "the index is not an object: PATCH the full index row under the `index` key");
+    }
+    if (idx.schema !== SUPPORTED_INDEX_SCHEMA) {
+      return fail(400, `index schema ${JSON.stringify(idx.schema)} is not ${SUPPORTED_INDEX_SCHEMA}`);
+    }
+    sets.push("index_json = ?");
+    args.push(JSON.stringify(idx));
+    for (let i = 0; i < INDEX_COLUMNS.length; i++) {
+      sets.push(`${INDEX_COLUMNS[i]} = ?`);
+      args.push(columnValues(idx)[i]);
+    }
   }
 
   await env.DB.prepare(`UPDATE runs SET ${sets.join(", ")} WHERE id = ?`).bind(...args, id).run();

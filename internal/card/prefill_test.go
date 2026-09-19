@@ -90,7 +90,7 @@ func TestSinglePrefillIsTheStreamsOwnRate(t *testing.T) {
 // change with the stream count.
 func TestPrefillPromptTokensStayPerRequest(t *testing.T) {
 	s := ExampleConcurrent()
-	want := formatInt(promptTokens(s)) + " prompt tokens"
+	want := formatInt(PromptTokens(s)) + " prompt tokens"
 	if row := prefillRow(s); !strings.Contains(row, want) {
 		t.Errorf("the Prefill row has no %q:\n%s", want, row)
 	}

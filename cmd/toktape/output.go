@@ -66,9 +66,10 @@ var verbOutputs = map[string][]outputFormat{
 	// runs reads the service's listing: the table by default, the
 	// service's own body under -o json, one run object per line under
 	// -o jsonl. show reads one run: the summary, or the service's body
-	// under -o json.
-	"runs": {outputJSON, outputJSONL},
-	"show": {outputJSON},
+	// under -o json. reindex rewrites rows from their tapes: text only.
+	"runs":    {outputJSON, outputJSONL},
+	"show":    {outputJSON},
+	"reindex": {},
 }
 
 // outputRefusals is why a format another verb takes is not one this verb

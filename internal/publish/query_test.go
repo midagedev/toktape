@@ -47,8 +47,8 @@ func TestListQueryStrings(t *testing.T) {
 	full := ListQuery{
 		Text: "llama", Model: "llama-3", Repo: "bartowski/repo",
 		Quant: "q4_k_m", Engine: "llama.cpp", GPU: "rtx-4090",
-		Host: "desktop", OS: "linux", Set: "sql",
-		Sessions: 4, MinVRAMGB: 24, Sort: "decode",
+		Host: "desktop", OS: "linux", Set: "sql", Size: "35",
+		Sessions: 4, MinVRAMGB: 24, Sort: "decode", MinPredicted: 12,
 		Limit: 10, Cursor: "abc",
 	}
 	for _, c := range []struct {
@@ -70,9 +70,9 @@ func TestListQueryStrings(t *testing.T) {
 			[]string{
 				"q=llama", "model=llama-3", "repo=bartowski%2Frepo",
 				"quant=q4_k_m", "engine=llama.cpp", "gpu=rtx-4090",
-				"host=desktop", "os=linux", "set=sql",
+				"host=desktop", "os=linux", "set=sql", "size=35",
 				"sessions=4", "min_vram=24", "sort=decode",
-				"limit=10", "cursor=abc",
+				"min_predicted=12", "limit=10", "cursor=abc",
 			},
 			[]string{"scope="},
 		},

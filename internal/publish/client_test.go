@@ -522,6 +522,40 @@ func TestClientEditRefusals(t *testing.T) {
 	})
 }
 
+// A reindex is an Edit carrying the full row (TTP-130): the PATCH body has
+// "index" with the schema and the ctx figure beside it, and nothing else.
+func TestClientEditIndex(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"abc123","published_at":"2026-09-19T00:00:00Z","private":false,"tape":"/r/abc123.tape","tape_bytes":25,"card":null,"owned":true,"index":{"schema":1},"title":"t"}`)
+	}))
+	defer srv.Close()
+
+	idx := IndexOf(&tape.Tape{Summary: *card.Example()})
+	if _, err := (&Client{BaseURL: srv.URL, Token: "tk_journal"}).Edit(context.Background(), "abc123", Edit{Index: &idx}); err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	raw, ok := body["index"]
+	if !ok {
+		t.Fatalf("body = %v, want an \"index\" key", body)
+	}
+	got, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("index = %v, want one JSON object", raw)
+	}
+	if got["schema"] != float64(1) {
+		t.Errorf("index.schema = %v, want 1", got["schema"])
+	}
+	if got["ctx_size"] != float64(16384) {
+		t.Errorf("index.ctx_size = %v, want the ctx figure 16384", got["ctx_size"])
+	}
+	if len(body) != 1 {
+		t.Errorf("body keys = %v, want only \"index\"", body)
+	}
+}
+
 // The default is the hosted service, so a publish with no --url reaches it
 // rather than nothing.
 func TestClientDefaultBaseURL(t *testing.T) {

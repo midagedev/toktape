@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 
 	"github.com/midagedev/toktape/internal/config"
 	"github.com/midagedev/toktape/internal/publish"
+	"github.com/midagedev/toktape/internal/tape"
 )
 
 // runsUsage is what a mistyped runs invocation prints, wired into usageFor
@@ -31,8 +33,10 @@ Flags:
   --host TEXT       host class, e.g. desktop
   --os TEXT         operating system, e.g. linux
   --set TEXT        prompt set id
+  --size B          active-params band: 0, 4, 10, 35 or 100 (billions, lower bound)
   --sessions N      streams sent at once
   --min-vram GB     VRAM floor in gigabytes
+  --min-predicted N fewest tokens any stream generated, floor
   --sort ORDER      newest (the default), oldest or decode
   --limit N         runs per page (default 30)
   --cursor CURSOR   continue the page the last listing cut
@@ -62,6 +66,20 @@ JSON. Unknown prints as ? and is never filled in. --save refuses to
 overwrite without --force.
 `
 
+// reindexUsage is what a mistyped reindex invocation prints (see runsUsage).
+const reindexUsage = `toktape reindex — rewrite published rows from their tapes
+
+Usage:
+  toktape reindex <id|url>... [flags]
+
+Flags:
+  --url URL         the service to read from (default ` + publish.DefaultBaseURL + `)
+
+Each run is downloaded, re-read and re-indexed with this build's figures,
+then patched back with the journal token that owns it. A run that cannot
+be reindexed is named and skipped; the exit is publish when any was.
+`
+
 // runRuns lists published runs: the search, the journal scope, or one user
 // home. The product is the table on stdout; -o json prints the service's
 // own body verbatim and -o jsonl one run object per line.
@@ -78,8 +96,10 @@ func runRuns(ctx context.Context, c *cli, args []string) int {
 	host := fs.String("host", "", "host class")
 	osName := fs.String("os", "", "operating system")
 	set := fs.String("set", "", "prompt set id")
+	size := fs.String("size", "", "active-params band lower bound in billions: 0, 4, 10, 35, 100")
 	sessions := fs.Int("sessions", 0, "streams sent at once")
 	minVRAM := fs.Int("min-vram", 0, "VRAM floor in gigabytes")
+	minPredicted := fs.Int("min-predicted", 0, "fewest tokens any stream generated, floor")
 	sort := fs.String("sort", "newest", "newest, oldest or decode")
 	limit := fs.Int("limit", 30, "runs per page")
 	cursor := fs.String("cursor", "", "continue the cut page")
@@ -121,7 +141,8 @@ func runRuns(ctx context.Context, c *cli, args []string) int {
 	listing, err := client.List(ctx, publish.ListQuery{
 		Text: *q, Model: *model, Repo: *repo, Quant: *quant,
 		Engine: *engine, GPU: *gpu, Host: *host, OS: *osName, Set: *set,
-		Sessions: *sessions, MinVRAMGB: *minVRAM, Sort: *sort,
+		Size: *size, Sessions: *sessions, MinVRAMGB: *minVRAM,
+		MinPredicted: *minPredicted, Sort: *sort,
 		Limit: *limit, Cursor: *cursor, Mine: *mine, User: *user,
 	})
 	if err != nil {
@@ -171,17 +192,22 @@ func runRuns(ctx context.Context, c *cli, args []string) int {
 			fmt.Fprintln(c.stdout, strings.TrimSpace(bio))
 		}
 	}
-	header := []string{"ID", "DECODE tok/s", "MODEL", "QUANT", "ENGINE", "GPU", "STREAMS", "CAVEATS", "PUBLISHED", "TITLE"}
+	header := []string{"ID", "DECODE tok/s", "PREFILL tok/s", "MODEL", "PARAMS", "QUANT", "STREAMS", "P/G", "CTX", "KV", "ENGINE", "GPU", "CAVEATS", "PUBLISHED", "TITLE"}
 	var rows [][]string
 	for _, r := range listing.Runs {
 		rows = append(rows, []string{
 			orUnknown(r.ID),
 			rateCell(r.DecodePerS),
+			rateCell(r.PrefillPerS),
 			modelCell(r.ModelID, r.ModelRaw),
+			paramsCell(r),
 			orUnknown(firstSet(r.QuantID, r.QuantRaw)),
+			countCell(r.Sessions),
+			pgCell(r),
+			ctxCell(r.CtxSize),
+			orUnknown(r.KVCache),
 			engineCell(r.EngineKind, r.EngineVer),
 			gpuCell(r),
-			countCell(r.Sessions),
 			countCell(r.CaveatCount),
 			dateCell(r.PublishedAt),
 			r.Title,
@@ -265,6 +291,21 @@ func runShow(ctx context.Context, c *cli, args []string) int {
 	kv("decode", tokCell(idx.DecodePerSec))
 	kv("prefill", tokCell(idx.PrefillPerSec))
 	kv("ttft p50", msCell(idx.TTFTp50Ms))
+	if s := workloadLine(idx); s != "" {
+		kv("workload", s)
+	}
+	if s := contextLine(idx); s != "" {
+		kv("context", s)
+	}
+	if s := configLine(idx); s != "" {
+		kv("config", s)
+	}
+	if s := draftLine(idx); s != "" {
+		kv("draft", s)
+	}
+	if s := machineLine(idx); s != "" {
+		kv("machine", s)
+	}
 	kv("caveats", caveatsCell(detail.Caveats))
 	kv("published", orUnknown(detail.PublishedAt))
 	kv("by", byCell(detail))
@@ -504,4 +545,263 @@ func firstSet(ss ...string) string {
 		}
 	}
 	return ""
+}
+
+// paramsCell is the params chip: the total with the active count beside it
+// on an MoE when both are known, the known one when only one is, ? when
+// neither is. The band the Worker filters on is over the active count.
+func paramsCell(r publish.Row) string {
+	var total, active int64
+	if r.Params != nil {
+		total = *r.Params
+	}
+	if r.ActiveParams != nil {
+		active = *r.ActiveParams
+	}
+	return paramsChip(r.MoE != nil && *r.MoE, total, active)
+}
+
+// paramsChip renders a parameter count as the chip the contract names: 35B
+// at and above 10B, one decimal below it, and on an MoE the total with the
+// active count riding beside it when both are known.
+func paramsChip(moe bool, total, active int64) string {
+	switch {
+	case moe && total > 0 && active > 0:
+		return fmtParams(total) + " · " + fmtParams(active) + " active"
+	case active > 0:
+		return fmtParams(active)
+	case total > 0:
+		return fmtParams(total)
+	}
+	return "?"
+}
+
+// fmtParams is one parameter count in billions: whole billions above 10B,
+// one decimal below it, with a bare .0 trimmed.
+func fmtParams(v int64) string {
+	if v >= 10_000_000_000 {
+		return fmt.Sprintf("%.0fB", float64(v)/1e9)
+	}
+	return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(v)/1e9), ".0") + "B"
+}
+
+// pgCell is prompt_n over predicted_n, with the shortest stream riding
+// beside them when one stream was shorter than the mean says.
+func pgCell(r publish.Row) string {
+	if r.PromptN == nil || r.PredictedN == nil {
+		return "?"
+	}
+	s := fmt.Sprintf("%d/%d", *r.PromptN, *r.PredictedN)
+	if r.MinPredictedN != nil && *r.MinPredictedN < *r.PredictedN {
+		s += fmt.Sprintf("·min%d", *r.MinPredictedN)
+	}
+	return s
+}
+
+// ctxCell is the context window in k: whole ks bare, the rest one decimal.
+func ctxCell(ctx *int) string {
+	if ctx == nil {
+		return "?"
+	}
+	k := float64(*ctx) / 1024
+	if k == math.Trunc(k) {
+		return fmt.Sprintf("%.0fk", k)
+	}
+	return fmt.Sprintf("%.1fk", k)
+}
+
+// pctCell is a 0..1 share as whole percent, one decimal when it is not whole.
+func pctCell(r float64) string {
+	p := r * 100
+	if p == math.Trunc(p) {
+		return fmt.Sprintf("%.0f%%", p)
+	}
+	return fmt.Sprintf("%.1f%%", p)
+}
+
+// watts is a power draw without its unit: whole watts bare, else one decimal.
+func watts(f float64) string {
+	if f == math.Trunc(f) {
+		return fmt.Sprintf("%.0f", f)
+	}
+	return fmt.Sprintf("%.1f", f)
+}
+
+// workloadLine is what the run did: prompt tokens in, generated tokens out
+// with the shortest stream beside them, the cache share and the stream
+// count. Each part prints only when its figures were measured.
+func workloadLine(idx publish.Index) string {
+	var head string
+	switch {
+	case idx.PromptN > 0 && idx.PredictedN > 0:
+		head = fmt.Sprintf("%d in / %d out", idx.PromptN, idx.PredictedN)
+		if idx.MinPredictedN > 0 && idx.MinPredictedN < idx.PredictedN {
+			head += fmt.Sprintf(" (min %d)", idx.MinPredictedN)
+		}
+	case idx.PromptN > 0:
+		head = fmt.Sprintf("%d in", idx.PromptN)
+	case idx.PredictedN > 0:
+		head = fmt.Sprintf("%d out", idx.PredictedN)
+	}
+	var parts []string
+	if head != "" {
+		parts = append(parts, head)
+	}
+	if idx.PromptN > 0 {
+		parts = append(parts, "cache "+pctCell(idx.CacheHitRatio))
+	}
+	if idx.Sessions == 1 {
+		parts = append(parts, "1 stream")
+	} else if idx.Sessions > 1 {
+		parts = append(parts, fmt.Sprintf("%d streams", idx.Sessions))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// contextLine is the reservation the run was given: the window and the
+// slots. A measured length is never printed here; ctx_size is what was asked.
+func contextLine(idx publish.Index) string {
+	var parts []string
+	if idx.CtxSize > 0 {
+		parts = append(parts, fmt.Sprintf("%d window", idx.CtxSize))
+	}
+	if idx.NSlots > 0 {
+		parts = append(parts, fmt.Sprintf("%d slots", idx.NSlots))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// configLine is the server's launch shape, each flag only when it was read.
+func configLine(idx publish.Index) string {
+	var parts []string
+	if idx.FA != "" {
+		parts = append(parts, "fa "+idx.FA)
+	}
+	if idx.KVCache != "" {
+		parts = append(parts, "kv "+idx.KVCache)
+	}
+	if idx.Batch != "" {
+		parts = append(parts, "b "+idx.Batch)
+	}
+	if idx.UBatch != "" {
+		parts = append(parts, "ub "+idx.UBatch)
+	}
+	if idx.NGL != "" {
+		parts = append(parts, "ngl "+idx.NGL)
+	}
+	if idx.Offload != "" {
+		parts = append(parts, "offload "+idx.Offload)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// draftLine is the speculative decoder: the model with its acceptance rate
+// riding beside it when the server reported both halves.
+func draftLine(idx publish.Index) string {
+	var parts []string
+	if idx.DraftModel != "" {
+		parts = append(parts, idx.DraftModel)
+	}
+	if idx.DraftAccept > 0 {
+		parts = append(parts, pctCell(idx.DraftAccept)+" accepted")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// machineLine is what the box drew and whether it throttled: the draw over
+// its limit when both were read, the draw alone otherwise.
+func machineLine(idx publish.Index) string {
+	var parts []string
+	switch {
+	case idx.PowerW > 0 && idx.PowerLimitW > 0:
+		parts = append(parts, fmt.Sprintf("%s of %s W", watts(idx.PowerW), watts(idx.PowerLimitW)))
+	case idx.PowerW > 0:
+		parts = append(parts, watts(idx.PowerW)+" W")
+	case idx.PowerLimitW > 0:
+		parts = append(parts, watts(idx.PowerLimitW)+" W limit")
+	}
+	if idx.Throttled {
+		parts = append(parts, "throttled")
+	}
+	if idx.Cold {
+		parts = append(parts, "cold cache")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// runReindex rewrites published rows from their tapes with this build's
+// figures (TTP-130): each run is downloaded, decoded, re-indexed and
+// patched back. It needs the journal token exactly like publish --edit —
+// an anonymous run cannot be edited. A run that fails is named on stderr
+// and skipped, and the exit is publish when any was.
+func runReindex(ctx context.Context, c *cli, args []string) int {
+	fs := newFlagSet("reindex")
+	output := declareOutputFlag(fs)
+	svcURL := fs.String("url", "", "the service to read from (default "+publish.DefaultBaseURL+")")
+	names, err := parseArgs(fs, args)
+	if err != nil {
+		return c.badFlags("reindex", usageFor("reindex"), args, err)
+	}
+	if len(names) == 0 {
+		return c.usageTextf(usageText, "toktape reindex: expected one run id or link")
+	}
+	format, refused := outputFor("reindex", *output)
+	c.json = format.isJSON()
+	if refused != nil {
+		return c.fail(*refused)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return c.usagef("toktape: %v", err)
+	}
+	if cfg.Token == "" {
+		return c.usagef("toktape publish --edit needs a journal token in config.toml; an anonymous run cannot be edited")
+	}
+	client := &publish.Client{
+		BaseURL:   *svcURL,
+		Token:     cfg.Token,
+		UserAgent: "toktape/" + version,
+	}
+	failed := false
+	for _, name := range names {
+		id, err := publish.RunID(name)
+		if err != nil {
+			fmt.Fprintf(c.stderr, "toktape reindex: %v\n", err)
+			failed = true
+			continue
+		}
+		var buf bytes.Buffer
+		if _, err := client.Download(ctx, id, &buf); err != nil {
+			fmt.Fprintf(c.stderr, "toktape reindex %s: %v\n", id, err)
+			failed = true
+			continue
+		}
+		tp, err := tape.Decode(bytes.NewReader(buf.Bytes()))
+		if err != nil {
+			fmt.Fprintf(c.stderr, "toktape reindex %s: %v\n", id, err)
+			failed = true
+			continue
+		}
+		idx := publish.IndexOf(tp)
+		if _, err := client.Edit(ctx, id, publish.Edit{Index: &idx}); err != nil {
+			fmt.Fprintf(c.stderr, "toktape reindex %s: %v\n", id, err)
+			failed = true
+			continue
+		}
+		ctxS := "?"
+		if idx.CtxSize > 0 {
+			ctxS = ctxCell(&idx.CtxSize)
+		}
+		fmt.Fprintf(c.stdout, "%s  reindexed · P%d/G%d · ctx %s · kv %s · %s\n",
+			id, idx.PromptN, idx.PredictedN, ctxS, orUnknown(idx.KVCache),
+			paramsChip(idx.MoE, idx.Params, idx.ActiveParams))
+	}
+	if failed {
+		return c.fail(failure{
+			code: exitPublish,
+			msg:  "toktape reindex: some runs were not reindexed",
+		})
+	}
+	return exitOK
 }

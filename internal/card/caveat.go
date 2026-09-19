@@ -314,7 +314,7 @@ func ShortPrompt(s *tape.RunSummary) bool {
 	if s == nil {
 		return false
 	}
-	return shortPromptCount(promptTokens(s))
+	return shortPromptCount(PromptTokens(s))
 }
 
 // streamsNotConcurrent reports whether the run sent several streams at once
@@ -398,7 +398,7 @@ func shortPromptCount(n int) bool {
 // condition. Joined here, the card cannot render the count without the reason
 // the rate above it is not a prefill rate.
 func promptTokensPart(s *tape.RunSummary) string {
-	count := formatInt(promptTokens(s)) + " prompt tokens"
+	count := formatInt(PromptTokens(s)) + " prompt tokens"
 	if !shortPrompt(s) {
 		return count
 	}
@@ -551,7 +551,7 @@ func Caveats(s *tape.RunSummary) []Caveat {
 	if shortPrompt(s) {
 		add(CodeShortPromptForPrefill, SeverityFigure, fmt.Sprintf(
 			"short prompt: %d prompt tokens is under %d, so the prefill rate is not one",
-			promptTokens(s), MinPrefillPromptTokens))
+			PromptTokens(s), MinPrefillPromptTokens))
 	}
 	if text := clientDisagreesText(s); text != "" {
 		add(CodeClientDisagrees, SeverityRun, text)
