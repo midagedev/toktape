@@ -178,6 +178,63 @@ func TestAggregateConcurrentWindow(t *testing.T) {
 		t.Errorf("concurrent %v is not above the whole-wall %v: the ragged tail must dilute the whole-wall figure, not the all-live one",
 			agg.ConcurrentPredictedPerSecond, agg.AggregatePredictedPerSecond)
 	}
+
+	// The per-stream figure and its count (lead, 2026-09-19). A surface that
+	// prints the window aggregate beside PerStreamPredictedPerSecond puts two
+	// spans in one row: the whole-wall mean is a stream's rate including the
+	// tail where it had more of the machine to itself. These two are the pair
+	// that reconciles, and the count is the divisor made visible.
+	if got, want := agg.ConcurrentStreams, 4; got != want {
+		t.Errorf("ConcurrentStreams = %d, want %d: the answered streams the window was taken over", got, want)
+	}
+	if got, want := agg.ConcurrentPerStreamPredictedPerSecond, agg.ConcurrentPredictedPerSecond/4; math.Abs(got-want) > 1e-9 {
+		t.Errorf("ConcurrentPerStreamPredictedPerSecond = %v, want %v", got, want)
+	}
+	if got := agg.ConcurrentPerStreamPredictedPerSecond * float64(agg.ConcurrentStreams); math.Abs(got-agg.ConcurrentPredictedPerSecond) > 1e-9 {
+		t.Errorf("%d x %v = %v, want the aggregate %v: the pair must reconcile by construction",
+			agg.ConcurrentStreams, agg.ConcurrentPerStreamPredictedPerSecond, got, agg.ConcurrentPredictedPerSecond)
+	}
+	// Not asserted here: that the window per-stream figure sits below the
+	// whole-wall one. That is true of a real box — a stream that outlives the
+	// others gets more of the machine, so its own mean rises — and it is why
+	// the two must not be printed as one figure, but these streams are
+	// synthetic and decode at a fixed 25 ms gap whatever else is running, so
+	// the fixture cannot show it (measured, lead 2026-09-19: 40.06 window
+	// against 40.00 whole-wall, the boundary token, not contention). An
+	// assertion here would pin the fixture's physics, not the arithmetic's.
+}
+
+// TestConcurrentPerStreamDividesByAnsweredStreams: the divisor is the streams
+// the window was taken over, not every record (lead, 2026-09-19). Streams is
+// len(recs) and includes the ones that failed and the ones that answered with
+// nothing, so dividing by it prints a per-stream figure that is silently low
+// and a product that does not hold — which is the whole reason the count is
+// stored beside the rate rather than left to each surface to guess.
+func TestConcurrentPerStreamDividesByAnsweredStreams(t *testing.T) {
+	recs := []tape.RequestRecord{
+		synthStream(0, 0, 200*time.Millisecond, 25*time.Millisecond, 100),
+		synthStream(1, 2*time.Millisecond, 260*time.Millisecond, 25*time.Millisecond, 80),
+		synthStream(2, 5*time.Millisecond, 310*time.Millisecond, 25*time.Millisecond, 120),
+	}
+	failed := synthStream(3, 1*time.Millisecond, 280*time.Millisecond, 25*time.Millisecond, 72)
+	failed.Error = "connection reset"
+	silent := synthStream(4, 3*time.Millisecond, 0, 0, 0)
+	silent.Tokens = nil
+	recs = append(recs, failed, silent)
+
+	agg := Aggregate(recs)
+	if got, want := agg.Streams, 5; got != want {
+		t.Fatalf("Streams = %d, want %d: the fixture must carry both a failed and a silent stream", got, want)
+	}
+	if got, want := agg.ConcurrentStreams, 3; got != want {
+		t.Errorf("ConcurrentStreams = %d, want %d: neither the failed nor the silent stream is in the window", got, want)
+	}
+	if got := agg.ConcurrentPerStreamPredictedPerSecond * float64(agg.ConcurrentStreams); math.Abs(got-agg.ConcurrentPredictedPerSecond) > 1e-9 {
+		t.Errorf("%d x %v = %v, want the aggregate %v", agg.ConcurrentStreams, agg.ConcurrentPerStreamPredictedPerSecond, got, agg.ConcurrentPredictedPerSecond)
+	}
+	if byStreams := agg.ConcurrentPredictedPerSecond / float64(agg.Streams); math.Abs(agg.ConcurrentPerStreamPredictedPerSecond-byStreams) < 1e-9 {
+		t.Errorf("ConcurrentPerStreamPredictedPerSecond = %v, which is the aggregate over all %d records: the divisor must be the answered streams", agg.ConcurrentPerStreamPredictedPerSecond, agg.Streams)
+	}
 }
 
 // TestAggregateConcurrentWindowZeroes: the concurrent fields are 0 — never an

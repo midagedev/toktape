@@ -213,6 +213,11 @@ func Aggregate(recs []tape.RequestRecord) tape.AggregateTimings {
 		out.ConcurrentWindowMs = msOf(w)
 		out.ConcurrentPredictedN = n
 		out.ConcurrentPredictedPerSecond = float64(n) / w.Seconds()
+		// The per-stream figure comes from the same slice as the window, so
+		// the divisor is the streams the window was actually taken over and
+		// N x each == aggregate holds by construction (lead, 2026-09-19).
+		out.ConcurrentPerStreamPredictedPerSecond = float64(n) / float64(len(ok)) / w.Seconds()
+		out.ConcurrentStreams = len(ok)
 	}
 	if len(rates) > 0 {
 		sum := 0.0

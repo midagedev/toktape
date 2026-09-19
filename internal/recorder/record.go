@@ -1034,8 +1034,32 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 // when the server is not its child, and the fix for that is the server
 // declaring its own pid.
 func (r *run) openSampler() (procmon.FaultSampler, func()) {
-	if r.pid <= 0 {
+	s, err := r.newFaultSampler()
+	if err != nil {
+		r.warn("process sampler unavailable, no memory or fault series")
 		return nil, func() {}
+	}
+	if s == nil {
+		return nil, func() {}
+	}
+	return s, func() { s.Close() }
+}
+
+// newFaultSampler opens a latched process sampler without the run's warning
+// behaviour, for callers whose silence is part of their contract: the probe
+// pass never warns, so it cannot go through openSampler's "sampler
+// unavailable" sentence. A nil sampler with a nil error means no /proc view
+// — nothing to observe, nothing to say (TTP-143, 2026-09-19).
+//
+// The latch is here rather than at each caller because both callers need the
+// same property: the first delta after this call is the first thing that
+// happened after it. For the run that makes the first token's delta the
+// prompt phase; for the probe it makes the pass's figure the pass's own
+// cost, the faults of loading the weights included, which is the whole
+// reason the pass samples at all.
+func (r *run) newFaultSampler() (procmon.FaultSampler, error) {
+	if r.pid <= 0 {
+		return nil, nil
 	}
 	var s procmon.FaultSampler
 	var err error
@@ -1045,14 +1069,13 @@ func (r *run) openSampler() (procmon.FaultSampler, func()) {
 		s, err = procmon.NewSamplerAt(r.opts.FSRoot, r.pid)
 	}
 	if err != nil {
-		r.warn("process sampler unavailable, no memory or fault series")
-		return nil, func() {}
+		return nil, err
 	}
 	// The first delta has nothing to subtract from. Latching here, before
-	// anything is sent, is what makes the first token's delta the prompt
-	// phase (procmon.Sampler.FaultDelta doc).
+	// anything is sent, is what makes the first delta the phase that
+	// followed this call (procmon.Sampler.FaultDelta doc).
 	_, _, _ = s.FaultDelta()
-	return s, func() { s.Close() }
+	return s, nil
 }
 
 // warnTreeProcesses says, once per engine run, that its process figures are

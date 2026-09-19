@@ -131,11 +131,25 @@ func probePrompt(lead string, offset, tokens int) string {
 // Probe is the schema's "this run did not probe". A ServerOpenAI server is
 // skipped whole — it has no /completion route and no timings object, so
 // there is nothing to observe through this pass.
+//
+// The pass is bracketed by its own fault sampler (TTP-143, 2026-09-19): it
+// sends the first prompts a cold server ever sees, so it pays the faults of
+// loading the weights — and the run's sampler latches only after the pass
+// returns, so without this bracket that cost lands in nobody's figures and
+// a genuinely cold server reads warm. The bracket's figure is also the
+// better measurement of the two: one stream, prompts of a known length,
+// nothing else in flight, where the run's reading was inferred from a decode
+// window that was also busy generating. No sampler is no observation,
+// silently, like every other miss here.
 func (r *run) prefillProbe(ctx context.Context) {
 	if !r.kind.SpeaksLlamaProtocol() {
 		return
 	}
 	p := &tape.ProbeSummary{}
+	sampler, _ := r.newFaultSampler()
+	if sampler != nil {
+		defer sampler.Close()
+	}
 	st, ttft, ok := r.probeSend(ctx, probePrompt(probeLeadShort, probeCycleShort, probeShortTokens))
 	if ok && st.PromptN > 0 {
 		// A point with no evaluated tokens is not a cost measurement
@@ -166,6 +180,26 @@ func (r *run) prefillProbe(ctx context.Context) {
 	}
 	if len(p.Prefill) == 2 {
 		p.PrefillPerSecond, p.FixedMs = fitPrefill(p.Prefill)
+	}
+	if sampler != nil {
+		// The denominator is the tokens the pass evaluated — both fit
+		// points and the replay's own count. A cache-served replay reports
+		// PromptN 0 in the server's own words, so it contributes nothing
+		// and the sum needs no special case: faults of a hit are page-table
+		// walks, not prefills.
+		if maj, _, err := sampler.FaultDelta(); err == nil {
+			tokens := 0
+			for _, pt := range p.Prefill {
+				tokens += pt.PromptN
+			}
+			if p.Replay != nil {
+				tokens += p.Replay.PromptN
+			}
+			p.MajFaults = maj
+			if tokens > 0 {
+				p.MajFaultsPerToken = float64(maj) / float64(tokens)
+			}
+		}
 	}
 	if len(p.Prefill) > 0 || p.Replay != nil {
 		r.prefill = p

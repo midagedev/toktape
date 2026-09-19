@@ -575,3 +575,102 @@ func TestProbeSkipsTheLongPointWhenTheFloorWouldBlowTheBudget(t *testing.T) {
 		t.Errorf("probe sent %d requests, want exactly 1 (the short point; no long point, no replay)", len(prompts))
 	}
 }
+
+// TTP-143 (FAIL-first, 2026-09-19): the probe pass pays the major faults a
+// cold server takes for its weights — it sends the first prompts the server
+// ever sees — and the run's sampler latches only after the pass, so without
+// these fields the cost is simply gone and a genuinely cold server reads
+// warm. The fake /completion route advances the fixture counter five faults
+// a request, so the three probe requests cost fifteen; the run's own
+// requests go to /v1/chat/completions and cost none, which is what makes the
+// run's zero the honest reading rather than a fixture artefact.
+func TestProbePaysItsOwnMajorFaults(t *testing.T) {
+	proc := newLivingProc(t)
+	mux := fakeMux(t)
+	served := map[string]bool{}
+	mux.HandleFunc("/completion", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Prompt string `json:"prompt"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// Five faults a request: the page-ins a cold server takes while it
+		// reads the prompt's weights. The replay takes them too — a cache
+		// hit still walks the page tables — but evaluates no tokens.
+		for i := 0; i < 5; i++ {
+			proc.bump(t)
+		}
+		n := len(in.Prompt) / 5
+		cacheN := 0
+		if served[in.Prompt] {
+			cacheN, n = n, 0
+		}
+		served[in.Prompt] = true
+		ms := 30 + 0.5*float64(n)
+		if cacheN > 0 {
+			ms = 2.0
+		}
+		writeCompletion(w, n, cacheN, ms)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	opts := probeOpts(t, srv)
+	opts.FSRoot = proc.root
+	tp, err := recorder.Record(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if tp.Summary.Server.PID != fixturePID {
+		t.Fatalf("PID = %d, the writable fixture was not used", tp.Summary.Server.PID)
+	}
+	p := tp.Summary.Probe
+	if p == nil {
+		t.Fatal("Summary.Probe = nil, the pass did not record anything")
+	}
+	if len(p.Prefill) != 2 {
+		t.Fatalf("Prefill points = %d, want 2: %+v", len(p.Prefill), p.Prefill)
+	}
+	if p.MajFaults != 15 {
+		t.Errorf("MajFaults = %d, want 15 (three requests x five faults)", p.MajFaults)
+	}
+	// The denominator is the tokens the pass evaluated: both fit points,
+	// and the replay's none — the cache served it, so its tokens were not
+	// prefilled and its faults are not per-prefill-token faults.
+	tokens := p.Prefill[0].PromptN + p.Prefill[1].PromptN
+	if p.Replay != nil {
+		tokens += p.Replay.PromptN
+	}
+	if !near(p.MajFaultsPerToken, 15.0/float64(tokens), 0.01) {
+		t.Errorf("MajFaultsPerToken = %v, want 15 over the %d evaluated tokens (%v)", p.MajFaultsPerToken, tokens, 15.0/float64(tokens))
+	}
+	// The run's own counters start after the pass: the probe's faults are
+	// not the run's, which is precisely why the probe has to carry them.
+	if got := tp.Summary.Memory.MajFaultsTotal; got != 0 {
+		t.Errorf("Memory.MajFaultsTotal = %d, want 0: the run's sampler latched after the probe", got)
+	}
+}
+
+// And where no counter can be read — no /proc view of the server — both
+// figures stay 0: not observed, never invented.
+func TestProbeFaultsAreZeroWithoutAProcView(t *testing.T) {
+	mux, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	// probeOpts leaves FSRoot an empty temp dir: no /proc under it, so no
+	// sampler for the probe and none for the run.
+	tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	p := tp.Summary.Probe
+	if p == nil {
+		t.Fatal("Summary.Probe = nil, the pass did not record anything")
+	}
+	if p.MajFaults != 0 || p.MajFaultsPerToken != 0 {
+		t.Errorf("fault figures without a counter: %d faults, %v per token; both want 0", p.MajFaults, p.MajFaultsPerToken)
+	}
+}
