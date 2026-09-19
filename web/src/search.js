@@ -110,6 +110,16 @@ const FILTERS = [
   ["sessions", "sessions"],
 ];
 
+// The longest free-text search that reaches the database (lead, 2026-09-19).
+// SQLite refuses a LIKE pattern over 50 characters —
+// SQLITE_MAX_LIKE_PATTERN_LENGTH, which D1 ships at its default — and the
+// pattern this builds is the text wrapped in two `%`. Before this, a 49th
+// character threw inside the query and the page answered 500: measured on
+// production, where pasting a model path into the box was enough. The box
+// carries the same number as `maxlength`, so a person cannot type their way
+// into the refusal and only a hand-written URL or an API caller sees it.
+const MAX_Q = 48;
+
 // The VRAM tiers the box offers, in GB. A threshold, not a category, so it
 // has no facet counts — just these fixed options.
 const VRAM_TIERS = [8, 12, 16, 24, 48, 80];
@@ -272,6 +282,9 @@ export function whereFor(url, scope, skipParam) {
   // they are stored: a run whose model never normalised is still findable by
   // the file name that was observed (§9.4, rule 2).
   const q = (url.searchParams.get("q") || "").trim();
+  if (q.length > MAX_Q) {
+    return { where, args, error: fail(400, `the search text is ${q.length} characters; ${MAX_Q} is the most that travels`) };
+  }
   if (q && skipParam !== "q") {
     const cols = ["model_raw", "model_id", "repo", "gpus_raw", "engine_kind", "quant_raw"];
     // One placeholder per column rather than a numbered one reused. SQLite
@@ -312,8 +325,9 @@ export async function query(env, url, scope, limit) {
   const { where, args } = w;
   const cursor = decodeCursor(url.searchParams.get("cursor"));
   // created_at, never recorded_at: ordering on a field out of the upload
-  // would make the listing trust the uploader's clock, and its UTC offset is
-  // still an open question (TTP-120).
+  // would make the listing trust the uploader's clock. (The offset question
+  // beside it is settled — a published tape carries the instant in UTC,
+  // §9.3/TTP-120 — but whose clock it came from has not changed.)
   let order;
   if (sort === "oldest") {
     if (cursor) {
@@ -868,7 +882,7 @@ export function filterForm(url, facets) {
   // The current path, not "/": on /u/<handle> the filters used to submit to
   // the front page (2026-09-19).
   return `<form class="filters" method="get" action="${esc(url.pathname)}">
-  <input type="search" name="q" value="${esc(url.searchParams.get("q") || "")}"
+  <input type="search" name="q" maxlength="${MAX_Q}" value="${esc(url.searchParams.get("q") || "")}"
     placeholder="model, repo, GPU, engine…" autocomplete="off">
   <kbd title="press / to search">/</kbd>
   ${sel("model", "any model", facets.model)}

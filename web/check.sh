@@ -350,6 +350,24 @@ npx wrangler d1 execute toktape --local --command \
   "INSERT OR REPLACE INTO runs (id, created_at, tape_key, tape_ext, tape_bytes, index_schema, index_json, model_id, model_raw, prompt_n, predicted_n, min_predicted_n, cache_hit_ratio, ctx_size, n_slots, fa, kv_cache, offload, active_params, params, moe, n_experts, n_experts_used, prefill_per_sec, throttled, power_w, power_limit_w) VALUES ('figsrow0000000000000', '2026-01-03T00:00:00Z', 'none', '.tape', 1, 1, '{\"schema\":1,\"model_id\":\"harness-figs\",\"model_raw\":\"harness-figs.gguf\",\"prompt_n\":512,\"predicted_n\":128,\"min_predicted_n\":12,\"cache_hit_ratio\":0.41,\"ctx_size\":32768,\"n_slots\":4,\"fa\":\"on\",\"kv_cache\":\"q8_0\",\"offload\":\"partial\",\"active_params\":3000000000,\"params\":35000000000,\"moe\":true,\"n_experts\":128,\"n_experts_used\":8,\"prefill_per_sec\":1234.5,\"throttled\":true,\"power_w\":281,\"power_limit_w\":300}', 'harness-figs', 'harness-figs.gguf', 512, 128, 12, 0.41, 32768, 4, 'on', 'q8_0', 'partial', 3000000000, 35000000000, 1, 128, 8, 1234.5, 1, 281, 300)" \
   >"$work/figs.log" 2>&1 || { cat "$work/figs.log"; die "could not insert the figures harness row"; }
 # Refusals: a band that is not there, and a floor that is not a number.
+# A search longer than SQLite's LIKE pattern limit is refused, not thrown
+# (lead, 2026-09-19). Before this the 49th character reached the database and
+# the page answered 500 — measured on production, where pasting a model path
+# into the box was enough to do it. 48 passes, 49 is a 400 that names the
+# number, and the box carries the same number as maxlength so a person cannot
+# type their way into the refusal.
+q48=$(python3 -c "print('a'*48)")
+q49=$(python3 -c "print('a'*49)")
+code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?q=$q48")
+[ "$code" = "200" ] || { cat "$work/body"; die "a 48-character search was refused (got $code)"; }
+code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?q=$q49")
+[ "$code" = "400" ] || { cat "$work/body"; die "a search past the LIKE pattern limit was not refused (got $code)"; }
+grep -q '48 is the most' "$work/body" || { cat "$work/body"; die "the search refusal does not name the limit"; }
+code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/?q=$q49")
+[ "$code" = "400" ] || { cat "$work/body"; die "the page did not refuse an over-long search (got $code)"; }
+curl -fsS "$base/" >"$work/body" && grep -q 'name="q" maxlength="48"' "$work/body" ||
+  { die "the search box carries no maxlength, so a person can type past the limit"; }
+
 code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?size=999")
 [ "$code" = "400" ] || { cat "$work/body"; die "an unknown size was not refused (got $code)"; }
 grep -q 'unknown size' "$work/body" || { cat "$work/body"; die "the size refusal does not name the size"; }
