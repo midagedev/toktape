@@ -55,8 +55,8 @@ toktape は、すでに起動している llama-server にアタッチし、1 �
 │          -m /models/Qwen3.6-35B-A3B/Qwen3.6-35B-A3B-UD-Q6_K.gguf     │
 │          -c 32768 --jinja -np 4 --jinja --host 127.0.0.1 --port 8012 │
 ├──────────────────────────────────────────────────────────────────────┤
-│ ! engine commit c10fbbcc read from the checkout next to the binary,  │
-│   not from the binary                                                │
+│ ! 2 caveats — ragged run: 4 × 42.1 is 168, not the 144 aggregate —   │
+│   the streams did not all decode across the same window · recorded   │
 ├──────────────────────────────────────────────────────────────────────┤
 │                toktape · github.com/midagedev/toktape                │
 └──────────────────────────────────────────────────────────────────────┘

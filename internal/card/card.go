@@ -9,7 +9,6 @@ import (
 
 	"github.com/midagedev/toktape/internal/bandwidth"
 	"github.com/midagedev/toktape/internal/gpu"
-	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -700,7 +699,10 @@ func readRoundPrompt(p tape.RoundSummary) roundPrompt {
 		r.hitRatio = float64(p.CacheN) / float64(total)
 	}
 	r.short = shortPromptCount(r.evaluated)
-	r.cached = p.CacheN > 0 && r.hitRatio >= server.CachedHitRatio
+	// The run-level cached_prefill caveat asks the same question of the
+	// whole run (cacheHitCached, TTP-88): one predicate, so a round and a
+	// run cannot disagree about where "cached" starts.
+	r.cached = cacheHitCached(p.CacheN, p.PromptN+p.CacheN)
 	return r
 }
 
@@ -1102,8 +1104,10 @@ const streamsIdentityTolerance = 0.02
 // aggregate is the run's tokens over a window whose tail holds one stream, so
 // N × per-stream is not it (the ExLlamaV3 two-stream take read 2 × 11.6
 // against a 19.4 aggregate). Printing the figures and letting the arithmetic
-// silently not work was never the reader's answer; the sentence is. TTP-108
-// is the fuller version of this, on the caveat lines.
+// silently not work was never the reader's answer; the sentence is.
+// TTP-108 (2026-09-19) is the fuller version of this clause, on the caveat
+// lines as ragged_aggregate with the arithmetic named: RaggedAggregate asks
+// the question for both.
 func streamLines(s *tape.RunSummary) []string {
 	a := s.Aggregate
 	n := a.Streams
@@ -1118,11 +1122,14 @@ func streamLines(s *tape.RunSummary) []string {
 	if a.StreamsFailed > 0 {
 		parts = append(parts, fmt.Sprintf("%d of %d failed", a.StreamsFailed, sent))
 	}
-	// A multi-round run is not one window either (lead, 2026-09-13): its
+	// The clause is RaggedAggregate's question, asked here and nowhere
+	// re-derived (TTP-108, 2026-09-19): the same predicate raises
+	// ragged_aggregate on the caveat lines, with the arithmetic named. A
+	// multi-round run is not one window either (lead, 2026-09-13): its
 	// aggregate is weighted by how long each round decoded. "per round" above
 	// already says the streams were not all in one window, so the clause would
-	// be saying it twice.
-	if s.Rounds <= 1 && !streamsMultiply(a, n) {
+	// be saying it twice — and the predicate says so too.
+	if RaggedAggregate(s) {
 		parts = append(parts, "not all decoding at once")
 	}
 	// TTFT is here rather than on the Prefill row for a run of several streams
@@ -1131,11 +1138,20 @@ func streamLines(s *tape.RunSummary) []string {
 	// second line. It belongs beside its own p95. A single-stream run has no
 	// Streams block, so the Prefill row still carries its TTFT.
 	//
+	// The pair is TTFTPercentiles' to give (TTP-97, 2026-09-19): percentiles
+	// computed from two samples frequently render as the same string, which
+	// reads as a bug, so alike renderings print the single figure instead.
+	//
 	// The line wraps rather than truncating: on a server with fewer slots than
 	// streams the queue note is the part that explains the per-stream rate
 	// above it, so it is never the part that gets cut.
+	p50, p95, pair := TTFTPercentiles(s, formatMs)
+	ttft := "TTFT " + p50
+	if pair {
+		ttft = fmt.Sprintf("TTFT p50 %s p95 %s", p50, p95)
+	}
 	parts = append(parts,
-		fmt.Sprintf("TTFT p50 %s p95 %s", formatMs(a.TTFTp50Ms), formatMs(a.TTFTp95Ms)),
+		ttft,
 		"slots busy max "+formatInt(a.SlotsBusyMax),
 		queuedString(s))
 	return labelled("Streams", speedLabelW, wrapJoin(dropEmpty(parts...), " · ", innerWidth-speedLabelW))

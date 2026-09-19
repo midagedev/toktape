@@ -53,6 +53,11 @@ func ExplainCaveats(s *tape.RunSummary) string {
 		{CodeStreamsNotConcurrent, fmt.Sprintf("peak_decoding_streams %s of %d sent at once, slots busy max %s",
 			orUnknown(countOrEmpty(s.Aggregate.PeakDecodingStreams)), s.Concurrency,
 			orUnknown(countOrEmpty(s.Aggregate.SlotsBusyMax)))},
+		// The arithmetic behind ragged_aggregate: the aggregate beside N ×
+		// per-stream, so "why did this card warn" is answered by the row.
+		{CodeRaggedAggregate, fmt.Sprintf("aggregate %s, %d × %s each",
+			formatRateUnit(s.Aggregate.AggregatePredictedPerSecond),
+			streamsSent(s), formatRateUnit(s.Aggregate.PerStreamPredictedPerSecond))},
 		{CodePlacementContradicted, placementContradictionReading(s)},
 		{CodeBandwidthOverCeiling, bandwidthOverCeilingReading(s)},
 		{CodeAnswerCut, fmt.Sprintf("%d of %d predicted tokens were reasoning",
@@ -67,6 +72,11 @@ func ExplainCaveats(s *tape.RunSummary) string {
 			s.Cache.Label, formatFloat1(s.Memory.MajFaultsPerToken))},
 		{CodeShortPromptForPrefill, fmt.Sprintf("%d prompt tokens, floor %d",
 			PromptTokens(s), MinPrefillPromptTokens)},
+		// The share behind cached_prefill, against the threshold the
+		// sentence was decided on (cacheHitCached, TTP-88) — the same
+		// threshold the round lines below print, so the run and its rounds
+		// cannot disagree about where "cached" starts.
+		{CodeCachedPrefill, cachedPrefillReading(s)},
 		// The per-stream count beside the run-level flag it now decides
 		// independently of (lead, 2026-09-15): the flag describes the means,
 		// so both numbers are needed to answer "why did this card warn" — and
@@ -175,6 +185,18 @@ func explainRoundPrompt(p tape.RoundSummary) string {
 	}
 	return fmt.Sprintf("prefill line: %d evaluated per stream at %s, floor %d",
 		r.evaluated, formatRateUnit(r.rate), MinPrefillPromptTokens)
+}
+
+// cachedPrefillReading is the cached_prefill reading: the recorded share
+// against the threshold cacheHitCached decides on, so the listing shows the
+// numbers behind the verdict rather than a second opinion.
+func cachedPrefillReading(s *tape.RunSummary) string {
+	hits, total := s.Cache.HitTokens, s.Cache.PromptTotal
+	if total <= 0 {
+		return "no prompt total recorded"
+	}
+	return fmt.Sprintf("cache %s hit (%d/%d), threshold %s",
+		formatPct(float64(hits)/float64(total)), hits, total, formatPct(server.CachedHitRatio))
 }
 
 // countOrEmpty is n, or "" when it was never recorded, for orUnknown.

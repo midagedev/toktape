@@ -1,0 +1,215 @@
+{
+  "id": "20260919-120000-r1-distill-llama-70b",
+  "toktape_version": "0.1.0",
+  "started_at": "2026-09-19T12:00:00Z",
+  "finished_at": "2026-09-19T12:00:18.4Z",
+  "server": {
+    "kind": "llama-server",
+    "url": "http://127.0.0.1:8080",
+    "build": "b3650",
+    "commit": "a1b2c3d",
+    "pid": 48213,
+    "host": "workstation",
+    "args": [
+      "/usr/local/bin/llama-server",
+      "-m",
+      "/models/DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
+      "-c",
+      "16384",
+      "--parallel",
+      "8",
+      "-ngl",
+      "99",
+      "-fa",
+      "on",
+      "-b",
+      "2048",
+      "-ub",
+      "512",
+      "-ctk",
+      "q8_0",
+      "-ctv",
+      "q8_0",
+      "-t",
+      "16"
+    ],
+    "flags": {
+      "ngl": "99",
+      "fa": "on",
+      "b": "2048",
+      "ub": "512",
+      "ctk": "q8_0",
+      "ctv": "q8_0",
+      "t": "16"
+    },
+    "n_slots": 8,
+    "ctx_size": 16384
+  },
+  "model": {
+    "path": "/models/DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
+    "file_name": "DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
+    "name": "R1 Distill Llama 70B",
+    "arch": "llama",
+    "quant": "Q4_K_M",
+    "file_bytes": 45655502848,
+    "params": 70553706496,
+    "n_layers": 80,
+    "ctx_train": 131072,
+    "active_bytes_per_token": 45100000000
+  },
+  "host": {
+    "hostname": "workstation",
+    "os": "linux",
+    "kernel": "6.8.0-45-generic",
+    "cpu": "AMD Ryzen 9 7950X",
+    "cpu_cores": 16,
+    "cpu_threads": 32,
+    "ram_bytes": 68719476736,
+    "ram_speed": "DDR5-6000",
+    "ram_channels": 2,
+    "gpus": [
+      {
+        "index": 0,
+        "name": "NVIDIA GeForce RTX 3090",
+        "vram_bytes": 25769803776,
+        "driver": "550.54.14",
+        "pcie": "4.0 x16",
+        "peak_bw_bps": 936200000000
+      },
+      {
+        "index": 1,
+        "name": "NVIDIA GeForce RTX 3090",
+        "vram_bytes": 25769803776,
+        "driver": "550.54.14",
+        "pcie": "4.0 x16",
+        "peak_bw_bps": 936200000000
+      }
+    ]
+  },
+  "placement": {
+    "devices": [
+      {
+        "device": "GPU0",
+        "bytes": 23192823398,
+        "classes": {
+          "attention": 4294967296,
+          "embeddings": 589934592,
+          "ffn": 18307921510
+        },
+        "layers": "0-39"
+      },
+      {
+        "device": "GPU1",
+        "bytes": 22441208218,
+        "classes": {
+          "attention": 4294967296,
+          "ffn": 17287092506,
+          "output": 859148416
+        },
+        "layers": "40-79"
+      }
+    ],
+    "never_loaded_bytes": 0,
+    "source": "gguf+args",
+    "vram_weights_bytes": 45634031616,
+    "vram_kv_bytes": 2791728742,
+    "vram_compute_bytes": 1610612736
+  },
+  "memory": {
+    "at_end": {
+      "virt_bytes": 51539607552,
+      "rss_bytes": 1288490189,
+      "rss_file_bytes": 858993459,
+      "rss_anon_bytes": 429496730,
+      "rss_shmem_bytes": 0,
+      "swap_bytes": 0,
+      "maj_faults": 0,
+      "min_faults": 128402
+    },
+    "peak_rss_bytes": 1288490189,
+    "mapped_file_bytes": 45655502848,
+    "maj_faults_total": 0,
+    "maj_faults_prompt": 0,
+    "maj_faults_decode": 0,
+    "maj_faults_per_token": 0
+  },
+  "concurrency": 1,
+  "timings": {
+    "prompt_n": 15,
+    "cache_n": 497,
+    "prompt_ms": 6,
+    "prompt_per_second": 2500,
+    "predicted_n": 320,
+    "predicted_ms": 18333.3,
+    "predicted_per_second": 17.4,
+    "ttft_ms": 12,
+    "client_prompt_per_second": 1250,
+    "client_predicted_per_second": 17.3,
+    "client_agrees_with_server": true,
+    "decode_label": "decode",
+    "itl_p50_ms": 57.5,
+    "itl_p95_ms": 62,
+    "itl_p99_ms": 71.3,
+    "effective_bw_bps": 784740000000
+  },
+  "aggregate": {
+    "streams": 1,
+    "wall_ms": 18963,
+    "total_prompt_n": 384,
+    "total_predicted_n": 320,
+    "aggregate_predicted_per_second": 17.4,
+    "aggregate_prompt_per_second": 610,
+    "per_stream_predicted_per_second": 17.4,
+    "ttft_p50_ms": 630,
+    "ttft_p95_ms": 630,
+    "slots_busy_max": 1
+  },
+  "cache": {
+    "hit_tokens": 497,
+    "prompt_total": 512,
+    "hit_ratio": 0.970703125,
+    "label": "cached"
+  },
+  "contention": {
+    "contended": false,
+    "loadavg1": 3.1,
+    "other_gpu_procs": 0
+  },
+  "template": {
+    "chat_template": "llama3",
+    "rendered_has_think_close": false,
+    "rendered_prompt_sha256": "9f2c4b1a8d5e6037c1a9b2d4e8f70516a3c9d2b4e6f8017a3c5d9e2b4f6a8017",
+    "rendered_prompt_tokens": 512
+  },
+  "sampling": {
+    "endpoint": "chat"
+  },
+  "limit": {},
+  "gpus_at_end": [
+    {
+      "index": 0,
+      "used_bytes": 25555748454,
+      "proc_bytes": 25341952819,
+      "util_pct": 96,
+      "temp_c": 68,
+      "power_w": 340,
+      "clock_mhz": 1830
+    },
+    {
+      "index": 1,
+      "used_bytes": 24481361100,
+      "proc_bytes": 24267565465,
+      "util_pct": 91,
+      "temp_c": 64,
+      "power_w": 310,
+      "clock_mhz": 1815
+    }
+  ],
+  "caveats": [
+    {
+      "code": "cached_prefill",
+      "severity": "figure",
+      "text": "cached prefill: 497 of 512 prompt tokens (97%) were prefix-cache hits, so the prefill rate is over the 15 the server evaluated"
+    }
+  ]
+}

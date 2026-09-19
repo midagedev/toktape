@@ -126,14 +126,18 @@ func TestNoHeroSubLineIsEverCut(t *testing.T) {
 	shortPrompt.Cache.PromptTotal, shortPrompt.Timings.PromptN = 30, 30
 
 	for name, s := range map[string]*tape.RunSummary{
-		"example":        card.Example(),
-		"concurrent":     card.ExampleConcurrent(),
-		"speculative":    card.ExampleSpeculative(),
-		"rounds":         card.ExampleRounds(),
-		"sweep":          card.ExampleSweep(),
-		"sharded":        card.ExampleSharded(),
-		"long draft":     longDraft,
-		"short prompt":   shortPrompt,
+		"example":      card.Example(),
+		"concurrent":   card.ExampleConcurrent(),
+		"speculative":  card.ExampleSpeculative(),
+		"rounds":       card.ExampleRounds(),
+		"sweep":        card.ExampleSweep(),
+		"sharded":      card.ExampleSharded(),
+		"long draft":   longDraft,
+		"short prompt": shortPrompt,
+		// TTP-108: the ragged clause rides the decode sub-line, which
+		// makes it the longest sub1 a fixture produces.
+		"ragged":         card.ExampleRagged(),
+		"cached":         card.ExampleCachedPrefill(),
 		"nothing at all": {},
 	} {
 		t.Run(name, func(t *testing.T) {

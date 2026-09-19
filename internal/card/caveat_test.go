@@ -75,8 +75,24 @@ func caveatCases() []caveatCase {
 			s.Concurrency = 2
 			s.Aggregate.Streams, s.Aggregate.MinPredictedN = 2, 100
 			s.Aggregate.PeakDecodingStreams = 1
+			// The mutation is about the timeline, so the arithmetic has to
+			// agree: the clean fixture's aggregate is one stream's rate,
+			// and two streams at that rate with this aggregate is a ragged
+			// run too (TTP-108, 2026-09-19).
+			s.Aggregate.AggregatePredictedPerSecond = 2 * s.Aggregate.PerStreamPredictedPerSecond
 		},
 		onCard: "decoded one at a time",
+	}, {
+		// TTP-108: four streams at 17.4 each is 69.6, not this aggregate.
+		code: CodeRaggedAggregate,
+		mutate: func(s *tape.RunSummary) {
+			s.Concurrency = 4
+			s.Aggregate.Streams, s.Aggregate.MinPredictedN = 4, 280
+			s.Aggregate.AggregatePredictedPerSecond = 12.0
+		},
+		// The Streams block's own clause is the reason the caveat exists;
+		// the sentence is checked wrap-insensitively by the shared test.
+		onCard: "not all decoding at once",
 	}, {
 		code: CodePlacementContradicted,
 		// The estimate splits the model across both cards; the run's own
@@ -140,6 +156,18 @@ func caveatCases() []caveatCase {
 			s.Timings.PromptN, s.Timings.CacheN = 63, 0
 		},
 		onCard: "not a prefill measurement",
+	}, {
+		// TTP-88: a second run of the same prompt — 497 of 512 tokens from
+		// the cache. The prefill rate beside it is a cache-hit rate, and
+		// only the caveat says so.
+		code: CodeCachedPrefill,
+		mutate: func(s *tape.RunSummary) {
+			s.Cache.PromptTotal, s.Cache.HitTokens = 512, 497
+			s.Cache.HitRatio = 497.0 / 512
+			s.Cache.Label = tape.CacheCached
+			s.Timings.PromptN, s.Timings.CacheN = 15, 497
+		},
+		onCard: "cached prefill",
 	}, {
 		code:   CodeClientDisagrees,
 		mutate: func(s *tape.RunSummary) { s.Timings.ClientAgreesWithServer = false },
@@ -518,6 +546,10 @@ func TestStreamsNotConcurrentTextAndGates(t *testing.T) {
 		s.Concurrency = 2
 		s.Aggregate.Streams, s.Aggregate.MinPredictedN = 2, 100
 		mutate(s)
+		// The timeline is what these cases vary; the arithmetic agrees, or
+		// the ragged_aggregate caveat (TTP-108, 2026-09-19) fires beside
+		// the sentence under test.
+		s.Aggregate.AggregatePredictedPerSecond = float64(streamsSent(s)) * s.Aggregate.PerStreamPredictedPerSecond
 		return Caveats(s)
 	}
 	has := func(cs []Caveat, code string) bool {
@@ -672,10 +704,20 @@ func TestStreamsNotConcurrentRanksDirectlyUnderStreamsFailed(t *testing.T) {
 	// is not the run the SAMPLING row describes — but it is a disagreement
 	// between what was asked for and what happened, which is the family
 	// client_disagrees opens, not a failure of the measurement itself.
+	//
+	// ragged_aggregate entered at rank 2 (TTP-108, 2026-09-19), directly
+	// under streams_not_concurrent: the same concurrency story told by the
+	// arithmetic rather than the timeline, and the timeline names the
+	// mechanism where the arithmetic only names the shortfall.
+	//
+	// cached_prefill entered at rank 10 (TTP-88, 2026-09-19), directly under
+	// short_prompt_for_prefill: both qualify the Prefill row, but a short
+	// prompt was never a measurement while a cached one measured the cache
+	// path — the stronger disqualification ranks first.
 	want := []string{
-		CodeStreamsFailed, CodeStreamsNotConcurrent, CodePlacementContradicted,
+		CodeStreamsFailed, CodeStreamsNotConcurrent, CodeRaggedAggregate, CodePlacementContradicted,
 		CodeBandwidthOverCeiling, CodeAnswerCut, CodeShortGeneration,
-		CodeShortStream, CodeColdCache, CodeShortPromptForPrefill, CodeClientDisagrees,
+		CodeShortStream, CodeColdCache, CodeShortPromptForPrefill, CodeCachedPrefill, CodeClientDisagrees,
 		CodeClientTimed, CodeTokensUncounted,
 		CodeThinkingIgnored,
 		CodeRecorded, CodeMachineContended, CodeConditionsChanged, CodeRunCutByClock,

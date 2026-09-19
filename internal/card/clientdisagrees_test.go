@@ -20,6 +20,11 @@ func twoStreamsOneDisagreeing(t *testing.T) *tape.RunSummary {
 	s.Timings.ClientAgreesWithServer = true
 	s.Aggregate.Streams = 2
 	s.Aggregate.DisagreeingStreams = 1
+	// Two streams at the per-stream rate share a window here: the clean
+	// fixture's aggregate is one stream's rate, and two streams at that
+	// rate with this aggregate is a ragged run too (TTP-108, 2026-09-19) —
+	// these tests are about the disagreement, not the arithmetic.
+	s.Aggregate.AggregatePredictedPerSecond = 2 * s.Aggregate.PerStreamPredictedPerSecond
 	return s
 }
 
@@ -85,6 +90,9 @@ func TestTheDisagreementCaveatMatchesTheFiguresItPrints(t *testing.T) {
 	t.Run("the count is the answered streams, not the sent ones", func(t *testing.T) {
 		s := twoStreamsOneDisagreeing(t)
 		s.Aggregate.Streams, s.Aggregate.StreamsFailed = 4, 1
+		// Four sent now, so the shared window's aggregate is four times the
+		// per-stream rate (TTP-108, 2026-09-19 — see the helper).
+		s.Aggregate.AggregatePredictedPerSecond = 4 * s.Aggregate.PerStreamPredictedPerSecond
 		cs := Caveats(s)
 		if len(cs) != 2 || cs[0].Code != CodeStreamsFailed || cs[1].Code != CodeClientDisagrees {
 			t.Fatalf("Caveats = %+v, want streams_failed then client_disagrees", cs)

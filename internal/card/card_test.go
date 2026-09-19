@@ -69,6 +69,12 @@ func TestTextGolden(t *testing.T) {
 		{"long-ot", longOTSummary()},
 		// More streams than slots: the Streams block must show the queue.
 		{"queued", queuedSummary()},
+		// TTP-88: a second run of the same prompt, 97 % from the prefix
+		// cache. The only golden carrying the cached_prefill caveat.
+		{"example-cached", ExampleCachedPrefill()},
+		// TTP-108: four streams that did not share a decode window. The
+		// only golden carrying the ragged_aggregate caveat.
+		{"example-ragged", ExampleRagged()},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -88,6 +94,8 @@ func TestJSONGolden(t *testing.T) {
 		{"example-concurrent", ExampleConcurrent()},
 		{"example-speculative", ExampleSpeculative()},
 		{"example-rounds", ExampleRounds()},
+		{"example-cached", ExampleCachedPrefill()},
+		{"example-ragged", ExampleRagged()},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

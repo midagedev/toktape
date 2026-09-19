@@ -1,0 +1,31 @@
+┌──────────────────────────────────────────────────────────────────────┐
+│ toktape v0.1.0                  20260919-120000-r1-distill-llama-70b │
+├──────────────────────────────────────────────────────────────────────┤
+│ MODEL    DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf · Q4_K_M          │
+│          42.5 GiB                                                    │
+│ ENGINE   llama-server b3650 (a1b2c3d) · linux 6.8.0-45-generic       │
+│          workstation                                                 │
+│ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
+├──────────────────────────────────────────────────────────────────────┤
+│ Decode        17.4 tok/s · ≈ 785 GB/s, 84% of peak                   │
+│ Prefill       2500 tok/s · 512 prompt tokens · TTFT 12 ms            │
+│ Context       16384 (512 in / 320 out)                               │
+│ Prefix cache  97% hit (497/512) · cached                             │
+│ Sampling      temp default · chat                                    │
+├──────────────────────────────────────────────────────────────────────┤
+│ MEMORY   GPU0 [██████████] 23.8/24.0 GiB                             │
+│          GPU1 [██████████] 22.8/24.0 GiB                             │
+│          weights 42.5 | kv 2.6 | compute 1.5 GiB                     │
+│          Host RSS 1.2 GiB (file 0.8 / anon 0.4)                      │
+│          Page faults 0.0 maj/token (0 during decode)                 │
+├──────────────────────────────────────────────────────────────────────┤
+│ HOST     GPU0 68°C 340 W · GPU1 64°C 310 W · throttled: no           │
+│          contended: no                                               │
+├──────────────────────────────────────────────────────────────────────┤
+│ FLAGS    -ngl 99 -fa on -b 2048 -ub 512 -ctk q8_0 -ctv q8_0 -t 16    │
+├──────────────────────────────────────────────────────────────────────┤
+│ ! cached prefill: 497 of 512 prompt tokens (97%) were prefix-cache   │
+│   hits, so the prefill rate is over the 15 the server evaluated      │
+├──────────────────────────────────────────────────────────────────────┤
+│                toktape · github.com/midagedev/toktape                │
+└──────────────────────────────────────────────────────────────────────┘

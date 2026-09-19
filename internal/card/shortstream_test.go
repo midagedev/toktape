@@ -18,6 +18,11 @@ func fourStreamsOneShort(t *testing.T) *tape.RunSummary {
 	s.Aggregate.Streams = 4
 	s.Aggregate.TotalPredictedN = 910
 	s.Aggregate.MinPredictedN = 10
+	// Four streams at the per-stream rate share a window here: the clean
+	// fixture's aggregate is one stream's rate, and four streams at that
+	// rate with this aggregate is a ragged run too (TTP-108, 2026-09-19) —
+	// these tests are about the short stream, not the arithmetic.
+	s.Aggregate.AggregatePredictedPerSecond = 4 * s.Aggregate.PerStreamPredictedPerSecond
 	return s
 }
 

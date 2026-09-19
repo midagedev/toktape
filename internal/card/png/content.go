@@ -180,6 +180,8 @@ func (c *content) buildHero(s *tape.RunSummary) {
 		if streams == 0 {
 			streams = s.Concurrency
 		}
+		perStream := fmt.Sprintf("%d × %s per stream",
+			streams, formatRateUnit(a.PerStreamPredictedPerSecond))
 		c.left = heroCol{
 			eyebrow: decodeEyebrow(s, "aggregate "+label),
 			number:  formatRate(a.AggregatePredictedPerSecond),
@@ -187,11 +189,21 @@ func (c *content) buildHero(s *tape.RunSummary) {
 			// The queue note rides on the per-stream line because that is
 			// the figure it qualifies: streams that waited for a slot were
 			// partly serialised, and their per-stream rate is not the rate
-			// of a run that fitted the server.
+			// of a run that fitted the server. The ragged clause rides it
+			// for the same reason (TTP-108, 2026-09-19): it says why N ×
+			// per-stream is not the aggregate above it, in the Streams
+			// block's own words, asked through card.RaggedAggregate so the
+			// image and the text card agree.
 			sub1: joinParts(" · ",
-				fmt.Sprintf("%d × %s per stream",
-					streams, formatRateUnit(a.PerStreamPredictedPerSecond)),
+				perStream,
+				raggedString(s),
 				queuedString(s)),
+			// What goes when the column is full is the qualification, not
+			// the figures: the per-stream rate and the queue note are what
+			// another rig is compared against.
+			sub1Fallbacks: []string{
+				joinParts(" · ", perStream, queuedString(s)),
+			},
 			sub2: joinParts(" · ",
 				formatInt(a.TotalPredictedN)+" tokens",
 				formatSeconds(a.WallMs)+" wall",
@@ -291,10 +303,13 @@ func (c *content) buildHero(s *tape.RunSummary) {
 					queueWaitString(s)),
 				fmt.Sprintf("%s per stream", formatRateUnit(t.PromptPerSecond)),
 			},
+			// The TTFT pair is card.TTFTPercentiles' to give (TTP-97,
+			// 2026-09-19): percentiles computed from two samples
+			// frequently render as the same string, which reads as a bug,
+			// so alike renderings print the single figure instead — the
+			// same rule the text card's Streams block follows.
 			sub2: joinParts(" · ",
-				"TTFT p50 "+formatMs(a.TTFTp50Ms),
-				"p95 "+formatMs(a.TTFTp95Ms),
-				formatInt(a.TotalPromptN)+" prompt tok",
+				append(ttftParts(s), formatInt(a.TotalPromptN)+" prompt tok")...,
 			),
 		}
 	} else {
@@ -309,6 +324,21 @@ func (c *content) buildHero(s *tape.RunSummary) {
 			),
 		}
 	}
+}
+
+// ttftParts is the hero's TTFT clause above one stream: the p50 beside its
+// p95, or the single figure when the pair would say nothing twice —
+// percentiles computed from two samples that render as the same string read
+// as a bug in the card rather than a fact about the run (TTP-97,
+// 2026-09-19). Asked through card.TTFTPercentiles, the predicate the text
+// card's Streams block and the TUI ask, so every renderer prints the pair on
+// the same runs.
+func ttftParts(s *tape.RunSummary) []string {
+	p50, p95, pair := card.TTFTPercentiles(s, formatMs)
+	if !pair {
+		return []string{"TTFT " + p50}
+	}
+	return []string{"TTFT p50 " + p50, "p95 " + p95}
 }
 
 // roundsString is the PNG's form of the text card's Prompts row:
@@ -454,6 +484,20 @@ func verifyBandwidthString(s *tape.RunSummary) (full, withoutRatio string) {
 		full += " · " + formatPct(ofPeak) + " of peak"
 	}
 	return full, withoutRatio
+}
+
+// raggedString is the decode column's "not all decoding at once" clause:
+// the aggregate is not N × per-stream because the streams did not share a
+// window (TTP-108, 2026-09-19). Asked through card.RaggedAggregate, the
+// predicate the text card's Streams block and the ragged_aggregate caveat
+// ask, so the image qualifies the same figure the same way. "" when the
+// arithmetic holds, so joinParts drops it and the line is what it always
+// was.
+func raggedString(s *tape.RunSummary) string {
+	if !card.RaggedAggregate(s) {
+		return ""
+	}
+	return "not all decoding at once"
 }
 
 // decodeEyebrow is prefillEyebrow for the decode column (TTP-83, 2026-09-14): a

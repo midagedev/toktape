@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/midagedev/toktape/internal/bandwidth"
+	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -62,6 +63,15 @@ const (
 	// a time — so the Streams row's "N × per-stream = aggregate" reads as N
 	// concurrent sessions when the aggregate is one stream behind a queue.
 	CodeStreamsNotConcurrent = "streams_not_concurrent"
+	// CodeRaggedAggregate: the aggregate decode rate sits materially below
+	// per-stream × streams, so the streams did not all decode across the
+	// same window and the aggregate is not the sum (TTP-108, 2026-09-19).
+	// The Streams block already said "not all decoding at once" for this;
+	// this is the fuller version of that clause, on the caveat lines, with
+	// the arithmetic named — a reader who multiplies the "each" figure by
+	// the stream count gets a number the card printed nowhere, and no
+	// sentence explained the one it did.
+	CodeRaggedAggregate = "ragged_aggregate"
 	// CodePlacementContradicted: the placement ESTIMATE puts weights on a GPU
 	// the run's own reading says held (almost) nothing (lead, 2026-09-15).
 	// The estimate cannot see CUDA_VISIBLE_DEVICES, so a one-card run on a
@@ -91,6 +101,13 @@ const (
 	// CodeShortPromptForPrefill: the prompt was too short to be a prefill
 	// measurement (TTP-65).
 	CodeShortPromptForPrefill = "short_prompt_for_prefill"
+	// CodeCachedPrefill: the prompt was substantially served from the prefix
+	// cache, so the prefill rate describes a cache hit rather than an
+	// evaluation (TTP-88, 2026-09-19). A second run of the same prompt
+	// reports a flattering prefill figure with the Prefix cache row naming
+	// the share on its own unlinked row; this is the sentence that connects
+	// the two.
+	CodeCachedPrefill = "cached_prefill"
 	// CodeClientDisagrees: the client-side rate and the server's own differ by
 	// more than tape.RateTolerance (lesson 1).
 	CodeClientDisagrees = "client_disagrees_with_server"
@@ -170,6 +187,13 @@ const (
 // never shared an instant mean it exists but measures a queue. Both are the
 // server's own concurrency story contradicting the row's "N at once".
 //
+// ragged_aggregate sits directly under streams_not_concurrent (TTP-108,
+// 2026-09-19). It is the same concurrency story told by the arithmetic
+// rather than the timeline: the aggregate is not N × per-stream because the
+// streams did not share a window. It ranks under it because the timeline
+// names the mechanism — a queue — where the arithmetic only names the
+// shortfall.
+//
 // placement_contradicted sits directly under the two streams codes (lead,
 // 2026-09-15). It qualifies a derived figure rather than a measured one — the
 // ratio the card has already declined to print — but what it contradicts is
@@ -198,6 +222,12 @@ const (
 // caveat line spells out one and names the other by code, so the cold run is
 // on the card either way — in the cache pill and the maj-faults row as well.
 //
+// cached_prefill sits directly under short_prompt_for_prefill (TTP-88,
+// 2026-09-19). Both qualify the Prefill row, but a short prompt was never a
+// measurement while a cached one measured something — the cache path — only
+// not the evaluation the row claims. The stronger disqualification ranks
+// first.
+//
 // The second group is a run that was not one measurement — a disagreement
 // between the two clocks, the recorder's own caveats, a contended or drifting
 // box, a run the clock cut. Each leaves every figure a real reading; what they
@@ -212,22 +242,24 @@ const (
 var caveatRank = map[string]int{
 	CodeStreamsFailed:         0,
 	CodeStreamsNotConcurrent:  1,
-	CodePlacementContradicted: 2,
-	CodeBandwidthOverCeiling:  3,
-	CodeAnswerCut:             4,
-	CodeShortGeneration:       5,
-	CodeShortStream:           6,
-	CodeColdCache:             7,
-	CodeShortPromptForPrefill: 8,
-	CodeClientDisagrees:       9,
-	CodeClientTimed:           10,
-	CodeTokensUncounted:       11,
-	CodeThinkingIgnored:       12,
-	CodeRecorded:              13,
-	CodeMachineContended:      14,
-	CodeConditionsChanged:     15,
-	CodeRunCutByClock:         16,
-	CodeNoProcView:            17,
+	CodeRaggedAggregate:       2,
+	CodePlacementContradicted: 3,
+	CodeBandwidthOverCeiling:  4,
+	CodeAnswerCut:             5,
+	CodeShortGeneration:       6,
+	CodeShortStream:           7,
+	CodeColdCache:             8,
+	CodeShortPromptForPrefill: 9,
+	CodeCachedPrefill:         10,
+	CodeClientDisagrees:       11,
+	CodeClientTimed:           12,
+	CodeTokensUncounted:       13,
+	CodeThinkingIgnored:       14,
+	CodeRecorded:              15,
+	CodeMachineContended:      16,
+	CodeConditionsChanged:     17,
+	CodeRunCutByClock:         18,
+	CodeNoProcView:            19,
 }
 
 // MinPrefillPromptTokens is tape.MinPrefillPromptTokens, re-exported so this
@@ -347,6 +379,38 @@ func streamsNotConcurrentText(s *tape.RunSummary) string {
 		s.Aggregate.PeakDecodingStreams, n, n)
 }
 
+// RaggedAggregate reports whether the run's aggregate decode rate sits
+// materially below per-stream × streams, so the aggregate is not the sum
+// (TTP-108, 2026-09-19).
+//
+// It is the single owner of that question: the Streams block's "not all
+// decoding at once" clause, the PNG's decode sub-line and
+// CodeRaggedAggregate all ask it here, so the clause and the caveat cannot
+// disagree about the same arithmetic. The test itself is streamsMultiply —
+// no second test of the same fact — with the guards the Streams block
+// already applied: the Decode row prints the aggregate beside the "each"
+// figure only above one stream, and a multi-round run's aggregate is
+// weighted by how long each round decoded, which "per round" already says.
+func RaggedAggregate(s *tape.RunSummary) bool {
+	if s == nil || s.Concurrency <= 1 || s.Rounds > 1 {
+		return false
+	}
+	return !streamsMultiply(s.Aggregate, streamsSent(s))
+}
+
+// raggedAggregateText is the sentence for CodeRaggedAggregate: the
+// arithmetic it disputes, with every number the reader needs to check it —
+// the stream count, the per-stream rate, their product, and the aggregate
+// the card printed instead.
+func raggedAggregateText(s *tape.RunSummary) string {
+	n := streamsSent(s)
+	per := s.Aggregate.PerStreamPredictedPerSecond
+	return fmt.Sprintf(
+		"ragged run: %d × %s is %s, not the %s aggregate — the streams did not all decode across the same window",
+		n, formatRate(per), formatRate(float64(n)*per),
+		formatRate(s.Aggregate.AggregatePredictedPerSecond))
+}
+
 // shortStreamText says how much of the per-stream rate is a sample.
 //
 // With AggregateTimings.ShortStreams recorded (2026-09-14) it names how many
@@ -386,6 +450,48 @@ func shortStreamText(s *tape.RunSummary) string {
 // a measurement. 0 is unknown and is never short.
 func shortPromptCount(n int) bool {
 	return n > 0 && n < MinPrefillPromptTokens
+}
+
+// cacheHitCached is the run- and round-level "mostly served from the prefix
+// cache" test: hits of total at or above server.CachedHitRatio (TTP-88,
+// 2026-09-19).
+//
+// It is the single owner of that question: CodeCachedPrefill asks it here
+// with the run's recorded cache share, and the Prompts row's readRoundPrompt
+// asks it with each round's — the same threshold the cache explanation in
+// explain.go prints, so the caveat and the explanation cannot disagree about
+// where "cached" starts. The ratio is recomputed from the counts rather than
+// read off Cache.HitRatio, the way the Prefix cache row and the explanation
+// already derive it, because the recorded ratio is a reading of these two
+// numbers and the predicate must fire on what was observed. 0 total is
+// unknown — a tape older than the fields — and fires nothing, and a hit
+// count of 0 is not "mostly served from the cache" however the ratio reads.
+func cacheHitCached(hits, total int) bool {
+	if total <= 0 || hits <= 0 {
+		return false
+	}
+	return float64(hits)/float64(total) >= server.CachedHitRatio
+}
+
+// cachedPrefill reports whether the run's prompt was substantially served
+// from the prefix cache, so its prefill rate describes a cache hit rather
+// than an evaluation (TTP-88, 2026-09-19).
+func cachedPrefill(s *tape.RunSummary) bool {
+	if s == nil {
+		return false
+	}
+	return cacheHitCached(s.Cache.HitTokens, s.Cache.PromptTotal)
+}
+
+// cachedPrefillText is the sentence for CodeCachedPrefill: how much of the
+// prompt was a hit, and what the prefill rate is a rate over instead — the
+// tokens the server evaluated — because a caveat a reader cannot check is
+// one they will ignore.
+func cachedPrefillText(s *tape.RunSummary) string {
+	hits, total := s.Cache.HitTokens, s.Cache.PromptTotal
+	return fmt.Sprintf(
+		"cached prefill: %s of %s prompt tokens (%s) were prefix-cache hits, so the prefill rate is over the %s the server evaluated",
+		formatInt(hits), formatInt(total), formatPct(float64(hits)/float64(total)), formatInt(total-hits))
 }
 
 // promptTokensPart is the Prefill row's prompt-token count WITH the
@@ -521,6 +627,9 @@ func Caveats(s *tape.RunSummary) []Caveat {
 	if streamsNotConcurrent(s) {
 		add(CodeStreamsNotConcurrent, SeverityFigure, streamsNotConcurrentText(s))
 	}
+	if RaggedAggregate(s) {
+		add(CodeRaggedAggregate, SeverityFigure, raggedAggregateText(s))
+	}
 	if c := bandwidth.Contradiction(s); c != nil {
 		add(CodePlacementContradicted, SeverityFigure, fmt.Sprintf(
 			"the placement estimate puts %s of weights on GPU%d, which held %s: the split and everything derived from it are not this run's",
@@ -552,6 +661,9 @@ func Caveats(s *tape.RunSummary) []Caveat {
 		add(CodeShortPromptForPrefill, SeverityFigure, fmt.Sprintf(
 			"short prompt: %d prompt tokens is under %d, so the prefill rate is not one",
 			PromptTokens(s), MinPrefillPromptTokens))
+	}
+	if cachedPrefill(s) {
+		add(CodeCachedPrefill, SeverityFigure, cachedPrefillText(s))
 	}
 	if text := clientDisagreesText(s); text != "" {
 		add(CodeClientDisagrees, SeverityRun, text)
