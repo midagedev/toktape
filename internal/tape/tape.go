@@ -645,8 +645,34 @@ type AggregateTimings struct {
 	ConcurrentWindowMs           float64 `json:"concurrent_window_ms,omitempty"`
 	ConcurrentPredictedN         int     `json:"concurrent_predicted_n,omitempty"`
 	ConcurrentPredictedPerSecond float64 `json:"concurrent_predicted_per_second,omitempty"`
-	TTFTp50Ms                    float64 `json:"ttft_p50_ms"`
-	TTFTp95Ms                    float64 `json:"ttft_p95_ms"`
+	// ConcurrentPerStreamPredictedPerSecond is the "37.1 each" of the table
+	// above: one stream's rate inside the window, which is the aggregate
+	// over the streams the window was measured across. It exists because a
+	// row printing the window aggregate beside PerStreamPredictedPerSecond
+	// prints two figures measured over two different spans — a stream that
+	// outlives the others gets more of the machine, so its own mean rises
+	// above the rate it held while the others were running, and the reader
+	// who multiplies gets a third number the card never printed. That is the
+	// arithmetic `ragged_aggregate` was written to dispute, reappearing
+	// inside the row that was supposed to settle it (lead, 2026-09-19).
+	//
+	// It is not derivable outside the reducer: the divisor is the answered
+	// streams the window was taken over, which is neither Streams (every
+	// record) nor Streams-StreamsFailed (a stream that errored with tokens
+	// already sent, or returned none without erroring, lands in neither).
+	// Computed beside the window from the same slice so the two cannot
+	// drift. 0 = not computed, exactly when the window is.
+	ConcurrentPerStreamPredictedPerSecond float64 `json:"concurrent_per_stream_predicted_per_second,omitempty"`
+	// ConcurrentStreams is how many streams that per-stream figure is a
+	// figure for: the answered streams the window was taken over, which is
+	// the divisor made visible. A surface that spells the multiplication out
+	// — the PNG's "4 x 17.4 per stream" — needs this count and not Streams,
+	// which includes the ones that failed and the ones that answered with
+	// nothing. Printing Streams there is a product that does not hold
+	// (lead, 2026-09-19). 0 = not computed, exactly when the window is.
+	ConcurrentStreams int     `json:"concurrent_streams,omitempty"`
+	TTFTp50Ms         float64 `json:"ttft_p50_ms"`
+	TTFTp95Ms         float64 `json:"ttft_p95_ms"`
 	// SlotsBusyMax is the highest number of busy slots observed via /slots.
 	SlotsBusyMax int `json:"slots_busy_max,omitempty"`
 	// PeakDecodingStreams is the most answered streams that were decoding at
