@@ -94,13 +94,45 @@ func (o Options) limit() tape.LimitSummary {
 	return out
 }
 
-// limitOf is the run's limit as the tape records it: what was asked for, plus
-// when the clock actually cut. They are one struct because a reader needs both
-// to say anything — a CutAt without a For is unreadable, and a For without a
-// CutAt is a budget nothing spent.
-func limitOf(asked tape.LimitSummary, cutAt time.Duration) tape.LimitSummary {
+// limitOf is the run's limit as the tape records it: what was asked for,
+// when the clock actually cut, and what the streams' own finish words say
+// ended them (TTP-135). They are one struct because a reader needs the whole
+// of it to say anything — a CutAt without a For is unreadable, a For without
+// a CutAt is a budget nothing spent, and a CappedStreams without an
+// EndingsObserved beside it cannot tell an observed none from a tape that
+// cannot say.
+//
+// The endings are counted here, from the records, because the finish word
+// has been in every tape since PromptRecord existed and the summary is all a
+// renderer reads. A failed stream is not an answered one and counts toward
+// neither; a cut stream carries no word (the server never said one) and so
+// counts toward neither as well.
+func limitOf(asked tape.LimitSummary, cutAt time.Duration, recs []tape.RequestRecord) tape.LimitSummary {
 	asked.CutAt = cutAt
+	for i := range recs {
+		r := &recs[i]
+		if r.Error != "" || r.Prompt.FinishReason == "" {
+			continue
+		}
+		asked.EndingsObserved++
+		if finishReasonMeansCap(r.Prompt.FinishReason) {
+			asked.CappedStreams++
+		}
+	}
 	return asked
+}
+
+// finishReasonMeansCap reports whether a finish word says the stream stopped
+// because it reached the token cap rather than because the model had
+// finished. Two spellings mean it in the tapes this tool records, and both
+// are the server's own word — the raw /completion path records llama-server's
+// stop_type verbatim by design (internal/server/completion.go), and "limit"
+// is its word there, while the chat paths speak the OpenAI vocabulary's
+// "length". Anything else ("stop", "eos", a word a new engine coined) was
+// observed but is not the cap: it counts toward EndingsObserved only, the
+// same direction every unrecognised observation errs in this schema.
+func finishReasonMeansCap(reason string) bool {
+	return reason == "length" || reason == "limit"
 }
 
 // clock is a run's wall-clock budget: the one thing that ends a generation

@@ -97,8 +97,9 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		// What was allowed to end this generation and what did (TTP-76). CutAt
 		// is 0 unless the clock actually ended something, so a reader tells a
 		// cut run from a completed one by that field alone, and CutAt > For
-		// says the floor held the cut back past the budget.
-		Limit:    limitOf(r.limit, r.cutAt),
+		// says the floor held the cut back past the budget. The endings
+		// (TTP-135) are counted from these same records inside limitOf.
+		Limit:    limitOf(r.limit, r.cutAt, recs),
 		Template: r.template,
 		// The prefill pass's own figures, whole as it measured them
 		// (TTP-137). nil on a run that did not probe, which is every tape
@@ -274,7 +275,10 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 //     identical to Aggregate's, by construction.
 //   - One uncounted stream (PredictedNSource "chunks") poisons the aggregate
 //     rate to 0: its PredictedN is a chunk count, and a rate over the summed
-//     total would print chunks as if they were tokens.
+//     total would print chunks as if they were tokens. The concurrent rate
+//     falls with it — its N counts token events, which on a chunks stream
+//     are chunks — while the window and the count stay recorded, the same
+//     keep-the-total-refuse-the-rate split TotalPredictedN gets.
 func fixClientAggregate(recs []tape.RequestRecord, agg *tape.AggregateTimings) {
 	d := 0
 	poisoned := false
@@ -297,6 +301,7 @@ func fixClientAggregate(recs []tape.RequestRecord, agg *tape.AggregateTimings) {
 	agg.DisagreeingStreams = d
 	if poisoned {
 		agg.AggregatePredictedPerSecond = 0
+		agg.ConcurrentPredictedPerSecond = 0
 	}
 }
 

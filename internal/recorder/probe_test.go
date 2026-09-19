@@ -476,3 +476,102 @@ func TestVRAMKVEngineFigureWinsOverTheLog(t *testing.T) {
 		t.Errorf("Placement.VRAMKVBytes = %d, want the engine's own 12345678", got)
 	}
 }
+
+// The adaptive-probe gates (TTP-142). A fixed 2048-token long point is 1.7 s
+// at the reference box's 1182 tok/s prefill but 79 s on a box measured at
+// 26 tok/s with experts on the CPU — and the replay sends it again. The long
+// point's length is chosen from the short point's own observed cost, against
+// recorder.probeBudgetMs (5000 here).
+func TestProbeAdaptsTheLongPointToTheBox(t *testing.T) {
+	const budgetMs = 5000 // recorder.probeBudgetMs
+	record := func(costs probeCosts) (*tape.ProbeSummary, []string) {
+		mux, seen := probeMux(t, costs)
+		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
+		tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
+		if err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+		if tp.Summary.Probe == nil {
+			t.Fatal("Summary.Probe = nil, the pass did not record anything")
+		}
+		prompts, _ := seen.snapshot()
+		return tp.Summary.Probe, prompts
+	}
+
+	// Fast box (400 tok/s at the margin — planted 0.5 ms/token): the budget
+	// admits the ceiling, and the ceiling is what llama-bench's pp2048 lines
+	// up against, so it stays 2048.
+	fast, fastPrompts := record(probeCosts{fixedMs: 30, perTokMs: 0.5})
+	if len(fast.Prefill) != 2 {
+		t.Fatalf("fast box: %d points, want 2: %+v", len(fast.Prefill), fast.Prefill)
+	}
+	if n := fast.Prefill[1].PromptN; n < 1950 || n > 2100 {
+		t.Errorf("fast box chose a %d-token long point, want the 2048 ceiling (about 2007 at this fake's 5 bytes a token)", n)
+	}
+	if len(fastPrompts) != 3 {
+		t.Errorf("fast box: %d probe requests, want 3 (short, long, replay)", len(fastPrompts))
+	}
+
+	// Slow box (planted 2.5 ms/token, 400 tok/s): a 2048-token point is about
+	// 5.1 s, so a smaller one is chosen — the largest that fits the budget —
+	// and the fit through it still recovers the planted machine.
+	slow, slowPrompts := record(probeCosts{fixedMs: 30, perTokMs: 2.5})
+	if len(slow.Prefill) != 2 {
+		t.Fatalf("slow box: %d points, want 2: %+v", len(slow.Prefill), slow.Prefill)
+	}
+	long := slow.Prefill[1]
+	if long.PromptN >= fast.Prefill[1].PromptN {
+		t.Errorf("slow box chose %d tokens, not below the fast box's %d: the budget did not bind", long.PromptN, fast.Prefill[1].PromptN)
+	}
+	if long.PromptN < 1500 || long.PromptN > 1900 {
+		t.Errorf("slow box long point = %d tokens, want about 1788 (the largest that fits %d ms at this box's short-point cost)", long.PromptN, budgetMs)
+	}
+	if long.PromptMs > budgetMs {
+		t.Errorf("slow box long point cost %v ms, want it inside the %d ms budget", long.PromptMs, budgetMs)
+	}
+	if !near(slow.PrefillPerSecond, 400, 0.01) || !near(slow.FixedMs, 30, 0.01) {
+		t.Errorf("adapted length broke the fit: %v tok/s, fixed %v ms; want the planted 400 and 30", slow.PrefillPerSecond, slow.FixedMs)
+	}
+	if len(slowPrompts) != 3 || slowPrompts[2] != slowPrompts[1] {
+		t.Errorf("slow box replay: %d requests, replay==long is %v; the replay must resend the adapted prompt, not a 2048 one",
+			len(slowPrompts), slowPrompts[2] == slowPrompts[1])
+	}
+}
+
+// Gate 6: a box so slow that even the floor length would blow the budget gets
+// no long point at all — the short point is recorded, the fit refuses (a bad
+// fit is worse than no fit), and nothing is sent twice.
+func TestProbeSkipsTheLongPointWhenTheFloorWouldBlowTheBudget(t *testing.T) {
+	// Planted 40 ms/token = 25 tok/s at the margin, the measured CPU-experts
+	// class: the 128-token short point itself costs about 5 s, and no length
+	// past the floor fits the budget.
+	mux, seen := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 40})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	p := tp.Summary.Probe
+	if p == nil {
+		t.Fatal("Summary.Probe = nil, the pass did not record anything")
+	}
+	if len(p.Prefill) != 1 {
+		t.Fatalf("Prefill points = %d, want 1 (the short point only): %+v", len(p.Prefill), p.Prefill)
+	}
+	if p.Prefill[0].PromptN < 100 {
+		t.Errorf("short point = %d tokens, want it recorded (about 125)", p.Prefill[0].PromptN)
+	}
+	if p.PrefillPerSecond != 0 || p.FixedMs != 0 {
+		t.Errorf("one-point probe produced a fit: %v tok/s, fixed %v ms; fitPrefill must refuse", p.PrefillPerSecond, p.FixedMs)
+	}
+	if p.Replay != nil {
+		t.Errorf("Replay = %+v, want nil: there is no long prompt to resend", *p.Replay)
+	}
+	prompts, _ := seen.snapshot()
+	if len(prompts) != 1 {
+		t.Errorf("probe sent %d requests, want exactly 1 (the short point; no long point, no replay)", len(prompts))
+	}
+}

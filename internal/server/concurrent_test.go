@@ -105,6 +105,109 @@ func TestAggregateFourStreamsOneFailed(t *testing.T) {
 	}
 }
 
+// TestAggregateConcurrentWindow is the TTP-138 gate: the window in which
+// every answered stream was decoding, and what was produced inside it.
+//
+// Four streams, all at a 25 ms gap (40 tok/s each), ending at deliberately
+// different times — 2675, 2237, 3290 and 2056 ms absolute:
+//
+//	stream 0  first  200, last 2675   (100 tokens)
+//	stream 1  first  262, last 2237   ( 80 tokens)
+//	stream 2  first  315, last 3290   (120 tokens)
+//	stream 3  first  281, last 2056   ( 72 tokens)
+//
+// The window is [latest first token 315, earliest last token 2056] = 1741 ms,
+// both ends inclusive — stream 2's first token and stream 3's last token sit
+// exactly on the boundaries. Tokens inside per stream: 70, 69, 70, 70 = 279.
+func TestAggregateConcurrentWindow(t *testing.T) {
+	recs := []tape.RequestRecord{
+		synthStream(0, 0, 200*time.Millisecond, 25*time.Millisecond, 100),
+		synthStream(1, 2*time.Millisecond, 260*time.Millisecond, 25*time.Millisecond, 80),
+		synthStream(2, 5*time.Millisecond, 310*time.Millisecond, 25*time.Millisecond, 120),
+		synthStream(3, 1*time.Millisecond, 280*time.Millisecond, 25*time.Millisecond, 72),
+	}
+	agg := Aggregate(recs)
+
+	// The whole-wall figure stays exactly what it was: 372 tokens over the
+	// window from the earliest first token (200) to the latest last (3290).
+	// This clause is the addition-not-redefinition guard.
+	wantAggregate := 372.0 / ((3290.0 - 200.0) / 1000.0)
+	if math.Abs(agg.AggregatePredictedPerSecond-wantAggregate) > 0.01 {
+		t.Errorf("AggregatePredictedPerSecond = %v, want the unchanged whole-wall %v", agg.AggregatePredictedPerSecond, wantAggregate)
+	}
+	if got, want := agg.TotalPredictedN, 372; got != want {
+		t.Errorf("TotalPredictedN = %d, want %d", got, want)
+	}
+
+	if got, want := agg.ConcurrentWindowMs, 1741.0; math.Abs(got-want) > 0.001 {
+		t.Errorf("ConcurrentWindowMs = %v, want %v (latest first 315 .. earliest last 2056)", got, want)
+	}
+	if got, want := agg.ConcurrentPredictedN, 279; got != want {
+		t.Errorf("ConcurrentPredictedN = %d, want %d (70+69+70+70 inside the window, both ends inclusive)", got, want)
+	}
+	if got, want := agg.ConcurrentPredictedPerSecond, 279.0/1.741; math.Abs(got-want) > 0.01 {
+		t.Errorf("ConcurrentPredictedPerSecond = %v, want %v", got, want)
+	}
+
+	// The reconciliation the field exists for: over the same window, the
+	// concurrent rate is the sum of the streams' own rates in that window —
+	// four equal-gap streams, so ≈ 4 x any one of them — while the whole-wall
+	// figure cannot reconcile with its own per-stream mean (the ragged tail
+	// is the survivors, not four streams).
+	var sumPerStream float64
+	for i := range recs {
+		n := 0
+		for _, tk := range recs[i].Tokens {
+			at := recs[i].StartedAt + tk.T
+			if at >= 315*time.Millisecond && at <= 2056*time.Millisecond {
+				n++
+			}
+		}
+		sumPerStream += float64(n) / 1.741
+	}
+	if math.Abs(agg.ConcurrentPredictedPerSecond-sumPerStream) > 1e-6 {
+		t.Errorf("ConcurrentPredictedPerSecond = %v, want the sum of per-stream window rates %v", agg.ConcurrentPredictedPerSecond, sumPerStream)
+	}
+	// The one-token boundary effect: counts inside the window differ by a
+	// token between equal-gap streams (70, 69, 70, 70), so 4 x any single
+	// stream's rate is only good to a couple of percent.
+	if fourX := 4 * (70.0 / 1.741); math.Abs(sumPerStream-fourX) > 0.02*fourX {
+		t.Errorf("sum of per-stream window rates = %v, want ≈ 4 x one 25 ms-gap stream's rate in the window (%v)", sumPerStream, fourX)
+	}
+	if agg.ConcurrentPredictedPerSecond <= agg.AggregatePredictedPerSecond {
+		t.Errorf("concurrent %v is not above the whole-wall %v: the ragged tail must dilute the whole-wall figure, not the all-live one",
+			agg.ConcurrentPredictedPerSecond, agg.AggregatePredictedPerSecond)
+	}
+}
+
+// TestAggregateConcurrentWindowZeroes: the concurrent fields are 0 — never an
+// invented figure — on a one-stream run (the window is the run and the
+// existing field already says it), and when the answered streams never shared
+// an instant (the window is not positive).
+func TestAggregateConcurrentWindowZeroes(t *testing.T) {
+	t.Run("one stream gets no window figure", func(t *testing.T) {
+		agg := Aggregate([]tape.RequestRecord{synthStream(0, 0, 200*time.Millisecond, 25*time.Millisecond, 100)})
+		if agg.ConcurrentWindowMs != 0 || agg.ConcurrentPredictedN != 0 || agg.ConcurrentPredictedPerSecond != 0 {
+			t.Errorf("concurrent figures on one stream = %v ms / %d / %v, want all 0: the window is the run",
+				agg.ConcurrentWindowMs, agg.ConcurrentPredictedN, agg.ConcurrentPredictedPerSecond)
+		}
+		if math.Abs(agg.PerStreamPredictedPerSecond-40) > 0.001 {
+			t.Errorf("PerStreamPredictedPerSecond = %v, want 40: the run's own rate must stay", agg.PerStreamPredictedPerSecond)
+		}
+	})
+	t.Run("streams that never overlapped have no window", func(t *testing.T) {
+		// Stream 0 ends at 445 ms; stream 1's first token is at 600 ms.
+		agg := Aggregate([]tape.RequestRecord{
+			synthStream(0, 0, 200*time.Millisecond, 25*time.Millisecond, 10),
+			synthStream(1, 0, 600*time.Millisecond, 25*time.Millisecond, 10),
+		})
+		if agg.ConcurrentWindowMs != 0 || agg.ConcurrentPredictedN != 0 || agg.ConcurrentPredictedPerSecond != 0 {
+			t.Errorf("concurrent figures without overlap = %v ms / %d / %v, want all 0",
+				agg.ConcurrentWindowMs, agg.ConcurrentPredictedN, agg.ConcurrentPredictedPerSecond)
+		}
+	})
+}
+
 func TestAggregateEdgeCases(t *testing.T) {
 	t.Run("no records", func(t *testing.T) {
 		if got := Aggregate(nil); got.Streams != 0 || got.AggregatePredictedPerSecond != 0 {

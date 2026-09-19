@@ -23,15 +23,39 @@ import (
 // its prefix in the server's cache and poison the very measurement the set
 // exists to make (the warm-pass incident of 2026-09-19, cached_prefill).
 
-// The two prompt lengths the pass measures, in prompt tokens. 2048 is
+// The prompt lengths the pass measures, in prompt tokens. The short point is
+// a fixed 128: far enough past tape.MinPrefillPromptTokens that it is a
+// prefill measurement and not the noise around one, and short enough that it
+// costs about a tenth of a second at the reference rate. The long point is
+// chosen per box (TTP-142) with probeLongTokens as its ceiling — 2048 is
 // llama-bench's pp2048, the figure a reader can line up against the number
-// every other tool on this box has already printed; 128 is far enough past
-// tape.MinPrefillPromptTokens that a point is a prefill measurement and not
-// the noise around one, and short enough that the pair costs about two
-// seconds at the reference rate.
+// every other tool on this box has already printed, and every box fast enough
+// to afford it still sends exactly that.
 const (
 	probeShortTokens = 128
 	probeLongTokens  = 2048
+)
+
+// The long point's cost is bounded (TTP-142). A fixed 2048-token point is
+// about 1.7 s at the reference box's 1182 tok/s prefill, but 79 s on a box
+// measured at 26 tok/s with experts on the CPU — and the replay sends the
+// point again, so a default run there spent over two minutes probing,
+// silently, before recording anything.
+const (
+	// probeBudgetMs is what one long point may cost, predicted from the short
+	// point's own observed prompt_ms and prompt_n. A few seconds keeps the
+	// whole pass in the noise next to DefaultFor (20 s) on any box, while
+	// still buying the full 2048-token ceiling wherever prefill is faster
+	// than about 410 tok/s.
+	probeBudgetMs = 5000.0
+	// probeLongFloorMultiple is how many times the short point the long one
+	// must at least be for the slope through the pair to be a slope: at 3x,
+	// the span between the two lengths is twice the short point (256 tokens
+	// of Δn), enough that the long leg dominates Δms/Δn rather than the
+	// short point's own noise. A long point that cannot be that long inside
+	// the budget is not sent at all — a bad fit is worse than no fit, and
+	// fitPrefill already refuses one point.
+	probeLongFloorMultiple = 3
 )
 
 // probeCharsPerToken converts those token budgets into byte budgets for the
@@ -91,6 +115,17 @@ func probePrompt(lead string, offset, tokens int) string {
 // the run's own timeline — startedAt, the sampler's fault baseline, the
 // clock's budget — starts clean after it.
 //
+// The long point's length is not fixed: it is chosen from the short point's
+// own observed cost, as the largest that fits probeBudgetMs under the
+// ceiling probeLongTokens (probeLongLength, TTP-142). A reader comparing
+// runs from different boxes will therefore see different prompt_n values in
+// Prefill[1] — that is deliberate, it is the budget doing its job, and the
+// fit's slope does not depend on which length was sent. On a box too slow
+// for even the floor length to fit, no long point and no replay are sent at
+// all: the short point is recorded and fitPrefill refuses, which is the
+// honest outcome — one point cannot separate a machine's rate from a
+// server's fixed cost.
+//
 // The pass never fails a run and never warns: a request that errors or a
 // server that reports no timings is a figure that was not observed, and nil
 // Probe is the schema's "this run did not probe". A ServerOpenAI server is
@@ -101,38 +136,69 @@ func (r *run) prefillProbe(ctx context.Context) {
 		return
 	}
 	p := &tape.ProbeSummary{}
-	for _, spec := range []struct {
-		lead   string
-		offset int
-		tokens int
-	}{
-		{probeLeadShort, probeCycleShort, probeShortTokens},
-		{probeLeadLong, probeCycleLong, probeLongTokens},
-	} {
-		st, ttft, ok := r.probeSend(ctx, probePrompt(spec.lead, spec.offset, spec.tokens))
-		if ok && st.PromptN > 0 {
-			// A point with no evaluated tokens is not a cost measurement
-			// (a cache-served prompt), so it is not recorded as one.
+	st, ttft, ok := r.probeSend(ctx, probePrompt(probeLeadShort, probeCycleShort, probeShortTokens))
+	if ok && st.PromptN > 0 {
+		// A point with no evaluated tokens is not a cost measurement
+		// (a cache-served prompt), so it is not recorded as one.
+		p.Prefill = append(p.Prefill, tape.PrefillPoint{
+			PromptN:  st.PromptN,
+			PromptMs: st.PromptMs,
+			TTFTMs:   ttft,
+		})
+	}
+	if long := probeLongLength(st); long > 0 {
+		if st, ttft, ok = r.probeSend(ctx, probePrompt(probeLeadLong, probeCycleLong, long)); ok && st.PromptN > 0 {
 			p.Prefill = append(p.Prefill, tape.PrefillPoint{
 				PromptN:  st.PromptN,
 				PromptMs: st.PromptMs,
 				TTFTMs:   ttft,
 			})
 		}
+		// The replay resends the prompt the long point actually used, never a
+		// fixed one: the prefix cache is being asked about that prompt.
+		if st, _, ok = r.probeSend(ctx, probePrompt(probeLeadLong, probeCycleLong, long)); ok {
+			p.Replay = &tape.ReplayProbe{
+				PromptN:  st.PromptN,
+				CacheN:   st.CacheN,
+				PromptMs: st.PromptMs,
+			}
+		}
 	}
 	if len(p.Prefill) == 2 {
 		p.PrefillPerSecond, p.FixedMs = fitPrefill(p.Prefill)
 	}
-	if st, _, ok := r.probeSend(ctx, probePrompt(probeLeadLong, probeCycleLong, probeLongTokens)); ok {
-		p.Replay = &tape.ReplayProbe{
-			PromptN:  st.PromptN,
-			CacheN:   st.CacheN,
-			PromptMs: st.PromptMs,
-		}
-	}
 	if len(p.Prefill) > 0 || p.Replay != nil {
 		r.prefill = p
 	}
+}
+
+// probeLongLength is the long point's token budget for this box: the short
+// point's observed cost, projected onto longer lengths, admits the largest
+// length that fits probeBudgetMs, capped at probeLongTokens (TTP-142).
+//
+// The projection is linear from the origin — L x the short point's ms-per-
+// token — which overestimates any affine cost (the fixed part is counted
+// pro rata rather than once), so staying inside the budget errs on the
+// conservative side; only a superlinear cost curve, which prefill at these
+// lengths is not, could outrun it. The returned budget is in the nominal
+// tokens probePrompt builds from; the server's own prompt_n of the point
+// that comes back is what lands in the tape.
+//
+// 0 means no long point: the short point was not observed (nothing to
+// predict from), or no length past the floor fits the budget — and a fit
+// through a too-narrow pair would be noise, not a rate.
+func probeLongLength(short server.ServerTimings) int {
+	if short.PromptN <= 0 || short.PromptMs <= 0 {
+		return 0
+	}
+	fits := int(probeBudgetMs * float64(short.PromptN) / short.PromptMs)
+	if fits > probeLongTokens {
+		fits = probeLongTokens
+	}
+	if fits < probeLongFloorMultiple*probeShortTokens {
+		return 0
+	}
+	return fits
 }
 
 // probeSend sends one probe request — the prompt verbatim to /completion,

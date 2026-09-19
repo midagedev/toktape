@@ -154,3 +154,75 @@ func TestLimitRecordsWhetherTheCapWasNamed(t *testing.T) {
 		}
 	}
 }
+
+// TestLimitCountsTheEndings (TTP-135): CappedStreams and EndingsObserved are
+// counted from the per-request finish words, and a word that does not mean
+// the cap was still observed — it counts toward EndingsObserved and not
+// toward CappedStreams.
+func TestLimitCountsTheEndings(t *testing.T) {
+	rec := func(err, finish string) tape.RequestRecord {
+		return tape.RequestRecord{
+			Error:  err,
+			Prompt: tape.PromptRecord{FinishReason: finish},
+		}
+	}
+	cases := []struct {
+		name         string
+		recs         []tape.RequestRecord
+		wantCapped   int
+		wantObserved int
+	}{
+		{
+			name: "a mix of cap, model-stop and silence",
+			recs: []tape.RequestRecord{
+				rec("", "length"),
+				rec("", "length"),
+				rec("", "stop"),
+				rec("", ""),
+			},
+			wantCapped:   2,
+			wantObserved: 3,
+		},
+		{
+			name: "an engine that reports no finish reason at all leaves both 0",
+			recs: []tape.RequestRecord{
+				rec("", ""),
+				rec("", ""),
+			},
+		},
+		{
+			name: "a failed stream counts toward neither, even with a reason",
+			recs: []tape.RequestRecord{
+				rec("server: stream error: boom", "length"),
+				rec("", "stop"),
+			},
+			wantCapped:   0,
+			wantObserved: 1,
+		},
+		{
+			name: "the raw path's own word for the cap is the cap too",
+			recs: []tape.RequestRecord{
+				rec("", "limit"),
+			},
+			wantCapped:   1,
+			wantObserved: 1,
+		},
+		{
+			name: "an unrecognised reason was observed but is not the cap",
+			recs: []tape.RequestRecord{
+				rec("", "eos"),
+			},
+			wantCapped:   0,
+			wantObserved: 1,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := limitOf(tape.LimitSummary{For: 20 * time.Second, MaxTokens: 2048}, 0, tc.recs)
+			if got.CappedStreams != tc.wantCapped || got.EndingsObserved != tc.wantObserved {
+				t.Errorf("CappedStreams/EndingsObserved = %d/%d, want %d/%d",
+					got.CappedStreams, got.EndingsObserved, tc.wantCapped, tc.wantObserved)
+			}
+		})
+	}
+}

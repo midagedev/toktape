@@ -205,6 +205,15 @@ func Aggregate(recs []tape.RequestRecord) tape.AggregateTimings {
 	if w := lastFirst - minStart; w > 0 && out.TotalPromptN > 0 {
 		out.AggregatePromptPerSecond = float64(out.TotalPromptN) / w.Seconds()
 	}
+	// The window every answered stream was decoding in (TTP-138).
+	// concurrentWindow is the one owner of this arithmetic: the rounds
+	// reduction and any future aggregate read these fields per round, never
+	// re-derive the span.
+	if w, n := concurrentWindow(ok); w > 0 && n > 0 {
+		out.ConcurrentWindowMs = msOf(w)
+		out.ConcurrentPredictedN = n
+		out.ConcurrentPredictedPerSecond = float64(n) / w.Seconds()
+	}
 	if len(rates) > 0 {
 		sum := 0.0
 		for _, r := range rates {
@@ -224,6 +233,52 @@ func Aggregate(recs []tape.RequestRecord) tape.AggregateTimings {
 	// carry, so it is derived here and every caller of Aggregate gets it.
 	out.PeakDecodingStreams = PeakDecodingStreams(recs)
 	return out
+}
+
+// concurrentWindow is the span in which every answered stream was producing
+// tokens — from the latest first token to the earliest last — and the tokens
+// every answered stream produced inside it, timestamps inclusive at both
+// ends (tape.AggregateTimings.ConcurrentWindowMs, TTP-138).
+//
+// AggregatePredictedPerSecond runs from the first token of the run to the
+// last, which stops being one concurrency the moment a stream finishes
+// early: the tail is the survivors and the figure is a mean across two
+// different machines. Over this window the rate reconciles with the
+// per-stream ones by construction — every stream counted is producing for
+// the whole span — which is what a throughput figure was promised to be.
+//
+// recs are the answered streams: no error, at least one token each. With
+// fewer than two there is no "every stream" to span — the window is the run
+// and AggregatePredictedPerSecond already says it — and when the earliest
+// last token precedes the latest first one the streams never shared an
+// instant. Both leave the window not positive and nothing counted, so the
+// fields stay 0, the schema's "not computed".
+func concurrentWindow(recs []*tape.RequestRecord) (window time.Duration, tokens int) {
+	if len(recs) < 2 {
+		return 0, 0
+	}
+	var lastFirst, firstLast time.Duration
+	for i, r := range recs {
+		first := r.StartedAt + r.Tokens[0].T
+		last := r.StartedAt + r.Tokens[len(r.Tokens)-1].T
+		if i == 0 || first > lastFirst {
+			lastFirst = first
+		}
+		if i == 0 || last < firstLast {
+			firstLast = last
+		}
+	}
+	if w := firstLast - lastFirst; w > 0 {
+		for _, r := range recs {
+			for _, tk := range r.Tokens {
+				if at := r.StartedAt + tk.T; at >= lastFirst && at <= firstLast {
+					tokens++
+				}
+			}
+		}
+		return w, tokens
+	}
+	return 0, 0
 }
 
 // PeakDecodingStreams is the most answered streams whose decode windows share

@@ -355,6 +355,8 @@ func reduceRounds(recs []tape.RequestRecord, names []string, streams int) (tape.
 		decodeSec, promptSec     float64
 		decodeTokens, promptToks int
 		peakStreams              int
+		concurrentMs             float64
+		concurrentN              int
 	)
 	per := make([]tape.RoundSummary, len(names))
 	for k, rr := range byRound {
@@ -375,6 +377,14 @@ func reduceRounds(recs []tape.RequestRecord, names []string, streams int) (tape.
 			promptSec += float64(a.TotalPromptN) / a.AggregatePromptPerSecond
 			promptToks += a.TotalPromptN
 		}
+		// The concurrent window is summed the same way the decode seconds
+		// are: per round from server.Aggregate — the one owner of that
+		// arithmetic (TTP-138) — never re-derived here. Across serial rounds
+		// the whole-record window inverts (the latest first token of the last
+		// round is after the earliest last token of the first), so the
+		// naive figure the loop's agg started from is replaced wholesale.
+		concurrentMs += a.ConcurrentWindowMs
+		concurrentN += a.ConcurrentPredictedN
 		per[k] = tape.RoundSummary{
 			Index:                       k,
 			Name:                        names[k],
@@ -411,6 +421,12 @@ func reduceRounds(recs []tape.RequestRecord, names []string, streams int) (tape.
 
 	agg.WallMs = wallMs
 	agg.PeakDecodingStreams = peakStreams
+	agg.ConcurrentWindowMs = concurrentMs
+	agg.ConcurrentPredictedN = concurrentN
+	agg.ConcurrentPredictedPerSecond = 0
+	if concurrentMs > 0 && concurrentN > 0 {
+		agg.ConcurrentPredictedPerSecond = float64(concurrentN) / (concurrentMs / 1000)
+	}
 	agg.AggregatePredictedPerSecond, agg.AggregatePromptPerSecond = 0, 0
 	if decodeSec > 0 {
 		agg.AggregatePredictedPerSecond = float64(decodeTokens) / decodeSec

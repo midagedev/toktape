@@ -32,6 +32,89 @@ func roundRec(round, index int, sent, first, last time.Duration, predictedN int,
 	}
 }
 
+// raggedRec is one reduced stream with a full token timeline: n tokens from
+// first (absolute, since the run start) spaced gap apart, sent at sent. Built
+// for the concurrent-window gates, which need streams that end at
+// deliberately different times inside a round.
+func raggedRec(round, index int, sent, first, gap time.Duration, n int) tape.RequestRecord {
+	rec := tape.RequestRecord{Index: index, Round: round, StartedAt: sent}
+	for i := 0; i < n; i++ {
+		rec.Tokens = append(rec.Tokens, tape.TokenEvent{T: first - sent + time.Duration(i)*gap, Index: i})
+	}
+	rec.Timings = tape.TimingsSummary{
+		PromptN:    100,
+		PredictedN: n,
+		TTFTMs:     float64((first - sent) / time.Millisecond),
+	}
+	return rec
+}
+
+// TestReduceRoundsConcurrentWindowIsTheRoundsOwn (TTP-138): the run's
+// concurrent window is the sum of the rounds' own, taken from the same
+// server.Aggregate that computes them for a single-round run — the window
+// arithmetic has one owner, and the rounds path reads its per-round output
+// the same way it reads the decode window, rather than re-deriving it.
+//
+// Over every record at once the window is worse than naive: serial rounds
+// make the latest first token come after the earliest last one, so the span
+// in which "every stream was decoding" is negative and the naive figure is
+// the schema's unknown — which is exactly why the override here must exist.
+func TestReduceRoundsConcurrentWindowIsTheRoundsOwn(t *testing.T) {
+	s, ms := time.Second, time.Millisecond
+	recs := []tape.RequestRecord{
+		// Round 0: A 100→1000 ms, B 300→1200 ms — window [300, 1000], 16
+		// tokens inside (A 8, B 8).
+		raggedRec(0, 0, 0, 100*ms, 100*ms, 10),
+		raggedRec(0, 1, 0, 300*ms, 100*ms, 10),
+		// Round 1: C 10.5→11.4 s, D 10.7→11.2 s — window [10700, 11200],
+		// 12 tokens inside (C 6, D 6).
+		raggedRec(1, 0, 10*s, 10500*ms, 100*ms, 10),
+		raggedRec(1, 1, 10*s, 10700*ms, 100*ms, 6),
+	}
+
+	// The precondition the override exists for: across the serial rounds the
+	// window inverts (latest first 10700 > earliest last 1000), so the naive
+	// aggregate over every record reports the schema's unknown.
+	if naive := server.Aggregate(recs); naive.ConcurrentWindowMs != 0 || naive.ConcurrentPredictedN != 0 {
+		t.Fatalf("the naive concurrent window is %v ms / %d tokens, want 0 — the fixture no longer inverts across rounds",
+			naive.ConcurrentWindowMs, naive.ConcurrentPredictedN)
+	}
+
+	agg, _, _ := reduceRounds(recs, []string{"ragged", "later"}, 2)
+
+	// The same function, per round: whatever server.Aggregate says each
+	// round's window was, the run's is the sum of exactly those figures. A
+	// second implementation of the arithmetic would have to keep agreeing
+	// with every one of these to pass.
+	perRound := []tape.AggregateTimings{
+		server.Aggregate(recs[:2]),
+		server.Aggregate(recs[2:]),
+	}
+	var wantMs, wantN int = 0, 0
+	for _, a := range perRound {
+		wantMs += int(a.ConcurrentWindowMs)
+		wantN += a.ConcurrentPredictedN
+	}
+	if wantMs != 700+500 || wantN != 16+12 {
+		t.Fatalf("per-round windows summed to %d ms / %d tokens, want 1200 / 28 — the fixture drifted", wantMs, wantN)
+	}
+	if got := int(agg.ConcurrentWindowMs); got != wantMs {
+		t.Errorf("run ConcurrentWindowMs = %d, want %d (the rounds' own windows summed)", got, wantMs)
+	}
+	if got := agg.ConcurrentPredictedN; got != wantN {
+		t.Errorf("run ConcurrentPredictedN = %d, want %d", got, wantN)
+	}
+	if got, want := agg.ConcurrentPredictedPerSecond, 28.0/1.2; math.Abs(got-want) > 0.01 {
+		t.Errorf("run ConcurrentPredictedPerSecond = %v, want %v (28 tokens over the summed 1.2 s)", got, want)
+	}
+	// The recombination is a rate over summed windows, not a mean of rates:
+	// round 0 says 16/0.7 = 22.9 and round 1 says 12/0.5 = 24, and the run
+	// must carry the pooled 23.3 rather than either round's own figure.
+	if math.Abs(agg.ConcurrentPredictedPerSecond-16.0/0.7) < 0.1 {
+		t.Errorf("run concurrent rate = %v, equals round 0's own figure; want the pooled one", agg.ConcurrentPredictedPerSecond)
+	}
+}
+
 func intp(v int) *int { return &v }
 
 // twoRoundsWithAGap is two rounds of two streams with a 7.5 s pause between
