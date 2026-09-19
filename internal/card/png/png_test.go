@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/midagedev/toktape/internal/card"
+	"github.com/midagedev/toktape/internal/gpu"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -185,8 +186,10 @@ func TestEveryBandHasInk(t *testing.T) {
 	}{
 		{"header", bandHeaderTop, bandHeroTop},
 		{"hero", bandHeroTop, bandMemTop},
-		{"memory", bandMemTop, bandFooterTop},
-		{"footer", bandFooterTop, bandStripTop},
+		{"memory", bandMemTop, bandIdentTop},
+		// 2026-09-19: the footer band became the identity band; same
+		// boundaries, three 26 px lines instead of twelve 14 px rows.
+		{"ident", bandIdentTop, bandStripTop},
 		{"strip", bandStripTop, bandStripEnd},
 	}
 	for name, s := range fixtures() {
@@ -283,28 +286,24 @@ func TestHangulHasGlyphs(t *testing.T) {
 // TestHangulRenders draws a Hangul model name and probes the pixels where the
 // renderer said it put it. Without the fallback face the region would be blank
 // or full of .notdef boxes; a blank region is the failure this catches.
+//
+// 2026-09-19: the name's home is the identity band's first line (ident.model)
+// — the header's right side carries the run's moment now, so the second probe
+// the old test made against header.model went with it.
 func TestHangulRenders(t *testing.T) {
 	c, err := renderCanvas(hangulSummary())
 	if err != nil {
 		t.Fatalf("renderCanvas: %v", err)
 	}
-	m, ok := c.markByID("footer.col0.row0")
+	m, ok := c.markByID("ident.model")
 	if !ok {
-		t.Fatal("footer.col0.row0 was never drawn")
+		t.Fatal("ident.model was never drawn")
 	}
 	if !strings.Contains(m.Text, "한글") {
-		t.Fatalf("footer model row = %q, want it to carry the Hangul name", m.Text)
+		t.Fatalf("identity model line = %q, want it to carry the Hangul name", m.Text)
 	}
 	if got := inkCount(c.img, m.Rect); got < 150 {
 		t.Errorf("Hangul model name has %d ink pixels in %v, want >= 150", got, m.Rect)
-	}
-	// The header carries the Hangul file name too, on a different face size.
-	h, ok := c.markByID("header.model")
-	if !ok {
-		t.Fatal("header.model was never drawn")
-	}
-	if got := inkCount(c.img, h.Rect); got < 150 {
-		t.Errorf("Hangul file name has %d ink pixels in %v, want >= 150", got, h.Rect)
 	}
 }
 
@@ -339,62 +338,135 @@ func TestNothingLeavesTheContentBox(t *testing.T) {
 	}
 }
 
-// TestFooterColumnsDoNotCollide keeps the four-column grid a grid: a long CPU
-// name or a long GPU list must be truncated, never allowed to run into the
-// next column.
-func TestFooterColumnsDoNotCollide(t *testing.T) {
-	long := card.Example()
-	long.Host.CPU = "AMD Ryzen Threadripper PRO 7995WX 96-Core Processor With A Silly Name"
-	long.Model.Name = "A Model Whose General Name Field Was Filled In By Somebody Enthusiastic"
-	long.Server.Kind = "llama-server-with-an-unreasonably-long-kind"
+// TestFooterColumnsDoNotCollide and TestLongFlagsAreTruncated were deleted on
+// 2026-09-19 with the surfaces they guarded: the footer grid became the
+// identity band (TestIdentityLinesFitItsBand holds the collision contract now
+// — against the content box rather than three columns) and the flags line left
+// the PNG for the run page and -o md.
 
-	for name, s := range map[string]*tape.RunSummary{"example": card.Example(), "long": long} {
-		t.Run(name, func(t *testing.T) {
-			c, err := renderCanvas(s)
+// TestIdentityLinesAtTheirBaselines pins the band's geometry: each line at its
+// id, left-aligned at contentL, on its contract baseline, in stIdent — the
+// advance box is recomputed from the stIdent face, so a size, weight or
+// baseline change fails here (2026-09-19).
+func TestIdentityLinesAtTheirBaselines(t *testing.T) {
+	c, err := renderCanvas(card.Example())
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	f, err := c.fonts.face(sizeIdent, wBold)
+	if err != nil {
+		t.Fatalf("face: %v", err)
+	}
+	ascent, descent := f.metrics()
+	for id, base := range map[string]int{
+		"ident.model":  identLine1Base,
+		"ident.rig":    identLine2Base,
+		"ident.engine": identLine3Base,
+	} {
+		m, ok := c.markByID(id)
+		if !ok {
+			t.Fatalf("%s was never drawn", id)
+		}
+		want := image.Rect(contentL, base-ascent, contentL+c.measure(m.Text, stIdent), base+descent)
+		if m.Rect != want {
+			t.Errorf("%s (%q) box = %v, want %v — the line moved, or is not in stIdent", id, m.Text, m.Rect, want)
+		}
+	}
+	// The detail line under the model, in stIdentSub.
+	fs, err := c.fonts.face(sizeIdentSub, wRegular)
+	if err != nil {
+		t.Fatalf("face: %v", err)
+	}
+	subAscent, subDescent := fs.metrics()
+	m, ok := c.markByID("ident.modelsub")
+	if !ok {
+		t.Fatal("ident.modelsub was never drawn")
+	}
+	want := image.Rect(contentL, identSubBase-subAscent, contentL+c.measure(m.Text, stIdentSub), identSubBase+subDescent)
+	if m.Rect != want {
+		t.Errorf("ident.modelsub (%q) box = %v, want %v — the line moved, or is not in stIdentSub", m.Text, m.Rect, want)
+	}
+}
+
+// TestThrottledPill: the verdict the environment line carried is a pill now
+// (2026-09-19), and it keeps the rule it always had — always printed,
+// labelled, "?" when no GPU reading exists, because "no" would be a claim
+// nobody measured.
+func TestThrottledPill(t *testing.T) {
+	held := card.Example()
+	held.GPUsAtEnd[0].ThrottleMask = gpu.ThrottleHWThermalSlowdown
+	for _, tc := range []struct {
+		name string
+		s    *tape.RunSummary
+		want string
+	}{
+		{"read and quiet", card.Example(), "throttled no"},
+		{"read and held below settings", held, "throttled yes"},
+		{"unread", &tape.RunSummary{}, "throttled " + unknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := renderCanvas(tc.s)
 			if err != nil {
 				t.Fatalf("renderCanvas: %v", err)
 			}
-			for i := 0; i < footerCols; i++ {
-				left := contentL + i*footerColStep
-				right := left + footerColW
-				for _, part := range []string{"label", "row0", "row1", "row2", "row3"} {
-					m, ok := c.markByID(colID(i, part))
-					if !ok {
-						t.Fatalf("%s was never drawn", colID(i, part))
-					}
-					if m.Rect.Min.X < left || m.Rect.Max.X > right {
-						t.Errorf("%s (%q) spans x=%d..%d, outside its column (%d..%d)",
-							m.ID, m.Text, m.Rect.Min.X, m.Rect.Max.X, left, right)
-					}
-				}
+			m, ok := c.markByID("memory.pill3")
+			if !ok {
+				t.Fatal("memory.pill3 was never drawn")
+			}
+			if m.Text != tc.want {
+				t.Errorf("throttle pill = %q, want %q", m.Text, tc.want)
 			}
 		})
 	}
 }
 
-// TestLongFlagsAreTruncated: the -ot group can be arbitrarily long and it is
-// the last thing on the strip, so it must be the thing that gets cut.
-func TestLongFlagsAreTruncated(t *testing.T) {
-	s := card.Example()
-	s.Server.Flags.OverrideTens = []string{strings.Repeat("blk.99.ffn_up_exps=CPU,", 40)}
-	c, err := renderCanvas(s)
+// TestHeaderWhenAndOS: the header's right side is the run's moment (2026-09-19)
+// — when it started and on what — and the ids the model name used are gone
+// with the surfaces that printed it.
+func TestHeaderWhenAndOS(t *testing.T) {
+	c, err := renderCanvas(card.Example())
 	if err != nil {
 		t.Fatalf("renderCanvas: %v", err)
 	}
-	m, ok := c.markByID("strip.flags")
+	when, ok := c.markByID("header.when")
 	if !ok {
-		t.Fatal("strip.flags was never drawn")
+		t.Fatal("header.when was never drawn")
 	}
-	if !strings.HasSuffix(m.Text, ellipsis) {
-		t.Errorf("flags line was not truncated: %q", m.Text)
+	if want := startedString(card.Example()); when.Text != want {
+		t.Errorf("header.when = %q, want startedString's %q", when.Text, want)
 	}
-	if m.Rect.Max.X > contentR {
-		t.Errorf("flags line ends at x=%d, past the content box (%d)", m.Rect.Max.X, contentR)
+	if when.Rect.Max.X > contentR {
+		t.Errorf("header.when ends at x=%d, past the content box (%d)", when.Rect.Max.X, contentR)
 	}
-	// The five argument-starters survive the cut.
-	for _, want := range []string{"-fa on", "-b 2048", "-ub 512", "-ctk q8_0", "-ctv q8_0"} {
-		if !strings.Contains(m.Text, want) {
-			t.Errorf("flags line lost %q: %q", want, m.Text)
+	osm, ok := c.markByID("header.os")
+	if !ok {
+		t.Fatal("header.os was never drawn")
+	}
+	if want := osString(card.Example().Host); osm.Text != want {
+		t.Errorf("header.os = %q, want osString's %q", osm.Text, want)
+	}
+
+	// The ids this round removed exist on no card, observed or not.
+	for _, s := range []*tape.RunSummary{card.Example(), {}} {
+		c, err := renderCanvas(s)
+		if err != nil {
+			t.Fatalf("renderCanvas: %v", err)
+		}
+		for _, id := range []string{"header.model", "header.modelsub", "strip.flags", "strip.env"} {
+			if _, ok := c.markByID(id); ok {
+				t.Errorf("%s was drawn on a card that no longer has that surface", id)
+			}
+		}
+	}
+
+	// An unobserved start time and os are dropped rather than drawn as "?".
+	c, err = renderCanvas(&tape.RunSummary{})
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	for _, id := range []string{"header.when", "header.os"} {
+		if _, ok := c.markByID(id); ok {
+			t.Errorf("%s was drawn for an unobserved run; the rule is to drop it, not to print ?", id)
 		}
 	}
 }
@@ -412,11 +484,15 @@ func TestUnknownSummaryNeverInventsANumber(t *testing.T) {
 	want := map[string]string{
 		"hero.left.number":  unknown,
 		"hero.right.number": unknown,
-		"header.model":      unknown,
 		"header.runid":      unknown,
-		"footer.col0.row0":  unknown,
-		"footer.col1.row0":  unknown,
-		"footer.col2.row0":  unknown,
+		// 2026-09-19: the identity band replaced the footer grid's row 0s.
+		"ident.model": unknown,
+		"ident.rig":   unknown,
+		// The engine line keeps the flag row the old strip carried, so an
+		// unread run prints the engine's own "?" beside the three "?"s of the
+		// argument-starters — five labelled unknowns, never a bare "?" list
+		// with no fields named (the joined-list rule is about joined parts).
+		"ident.engine": "? · fa ? · ctk ? · ctv ?",
 	}
 	for id, w := range want {
 		m, ok := c.markByID(id)
@@ -440,16 +516,11 @@ func TestUnknownSummaryNeverInventsANumber(t *testing.T) {
 	if m, ok := c.markByID("memory.pill2"); !ok || m.Text != "contended "+unknown {
 		t.Errorf("contended pill = %q (drawn=%v), want %q", m.Text, ok, "contended "+unknown)
 	}
-	if m, ok := c.markByID("footer.col1.row3"); !ok || m.Text != unknown {
-		t.Errorf("RAM cell = %q (drawn=%v), want %q — an unread size is not %q", m.Text, ok, unknown, "? GB")
-	}
-	// 2026-09-14 (TTP-54): the environment column became the strip's second
-	// line, so the assertion that used to read footer.col3.row0 reads the line
-	// that carries those fields now. The rule is the one it always was: the
-	// verdicts are labelled and keep their "?", and the fields nobody read are
-	// dropped rather than strung together as bare question marks.
-	if m, ok := c.markByID("strip.env"); !ok || m.Text != "throttled ? · contended ?" {
-		t.Errorf("environment line = %q (drawn=%v), want %q", m.Text, ok, "throttled ? · contended ?")
+	// The throttle verdict is the environment line's survivor and its rule is
+	// unchanged: labelled, always printed, "?" when nobody read the GPUs
+	// (2026-09-19).
+	if m, ok := c.markByID("memory.pill3"); !ok || m.Text != "throttled "+unknown {
+		t.Errorf("throttle pill = %q (drawn=%v), want %q", m.Text, ok, "throttled "+unknown)
 	}
 }
 
@@ -816,10 +887,15 @@ func TestWriteLeavesNoTempFile(t *testing.T) {
 	}
 }
 
-// TestUnsetFlagPrintsDefaultOnceTheArgvWasRead: the PNG's ENGINE column obeys
+// TestUnsetFlagPrintsDefaultOnceTheArgvWasRead: the engine identity line obeys
 // the text card's rule (internal/card/format.go flagValue). "?" is "nobody
 // looked"; a flag missing from an argv the recorder read is observed-as-absent
 // and the server's own default is in effect.
+//
+// 2026-09-19: the b/ub/ngl row left the card with the footer grid (it is on
+// the run page and in -o md), so what is pinned here is the fa/ctk/ctv row
+// that stayed, on the line that carries it now. The engine is "?" in these
+// fixtures — an unread kind — which is its own rule, not the flag row's.
 func TestUnsetFlagPrintsDefaultOnceTheArgvWasRead(t *testing.T) {
 	read := &tape.RunSummary{Server: tape.ServerInfo{
 		PID:   4242,
@@ -830,66 +906,24 @@ func TestUnsetFlagPrintsDefaultOnceTheArgvWasRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderCanvas: %v", err)
 	}
-	for id, want := range map[string]string{
-		"footer.col2.row1": "fa · ctk · ctv at defaults",
-		"footer.col2.row2": "b 2048 · ub default · ngl ?",
-	} {
-		m, ok := c.markByID(id)
-		if !ok {
-			t.Fatalf("%s was never drawn", id)
-		}
-		if m.Text != want {
-			t.Errorf("%s = %q, want %q", id, m.Text, want)
-		}
+	if m, ok := c.markByID("ident.engine"); !ok || m.Text != "? · fa · ctk · ctv at defaults" {
+		t.Errorf("engine line = %q (drawn=%v), want %q", m.Text, ok, "? · fa · ctk · ctv at defaults")
 	}
 
-	// No argv was read: every one of the five is genuinely unobserved.
+	// No argv was read: every one of the three is genuinely unobserved.
 	c, err = renderCanvas(&tape.RunSummary{Server: tape.ServerInfo{PID: 4242}})
 	if err != nil {
 		t.Fatalf("renderCanvas: %v", err)
 	}
-	for id, want := range map[string]string{
-		"footer.col2.row1": "fa ? · ctk ? · ctv ?",
-		"footer.col2.row2": "b ? · ub ? · ngl ?",
-	} {
-		m, ok := c.markByID(id)
-		if !ok {
-			t.Fatalf("%s was never drawn", id)
-		}
-		if m.Text != want {
-			t.Errorf("%s = %q, want %q — a default was claimed from an argv nobody read", id, m.Text, want)
-		}
+	if m, ok := c.markByID("ident.engine"); !ok || m.Text != "? · fa ? · ctk ? · ctv ?" {
+		t.Errorf("engine line = %q (drawn=%v), want %q — a default was claimed from an argv nobody read",
+			m.Text, ok, "? · fa ? · ctk ? · ctv ?")
 	}
 }
 
-// TestAllDefaultFlagsStripFits: the worst case of the observed-as-absent rule
-// is a server started with nothing but a model path, where all five
-// argument-starters read "default". That strip must still fit the content box
-// uncut — the five are exactly the fields the card exists to settle.
-func TestAllDefaultFlagsStripFits(t *testing.T) {
-	s := &tape.RunSummary{Server: tape.ServerInfo{
-		Args: []string{"/usr/local/bin/llama-server", "-m", "/models/model.gguf"},
-	}}
-	c, err := renderCanvas(s)
-	if err != nil {
-		t.Fatalf("renderCanvas: %v", err)
-	}
-	m, ok := c.markByID("strip.flags")
-	if !ok {
-		t.Fatal("strip.flags was never drawn")
-	}
-	if strings.HasSuffix(m.Text, ellipsis) {
-		t.Errorf("the all-default flag strip was truncated: %q", m.Text)
-	}
-	for _, want := range []string{"-fa default", "-b default", "-ub default", "-ctk default", "-ctv default"} {
-		if !strings.Contains(m.Text, want) {
-			t.Errorf("flags strip is missing %q: %q", want, m.Text)
-		}
-	}
-	if m.Rect.Max.X > contentR {
-		t.Errorf("flags line ends at x=%d, past the content box (%d)", m.Rect.Max.X, contentR)
-	}
-}
+// TestAllDefaultFlagsStripFits was deleted on 2026-09-19 with the flag strip
+// it measured; the all-default worst case of the rule it protected now lands
+// on an engine line that fits by construction (TestIdentityLinesFitItsBand).
 
 // TestQueuedStreamsAreNamed: the PNG says the same thing the text card does
 // about a run that asked for more streams than the server has slots. The
@@ -939,8 +973,9 @@ func TestQueuedStreamsAreNamed(t *testing.T) {
 }
 
 // TestAnswerCutPillFitsTheCard: a run that thought until it ran out of budget
-// gets a fourth pill, and the memory band still fits inside the content box
-// with it (TTP-20, 2026-09-13).
+// gets a fifth pill (the fourth is the throttle verdict the environment line's
+// round moved into the row, 2026-09-19), and the memory band still fits
+// inside the content box with it (TTP-20, 2026-09-13).
 func TestAnswerCutPillFitsTheCard(t *testing.T) {
 	s := *card.Example()
 	s.Timings.PredictedN = 128
@@ -951,16 +986,16 @@ func TestAnswerCutPillFitsTheCard(t *testing.T) {
 	for _, p := range c.pills {
 		texts = append(texts, p.text)
 	}
-	if got, want := len(c.pills), 4; got != want {
+	if got, want := len(c.pills), 5; got != want {
 		t.Fatalf("pills = %d %v, want %d", got, texts, want)
 	}
-	if got := c.pills[3].text; got != "answer cut" {
+	if got := c.pills[4].text; got != "answer cut" {
 		t.Errorf("last pill = %q, want %q", got, "answer cut")
 	}
 
 	// And it is absent when the run answered.
 	s.Timings.ReasoningN = 96
-	if got, want := len(contentOf(t, &s).pills), 3; got != want {
+	if got, want := len(contentOf(t, &s).pills), 4; got != want {
 		t.Errorf("pills = %d, want %d for a run that answered", got, want)
 	}
 

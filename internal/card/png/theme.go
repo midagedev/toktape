@@ -118,18 +118,16 @@ const (
 
 // Band boundaries, top to bottom. The contract fixed the four band heights at
 // 80 / 180 / 120 / 160 and the whitespace lives inside each band rather than
-// between them. The first three are still exact; the footer is 146 rather than
-// 160 (TTP-54, 2026-09-14). Growing the body type moved the environment rows
-// out of the footer grid and onto a third strip line, and the strip needed the
-// 14 px to keep its last line the same distance off the panel edge that the
-// wordmark sits from the top. Nothing above the footer moved.
+// between them. The first three are still exact; the identity band is 146
+// rather than 160 (TTP-54, 2026-09-14 gave the footer that height, and the
+// identity band kept it, 2026-09-19). Nothing above y=418 moved.
 const (
 	bandHeaderTop = 38
-	bandHeroTop   = bandHeaderTop + 80  // 118
-	bandMemTop    = bandHeroTop + 180   // 298
-	bandFooterTop = bandMemTop + 120    // 418
-	bandStripTop  = bandFooterTop + 146 // 564
-	bandStripEnd  = bandStripTop + 76   // 640
+	bandHeroTop   = bandHeaderTop + 80 // 118
+	bandMemTop    = bandHeroTop + 180  // 298
+	bandIdentTop  = bandMemTop + 120   // 418 — was bandFooterTop until 2026-09-19
+	bandStripTop  = bandIdentTop + 146 // 564
+	bandStripEnd  = bandStripTop + 76  // 640
 )
 
 // Hero row.
@@ -178,41 +176,25 @@ const (
 	memLegendSpacing = 22 // entry → entry
 )
 
-// Footer grid.
-//
-// Three columns, not four (TTP-54, 2026-09-14). A 255 px column cannot hold
-// 14 px body text: the rig's CPU name measures 336 px at the new size and the
-// engine's flag row 216. The environment column was the one to give up, because
-// its four rows are the only ones on the card that settle no argument — the os,
-// the throttle and contention verdicts, the GPU temperatures and the start
-// time — and they read as well on a strip line as in a column. Model, rig and
-// engine keep a column each at 346 px, which clears the longest real row on the
-// two ws tapes by 10 px.
+// Identity band (2026-09-19): three lines at 25 px — the model, the rig, the
+// engine — replacing the footer grid's twelve 14 px rows. A timeline shows
+// this card at about 600 px wide, and at that size the grid was grey texture:
+// the conditions a rate needs in order to mean anything have to be as legible
+// as the figure, or the card is an unqualified number. The twelve rows, the
+// flags line and the environment line are still in the tape, on the run page,
+// in -o md and in -o json — nothing is lost, it stops being printed here.
 const (
-	footerCols     = 3
-	footerColW     = 346
-	footerColStep  = 367                // colW + 21 gutter; 3 columns + 2 gutters == contentW
-	footerLabelBas = bandFooterTop + 32 // 450
-	footerRuleY    = bandFooterTop + 42 // 460
-	footerRow0Base = bandFooterTop + 66 // 484
-	footerRowStep  = 23
-	footerRows     = 4
-
-	// footerSlack is the clearance a footer row is measured against: a row must
-	// fit its column with room to spare, not merely avoid the ellipsis by a
-	// pixel. It was the fit test's own number (sizes_test.go) until 2026-09-15,
-	// when the model column began wrapping its own rows against the same
-	// clearance (modelFooterRows) — two thresholds for one column is how a row
-	// can pass one and be cut by the other.
-	footerSlack = 8
+	identLine1Base = bandIdentTop + 38  // 456 — model
+	identSubBase   = bandIdentTop + 66  // 484 — the model's detail
+	identLine2Base = bandIdentTop + 110 // 528 — rig
+	identLine3Base = bandIdentTop + 154 // 572 — engine
 )
 
-// Bottom strip. Three lines now: the flags, the environment the footer grid
-// gave up, and the credit line.
+// Bottom strip. One line now: the provenance pair. The rule moved down to 600
+// on 2026-09-19 with the flags and environment lines gone; the credit line
+// did not move.
 const (
-	stripRuleY    = bandStripTop + 2  // 566
-	stripFlagBase = bandStripTop + 24 // 588
-	stripEnvBase  = bandStripTop + 46 // 610
+	stripRuleY    = 600
 	stripFootBase = bandStripTop + 68 // 632
 )
 
@@ -245,6 +227,27 @@ const (
 	sizeMicro    = 13
 	sizeEyebrow  = 12.5
 	sizeColLabel = 12
+
+	// The identity band's sizes (2026-09-19; 26 → 25 the same day, by
+	// measurement). sizeIdent exists because a timeline crops this card to
+	// roughly half its pixel width: the twelve 14 px footer rows it replaced
+	// arrived at feed size as 7 px texture, and the conditions of a rate have
+	// to be as legible as the figure. The advance is not the 0.6 em the
+	// first cut assumed: measured on the bold face stIdent draws with, where
+	// HintingFull rounds every advance to a whole pixel, it is 15 px/char at
+	// 25 px (16 at 26), so a 25 px line holds 72 of the 1080 px content
+	// width. 25 rather than 26 because the rig line's preferred spelling has
+	// to fit the one-GPU fixtures whole, and at 26 even the sharded example's
+	// fell to a fallback; the two-GPU ws rig overflows either way and its
+	// chain carries the rest (rigIdent). sizeIdentSub is the detail line
+	// under the model. It was 17 until 2026-09-19: at 17 it landed at about
+	// 8.5 px once a timeline halved the card, which is the texture this band
+	// was drawn to remove — one row of it instead of fourteen is still a row
+	// nobody reads. 19 is the largest that keeps the longest fixture's line
+	// whole (exl3's arch is the HF class name, and 20 truncates it), and the
+	// 28 px pitch to the model baseline absorbs the two pixels.
+	sizeIdent    = 25
+	sizeIdentSub = 19
 )
 
 // Letter-spacing used to emulate small caps. Real small caps would need a face

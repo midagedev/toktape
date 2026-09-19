@@ -193,6 +193,8 @@ var (
 	stHero     = textStyle{size: heroNumberSize, weight: wExtraBold}
 	stHeroUnit = textStyle{size: heroUnitSize, weight: wBold}
 	stBody     = textStyle{size: sizeBody, weight: wRegular}
+	stIdent    = textStyle{size: sizeIdent, weight: wBold}
+	stIdentSub = textStyle{size: sizeIdentSub, weight: wRegular}
 	stSmall    = textStyle{size: sizeSmall, weight: wRegular}
 	stSmallB   = textStyle{size: sizeSmall, weight: wBold}
 	stMicro    = textStyle{size: sizeMicro, weight: wRegular}

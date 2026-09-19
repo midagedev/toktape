@@ -3,6 +3,7 @@ package png
 import (
 	"fmt"
 	"image/color"
+	"math"
 	"strconv"
 	"strings"
 
@@ -18,10 +19,10 @@ import (
 // renderings must settle the same argument with the same numbers.
 type content struct {
 	// Header.
-	version   string // "v0.1.0"
-	runID     string
-	modelFile string
-	modelSub  string // "UD-Q4_K_M · 19.83 GiB · qwen3moe"
+	version string // "v0.1.0"
+	runID   string
+	when    string // the run's start time, right of the wordmark (2026-09-19)
+	os      string // the os, under it
 
 	// Hero.
 	left, right heroCol
@@ -29,17 +30,27 @@ type content struct {
 	// Memory.
 	segments   []segment
 	breakdown  []legendEntry // weights / kv / compute, when the split is known
-	placedSum  string        // "23.7 GiB placed · host RSS 3.4 GiB"
+	sum        fallbackLine  // "offloaded · 23.7 GiB placed · host RSS 3.4 GiB", whole parts only
 	pills      []pill
 	hasPlaced  bool
 	hasProcMem bool
 
-	// Footer grid: three columns of footerRows lines, first line emphasised.
-	cols [footerCols]footerCol
+	// Identity band: model, rig, engine, one line each (2026-09-19).
+	ident1   fallbackLine // the model
+	identSub string       // the model's detail, one size below
+	ident2   fallbackLine // the rig
+	ident3   fallbackLine // the engine
+}
 
-	// Bottom strip.
-	env   string // the environment rows the footer grid gave up (TTP-54)
-	flags string
+// fallbackLine is one measured line of the card: a preferred string and the
+// ordered fallbacks it gives its elements up to, resolved by pickWidest at
+// draw time — the hero sub-lines' own mechanism. The identity band's three
+// lines use it at stIdent against the full content width (2026-09-19); the
+// memory summary uses it at stSmall against whatever width the pill row
+// leaves.
+type fallbackLine struct {
+	preferred string
+	fallbacks []string
 }
 
 type heroCol struct {
@@ -97,22 +108,15 @@ type pill struct {
 	col  color.RGBA
 }
 
-type footerCol struct {
-	label string
-	rows  [footerRows]string
-}
-
-// build derives the whole card from the summary. It takes the canvas because
-// the footer's model column measures its rows before it commits to them
-// (modelFooterRows) and the measuring is the canvas's job.
-func build(cv *canvas, s *tape.RunSummary) *content {
+// build derives the whole card from the summary. Nothing measures at build
+// time since the identity band replaced the footer grid (2026-09-19): its
+// lines are picked by pickWidest at draw time, against the full content width.
+func build(s *tape.RunSummary) *content {
 	c := &content{}
 	c.buildHeader(s)
 	c.buildHero(s)
 	c.buildMemory(s)
-	c.buildFooter(cv, s)
-	c.env = envLine(s)
-	c.flags = flagsLine(s.Server)
+	c.buildIdent(s)
 	return c
 }
 
@@ -121,26 +125,15 @@ func build(cv *canvas, s *tape.RunSummary) *content {
 func (c *content) buildHeader(s *tape.RunSummary) {
 	c.version = versionString(s)
 	c.runID = orUnknown(s.ID)
-	// The header names the file, not the GGUF's general.name. For a split set
-	// that is the variant label rather than part one's name, which every
-	// variant of the model shares (TTP-32); card.ModelLabel returns the file
-	// name unchanged for a single file.
-	c.modelFile = orUnknown(card.ModelLabel(s.Model))
-	c.modelSub = joinParts(" · ",
-		orUnknown(s.Model.Quant),
-		shardsPart(s.Model),
-		formatFileGiB(s.Model.FileBytes),
-		s.Model.Arch,
-	)
-}
-
-// shardsPart is the "9 shards" element of the header sub-line, empty for a
-// single file so joinParts drops it and the line is what it always was.
-func shardsPart(m tape.ModelInfo) string {
-	if !card.Sharded(m) {
-		return ""
-	}
-	return strconv.Itoa(m.Shards) + " shards"
+	// The header's right side is the run's moment, not the model's name: the
+	// name is the identity band's first line now (2026-09-19), and printing
+	// it twice is what that round removed. Both strings are dropped when
+	// unobserved rather than drawn as "?" — they are facts about the run, not
+	// figures a "?" would qualify. The hostname never comes here: the
+	// published view strips the machine's name, and a card that shows it
+	// locally and not when published would be two different cards.
+	c.when = omitUnknown(startedString(s))
+	c.os = omitUnknown(osString(s.Host))
 }
 
 // versionString mirrors internal/card/card.go: the summary's own version wins
@@ -716,18 +709,53 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 	// whose experts sit in system memory are two different machines, and the
 	// reader needs that word before the bar under it means anything. Nothing
 	// when the placement was not derived.
-	c.placedSum = placedStr + " placed · host RSS " + rss
+	//
+	// The line is measured (2026-09-19): the pill row beside it can leave
+	// less room than the whole summary needs, and the old character
+	// truncation cut inside a number — "host RSS 1.…" — which invites the
+	// reader to finish it wrongly. It gives up its trailing parts whole,
+	// through pickWidest against the width drawPills leaves; the shape word
+	// leads, so it is the last thing standing.
+	sumParts := []string{placedStr + " placed", "host RSS " + rss}
 	if word := layoutWord(s.Placement); word != "" {
-		c.placedSum = word + " · " + c.placedSum
+		sumParts = append([]string{word}, sumParts...)
 	}
+	c.sum = trailingPartsLine(sumParts)
 
 	c.pills = []pill{majFaultPill(s, c.hasProcMem), cachePill(s.Cache), contendedPill(s.Contention)}
+	// The throttle verdict and the conditions clause are the environment
+	// line's two survivors (2026-09-19): claims about the machine, which the
+	// card always prints, now as pills beside the bar rather than a strip
+	// line. The GPU state, the os and the start time left with the line —
+	// the os and the start time moved to the header, the temperatures and
+	// power draws stay in the tape and on the run page.
+	c.pills = append(c.pills, throttledPill(s))
+	if cs := card.ConditionsShort(s); cs != "" {
+		// Present only when it fired, and in Warn rather than the neutral
+		// colour: the machine's operating point moved under the run, which
+		// is a caution about every figure above it.
+		c.pills = append(c.pills, pill{text: cs, col: colWarn})
+	}
 	if p, ok := answerCutPill(s); ok {
 		// Only when it happened, so the ordinary card keeps three pills and
 		// its layout. This is the PNG's form of the text card's
 		// "! answer cut" warning line (TTP-20, 2026-09-13).
 		c.pills = append(c.pills, p)
 	}
+}
+
+// trailingPartsLine builds a measured line whose fallbacks drop whole
+// trailing parts one at a time, down to the first part alone: the memory
+// summary's form of fallbackLine (the identity lines hand-pick theirs). If
+// even the first part does not fit, pickWidest still returns it and
+// textOpts truncates — the pre-2026-09-19 behaviour, correct as the last
+// resort.
+func trailingPartsLine(parts []string) fallbackLine {
+	l := fallbackLine{preferred: strings.Join(parts, " · ")}
+	for i := len(parts) - 1; i > 0; i-- {
+		l.fallbacks = append(l.fallbacks, strings.Join(parts[:i], " · "))
+	}
+	return l
 }
 
 // hostSegment is the sand block of the placement bar, split into what is in
@@ -841,70 +869,245 @@ func contentionObserved(ci tape.ContentionInfo) bool {
 
 // ---------------------------------------------------------------- footer ---
 
-func (c *content) buildFooter(cv *canvas, s *tape.RunSummary) {
-	c.cols[0] = footerCol{label: "model", rows: modelFooterRows(cv, s.Model)}
-
-	c.cols[1] = footerCol{label: "rig", rows: [footerRows]string{
-		strings.Join(rigGPUs(s.Host.GPUs), " + "),
-		orUnknown(s.Host.CPU),
-		coreString(s.Host),
-		ramString(s.Host),
-	}}
-
-	f := s.Server.Flags
-	// An engine's argv is its own, so the two flag rows carry it verbatim
-	// instead of the llama.cpp token set; the kind and the context row are the
-	// same for everyone (2026-09-15, ExLlamaV3).
-	var row1, row2 string
-	if card.LlamaCPPFlags(s.Server) {
-		// The five argument-starters distinguish "?" (no argv was read) from
-		// "default" (a read argv did not set it); ngl is not one of the five.
-		read := argvObserved(s.Server)
-		row1 = engineFlagRow([]string{"fa", "ctk", "ctv"},
-			[]string{flagValue(f.FlashAttn, read), flagValue(f.CacheTypeK, read), flagValue(f.CacheTypeV, read)})
-		row2 = engineFlagRow([]string{"b", "ub", "ngl"},
-			[]string{flagValue(f.Batch, read), flagValue(f.UBatch, read), orUnknown(f.NGL)})
-	} else {
-		args := strings.Join(f.Other, " ")
-		if args == "" {
-			args = unknown
-		}
-		row1, row2 = wrapEngineArgs(cv, args)
-	}
-	c.cols[2] = footerCol{label: "engine", rows: [footerRows]string{
-		engineString(s.Server),
-		row1,
-		row2,
-		joinParts(" · ", "ctx "+formatInt(s.Server.CtxSize), "slots "+formatInt(s.Server.NSlots)),
-	}}
+// buildIdent derives the identity band (2026-09-19): the model, the rig and
+// the engine, one line each at 26 px, each with the fallbacks it gives its
+// elements up to when the whole does not fit the content width. The canvas
+// does the measuring, in pickWidest, at draw time.
+func (c *content) buildIdent(s *tape.RunSummary) {
+	c.ident1 = modelIdent(s.Model)
+	c.identSub = modelDetail(s.Model)
+	c.ident2 = rigIdent(s.Host)
+	c.ident3 = engineIdent(s.Server)
 }
 
-// envLine is what used to be the footer's fourth column: the os, the throttle
-// and contention verdicts, the GPUs' state at the end and when the run started
-// (TTP-54, 2026-09-14). Growing the body type left room for three columns, and
-// these are the four rows that settle no argument, so they became one line on
-// the bottom strip instead — where they are set larger than the column ever
-// gave them.
+// modelIdent is line 1: the model that ran, its quant and the file's size.
+// The name is card.ModelName — the variant directory for a shard set, the
+// file's stem for one file, never the GGUF header's general.name (the rule
+// modelFooterRows row 0 already carried; see card.ModelName for why).
 //
-// Two rules shape the order. The throttle and contention verdicts are always
-// printed, labelled, and keep their "?" — lesson 6, they are claims about a
-// machine and an unread one must say so. The rest are dropped when unobserved
-// rather than printed as a bare "?" in a list with nothing to say which field
-// it is. And the GPU state goes last because it is the only part that grows
-// with the rig: on a board with eight cards it is what the cut eats first.
-func envLine(s *tape.RunSummary) string {
-	return joinParts(" · ",
-		omitUnknown(osString(s.Host)),
-		"throttled "+throttledString(s),
-		"contended "+contendedString(s.Contention),
-		// TTP-57, 2026-09-14: the machine's operating point moved under the
-		// run. It sits with the other two claims about the machine — capped,
-		// busy, changed — and is dropped like every other unobserved element
-		// when it did not, rather than printed as a "?".
-		card.ConditionsShort(s),
-		omitUnknown(startedString(s)),
-		omitUnknown(gpuStateString(s.GPUsAtEnd)),
-	)
+// The quant part prints only when the name does not already carry it,
+// compared case-blind (2026-09-19): the name is the file's stem or the
+// variant directory, and both are named after the quant —
+// "DeepSeek-V4.1-Flash-Q3_K_M-engramQ8-tokembdBF16" contains Q3_K_M just as
+// "qwen3-30b-a3b-q4_k_m" contains Q4_K_M — so a second printing said the
+// same thing twice on one of the few lines a feed-size reader can actually
+// read, the same redundancy the header's model round removed. A repo-named
+// directory ("DeepSeek-V4.1-Flash-engramQ8-tokembdBF16") keeps the part.
+// The name itself is never stripped: the name is the name.
+func modelIdent(m tape.ModelInfo) fallbackLine {
+	name := orUnknown(card.ModelName(m))
+	// The quant and the size are dropped when unobserved, the envLine rule:
+	// a bare "?" in a joined list says nothing about which field is missing.
+	// The name keeps its "?" — it is the line's subject, and a nameless card
+	// must say so rather than print the quant alone.
+	quant := omitUnknown(orUnknown(m.Quant))
+	if quant != "" && containsFold(name, quant) {
+		quant = ""
+	}
+	size := omitUnknown(formatFileGiB(m.FileBytes))
+	return fallbackLine{
+		preferred: joinParts(" · ", name, quant, size),
+		fallbacks: []string{
+			joinParts(" · ", name, quant),
+			name,
+		},
+	}
+}
+
+// containsFold reports whether s contains sub, ignoring case. It is
+// internal/card/model.go's twin (card.ModelNameQuant's quant rule), kept
+// local by the same deliberate-duplicate rule format.go states for
+// internal/card's formatters: exporting it from another track's package
+// would be a wider change than the copy.
+func containsFold(s, sub string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))
+}
+
+// modelDetail is the sub-line under the model: what the model IS, in the
+// number formats the old model column used (formatParamsB for the counts,
+// plain integers for the layer and expert pair). Every element is dropped
+// when unobserved — a dense model has no experts and no active-params
+// figure, and simply prints fewer parts.
+func modelDetail(m tape.ModelInfo) string {
+	total := omitUnknown(formatParamsB(m.Params))
+	active := ""
+	if ap := activeParams(m); ap > 0 && ap != m.Params {
+		active = formatParamsB(ap) + " active per token"
+	}
+	layers := ""
+	if m.NLayers > 0 {
+		layers = strconv.Itoa(m.NLayers) + " layers"
+	}
+	experts := ""
+	if m.NExperts > 0 {
+		// The pair modelShape printed, spelled out for a line that has the
+		// room: "8 of 256 experts", or just the count when the used figure
+		// was never read.
+		if m.NExpertsUsed > 0 {
+			experts = fmt.Sprintf("%d of %d experts", m.NExpertsUsed, m.NExperts)
+		} else {
+			experts = strconv.Itoa(m.NExperts) + " experts"
+		}
+	}
+	return joinParts(" · ", total, active, m.Arch, layers, experts)
+}
+
+// activeParams is the parameter count a token actually touches. It is
+// internal/publish/index.go's derivation character for character — the hub's
+// index and the card must agree on the figure — duplicated here rather than
+// exported from internal/publish, which is another track's package, by the
+// same deliberate-duplicate rule format.go states for internal/card's
+// formatters.
+func activeParams(m tape.ModelInfo) int64 {
+	if m.NExperts == 0 {
+		return m.Params
+	}
+	if m.ActiveBytesPerToken > 0 && m.FileBytes > 0 && m.Params > 0 {
+		return int64(math.Round(float64(m.Params) * float64(m.ActiveBytesPerToken) / float64(m.FileBytes)))
+	}
+	return 0
+}
+
+// rigIdent is line 2: the cards, the CPU and the RAM, from the same helpers
+// the rig column used (rigGPUs, orUnknown, ramString). The core-count row
+// left the card with the grid: cores are in the tape and on the run page,
+// and at this size the CPU's own name is the part that names the machine.
+//
+// The fallback chain gives the CPU up in measured steps, and every step
+// exists because of a measured case (2026-09-19, at the 15 px/char the bold
+// face advances at 25 px — theme.go): the ws rig's preferred spelling is 82
+// characters, 1230 px against the 1080 px content width, and dropping the
+// vendor prefix (1170) or the core tail (1095) alone still does not fit —
+// "Ryzen Threadripper PRO 5975WX" without either is 1035 px, the rung that
+// keeps the machine's name on the two-card card. The hero recording's
+// one-card form fits a rung higher and keeps its "AMD ". Below the CPU come
+// the RAM, then the GPUs alone — the line's floor.
+func rigIdent(h tape.HostInfo) fallbackLine {
+	gpus := strings.Join(rigGPUs(h.GPUs), " + ")
+	cpu := omitUnknown(orUnknown(h.CPU))
+	ram := omitUnknown(ramString(h))
+	return fallbackLine{
+		preferred: joinParts(" · ", gpus, cpu, ram),
+		fallbacks: []string{
+			joinParts(" · ", gpus, stripCPUVendor(cpu), ram),
+			joinParts(" · ", gpus, stripCoreSuffix(cpu), ram),
+			joinParts(" · ", gpus, stripCPUVendor(stripCoreSuffix(cpu)), ram),
+			joinParts(" · ", gpus, ram),
+			gpus,
+		},
+	}
+}
+
+// cpuVendors are the leading vendor words stripCPUVendor drops, longest
+// first: "Intel(R) Core(TM) " begins with "Intel(R) ", so the shorter entry
+// checked first would leave a "Core(TM) " that names no machine either.
+var cpuVendors = []string{"Intel(R) Core(TM) ", "Intel(R) ", "Intel ", "AMD "}
+
+// stripCPUVendor drops a CPU name's leading vendor words — the rig line's
+// rung between the preferred spelling and the core-stripped one (2026-09-19).
+// The vendor word is the one part of the name that names no machine: every
+// CPU AMD or Intel sells begins with it, and "Ryzen Threadripper PRO
+// 5975WX" is the useful remainder. Like stripCoreSuffix it shortens and
+// never invents: only a LEADING occurrence of only the vendor words goes, so
+// a vendor word later in the string stays, and a name with no vendor prefix
+// ("Apple M2 Max") comes back unchanged.
+func stripCPUVendor(cpu string) string {
+	for _, prefix := range cpuVendors {
+		if strings.HasPrefix(cpu, prefix) {
+			return cpu[len(prefix):]
+		}
+	}
+	return cpu
+}
+
+// stripCoreSuffix drops a CPU name's core-count tail — " 32-Cores",
+// " 96-Core", " 96-Core Processor" — the rig line's first fallback. The tail
+// is the one part of the name the sub-line's figures already imply, and
+// "AMD Ryzen Threadripper PRO 5975WX" still names the CPU without it.
+//
+// The tail is the string's END, digits and all: lscpu reports "5975WX
+// 32-Cores", so matching " -Cores" alone never fires — the count sits between
+// the space and the suffix. Anything that is not that shape (an Intel suffix
+// like "CPU @ 3.00GHz", or a name with no count) comes back unchanged.
+func stripCoreSuffix(cpu string) string {
+	s := strings.TrimSuffix(cpu, " Processor")
+	for _, suffix := range []string{"-Cores", "-Core"} {
+		if !strings.HasSuffix(s, suffix) {
+			continue
+		}
+		i := len(s) - len(suffix)
+		for i > 0 && s[i-1] >= '0' && s[i-1] <= '9' {
+			i--
+		}
+		// A count with nothing before it, or no space to cut at, is not a
+		// core count the name carries as a tail.
+		if i < len(s)-len(suffix) && i > 0 && s[i-1] == ' ' {
+			return s[:i-1]
+		}
+	}
+	return cpu
+}
+
+// engineIdent is line 3: the engine, its argument row and the context. The
+// middle part is the row buildFooter's column 2 drew — the fa/ctk/ctv triple
+// for a llama.cpp server, or an engine's own argv joined to one line rather
+// than the two rows the old column wrapped it into (the identity line
+// measures the whole thing itself). The b/ub/ngl row left the card with the
+// grid; it is on the run page and in -o md.
+func engineIdent(srv tape.ServerInfo) fallbackLine {
+	eng := engineString(srv)
+	var middle string
+	if card.LlamaCPPFlags(srv) {
+		// The five argument-starters distinguish "?" (no argv was read) from
+		// "default" (a read argv did not set it); the same rule the strip
+		// carried, on the one row that stayed.
+		read := argvObserved(srv)
+		f := srv.Flags
+		middle = engineFlagRow([]string{"fa", "ctk", "ctv"},
+			[]string{flagValue(f.FlashAttn, read), flagValue(f.CacheTypeK, read), flagValue(f.CacheTypeV, read)})
+	} else {
+		middle = strings.Join(srv.Flags.Other, " ")
+		if middle == "" {
+			middle = unknown
+		}
+	}
+	// The context pair, dropped element by element when unobserved — a bare
+	// "?" between separators is the thing joinParts exists to prevent, so the
+	// pair is joined plainly and the outer joinParts drops it whole when
+	// neither figure was read.
+	var ctxSlots []string
+	if srv.CtxSize > 0 {
+		ctxSlots = append(ctxSlots, "ctx "+strconv.Itoa(srv.CtxSize))
+	}
+	if srv.NSlots > 0 {
+		ctxSlots = append(ctxSlots, strconv.Itoa(srv.NSlots)+" slots")
+	}
+	tail := strings.Join(ctxSlots, " · ")
+	return fallbackLine{
+		preferred: joinParts(" · ", eng, middle, tail),
+		fallbacks: []string{
+			joinParts(" · ", eng, tail),
+			eng,
+		},
+	}
+}
+
+// throttledPill is the environment line's throttle verdict as a pill
+// (2026-09-19), the same terms contendedPill prints the contention verdict
+// on: always printed, labelled, "?" when no GPU reading exists — "no" would
+// be a claim nobody measured. "yes" is a caution in Warn, per the palette's
+// emphasis contract (Bad is a run that is contended, cold or cut; a machine
+// that throttled explains the rate rather than invalidating it).
+func throttledPill(s *tape.RunSummary) pill {
+	v := throttledString(s)
+	col := colDim
+	switch v {
+	case "yes":
+		col = colWarn
+	case unknown:
+		col = colFaint
+	}
+	return pill{text: "throttled " + v, col: col}
 }
 
 // engineFlagRow renders one row of the ENGINE column: "fa on · ctk q8_0 · ctv
@@ -931,120 +1134,11 @@ func engineFlagRow(names, values []string) string {
 	return strings.Join(parts, " · ")
 }
 
-// modelFooterRows is the four-row model column of the footer grid.
-//
-// 2026-09-15 (user: "모델이 다 실제값으로 찍혀야해"): row 0 is card.ModelName —
-// the variant directory for a shard set, the file's stem for one file — never
-// the GGUF header's general.name, which a re-quantised variant keeps from the
-// base model it was cut from. The variantTag the size row used to close with
-// is gone with it: row 0 is the variant now, and printing parts of it twice is
-// what this change removed.
-//
-// A name wider than the column — the real recording's 45-character directory
-// measures 376 px against 346 — wraps at the last "-", "_" or "." that lets
-// row 0 keep its separator, and the two rows that frees spend as one: the
-// quant, the shard count, the size and the parameter count join with " · " so
-// the architecture row stays the last row. The joined row gives its parts up
-// in order of least importance when it is too wide — the parameter count
-// first, then the shard count — and never the quant or the size. A name too
-// wide for any separator falls to the canvas's own ellipsis, the same cut
-// every other footer cell takes.
-//
-// Widths are measured, not estimated, so this takes the canvas (TTP-32's
-// lesson: the column is 346 px and a 40-character directory is 320 of them).
-func modelFooterRows(cv *canvas, m tape.ModelInfo) [footerRows]string {
-	name := orUnknown(card.ModelName(m))
-	shape := modelShape(m)
-	quant := orUnknown(m.Quant)
-	size := formatFileGiB(m.FileBytes)
-	params := formatParamsB(m.Params)
-	fits := footerColW - footerSlack
-
-	if cv.measure(name, stSmallB) <= fits {
-		if !card.Sharded(m) {
-			return [footerRows]string{name, quant, joinParts(" · ", size, params), shape}
-		}
-		// The TTP-32 layout minus the variant tag: the shard count and the
-		// parameter count join the quant, the size row is the size alone.
-		return [footerRows]string{name, joinParts(" · ", quant, shardsPart(m), params), size, shape}
-	}
-
-	// The wrap: rows 0 and 1 spell the name across the separator, and the
-	// middle two rows become one.
-	row0, rest := wrapModelName(cv, name)
-	mid := joinParts(" · ", quant, shardsPart(m), size, params)
-	if cv.measure(mid, stSmall) > fits {
-		mid = joinParts(" · ", quant, shardsPart(m), size)
-	}
-	return [footerRows]string{row0, rest, mid, shape}
-}
-
-// wrapModelName splits name at the last "-", "_" or "." whose prefix (separator
-// included, so the name reads as folded rather than glued) still fits the
-// column. A name no separator helps is returned whole and the canvas's own
-// ellipsis takes it, the same cut every other footer cell takes.
-func wrapModelName(cv *canvas, name string) (row0, rest string) {
-	fits := footerColW - footerSlack
-	rs := []rune(name)
-	best := -1
-	for i, r := range rs {
-		if r != '-' && r != '_' && r != '.' {
-			continue
-		}
-		if cv.measure(string(rs[:i+1]), stSmallB) <= fits {
-			best = i
-		}
-	}
-	if best < 0 {
-		return name, ""
-	}
-	return string(rs[:best+1]), string(rs[best+1:])
-}
-
-// wrapEngineArgs is wrapModelName for an engine's argv: rows 1 and 2 of the
-// footer's engine column spell it across a space when it is wider than the
-// column, measured (never estimated — TTP-32's lesson) at the row style. The
-// break lands before the space, so row 1 carries whole arguments; a tail still
-// too wide for row 2 falls to the canvas's own ellipsis, the same cut every
-// other footer cell takes. An argv that fits is returned whole with an empty
-// second row (2026-09-15, ExLlamaV3).
-func wrapEngineArgs(cv *canvas, args string) (row1, row2 string) {
-	fits := footerColW - footerSlack
-	if cv.measure(args, stSmall) <= fits {
-		return args, ""
-	}
-	rs := []rune(args)
-	best := -1
-	for i, r := range rs {
-		if r != ' ' {
-			continue
-		}
-		if cv.measure(string(rs[:i]), stSmall) <= fits {
-			best = i
-		}
-	}
-	if best < 0 {
-		return args, ""
-	}
-	return string(rs[:best]), string(rs[best+1:])
-}
-
-// modelShape is the architecture line: dense models have no expert counts, so
-// the parts that were not observed are dropped rather than printed as "?".
-func modelShape(m tape.ModelInfo) string {
-	parts := []string{m.Arch}
-	if m.NLayers > 0 {
-		parts = append(parts, strconv.Itoa(m.NLayers)+"L")
-	}
-	if m.NExperts > 0 {
-		e := strconv.Itoa(m.NExperts) + " exp"
-		if m.NExpertsUsed > 0 {
-			e = fmt.Sprintf("%d/%d exp", m.NExpertsUsed, m.NExperts)
-		}
-		parts = append(parts, e)
-	}
-	return joinParts(" · ", parts...)
-}
+// modelFooterRows, wrapModelName, wrapEngineArgs and modelShape were deleted
+// on 2026-09-19 with the footer grid they laid out: the identity band carries
+// the same fields as three measured lines (buildIdent), and a line that does
+// not fit gives its own parts up (modelIdent's fallbacks) rather than wrapping
+// into a second row.
 
 // rigGPUs collapses identical devices into "2× RTX 3090 24G", exactly as the
 // text card's RIG line does.
@@ -1096,17 +1190,9 @@ func shortGPUName(n string) string {
 	return n
 }
 
-func coreString(h tape.HostInfo) string {
-	switch {
-	case h.CPUCores > 0 && h.CPUThreads > 0:
-		return fmt.Sprintf("%dC / %dT", h.CPUCores, h.CPUThreads)
-	case h.CPUCores > 0:
-		return fmt.Sprintf("%dC", h.CPUCores)
-	case h.CPUThreads > 0:
-		return fmt.Sprintf("%dT", h.CPUThreads)
-	}
-	return unknown
-}
+// coreString was deleted on 2026-09-19 with the footer grid's rig column: the
+// core count is on the run page and in -o md, and the identity band's rig line
+// spends its 26 px on the names.
 
 func ramString(h tape.HostInfo) string {
 	// An unread RAM size is "?", not "? GB": the unit would dress an
@@ -1179,46 +1265,10 @@ func throttledString(s *tape.RunSummary) string {
 	return "no"
 }
 
-// contendedString is contendedPill's text form for the footer grid.
-func contendedString(ci tape.ContentionInfo) string {
-	if !contentionObserved(ci) {
-		return unknown
-	}
-	return yesNo(ci.Contended)
-}
-
-func gpuStateString(gs []tape.GPUSample) string {
-	if len(gs) == 0 {
-		return unknown
-	}
-	parts := make([]string, 0, len(gs))
-	for _, g := range gs {
-		parts = append(parts, fmt.Sprintf("GPU%d %s %s", g.Index, tempString(g.TempC), powerString(g)))
-	}
-	return strings.Join(parts, " · ")
-}
-
-func tempString(c float64) string {
-	if c <= 0 {
-		return unknown + "°C"
-	}
-	return strconv.FormatFloat(c, 'f', 0, 64) + "°C"
-}
-
-// powerString is one GPU's power figure in the strip's compact spacing: the
-// draw against the limit when both were read, the draw alone on a tape
-// recorded before the limit was (2026-09-15). Mirrors internal/card's
-// powerString figure for figure — the two renderings must agree.
-func powerString(g tape.GPUSample) string {
-	draw := unknown
-	if g.PowerW > 0 {
-		draw = strconv.FormatFloat(g.PowerW, 'f', 0, 64)
-	}
-	if g.PowerLimitW <= 0 {
-		return draw + "W"
-	}
-	return draw + " of " + strconv.FormatFloat(g.PowerLimitW, 'f', 0, 64) + "W"
-}
+// contendedString, gpuStateString, tempString and powerString were deleted on
+// 2026-09-19 with the environment line they printed: the verdicts live in the
+// pills beside the placement bar, and the GPU state stays in the tape, on the
+// run page and in -o md, where the card's 1080 px no longer has to hold it.
 
 // startedString formats the recorded start time. It never reads the clock: a
 // replayed tape must render the moment it was recorded.
@@ -1231,76 +1281,10 @@ func startedString(s *tape.RunSummary) string {
 
 // ----------------------------------------------------------------- flags ---
 
-// flagsLine renders the flag strip. The five argument-starters (-fa, -b, -ub,
-// -ctk, -ctv) are always printed and show "?" when unobserved — they are the
-// ones that end comment threads (docs/research/02-sharing-artifacts.md §5.2).
-// The rest are omitted when empty. The -ot group goes last because it is the
-// only part that can be arbitrarily long, so truncation eats it first.
-//
-// An engine's argv is not llama.cpp's, so the strip carries the engine's own
-// arguments joined with single spaces — the way they were typed — and "?" when
-// it named none (2026-09-15, ExLlamaV3).
-func flagsLine(srv tape.ServerInfo) string {
-	if !card.LlamaCPPFlags(srv) {
-		if len(srv.Flags.Other) == 0 {
-			return unknown
-		}
-		return strings.Join(srv.Flags.Other, " ")
-	}
-	f := srv.Flags
-	read := argvObserved(srv)
-	var base []string
-	if f.NGL != "" {
-		base = append(base, "-ngl "+f.NGL)
-	}
-	base = append(base,
-		"-fa "+flagValue(f.FlashAttn, read),
-		"-b "+flagValue(f.Batch, read),
-		"-ub "+flagValue(f.UBatch, read),
-		"-ctk "+flagValue(f.CacheTypeK, read),
-		"-ctv "+flagValue(f.CacheTypeV, read),
-	)
-	if f.LoadMode != "" {
-		base = append(base, "--load-mode "+f.LoadMode)
-	}
-	if f.CPUMoE != "" {
-		// The field holds either a bare count or the verbatim flag.
-		if strings.HasPrefix(f.CPUMoE, "-") {
-			base = append(base, f.CPUMoE)
-		} else {
-			base = append(base, "-ncmoe "+f.CPUMoE)
-		}
-	}
-	if f.Threads != "" {
-		base = append(base, "-t "+f.Threads)
-	}
-	// Speculative decoding (TTP-30). These used to reach the card inside
-	// Other, because the parser did not name them; now that it does, they are
-	// printed here rather than dropped — a flag that was on the command line
-	// belongs on the FLAGS line. The Draft row in the speed section repeats
-	// the model and the block size because it needs them beside the acceptance
-	// rate, but --draft-min and --draft-p-min have no other home at all.
-	if f.DraftModel != "" {
-		base = append(base, "-md "+f.DraftModel)
-	}
-	if f.DraftMax != "" {
-		base = append(base, "--draft-max "+f.DraftMax)
-	}
-	if f.DraftMin != "" {
-		base = append(base, "--draft-min "+f.DraftMin)
-	}
-	if f.DraftPMin != "" {
-		base = append(base, "--draft-p-min "+f.DraftPMin)
-	}
-	base = append(base, f.Other...)
-	for _, p := range f.OverrideTens {
-		if p == "" {
-			continue
-		}
-		base = append(base, "-ot "+p)
-	}
-	return strings.Join(base, "  ")
-}
+// flagsLine was deleted on 2026-09-19 with the flag strip: the five
+// argument-starters' always-printed "?" rule survives on the identity band's
+// engine line (engineIdent carries the fa/ctk/ctv row), and the rest of the
+// argv is on the run page and in -o md, where it wraps.
 
 // layoutWord names where the weights live, in the reader's words rather than
 // the schema's. The text and the rules are internal/tui's twin (layoutWord

@@ -1,7 +1,6 @@
 package png
 
 import (
-	"fmt"
 	"image"
 	"strings"
 	"testing"
@@ -10,57 +9,66 @@ import (
 	"github.com/midagedev/toktape/internal/tape"
 )
 
-// 2026-09-15, ExLlamaV3: the flag strip and the footer's engine column learn
-// a second client — an engine that reports its own argv. Everything they
-// printed for a llama-server run is pinned here, literals taken from the
-// renderer as it stood BEFORE that change, so a predicate that moves a llama
-// run by one byte fails here rather than in a Reddit card. The text card's
-// half of the same contract is the committed goldens under
-// internal/card/testdata (TestTextGolden).
-func TestLlamaFlagMarksUnchanged(t *testing.T) {
+// TestLlamaFlagRowUnchanged (2026-09-15 ExLlamaV3 round's contract, re-pinned
+// 2026-09-19): the fa/ctk/ctv row the footer's engine column drew survives on
+// the identity band's engine line — same literals, same runs — and the argv
+// the strip carried is still in the tape, the run page and -o md. The row is
+// pinned at the builder's preferred string rather than the drawn mark because
+// the drawn line is pickWidest's choice: at 26 px the example's engine string
+// plus the row plus the context pair is 81 characters against a 69-character
+// line, so the row is exactly the element the fallback chain gives up first
+// (content.go's order), and the mark would pin the chain's outcome rather
+// than the row's content.
+func TestLlamaFlagRowUnchanged(t *testing.T) {
 	cases := []struct {
-		name  string
-		s     *tape.RunSummary
-		strip string
-		row1  string
-		row2  string
+		name string
+		s    *tape.RunSummary
+		row  string
 	}{
-		{"example", card.Example(),
-			"-ngl 99  -fa on  -b 2048  -ub 512  -ctk q8_0  -ctv q8_0  -t 16",
-			"fa on · ctk q8_0 · ctv q8_0",
-			"b 2048 · ub 512 · ngl 99"},
-		{"speculative", card.ExampleSpeculative(),
-			"-ngl 99  -fa on  -b 2048  -ub 512  -ctk q8_0  -ctv q8_0  -ncmoe 48  -t 16  -md DSpark-0.6B-Q8_0.gguf  --draft-max 3  --draft-min 1",
-			"fa on · ctk q8_0 · ctv q8_0",
-			"b 2048 · ub 512 · ngl 99"},
+		{"example", card.Example(), "fa on · ctk q8_0 · ctv q8_0"},
+		{"speculative", card.ExampleSpeculative(), "fa on · ctk q8_0 · ctv q8_0"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			ct := contentOf(t, c.s)
+			if !strings.Contains(ct.ident3.preferred, c.row) {
+				t.Errorf("engine line preferred = %q, want it to carry the pre-change row %q",
+					ct.ident3.preferred, c.row)
+			}
+			// The drawn line is some member of the chain — preferred or a
+			// fallback, never an invention — and it starts with the engine
+			// itself, which every member does.
 			cv, err := renderCanvas(c.s)
 			if err != nil {
 				t.Fatalf("renderCanvas: %v", err)
 			}
-			for id, want := range map[string]string{
-				"strip.flags":      c.strip,
-				"footer.col2.row1": c.row1,
-				"footer.col2.row2": c.row2,
-			} {
-				m, ok := cv.markByID(id)
-				if !ok {
-					t.Fatalf("%s was never drawn", id)
+			m, ok := cv.markByID("ident.engine")
+			if !ok {
+				t.Fatal("ident.engine was never drawn")
+			}
+			chain := append([]string{ct.ident3.preferred}, ct.ident3.fallbacks...)
+			var inChain bool
+			for _, member := range chain {
+				if m.Text == member {
+					inChain = true
+					break
 				}
-				if m.Text != want {
-					t.Errorf("%s = %q, want the pre-change %q", id, m.Text, want)
-				}
+			}
+			if !inChain {
+				t.Errorf("ident.engine = %q, want a member of the chain %v", m.Text, chain)
+			}
+			if !strings.HasPrefix(m.Text, engineString(c.s.Server)) {
+				t.Errorf("ident.engine = %q, want it to lead with %q", m.Text, engineString(c.s.Server))
 			}
 		})
 	}
 }
 
-// TestExLlamaV3Card: the engine fixture's picture. The flag strip carries the
-// engine's own argv, no mark anywhere teaches a llama.cpp flag, and every
-// text mark sits inside the content box — the TestShardedStaysInsideTheGrid
-// shape, on the fixture whose rows all changed.
+// TestExLlamaV3Card: the engine fixture's picture. The engine's own argv rides
+// the identity band's engine line — on the preferred string, which the
+// fallback chain gives up before the engine or the context when the whole
+// does not fit — no mark anywhere teaches a llama.cpp flag, and every text
+// mark sits inside the content box.
 func TestExLlamaV3Card(t *testing.T) {
 	s := card.ExampleExLlamaV3()
 	img, err := Render(s)
@@ -70,16 +78,29 @@ func TestExLlamaV3Card(t *testing.T) {
 	if got, want := img.Bounds(), image.Rect(0, 0, Width, Height); got != want {
 		t.Fatalf("bounds = %v, want %v", got, want)
 	}
+	ct := contentOf(t, s)
+	if !strings.Contains(ct.ident3.preferred, "-gs 44,21 -mcs 185 -mct 32 -mtp") {
+		t.Errorf("engine preferred = %q, want it to carry the engine argv on one line",
+			ct.ident3.preferred)
+	}
 	cv, err := renderCanvas(s)
 	if err != nil {
 		t.Fatalf("renderCanvas: %v", err)
 	}
-	m, ok := cv.markByID("strip.flags")
+	m, ok := cv.markByID("ident.engine")
 	if !ok {
-		t.Fatal("strip.flags was never drawn")
+		t.Fatal("ident.engine was never drawn")
 	}
-	if got, want := m.Text, "-gs 44,21 -mcs 185 -mct 32 -mtp"; got != want {
-		t.Errorf("strip.flags = %q, want the engine argv %q", got, want)
+	chain := append([]string{ct.ident3.preferred}, ct.ident3.fallbacks...)
+	var inChain bool
+	for _, member := range chain {
+		if m.Text == member {
+			inChain = true
+			break
+		}
+	}
+	if !inChain {
+		t.Errorf("ident.engine = %q, want a member of the chain %v", m.Text, chain)
 	}
 	for _, m := range cv.marks {
 		if m.Kind != "text" || m.Text == "" {
@@ -101,26 +122,6 @@ func TestExLlamaV3Card(t *testing.T) {
 			t.Errorf("%s (%q) spans x=%d..%d, outside the content box (%d..%d)",
 				m.ID, m.Text, m.Rect.Min.X, m.Rect.Max.X, contentL, contentR)
 		}
-	}
-	// The footer's engine column: rows 1 and 2 carry the argv between them,
-	// inside the column, with row 0 and row 3 untouched by this change.
-	left, right := contentL+2*footerColStep, contentL+2*footerColStep+footerColW
-	var sawArgs bool
-	for _, r := range []int{1, 2} {
-		m, ok := cv.markByID(colID(2, fmt.Sprintf("row%d", r)))
-		if !ok {
-			t.Fatalf("footer.col2.row%d was never drawn", r)
-		}
-		if m.Rect.Min.X < left || m.Rect.Max.X > right {
-			t.Errorf("footer.col2.row%d (%q) spans x=%d..%d, outside its column (%d..%d)",
-				r, m.Text, m.Rect.Min.X, m.Rect.Max.X, left, right)
-		}
-		if strings.Contains(m.Text, "-gs 44,21") {
-			sawArgs = true
-		}
-	}
-	if !sawArgs {
-		t.Error("no footer engine row carries the argv")
 	}
 }
 

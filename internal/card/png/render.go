@@ -10,7 +10,7 @@ import (
 // draw paints the whole card. The order is back to front: panel, rules, then
 // every band top to bottom.
 func (c *canvas) draw(s *tape.RunSummary) {
-	ct := build(c, s)
+	ct := build(s)
 
 	c.fill(image.Rect(0, 0, Width, Height), colBase)
 	panel := image.Rect(panelInset, panelTop, Width-panelInset, panelBottom)
@@ -25,7 +25,7 @@ func (c *canvas) draw(s *tape.RunSummary) {
 	c.drawHero(ct)
 	c.hairline("rule.hero", contentL, contentR, bandMemTop, colBorder)
 	c.drawMemory(ct)
-	c.drawFooter(ct)
+	c.drawIdent(ct)
 	c.drawStrip(ct)
 }
 
@@ -53,15 +53,24 @@ func (c *canvas) drawHeader(ct *content) {
 		style: stRunID, src: solid(colFaint), maxW: heroSplitX - contentL - 20,
 	})
 
-	// Right: the identity of the thing that was measured.
-	c.text(textOpts{
-		id: "header.model", s: ct.modelFile, x: contentR, baseline: bandHeaderTop + 34,
-		style: stTitle, src: solid(colText), align: alignRight, maxW: contentR - heroSplitX,
-	})
-	c.text(textOpts{
-		id: "header.modelsub", s: ct.modelSub, x: contentR, baseline: bandHeaderTop + 60,
-		style: stMeta, src: solid(colDim), align: alignRight, maxW: contentR - heroSplitX,
-	})
+	// Right: when the run happened, and on what. The model's name is the
+	// identity band's first line now (2026-09-19), so this side carries the
+	// run's moment instead — and never the hostname: the published view
+	// strips the machine's name, and a card must not change shape between
+	// the local and the published render. Both lines are dropped when
+	// unobserved rather than drawn as "?".
+	if ct.when != "" {
+		c.text(textOpts{
+			id: "header.when", s: ct.when, x: contentR, baseline: bandHeaderTop + 34,
+			style: stIdentSub, src: solid(colDim), align: alignRight, maxW: contentR - heroSplitX,
+		})
+	}
+	if ct.os != "" {
+		c.text(textOpts{
+			id: "header.os", s: ct.os, x: contentR, baseline: bandHeaderTop + 60,
+			style: stMicro, src: solid(colFaint), align: alignRight, maxW: contentR - heroSplitX,
+		})
+	}
 }
 
 // ------------------------------------------------------------------ hero ---
@@ -100,29 +109,31 @@ func (c *canvas) drawHeroCol(id string, h heroCol, x0, x1 int, src func(int, int
 	})
 
 	c.text(textOpts{
-		id: id + ".sub1", s: pickWidest(c, h.sub1, h.sub1Fallbacks, maxW), x: x0, baseline: heroSub1Base,
+		id: id + ".sub1", s: pickWidest(c, h.sub1, h.sub1Fallbacks, stBody, maxW), x: x0, baseline: heroSub1Base,
 		style: stBody, src: solid(colDim), maxW: maxW,
 	})
 	c.text(textOpts{
-		id: id + ".sub2", s: pickWidest(c, h.sub2, h.sub2Fallbacks, maxW), x: x0, baseline: heroSub2Base,
+		id: id + ".sub2", s: pickWidest(c, h.sub2, h.sub2Fallbacks, stBody, maxW), x: x0, baseline: heroSub2Base,
 		style: stBody, src: solid(colFaint), maxW: maxW,
 	})
 }
 
-// pickWidest returns the first of want and its fallbacks that measures inside maxW,
-// or the last one when none does — which textOpts then truncates, as it did
-// before there were fallbacks.
+// pickWidest returns the first of want and its fallbacks that measures inside
+// maxW in st, or the last one when none does — which textOpts then truncates,
+// as it did before there were fallbacks. The style is a parameter since the
+// identity band joined the hero sub-lines on this mechanism (2026-09-19): its
+// lines are picked at stIdent, the hero's at stBody.
 //
 // The measurement is the canvas's, not a character count: the card is set in a
 // proportional face, so "fits" is a question only the rasteriser can answer
 // and a rule of thumb here would be wrong on exactly the long names it exists
 // for.
-func pickWidest(c *canvas, want string, fallbacks []string, maxW int) string {
-	if c.measure(want, stBody) <= maxW {
+func pickWidest(c *canvas, want string, fallbacks []string, st textStyle, maxW int) string {
+	if c.measure(want, st) <= maxW {
 		return want
 	}
 	for _, alt := range fallbacks {
-		if alt != "" && c.measure(alt, stBody) <= maxW {
+		if alt != "" && c.measure(alt, st) <= maxW {
 			return alt
 		}
 	}
@@ -142,11 +153,15 @@ func (c *canvas) drawMemory(ct *content) {
 	pillsLeft := c.drawPills("memory.pill", ct.pills, contentR, memPillTop)
 	// The placed/RSS total sits on the label row, between the section name and
 	// the pills: the legend row below needs its whole width once the VRAM
-	// breakdown is in it.
+	// breakdown is in it. It is a measured line (2026-09-19): pickWidest
+	// drops its trailing parts whole against the width the pill row leaves,
+	// rather than letting the truncation cut inside a number.
 	sumX := label.Max.X + 24
+	sumW := pillsLeft - 24 - sumX
 	c.text(textOpts{
-		id: "memory.sum", s: ct.placedSum, x: sumX, baseline: memLabelBase,
-		style: stSmall, src: solid(colFaint), maxW: pillsLeft - 24 - sumX,
+		id: "memory.sum", s: pickWidest(c, ct.sum.preferred, ct.sum.fallbacks, stSmall, sumW),
+		x: sumX, baseline: memLabelBase,
+		style: stSmall, src: solid(colFaint), maxW: sumW,
 	})
 
 	bar := image.Rect(contentL, memBarTop, contentR, memBarTop+memBarHeight)
@@ -278,50 +293,34 @@ func (c *canvas) drawPills(idPrefix string, pills []pill, rightX, top int) int {
 	return left
 }
 
-// ---------------------------------------------------------------- footer ---
+// ----------------------------------------------------------------- ident ---
 
-func (c *canvas) drawFooter(ct *content) {
-	for i, col := range ct.cols {
-		x := contentL + i*footerColStep
-		c.text(textOpts{
-			id: colID(i, "label"), s: col.label, x: x, baseline: footerLabelBas,
-			style: stColLabel, src: solid(colFaint), maxW: footerColW,
-		})
-		c.hairline(colID(i, "rule"), x, x+footerColW, footerRuleY, colBorder)
-		for r, row := range col.rows {
-			style, src := stSmall, solid(colDim)
-			if r == 0 {
-				style, src = stSmallB, solid(colText)
-			}
-			c.text(textOpts{
-				id: colID(i, fmt.Sprintf("row%d", r)), s: row, x: x,
-				baseline: footerRow0Base + r*footerRowStep,
-				style:    style, src: src, maxW: footerColW,
-			})
-		}
-	}
-}
-
-func colID(i int, part string) string {
-	return fmt.Sprintf("footer.col%d.%s", i, part)
+// drawIdent paints the identity band (2026-09-19): the model, the rig and the
+// engine, one line each at 26 px, each picked by measurement against the full
+// content width — the hero sub-lines' pickWidest mechanism at stIdent.
+func (c *canvas) drawIdent(ct *content) {
+	c.text(textOpts{
+		id: "ident.model", s: pickWidest(c, ct.ident1.preferred, ct.ident1.fallbacks, stIdent, contentW),
+		x: contentL, baseline: identLine1Base, style: stIdent, src: solid(colText), maxW: contentW,
+	})
+	c.text(textOpts{
+		id: "ident.modelsub", s: ct.identSub, x: contentL, baseline: identSubBase,
+		style: stIdentSub, src: solid(colFaint), maxW: contentW,
+	})
+	c.text(textOpts{
+		id: "ident.rig", s: pickWidest(c, ct.ident2.preferred, ct.ident2.fallbacks, stIdent, contentW),
+		x: contentL, baseline: identLine2Base, style: stIdent, src: solid(colText), maxW: contentW,
+	})
+	c.text(textOpts{
+		id: "ident.engine", s: pickWidest(c, ct.ident3.preferred, ct.ident3.fallbacks, stIdent, contentW),
+		x: contentL, baseline: identLine3Base, style: stIdent, src: solid(colText), maxW: contentW,
+	})
 }
 
 // ----------------------------------------------------------------- strip ---
 
 func (c *canvas) drawStrip(ct *content) {
 	c.hairline("rule.strip", contentL, contentR, stripRuleY, colBorder)
-	c.text(textOpts{
-		id: "strip.flags", s: ct.flags, x: contentL, baseline: stripFlagBase,
-		style: stMicro, src: solid(colDim), maxW: contentW,
-	})
-	// The environment, which the footer grid gave up when it went to three
-	// columns (TTP-54). It is set in the flags line's voice, not a step below
-	// it: these rows were secondary text in the column they came from, and the
-	// whole point of the round is that the small text has to survive a feed.
-	c.text(textOpts{
-		id: "strip.env", s: ct.env, x: contentL, baseline: stripEnvBase,
-		style: stMicro, src: solid(colDim), maxW: contentW,
-	})
 	// The mark is set in the column labels' voice, not in an accent colour: it
 	// is a provenance note, and shouting it would read as a badge the tool
 	// awarded itself.

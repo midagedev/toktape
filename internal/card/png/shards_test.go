@@ -12,9 +12,8 @@ import (
 )
 
 // shardedFixtures are the split-set summaries this file runs over: the plain
-// one, the same run with a variant directory long enough to wrap inside the
-// footer column, and the real 2026-09-15 recording whose directory carries the
-// quant in its stem.
+// one, and the same run with a variant directory long enough that the model
+// line's preferred spelling does not fit and the fallback chain has to work.
 func shardedFixtures() map[string]*tape.RunSummary {
 	long := card.ExampleSharded()
 	long.Model.Dir = "DeepSeek-V4.1-Flash-engramQ8-tokembdBF16-rev3-nvme1-hardlink"
@@ -24,80 +23,86 @@ func shardedFixtures() map[string]*tape.RunSummary {
 	}
 }
 
-// TestShardedFooterNamesTheVariant is the TTP-32 contract for the picture: two
-// hard-linked variants of one model share general.name and every file name, so
-// the directory has to be on the card or the two runs are indistinguishable.
-func TestShardedFooterNamesTheVariant(t *testing.T) {
+// TestShardedIdentityNamesTheVariant is the TTP-32 contract for the picture
+// (re-pinned on the identity band, 2026-09-19): two hard-linked variants of
+// one model share general.name and every file name, so the directory has to
+// be on the card or the two runs are indistinguishable. The model's line
+// carries the directory whole, with the quant and the set's size — the two
+// things the old model column spent two rows on. The shards count left the
+// image for the tape, the run page and -o md.
+func TestShardedIdentityNamesTheVariant(t *testing.T) {
 	c, err := renderCanvas(card.ExampleSharded())
 	if err != nil {
 		t.Fatalf("renderCanvas: %v", err)
 	}
-	want := map[string]string{
-		// 2026-09-15 (user: "모델이 다 실제값으로 찍혀야해"): the variant directory
-		// is row 0 itself now — the model that ran — where it used to sit in
-		// the size row as a tag under a general.name headline. FAIL-first: the
-		// old rows printed "DeepSeek V4.1 Flash" and "… GiB · engramQ8-tokembdBF16".
-		"footer.col0.row0": "DeepSeek-V4.1-Flash-engramQ8-tokembdBF16",
-		"footer.col0.row1": "9 shards",
-		"footer.col0.row2": "400.00 GiB",
-		"header.model":     "DeepSeek-V4.1-Flash-engramQ8-tokembdBF16",
-		"header.modelsub":  "9 shards",
+	m, ok := c.markByID("ident.model")
+	if !ok {
+		t.Fatal("ident.model was never drawn")
 	}
-	for id, sub := range want {
-		m, ok := c.markByID(id)
-		if !ok {
-			t.Errorf("%s was never drawn", id)
-			continue
-		}
+	for _, sub := range []string{
+		"DeepSeek-V4.1-Flash-engramQ8-tokembdBF16",
+		"Q4_K_M",
+		"400.00 GiB",
+	} {
 		if !strings.Contains(m.Text, sub) {
-			t.Errorf("%s = %q, want it to carry %q", id, m.Text, sub)
+			t.Errorf("ident.model = %q, want it to carry %q", m.Text, sub)
 		}
 	}
 	// The part name itself is the one thing that must not be the headline: it
 	// is the same string for both variants.
-	if m, ok := c.markByID("header.model"); ok && strings.Contains(m.Text, "-00001-of-00009") {
-		t.Errorf("header.model = %q, still the bare part name", m.Text)
+	if strings.Contains(m.Text, "-00001-of-00009") {
+		t.Errorf("ident.model = %q, still the bare part name", m.Text)
 	}
-	// 2026-09-15: the header's general.name must not reach any mark.
-	for _, m := range c.marks {
-		if m.Kind == "text" && strings.Contains(m.Text, "DeepSeek V4.1 Flash") {
-			t.Errorf("%s printed the header's general.name: %q", m.ID, m.Text)
+	// The header's general.name must not reach any mark.
+	for _, mk := range c.marks {
+		if mk.Kind == "text" && strings.Contains(mk.Text, "DeepSeek V4.1 Flash") {
+			t.Errorf("%s printed the header's general.name: %q", mk.ID, mk.Text)
+		}
+	}
+	// And the ids the old test pinned exist on no card.
+	for _, id := range []string{"header.model", "header.modelsub", "footer.col0.row0"} {
+		if _, ok := c.markByID(id); ok {
+			t.Errorf("%s was drawn on a card that no longer has that surface", id)
 		}
 	}
 }
 
-// TestSingleFileFooterUnchanged: card.ModelLabel is the file name for a model
-// that is one file and shardsPart is empty, so every non-sharded card renders
-// the strings it always did.
-func TestSingleFileFooterUnchanged(t *testing.T) {
+// TestSingleFileIdentityUnchanged: card.ModelName is the file's stem for a
+// model that is one file, so a non-sharded card's model line names the file
+// that ran, with its quant and size — never a "shard" claim.
+func TestSingleFileIdentityUnchanged(t *testing.T) {
 	s := card.Example()
 	c, err := renderCanvas(s)
 	if err != nil {
 		t.Fatalf("renderCanvas: %v", err)
 	}
-	if m, _ := c.markByID("header.model"); m.Text != s.Model.FileName {
-		t.Errorf("header.model = %q, want the file name %q", m.Text, s.Model.FileName)
+	m, ok := c.markByID("ident.model")
+	if !ok {
+		t.Fatal("ident.model was never drawn")
 	}
-	// 2026-09-15 (user: "모델이 다 실제값으로 찍혀야해"): row 0 names the file's
-	// stem, not the header's "R1 Distill Llama 70B" — the file is the model
-	// that ran, and its own name already carries the quant. FAIL-first: the
-	// old row 0 printed the general.name.
-	if m, _ := c.markByID("footer.col0.row0"); m.Text != card.ModelStem(s.Model.FileName) {
-		t.Errorf("footer.col0.row0 = %q, want the file stem %q", m.Text, card.ModelStem(s.Model.FileName))
+	// The file's stem, not the header's "R1 Distill Llama 70B" — the file is
+	// the model that ran, and its own name already carries the quant
+	// (2026-09-15, user: "모델이 다 실제값으로 찍혀야해").
+	if stem := card.ModelStem(s.Model.FileName); !strings.Contains(m.Text, stem) {
+		t.Errorf("ident.model = %q, want the file stem %q", m.Text, stem)
 	}
-	if m, _ := c.markByID("footer.col0.row1"); m.Text != s.Model.Quant {
-		t.Errorf("footer.col0.row1 = %q, want the bare quant %q", m.Text, s.Model.Quant)
-	}
-	for _, id := range []string{"header.model", "header.modelsub", "footer.col0.row1", "footer.col0.row2"} {
-		if m, _ := c.markByID(id); strings.Contains(m.Text, "shard") {
-			t.Errorf("%s = %q claims shards for a single file", id, m.Text)
+	for _, want := range []string{s.Model.Quant, formatFileGiB(s.Model.FileBytes)} {
+		if !strings.Contains(m.Text, want) {
+			t.Errorf("ident.model = %q, want it to carry %q", m.Text, want)
 		}
+	}
+	if strings.Contains(m.Text, "shard") {
+		t.Errorf("ident.model = %q claims shards for a single file", m.Text)
+	}
+	if strings.Contains(m.Text, "R1 Distill") {
+		t.Errorf("ident.model = %q printed the GGUF header's general.name", m.Text)
 	}
 }
 
-// TestShardedStaysInsideTheGrid: the frame does not grow for a split set, and
-// the two rows that gained an element must still sit in their column.
-func TestShardedStaysInsideTheGrid(t *testing.T) {
+// TestShardedStaysInsideTheBand: the frame does not grow for a split set, and
+// the model line that carries the variant must still sit in the content box —
+// by its preferred spelling or by a fallback, never past the edge.
+func TestShardedStaysInsideTheBand(t *testing.T) {
 	for name, s := range shardedFixtures() {
 		t.Run(name, func(t *testing.T) {
 			img, err := Render(s)
@@ -110,17 +115,6 @@ func TestShardedStaysInsideTheGrid(t *testing.T) {
 			c, err := renderCanvas(s)
 			if err != nil {
 				t.Fatalf("renderCanvas: %v", err)
-			}
-			left, right := contentL, contentL+footerColW
-			for _, part := range []string{"label", "row0", "row1", "row2", "row3"} {
-				m, ok := c.markByID(colID(0, part))
-				if !ok {
-					t.Fatalf("%s was never drawn", colID(0, part))
-				}
-				if m.Rect.Min.X < left || m.Rect.Max.X > right {
-					t.Errorf("%s (%q) spans x=%d..%d, outside its column (%d..%d)",
-						m.ID, m.Text, m.Rect.Min.X, m.Rect.Max.X, left, right)
-				}
 			}
 			for _, m := range c.marks {
 				if m.Kind != "text" || m.Text == "" {
@@ -150,7 +144,7 @@ func TestWriteShardedCard(t *testing.T) {
 }
 
 // TestVariantTag was deleted on 2026-09-15 along with variantTag itself
-// (user: "모델이 다 실제값으로 찍혀야해"): the footer's row 0 is now the whole
+// (user: "모델이 다 실제값으로 찍혀야해"): the model's line is now the whole
 // variant directory — card.ModelName — so the tag that used to repeat the part
 // of it a general.name headline did not say would print the variant twice.
 
@@ -174,13 +168,14 @@ func realRecordingModel() tape.ModelInfo {
 	}
 }
 
-// TestFooterModelColumnNamesTheModelThatRan (2026-09-15, user: "모델이 다
-// 실제값으로 찍혀야해"): the footer's model column names the model that ran —
-// the variant directory, not the GGUF header's general.name. The directory is
-// wider than the 346 px column (376 px measured), so it wraps at the last "-"
-// that lets row 0 fit and the two rows it frees spend as one joined row; rows
-// 0 and 1 together still spell the whole name.
-func TestFooterModelColumnNamesTheModelThatRan(t *testing.T) {
+// TestIdentityModelLineNamesTheModelThatRan (2026-09-15, re-pinned 2026-09-19
+// on the identity band): the model's line names the model that ran — the
+// variant directory, not the GGUF header's general.name — with the size; the
+// quant part is printed only when the name does not already carry it, and
+// this 46-character name carries Q3_K_M (2026-09-19). Whatever pickWidest
+// picks, the name itself is whole on the card, because every member of the
+// chain keeps it and only the size is given up.
+func TestIdentityModelLineNamesTheModelThatRan(t *testing.T) {
 	s := card.ExampleSharded()
 	s.Model = realRecordingModel()
 	c, err := renderCanvas(s)
@@ -189,75 +184,113 @@ func TestFooterModelColumnNamesTheModelThatRan(t *testing.T) {
 	}
 
 	name := card.ModelName(s.Model)
-	row0, ok := c.markByID(colID(0, "row0"))
+	m, ok := c.markByID("ident.model")
 	if !ok {
-		t.Fatalf("%s was never drawn", colID(0, "row0"))
+		t.Fatal("ident.model was never drawn")
 	}
-	row1, ok := c.markByID(colID(0, "row1"))
+	if !strings.Contains(m.Text, name) {
+		t.Errorf("ident.model = %q, want the whole name %q", m.Text, name)
+	}
+	if strings.HasSuffix(m.Text, ellipsis) {
+		t.Errorf("the name was cut to %q — no fallback of this line fits", m.Text)
+	}
+	// The preferred spelling carries name and size; the quant part is gone
+	// because the name already carries it (2026-09-19, defect 1 of the band
+	// review — TestModelQuantPrintedOnce's rule). Whether the preferred is
+	// the one drawn is pickWidest's measured choice, so the builder is where
+	// the content contract is pinned.
+	if got, want := contentOf(t, s).ident1.preferred, name+" · 440.52 GiB"; got != want {
+		t.Errorf("model preferred = %q, want %q", got, want)
+	}
+	// The size is formatFileGiB(473000000000) = "440.52 GiB"; the sub-line's
+	// figures come from the header the recording really read.
+	sub, ok := c.markByID("ident.modelsub")
 	if !ok {
-		t.Fatalf("%s was never drawn", colID(0, "row1"))
+		t.Fatal("ident.modelsub was never drawn")
 	}
-	if joined := row0.Text + row1.Text; joined != name && !strings.HasSuffix(joined, ellipsis) {
-		t.Errorf("rows 0+1 spell %q, want the whole name %q (or a reported '…' cut)",
-			joined, name)
-	} else if strings.HasSuffix(joined, ellipsis) {
-		t.Errorf("the name was cut to %q + %q — report the measured widths", row0.Text, row1.Text)
-	}
-	// The separator the split keeps is at the end of row 0, so the name reads
-	// as one string folded, not as two glued words.
-	if !strings.HasSuffix(row0.Text, "-") && !strings.HasSuffix(row0.Text, "_") && !strings.HasSuffix(row0.Text, ".") {
-		t.Errorf("row 0 = %q does not end on the separator it split at", row0.Text)
-	}
-
-	left, right := contentL, contentL+footerColW
-	for _, part := range []string{"label", "row0", "row1", "row2", "row3"} {
-		m, ok := c.markByID(colID(0, part))
-		if !ok {
-			t.Fatalf("%s was never drawn", colID(0, part))
+	for _, want := range []string{"deepseek2", "61 layers", "8 of 256 experts"} {
+		if !strings.Contains(sub.Text, want) {
+			t.Errorf("ident.modelsub = %q lost %q", sub.Text, want)
 		}
-		if m.Rect.Min.X < left || m.Rect.Max.X > right {
-			t.Errorf("%s (%q) spans x=%d..%d, outside its column (%d..%d)",
-				m.ID, m.Text, m.Rect.Min.X, m.Rect.Max.X, left, right)
-		}
-	}
-
-	// The joined row keeps the quant and the size — the two things the column
-	// exists to say — and the architecture row stays the last row. The size is
-	// formatFileGiB(473000000000) = "440.52 GiB".
-	row2, _ := c.markByID(colID(0, "row2"))
-	for _, want := range []string{"Q3_K_M", "440.52 GiB"} {
-		if !strings.Contains(row2.Text, want) {
-			t.Errorf("the joined row = %q lost %q", row2.Text, want)
-		}
-	}
-	if row3, _ := c.markByID(colID(0, "row3")); !strings.Contains(row3.Text, "deepseek2") {
-		t.Errorf("the architecture row = %q is not where it always was", row3.Text)
 	}
 
 	// The header's general.name must appear on no mark on the card.
-	for _, m := range c.marks {
-		if m.Kind == "text" && strings.Contains(m.Text, "DeepSeek V4.1 Flash") {
-			t.Errorf("%s printed the header's general.name: %q", m.ID, m.Text)
+	for _, mk := range c.marks {
+		if mk.Kind == "text" && strings.Contains(mk.Text, "DeepSeek V4.1 Flash") {
+			t.Errorf("%s printed the header's general.name: %q", mk.ID, mk.Text)
 		}
 	}
 }
 
-// TestShardedModelColumnIsNotTruncated is the reason the rows were rearranged:
-// the variant is the whole point of the split-set card, and an ellipsis in the
-// middle of it says nothing. A 59-character directory is longer than the column
-// and is expected to cut; the rig's own 40-character one must not.
-func TestShardedModelColumnIsNotTruncated(t *testing.T) {
-	c, err := renderCanvas(card.ExampleSharded())
+// TestModelQuantPrintedOnce is the defect-1 gate (2026-09-19): the model name
+// is the file's stem or the variant directory, and both are named after the
+// quant, so a standalone quant part beside it says the same thing twice on
+// the line a feed-size reader can actually read — the same redundancy the
+// header's model round removed. The name is never stripped (the name is the
+// name); only the second printing goes.
+func TestModelQuantPrintedOnce(t *testing.T) {
+	// The hero recording: stem "Qwen3.6-35B-A3B-UD-Q6_K", quant "UD-Q6_K".
+	// FAIL-first on the pre-fix tree: the drawn line read
+	// "Qwen3.6-35B-A3B-UD-Q6_K · UD-Q6_K · 27.30 GiB".
+	s := heroTapeSummary(t)
+	c, err := renderCanvas(s)
 	if err != nil {
 		t.Fatalf("renderCanvas: %v", err)
 	}
-	for _, part := range []string{"row0", "row1", "row2", "row3"} {
-		m, ok := c.markByID(colID(0, part))
-		if !ok {
-			t.Fatalf("%s was never drawn", colID(0, part))
-		}
-		if strings.HasSuffix(m.Text, ellipsis) {
-			t.Errorf("%s was truncated: %q", m.ID, m.Text)
-		}
+	m, ok := c.markByID("ident.model")
+	if !ok {
+		t.Fatal("ident.model was never drawn")
+	}
+	if got := strings.Count(m.Text, s.Model.Quant); got != 1 {
+		t.Errorf("ident.model = %q carries %q %d times, want exactly once",
+			m.Text, s.Model.Quant, got)
+	}
+	if want := formatFileGiB(s.Model.FileBytes); !strings.Contains(m.Text, want) {
+		t.Errorf("ident.model = %q lost the file size %q the dedup must keep", m.Text, want)
+	}
+
+	// A lower-case file name contains its upper-case quant just as well
+	// (card.ModelNameQuant's containsFold rule), so it loses the part too.
+	fold := card.Example()
+	fold.Model.FileName = "qwen3-30b-a3b-q4_k_m.gguf"
+	if got, want := contentOf(t, fold).ident1.preferred,
+		"qwen3-30b-a3b-q4_k_m · "+formatFileGiB(fold.Model.FileBytes); got != want {
+		t.Errorf("model preferred = %q, want %q — the case-blind quant was printed again", got, want)
+	}
+
+	// A name that does not carry its quant keeps the part: the common case
+	// for a repo-named directory (the sharded example's dir has no quant in
+	// it), and the reason the part exists at all.
+	sharded := card.ExampleSharded()
+	if got, want := contentOf(t, sharded).ident1.preferred,
+		strings.Join([]string{card.ModelName(sharded.Model), sharded.Model.Quant,
+			formatFileGiB(sharded.Model.FileBytes)}, " · "); got != want {
+		t.Errorf("model preferred = %q, want %q — a quant-less name must keep the part", got, want)
+	}
+}
+
+// TestShardedModelLineIsNotTruncated is the reason the fallback chain exists:
+// the variant is the whole point of the split-set card, and an ellipsis in
+// the middle of it says nothing. The plain 36-character directory fits with
+// the quant and the size; the 61-character one gives them up and keeps the
+// name whole.
+func TestShardedModelLineIsNotTruncated(t *testing.T) {
+	for name, s := range shardedFixtures() {
+		t.Run(name, func(t *testing.T) {
+			c, err := renderCanvas(s)
+			if err != nil {
+				t.Fatalf("renderCanvas: %v", err)
+			}
+			m, ok := c.markByID("ident.model")
+			if !ok {
+				t.Fatal("ident.model was never drawn")
+			}
+			if strings.HasSuffix(m.Text, ellipsis) {
+				t.Errorf("ident.model was truncated: %q", m.Text)
+			}
+			if !strings.Contains(m.Text, card.ModelName(s.Model)) {
+				t.Errorf("ident.model = %q, want the whole variant name %q", m.Text, card.ModelName(s.Model))
+			}
+		})
 	}
 }
