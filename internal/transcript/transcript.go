@@ -121,13 +121,31 @@ func ended(r tape.RequestRecord) string {
 	if r.Prompt.Cut {
 		return "clock cut"
 	}
+	// The limit words are read as the pair, not as the word (lead,
+	// 2026-09-19). "limit" and "length" are both a limit, but four upstream
+	// paths set that word and only the context-capacity one also sets
+	// `truncated`, so this label says which — through the schema's own
+	// predicates, so this renderer and the reducer's counts cannot land on
+	// different sides of one record. The voice is this renderer's: the card
+	// says "4 of 4 ran out of context" about a run, and a stream says it
+	// about itself.
+	if r.Prompt.EndedOnContextExhaustion() {
+		return "context full"
+	}
+	if r.Prompt.EndedOnCap() {
+		return "token cap"
+	}
 	switch r.Prompt.FinishReason {
 	case "":
 		return "?"
-	case "stop":
+	// "stop" is the chat path's word for both of the raw path's own two,
+	// which it collapses; the raw path says which, and a transcript that
+	// prints "eos" at one and "model stopped" at the other would be naming
+	// the endpoint rather than the ending.
+	case "stop", "eos":
 		return "model stopped"
-	case "length":
-		return "token cap"
+	case "word":
+		return "stop string"
 	default:
 		return r.Prompt.FinishReason
 	}

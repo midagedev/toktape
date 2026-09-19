@@ -110,9 +110,16 @@ func (r StreamRequest) RecordedParams() map[string]any {
 // `stop_type` is one of none / eos / limit / word, and `timings` and
 // `prompt_progress` are the same objects the chat stream carries.
 type completionChunk struct {
-	Content        *string        `json:"content"`
-	Stop           bool           `json:"stop"`
-	StopType       string         `json:"stop_type"`
+	Content  *string `json:"content"`
+	Stop     bool    `json:"stop"`
+	StopType string  `json:"stop_type"`
+	// Truncated is llama-server's own flag, emitted on the final response
+	// beside `stop_type`: the sequence ran out of context capacity during
+	// generation (context shift off), or the shift path evicted early KV
+	// cells and carried on. It is what splits `stop_type` "limit" into its
+	// two meanings — the n_predict budget and the context running out — and
+	// it travels to the record verbatim (tape.PromptRecord.Truncated).
+	Truncated      bool           `json:"truncated"`
 	IDSlot         *int           `json:"id_slot"`
 	Timings        *ServerTimings `json:"timings"`
 	PromptProgress *chunkProgress `json:"prompt_progress"`
@@ -132,7 +139,8 @@ type completionChunk struct {
 // "length"). The server's own word is the record; no renderer branches on this
 // field, and inventing the other endpoint's spelling would put a word in the
 // server's mouth. "none" is the chunk saying it has not stopped, which is not
-// a finish reason and is dropped.
+// a finish reason and is dropped. `truncated` rides the same final response
+// and is carried the same way — verbatim, beside the word it qualifies.
 func parseCompletionChunk(trimmed string) (*streamChunk, error) {
 	var c completionChunk
 	if err := json.Unmarshal([]byte(trimmed), &c); err != nil {
@@ -144,6 +152,7 @@ func parseCompletionChunk(trimmed string) (*streamChunk, error) {
 		PromptProgress: c.PromptProgress,
 		Error:          c.Error,
 		stop:           c.Stop,
+		truncated:      c.Truncated,
 	}
 	var finish *string
 	if c.StopType != "" && c.StopType != "none" {

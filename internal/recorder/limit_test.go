@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -224,5 +225,106 @@ func TestLimitCountsTheEndings(t *testing.T) {
 					got.CappedStreams, got.EndingsObserved, tc.wantCapped, tc.wantObserved)
 			}
 		})
+	}
+}
+
+// rawLimitStream answers one /completion request whose finish word is "limit",
+// through the real chunk parser — the counts must be decided from what the
+// wire says, not from a hand-built record. truncated is spliced into the final
+// chunk verbatim: "true", "false", or "" for a server build without the key.
+func rawLimitStream(t *testing.T, truncated string) []tape.RequestRecord {
+	t.Helper()
+	sse := "data: {\"content\":\"ok\",\"stop\":false}\n\n" +
+		"data: {\"content\":\"\",\"stop\":true,\"stop_type\":\"limit\"" + truncated +
+		",\"timings\":{\"prompt_n\":9,\"prompt_ms\":12.0,\"prompt_per_second\":750.0," +
+		"\"predicted_n\":4,\"predicted_ms\":80.0,\"predicted_per_second\":50.0,\"cache_n\":0}}\n\n"
+	rec, _, err := server.ReplayCompletionStream([]byte(sse), nil, server.StreamHooks{})
+	if err != nil {
+		t.Fatalf("ReplayCompletionStream(%q): %v", truncated, err)
+	}
+	return []tape.RequestRecord{*rec}
+}
+
+// TestLimitTellsTheCapFromContextExhaustion (lead, 2026-09-19): upstream sets
+// STOP_TYPE_LIMIT at four sites and only the context-capacity one also sets
+// `truncated`, so "limit" alone cannot say which limit ended the stream. The
+// pair can, and the two counts are disjoint — a stream that ran out of
+// context did not reach the cap.
+func TestLimitTellsTheCapFromContextExhaustion(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		truncated  string
+		wantCapped int
+		wantCtx    int
+	}{
+		{"truncated: the context ran out", `,"truncated":true`, 0, 1},
+		{"not truncated: the token cap", `,"truncated":false`, 1, 0},
+		{"key absent: an older server build, the cap", ``, 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := limitOf(tape.LimitSummary{}, 0, rawLimitStream(t, tc.truncated))
+			if got.CappedStreams != tc.wantCapped || got.ContextExhaustedStreams != tc.wantCtx {
+				t.Errorf("CappedStreams/ContextExhaustedStreams = %d/%d, want %d/%d",
+					got.CappedStreams, got.ContextExhaustedStreams, tc.wantCapped, tc.wantCtx)
+			}
+			if got.EndingsObserved != 1 {
+				t.Errorf("EndingsObserved = %d, want 1: the stream said why it stopped", got.EndingsObserved)
+			}
+		})
+	}
+}
+
+// TestChatPathCannotSayContextExhaustion: /v1/chat/completions collapses all
+// four limit paths into "length" and has no field for truncation at all, so a
+// chat-path "length" counts toward CappedStreams and leaves
+// ContextExhaustedStreams 0 — the count must not pretend the path said
+// something it cannot (tape.PromptRecord.Truncated documents the why).
+func TestChatPathCannotSayContextExhaustion(t *testing.T) {
+	sse := "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"}}]}\n\n" +
+		"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	rec, _, err := server.ReplayStream([]byte(sse), nil, server.StreamHooks{})
+	if err != nil {
+		t.Fatalf("ReplayStream: %v", err)
+	}
+	if rec.Prompt.FinishReason != "length" {
+		t.Fatalf("finish reason %q, want length", rec.Prompt.FinishReason)
+	}
+	if rec.Prompt.Truncated {
+		t.Error("the chat path set Truncated; it has no such field and nothing may invent one")
+	}
+	got := limitOf(tape.LimitSummary{}, 0, []tape.RequestRecord{*rec})
+	if got.CappedStreams != 1 || got.ContextExhaustedStreams != 0 || got.EndingsObserved != 1 {
+		t.Errorf("CappedStreams/ContextExhaustedStreams/EndingsObserved = %d/%d/%d, want 1/0/1",
+			got.CappedStreams, got.ContextExhaustedStreams, got.EndingsObserved)
+	}
+}
+
+// TestTruncatedWithoutALimitWordCountsTowardNeither (lead, 2026-09-19).
+// Upstream sets `truncated` at two sites, and only one of them stops the
+// sequence: the context-shift path sets it and carries on, so a stream can
+// carry the flag and then finish on its own. The flag is readable only
+// beside a limit word, and a reducer that counted the flag alone — the
+// obvious simplification, and one every other gate here would still pass —
+// would file a completed answer as a context exhaustion.
+func TestTruncatedWithoutALimitWordCountsTowardNeither(t *testing.T) {
+	sse := "data: {\"content\":\"ok\",\"stop\":false}\n\n" +
+		"data: {\"content\":\"\",\"stop\":true,\"stop_type\":\"eos\",\"truncated\":true," +
+		"\"timings\":{\"prompt_n\":9,\"prompt_ms\":12.0,\"prompt_per_second\":750.0," +
+		"\"predicted_n\":4,\"predicted_ms\":80.0,\"predicted_per_second\":50.0,\"cache_n\":0}}\n\n"
+	rec, _, err := server.ReplayCompletionStream([]byte(sse), nil, server.StreamHooks{})
+	if err != nil {
+		t.Fatalf("ReplayCompletionStream: %v", err)
+	}
+	if !rec.Prompt.Truncated {
+		t.Fatal("the flag was dropped; this gate needs it recorded to be about anything")
+	}
+	got := limitOf(tape.LimitSummary{}, 0, []tape.RequestRecord{*rec})
+	if got.CappedStreams != 0 || got.ContextExhaustedStreams != 0 {
+		t.Errorf("CappedStreams/ContextExhaustedStreams = %d/%d, want 0/0: the model finished, whatever the shift did",
+			got.CappedStreams, got.ContextExhaustedStreams)
+	}
+	if got.EndingsObserved != 1 {
+		t.Errorf("EndingsObserved = %d, want 1: the stream said why it stopped", got.EndingsObserved)
 	}
 }

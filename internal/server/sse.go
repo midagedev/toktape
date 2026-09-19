@@ -67,6 +67,15 @@ type streamChunk struct {
 	// translator reports that chunk's `"stop": true`, which is where that
 	// endpoint ends its stream instead of sending the chat path's [DONE].
 	stop bool `json:"-"`
+	// truncated is not a wire field of the chat stream either, and for the
+	// same reason: it is how the /completion translator reports that
+	// endpoint's own `truncated` key, which upstream emits on the final
+	// response beside `stop_type` — the pair is what tells the token cap
+	// from the context running out. The chat path has no such field (its
+	// vocabulary collapses every limit into "length"), so it sets nothing
+	// here and PromptRecord.Truncated stays false because nothing said
+	// otherwise, never because something did.
+	truncated bool `json:"-"`
 }
 
 // chunkChoice is one entry of a chat chunk's choices array.
@@ -329,6 +338,16 @@ func (r *recorder) apply(c *streamChunk, t time.Duration) {
 	if c.Usage != nil {
 		u := *c.Usage
 		r.usage = &u
+	}
+	// The truncation flag lands beside the finish word it rides with: the
+	// raw endpoint emits `truncated` adjacent to `stop_type` on its final
+	// response, and the pair is what separates "limit" the token cap from
+	// "limit" the context running out (tape.PromptRecord.Truncated). Only
+	// true is news — truncation is a fact about what happened, not a state
+	// a later chunk can take back, and false is the zero value that means
+	// nothing said otherwise.
+	if c.truncated {
+		r.rec.Prompt.Truncated = true
 	}
 	for i := range c.Choices {
 		ch := &c.Choices[i]

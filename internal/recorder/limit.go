@@ -104,7 +104,13 @@ func (o Options) limit() tape.LimitSummary {
 //
 // The endings are counted here, from the records, because the finish word
 // has been in every tape since PromptRecord existed and the summary is all a
-// renderer reads. A failed stream is not an answered one and counts toward
+// renderer reads. Which case a record is in is not decided here (lead,
+// 2026-09-19): PromptRecord.EndedOnCap and EndedOnContextExhaustion own that,
+// because the transcript labels the same records one at a time and a
+// predicate authored in two packages is how the ragged clause ended up with
+// two renderers saying opposite things about one run. The two counts are
+// disjoint and the streams that finished on their own complete
+// EndingsObserved. A failed stream is not an answered one and counts toward
 // neither; a cut stream carries no word (the server never said one) and so
 // counts toward neither as well.
 func limitOf(asked tape.LimitSummary, cutAt time.Duration, recs []tape.RequestRecord) tape.LimitSummary {
@@ -115,24 +121,14 @@ func limitOf(asked tape.LimitSummary, cutAt time.Duration, recs []tape.RequestRe
 			continue
 		}
 		asked.EndingsObserved++
-		if finishReasonMeansCap(r.Prompt.FinishReason) {
+		switch {
+		case r.Prompt.EndedOnContextExhaustion():
+			asked.ContextExhaustedStreams++
+		case r.Prompt.EndedOnCap():
 			asked.CappedStreams++
 		}
 	}
 	return asked
-}
-
-// finishReasonMeansCap reports whether a finish word says the stream stopped
-// because it reached the token cap rather than because the model had
-// finished. Two spellings mean it in the tapes this tool records, and both
-// are the server's own word — the raw /completion path records llama-server's
-// stop_type verbatim by design (internal/server/completion.go), and "limit"
-// is its word there, while the chat paths speak the OpenAI vocabulary's
-// "length". Anything else ("stop", "eos", a word a new engine coined) was
-// observed but is not the cap: it counts toward EndingsObserved only, the
-// same direction every unrecognised observation errs in this schema.
-func finishReasonMeansCap(reason string) bool {
-	return reason == "length" || reason == "limit"
 }
 
 // clock is a run's wall-clock budget: the one thing that ends a generation

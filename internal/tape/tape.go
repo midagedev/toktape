@@ -970,6 +970,20 @@ type LimitSummary struct {
 	// Truncated says why). A renderer must not read 0 here as proof the
 	// streams hit the cap; it may only read a non-zero count as proof some
 	// did not.
+	//
+	// The condition this count holds under: the server was started without
+	// context shift, which is upstream's default. Verified against llama.cpp
+	// master, which sets `truncated` at two sites — the one that stops the
+	// sequence when shift is off, and the shift path itself, which evicts
+	// the early KV cells and carries on. On a --ctx-shift server a stream
+	// that shifted and then exhausted its n_predict budget arrives here
+	// carrying both "limit" and Truncated, and this count calls it context
+	// exhaustion when it was the cap. Nothing observable says which server
+	// it was: /props reports total_slots, n_ctx and the sampler defaults,
+	// and no key for ctx_shift. So the condition is stated here rather than
+	// detected, and it is the reason a reader who ran with shift on should
+	// read this count as "some streams shifted", which is the same warning
+	// in a different word.
 	ContextExhaustedStreams int `json:"context_exhausted_streams,omitempty"`
 }
 
@@ -1128,6 +1142,48 @@ type PromptRecord struct {
 	// "off" when the recorder sent the engine's own switch to disable it
 	// (--no-think), "" when it sent nothing and the server decided.
 	Thinking string `json:"thinking,omitempty"`
+}
+
+// EndedOnLimit reports whether the finish word means a limit at all — one of
+// the paths upstream files under STOP_TYPE_LIMIT — rather than that the model
+// finished. Two spellings mean it in the tapes this tool records, and both
+// are the server's own word: the raw /completion path records llama-server's
+// stop_type verbatim by design and "limit" is its word there, while the chat
+// paths speak the OpenAI vocabulary's "length". Anything else ("stop", "eos",
+// a word a new engine coined) was observed but is not a limit, which is the
+// direction every unrecognised observation errs in this schema.
+//
+// It does not say WHICH limit. Use EndedOnCap or EndedOnContextExhaustion
+// for that; this is the test they share.
+func (p PromptRecord) EndedOnLimit() bool {
+	return p.FinishReason == "length" || p.FinishReason == "limit"
+}
+
+// EndedOnContextExhaustion reports whether the stream stopped because the
+// sequence ran out of context: a limit word AND Truncated, which is the only
+// pair upstream produces for that path (lead, 2026-09-19).
+//
+// EndedOnCap is its complement within EndedOnLimit, and the two live here,
+// on the schema, rather than in whichever package happened to need them
+// first: the reducer counts these streams and the transcript labels them one
+// at a time, and a predicate authored twice is how the ragged clause came to
+// have two renderers saying opposite things about one run. The wording stays
+// with each renderer — "context full" is not the card's sentence — but which
+// case a record is in is decided in exactly one place.
+func (p PromptRecord) EndedOnContextExhaustion() bool {
+	return p.EndedOnLimit() && p.Truncated
+}
+
+// EndedOnCap reports whether the stream stopped because it reached the token
+// cap: a limit word without Truncated.
+//
+// It is where a chat-path stream lands, always: that path has no truncation
+// field, so its "length" reads as the cap even when the context ran out. The
+// count must not pretend a path said something it cannot — see
+// LimitSummary.ContextExhaustedStreams, which a renderer may read as proof
+// that some streams were not capped and never as proof that they were.
+func (p PromptRecord) EndedOnCap() bool {
+	return p.EndedOnLimit() && !p.Truncated
 }
 
 // Values of PromptRecord.Endpoint.

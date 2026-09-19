@@ -145,6 +145,42 @@ func TestCompletionChunkCarriesDraftAndSlot(t *testing.T) {
 	}
 }
 
+// TestCompletionChunkCarriesTruncated (lead, 2026-09-19): `truncated` rides
+// the same final /completion response as `stop_type` — upstream emits the two
+// as adjacent keys — and it is what splits "limit" into its two meanings: the
+// n_predict budget and the context running out. The record must carry it
+// verbatim beside FinishReason, and a chunk that does not say it must leave
+// the flag alone.
+func TestCompletionChunkCarriesTruncated(t *testing.T) {
+	stream := func(final string) *tape.RequestRecord {
+		sse := "data: {\"content\":\"ok\",\"stop\":false}\n\n" +
+			"data: {\"content\":\"\",\"stop\":true,\"stop_type\":\"limit\"" + final +
+			",\"timings\":{\"prompt_n\":9,\"prompt_ms\":12.0,\"prompt_per_second\":750.0," +
+			"\"predicted_n\":1,\"predicted_ms\":20.0,\"predicted_per_second\":50.0,\"cache_n\":0}}\n\n"
+		rec, _, err := ReplayCompletionStream([]byte(sse), nil, StreamHooks{})
+		if err != nil {
+			t.Fatalf("ReplayCompletionStream(%q): %v", final, err)
+		}
+		if rec.Prompt.FinishReason != "limit" {
+			t.Fatalf("finish reason %q, want the server's own word \"limit\"", rec.Prompt.FinishReason)
+		}
+		return rec
+	}
+	if rec := stream(`,"truncated":true`); !rec.Prompt.Truncated {
+		t.Error("Truncated = false on a stream the server said was truncated: the context ran out and the tape cannot say so")
+	}
+	// Explicit false is the cap, and so is the key's absence — a server build
+	// without the field, and every tape recorded before it.
+	for name, final := range map[string]string{
+		"explicit false": `,"truncated":false`,
+		"key absent":     ``,
+	} {
+		if rec := stream(final); rec.Prompt.Truncated {
+			t.Errorf("%s: Truncated = true; false is the zero value and means nothing said otherwise", name)
+		}
+	}
+}
+
 // TestCompletionChunkDropsStopTypeNone: "none" is the chunk saying it has not
 // stopped. Recording it would leave every mid-stream chunk claiming a finish
 // reason, and a record whose FinishReason is "none" reads as a run that ended

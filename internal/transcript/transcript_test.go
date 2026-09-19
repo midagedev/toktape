@@ -14,6 +14,11 @@ import (
 // FinishReason "length"       → "token cap"
 // FinishReason "tool_calls"   → "tool_calls" (verbatim)
 // FinishReason ""             → "?"
+//
+// 2026-09-19: the limit words are read as a pair with Truncated, the raw
+// path's own vocabulary is labelled rather than printed verbatim, and the
+// cases below extend the table. The "length" row above is unchanged and
+// stays: the chat path has no truncation field, so its word is the cap.
 func TestEndedLabels(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -29,6 +34,20 @@ func TestEndedLabels(t *testing.T) {
 		{"length", tape.RequestRecord{Prompt: tape.PromptRecord{FinishReason: "length"}}, "token cap"},
 		{"other verbatim", tape.RequestRecord{Prompt: tape.PromptRecord{FinishReason: "tool_calls"}}, "tool_calls"},
 		{"empty", tape.RequestRecord{}, "?"},
+		// The raw path's own words, which used to print verbatim beside the
+		// chat path's labelled ones.
+		{"raw eos", tape.RequestRecord{Prompt: tape.PromptRecord{FinishReason: "eos"}}, "model stopped"},
+		{"raw word", tape.RequestRecord{Prompt: tape.PromptRecord{FinishReason: "word"}}, "stop string"},
+		{"raw limit", tape.RequestRecord{Prompt: tape.PromptRecord{FinishReason: "limit"}}, "token cap"},
+		// The pair, not the word: the same limit word means a different
+		// ending with Truncated set, and this label is where a reader of one
+		// stream finds out which — the card's counts say it about the run.
+		{"raw limit truncated", tape.RequestRecord{Prompt: tape.PromptRecord{FinishReason: "limit", Truncated: true}}, "context full"},
+		// Truncated is only readable beside a limit word. A shifted stream
+		// that then finished on its own carries the flag and stopped for a
+		// reason that is not a limit at all; labelling that "context full"
+		// would be the flag overriding the ending.
+		{"truncated but finished", tape.RequestRecord{Prompt: tape.PromptRecord{FinishReason: "eos", Truncated: true}}, "model stopped"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
