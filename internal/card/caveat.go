@@ -405,6 +405,52 @@ func RaggedAggregate(s *tape.RunSummary) bool {
 	return !streamsMultiply(s.Aggregate, streamsSent(s))
 }
 
+// RaggedClause is the words, not just the predicate: what a renderer puts
+// beside the decode figures on a ragged run. "" when the run is not ragged.
+//
+// It lives here because the two renderers authored the same sentence twice
+// and then drifted (vision, 2026-09-19). RaggedAggregate was already shared
+// — the comment at the Streams row says the question is "asked here and
+// nowhere re-derived" — but only the question was; each renderer spelled the
+// answer itself, so a fix to one left the other saying the opposite thing
+// about the same run. The predicate being shared is what made that look
+// safe.
+//
+// On a tape that carries the window the clause names it. "not all decoding
+// at once" is the right thing to say beside a whole-wall aggregate, and a
+// contradiction beside the window's own rate, which is by definition the
+// span in which they all were.
+func RaggedClause(s *tape.RunSummary) string {
+	if !RaggedAggregate(s) {
+		return ""
+	}
+	if a := s.Aggregate; a.ConcurrentWindowMs > 0 && a.ConcurrentStreams > 0 {
+		return fmt.Sprintf("all %d overlapped for %s",
+			a.ConcurrentStreams, formatSeconds(a.ConcurrentWindowMs))
+	}
+	return "not all decoding at once"
+}
+
+// RaggedClauseShort is the same fact in fewer words, for a renderer whose
+// line will not hold the sentence. It lives beside the long form so the two
+// cannot drift: that drift is what this pair was extracted to stop.
+//
+// It drops the count, which a caller must already have shown — the PNG's
+// decode sub-line opens with "12 × 16.7 tok/s per stream", so "overlapped
+// 12.4 s" beside it is missing nothing. Measured: at 12 streams the long
+// form does not fit a 504 px column even with the queue note dropped, and
+// without this step the window would leave the image altogether on exactly
+// the wide runs it matters most for.
+func RaggedClauseShort(s *tape.RunSummary) string {
+	if !RaggedAggregate(s) {
+		return ""
+	}
+	if a := s.Aggregate; a.ConcurrentWindowMs > 0 && a.ConcurrentStreams > 0 {
+		return "overlapped " + formatSeconds(a.ConcurrentWindowMs)
+	}
+	return "not all decoding at once"
+}
+
 // raggedAggregateText is the sentence for CodeRaggedAggregate: what
 // actually happened — the run had a tail in which fewer streams were
 // running — with every number the reader needs to check it.

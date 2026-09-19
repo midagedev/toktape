@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/midagedev/toktape/internal/card"
+	"github.com/midagedev/toktape/internal/tape"
 )
 
 // TTP-138 (FAIL-first, 2026-09-19): the window figure is the decode column's
@@ -312,5 +313,77 @@ func TestCapPillFillMatchesItsNeighbours(t *testing.T) {
 	}
 	if capPill.col == neighbour.col {
 		t.Errorf("cap pill text colour = %v, the same as its neighbours: nothing marks it as a finding", capPill.col)
+	}
+}
+
+// The two renderers say the same thing about the same run (vision,
+// 2026-09-19).
+//
+// FAIL-first: the PNG's decode sub-line said "all 4 overlapped for 3.6 s"
+// while the text card's Streams row still said "not all decoding at once" —
+// two renderers characterising one run in opposite words. The predicate was
+// already shared, which is exactly what made it look safe; only the question
+// was, and each renderer spelled the answer itself. card.RaggedClause now
+// owns the sentence and this asserts the PNG carries it verbatim.
+func TestBothRenderersUseOneRaggedClause(t *testing.T) {
+	cases := map[string]*tape.RunSummary{
+		"with a window": card.ExampleWindow(),
+		"without one":   card.ExampleRagged(),
+	}
+	for name, s := range cases {
+		t.Run(name, func(t *testing.T) {
+			want := card.RaggedClause(s)
+			if want == "" {
+				t.Fatalf("fixture is not ragged, so this gate tests nothing")
+			}
+			c, err := renderCanvas(s)
+			if err != nil {
+				t.Fatalf("renderCanvas: %v", err)
+			}
+			sub, _ := c.markByID("hero.left.sub1")
+			if !strings.Contains(sub.Text, want) {
+				t.Errorf("decode sub-line = %q, want it to carry the one clause %q", sub.Text, want)
+			}
+			if !strings.Contains(card.Text(s), want) {
+				t.Errorf("text card does not carry the clause %q the PNG prints", want)
+			}
+		})
+	}
+}
+
+// The clause has to survive a wider run (vision, 2026-09-19): "all 12
+// overlapped for 12.4 s" is longer than the four-stream spelling this was
+// designed against, and the column is a fixed 504 px. If it stops fitting,
+// sub1Fallbacks drops it — and the PNG has no caveat band, so the condition
+// under which the headline holds would leave the image entirely.
+func TestRaggedClauseFitsAWideRun(t *testing.T) {
+	s := card.ExampleWindow()
+	s.Concurrency = 12
+	s.Aggregate.Streams = 12
+	s.Aggregate.ConcurrentStreams = 12
+	s.Aggregate.ConcurrentWindowMs = 12400
+	c, err := renderCanvas(s)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	sub, _ := c.markByID("hero.left.sub1")
+	// The contract is the fact, not the wording: at 12 streams neither the
+	// sentence nor the sentence-without-the-queue-note fits 504 px, so the
+	// line takes RaggedClauseShort — "overlapped 12.4 s", which is missing
+	// nothing, since the count it drops opens the same line. What must not
+	// happen is the window leaving the image.
+	if !strings.Contains(sub.Text, "12.4 s") {
+		t.Errorf("decode sub-line = %q, want the window figure still on the image at 12 streams", sub.Text)
+	}
+	if !strings.Contains(sub.Text, "12 ×") {
+		t.Errorf("decode sub-line = %q, want the count the short clause leans on", sub.Text)
+	}
+	if strings.Contains(sub.Text, "…") {
+		t.Errorf("decode sub-line = %q, cut rather than shortened", sub.Text)
+	}
+	// And the queue note is what yielded, not the window: the original
+	// fallback order gave up the window first.
+	if strings.Contains(sub.Text, "queued") {
+		t.Errorf("decode sub-line = %q, want the queue note to yield before the headline's own condition", sub.Text)
 	}
 }

@@ -1199,8 +1199,8 @@ func streamLines(s *tape.RunSummary) []string {
 	// aggregate is weighted by how long each round decoded. "per round" above
 	// already says the streams were not all in one window, so the clause would
 	// be saying it twice — and the predicate says so too.
-	if RaggedAggregate(s) {
-		parts = append(parts, "not all decoding at once")
+	if clause := RaggedClause(s); clause != "" {
+		parts = append(parts, clause)
 	}
 	// TTFT is here rather than on the Prefill row for a run of several streams
 	// (TTP-110): what that row printed was a.TTFTp50Ms, a statistic over the

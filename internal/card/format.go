@@ -243,3 +243,12 @@ func yesNo(b bool) string {
 	}
 	return "no"
 }
+
+// formatSeconds is a duration in whole tenths of a second: the PNG's own
+// spelling, which this package needs since RaggedClause moved here.
+func formatSeconds(ms float64) string {
+	if ms <= 0 {
+		return unknown
+	}
+	return strconv.FormatFloat(ms/1000, 'f', 1, 64) + " s"
+}

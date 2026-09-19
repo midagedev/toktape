@@ -222,11 +222,21 @@ func (c *content) buildHero(s *tape.RunSummary) {
 				perStream,
 				raggedString(s),
 				queuedString(s)),
-			// What goes when the column is full is the qualification, not
-			// the figures: the per-stream rate and the queue note are what
-			// another rig is compared against.
+			// What goes when the column is full is the queue note before
+			// the ragged clause (vision, 2026-09-19). The original order
+			// gave up the ragged clause first, on the reading that the
+			// figures outrank the qualification — but once the headline is
+			// the window's own rate, that clause is the only place on the
+			// image saying what span the headline is over, and the PNG has
+			// no caveat band to say it anywhere else. Measured at 12
+			// streams, where "all 12 overlapped for 12.4 s" is the longest
+			// this clause gets: the whole line does not fit and the first
+			// step decides which condition the reader loses.
 			sub1Fallbacks: []string{
+				joinParts(" · ", perStream, raggedString(s)),
+				joinParts(" · ", perStream, card.RaggedClauseShort(s)),
 				joinParts(" · ", perStream, queuedString(s)),
+				perStream,
 			},
 			sub2: joinParts(" · ",
 				formatInt(a.TotalPredictedN)+" tokens",
@@ -578,14 +588,7 @@ func verifyBandwidthString(s *tape.RunSummary) (full, withoutRatio string) {
 // what the reader needs instead is how long that span was — the one fact
 // the image has nowhere else, since the PNG has no caveat band.
 func raggedString(s *tape.RunSummary) string {
-	if !card.RaggedAggregate(s) {
-		return ""
-	}
-	if a := s.Aggregate; a.ConcurrentWindowMs > 0 && a.ConcurrentStreams > 0 {
-		return fmt.Sprintf("all %d overlapped for %s",
-			a.ConcurrentStreams, formatSeconds(a.ConcurrentWindowMs))
-	}
-	return "not all decoding at once"
+	return card.RaggedClause(s)
 }
 
 // decodeEyebrow is prefillEyebrow for the decode column (TTP-83, 2026-09-14): a
