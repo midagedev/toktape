@@ -43,7 +43,32 @@ const (
 	// generates until the context is full, so a run whose clock failed would
 	// then have nothing behind it at all — which is why
 	// tape.LimitSummary.MaxTokens is documented as always sent.
-	DefaultMaxTokens = 2048
+	//
+	// It is sized so that the sentence above can be true (TTP-145, 2026-09-20).
+	// At 2048 it was not: the guard fires before the clock on any box past
+	// 2048/20 = 102 tok/s per stream, so on most machines the cap was the
+	// terminator and every sentence this tool writes about the clock being
+	// the default's budget was false for that reader. The arithmetic was
+	// already written down two constants above — DefaultFor's own worked
+	// example computes 2800 tokens for twenty seconds on a 7B at 140 tok/s —
+	// and 2800 > 2048 went unnoticed.
+	//
+	// guardRate is the per-stream decode rate above which the guard would
+	// start terminating default runs again, and it is deliberately far past
+	// anything DefaultFor's example cites: a small model on current hardware
+	// can pass 140 by a wide margin, and a guard that has to be re-argued
+	// every time somebody buys a GPU is not a guard.
+	//
+	// The slow-box cost is real and is accepted: if the clock fails on a 2
+	// tok/s box this is now 66 minutes rather than 17. That is a choice
+	// between two failures of a mechanism that is not supposed to fire at
+	// all, and the one that happens every day is worse than the one that
+	// needs the clock to break first.
+	DefaultMaxTokens = int(DefaultFor/time.Second) * guardRate
+	// guardRate is DefaultMaxTokens' divisor, named so the relationship
+	// cannot drift: the guard is the clock's length times a decode rate no
+	// stream is expected to reach.
+	guardRate = 400
 	// NoClock is the Options.For value that means "this run has no wall-clock
 	// budget"; it is what `--for 0` sets. Zero cannot mean it, because zero is
 	// the zero value and the zero value has to be the sane default. Same shape

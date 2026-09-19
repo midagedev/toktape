@@ -328,3 +328,29 @@ func TestTruncatedWithoutALimitWordCountsTowardNeither(t *testing.T) {
 		t.Errorf("EndingsObserved = %d, want 1: the stream said why it stopped", got.EndingsObserved)
 	}
 }
+
+// TestTheGuardCannotBeatTheClock (TTP-145, lead, 2026-09-20). DefaultMaxTokens
+// documents itself as "a runaway guard, not a target: what ends a default run
+// is the clock". At 2048 against a 20 s clock that held only below 102 tok/s
+// per stream, so on most boxes the cap was the terminator — and the
+// contradiction was already written two constants above, where DefaultFor's
+// worked example computes 2800 tokens for the same twenty seconds on a 7B at
+// 140 tok/s.
+//
+// The gate is that constant's own fastest citation, so it fails the moment
+// the guard is sized below the machine the doc already describes.
+func TestTheGuardCannotBeatTheClock(t *testing.T) {
+	const docsFastestRate = 140 // tok/s per stream, DefaultFor's own example
+	seconds := int(DefaultFor / time.Second)
+	if got := seconds * docsFastestRate; DefaultMaxTokens <= got {
+		t.Errorf("DefaultMaxTokens = %d, want more than %d (%d s x %d tok/s): "+
+			"the guard terminates the default run on the machine its own doc cites, "+
+			"so the clock is not what ends it", DefaultMaxTokens, got, seconds, docsFastestRate)
+	}
+	// And the relationship, not just the number: a clock change must move the
+	// guard with it, or the next reader re-derives this by accident.
+	if want := seconds * guardRate; DefaultMaxTokens != want {
+		t.Errorf("DefaultMaxTokens = %d, want %d: the guard is the clock's length times guardRate",
+			DefaultMaxTokens, want)
+	}
+}
