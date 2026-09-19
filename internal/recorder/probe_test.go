@@ -7,7 +7,6 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -321,134 +320,20 @@ func TestOldTapeWithoutProbeKeyDecodes(t *testing.T) {
 	}
 }
 
-// Gate 6: the KV cache size comes from the server's own load log, and every
-// miss is a silent "not observed".
-const kvLogLines = `INFO  sys  : n_threads = 16
-llama_init_from_model: KV self size = 640.00 MiB, K (f16): 320.00 MiB, V (f16): 320.00 MiB
-llama_init_from_model: CPU output buffer size = 0.12 MiB
-`
-
-// kvFixture builds a /proc tree whose pid 1234 runs the fixture model, with
-// the given fd links under /proc/1234/fd, inside root — the same chroot the
-// log fixture writes into, so an fd target like /logs/server.log resolves
-// under it the way FSRoot does.
-func kvFixture(t *testing.T, root string, fds map[int]string) string {
-	t.Helper()
-	proc := filepath.Join(root, "proc", "1234")
-	if len(fds) > 0 {
-		if err := os.MkdirAll(filepath.Join(proc, "fd"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	} else if err := os.MkdirAll(proc, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(proc, "cmdline"),
-		[]byte("llama-server\x00-m\x00"+modelPath+"\x00"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for fd, target := range fds {
-		if err := os.Symlink(target, filepath.Join(proc, "fd", strconv.Itoa(fd))); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return root
-}
-
-// kvLogFixture writes the log a redirected server leaves behind, inside the
-// fixture tree at /logs/server.log, and returns its absolute-in-fixture
-// target for an fd link.
-func kvLogFixture(t *testing.T, root, text string) string {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Join(root, "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(root, "logs", "server.log")
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return "/logs/server.log"
-}
-
-func TestVRAMKVFromTheServersOwnLog(t *testing.T) {
-	cases := []struct {
-		name string
-		fds  func(t *testing.T, root string) map[int]string
-		want int64
-	}{
-		{
-			name: "stdout redirected to a log",
-			fds: func(t *testing.T, root string) map[int]string {
-				return map[int]string{1: kvLogFixture(t, root, kvLogLines)}
-			},
-			want: 671088640, // 640.00 MiB, the engine's own words
-		},
-		{
-			name: "stderr carries it when stdout is not a file",
-			fds: func(t *testing.T, root string) map[int]string {
-				log := kvLogFixture(t, root, kvLogLines)
-				return map[int]string{1: "/logs", 2: log} // /logs is a directory, not a regular file
-			},
-			want: 671088640,
-		},
-		{
-			name: "no fd directory at all",
-			fds: func(t *testing.T, root string) map[int]string {
-				return nil
-			},
-			want: 0,
-		},
-		{
-			name: "the link points nowhere",
-			fds: func(t *testing.T, root string) map[int]string {
-				return map[int]string{1: "/logs/missing.log", 2: "/logs/missing-too.log"}
-			},
-			want: 0,
-		},
-		{
-			name: "the log has no KV line",
-			fds: func(t *testing.T, root string) map[int]string {
-				return map[int]string{1: kvLogFixture(t, root, "main: server is listening\n")}
-			},
-			want: 0,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			mux, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5})
-			srv := httptest.NewServer(mux)
-			t.Cleanup(srv.Close)
-
-			// One chroot for the whole case: the /proc tree and the log its
-			// fd links point at both live under root, the way FSRoot sees
-			// one filesystem.
-			root := t.TempDir()
-			procRoot := kvFixture(t, root, tc.fds(t, root))
-			opts := probeOpts(t, srv)
-			opts.FSRoot = procRoot
-
-			tp, err := recorder.Record(context.Background(), opts)
-			if err != nil {
-				t.Fatalf("Record: %v", err)
-			}
-			s := tp.Summary
-			if s.Placement.VRAMKVBytes != tc.want {
-				t.Errorf("Placement.VRAMKVBytes = %d, want %d", s.Placement.VRAMKVBytes, tc.want)
-			}
-			if s.Placement.Source != "unknown" {
-				t.Errorf("Placement.Source = %q, want it left alone (unknown)", s.Placement.Source)
-			}
-			for _, w := range s.Warnings {
-				if low := strings.ToLower(w); strings.Contains(low, "kv") || strings.Contains(low, "vram") || strings.Contains(low, "log") {
-					t.Errorf("a miss is not the user's fault and must not be said: %q", w)
-				}
-			}
-		})
-	}
-}
-
-// Gate 6, engine priority: an engine that reported its own KV size is the
-// record; the log scan never overwrites it.
-func TestVRAMKVEngineFigureWinsOverTheLog(t *testing.T) {
+// An engine that reports its own KV size is the record, and it is now the
+// only source (decision on TTP-136, 2026-09-19).
+//
+// Until today the recorder also scanned the server's stdout for llama.cpp's
+// "KV self size = ..." line. That was dropped, and the gates that pinned it
+// went with it rather than being re-pinned, because the behaviour is gone by
+// design: the string does not exist in llama.cpp master (it became
+// "llama_kv_cache: size = ... (N cells, N layers, ...)", the second rename
+// since 2025), and no HTTP surface carries the figure at all — not
+// /metrics, not /props, not /slots. A scraper for one number that tracks an
+// upstream log format across renames is a dependency the card does not earn
+// back. Where the engine says nothing, VRAMKVBytes stays 0 and the card
+// prints "?", which is what "not observed" is supposed to look like.
+func TestVRAMKVIsTheEnginesFigureOrNothing(t *testing.T) {
 	inner, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5})
 	mux := http.NewServeMux()
 	mux.HandleFunc("/props", func(w http.ResponseWriter, r *http.Request) {
@@ -463,17 +348,32 @@ func TestVRAMKVEngineFigureWinsOverTheLog(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	root := t.TempDir()
-	procRoot := kvFixture(t, root, map[int]string{1: kvLogFixture(t, root, kvLogLines)})
-	opts := probeOpts(t, srv)
-	opts.FSRoot = procRoot
-
-	tp, err := recorder.Record(context.Background(), opts)
+	tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
 	if err != nil {
 		t.Fatalf("Record: %v", err)
 	}
 	if got := tp.Summary.Placement.VRAMKVBytes; got != 12345678 {
 		t.Errorf("Placement.VRAMKVBytes = %d, want the engine's own 12345678", got)
+	}
+}
+
+// And a server that says nothing about its KV cache leaves the figure
+// unobserved rather than derived. This is the half that used to be filled by
+// the log scan: placement spreads tensors and never computes a KV size, and
+// the arithmetic that looks like it should (layers x kv heads x head dim x
+// ctx x 2) is wrong by a factor of 4 on a hybrid-attention model, where only
+// every fourth layer holds a cache at all. 0 is the honest answer.
+func TestVRAMKVStaysUnobservedWhenTheEngineIsSilent(t *testing.T) {
+	mux, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if got := tp.Summary.Placement.VRAMKVBytes; got != 0 {
+		t.Errorf("Placement.VRAMKVBytes = %d, want 0: nothing observed it, and it is never computed", got)
 	}
 }
 

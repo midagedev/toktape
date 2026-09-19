@@ -393,8 +393,14 @@ func (r *run) narrowPlacement(gpusAtEnd []tape.GPUSample) {
 		placement.WithModel(r.model),
 		placement.WithGPUIndices(inPlay))
 	// The re-estimate spreads tensors and knows nothing about the KV cache —
-	// placement never derives one — so whatever collectVRAMKV read from the
-	// server's own log must survive the replace below (TTP-137).
+	// placement never derives one — so whatever the engine's own props
+	// reported must survive the replace below. When the engine says nothing
+	// the figure stays 0 and the card prints "?": toktape stopped trying to
+	// read the KV size out of llama.cpp's load log on 2026-09-19 (the
+	// decision on TTP-136), because that line has changed format twice since
+	// 2025 and is not exposed over HTTP at all, so a scraper for it is a
+	// version-coupled dependency for one number. An engine that reports it
+	// still fills it here.
 	sum.VRAMKVBytes = r.place.VRAMKVBytes
 	r.place = sum
 	// The re-estimate runs over the same tensors and flags as the first one,

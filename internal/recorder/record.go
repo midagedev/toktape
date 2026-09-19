@@ -103,10 +103,6 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 		}
 	}()
 	r.collectPlacement()
-	// After the placement estimate and before anything is planned: the KV
-	// cache size comes from the server's own load log (TTP-137), and only
-	// where placement itself did not observe one.
-	r.collectVRAMKV()
 	// A --spec-n-max sweep becomes rounds here, once the argv says whether a
 	// draft model is loaded (TTP-35).
 	r.planSweep()
