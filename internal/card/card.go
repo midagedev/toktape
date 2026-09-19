@@ -1687,16 +1687,41 @@ func flagTokens(srv tape.ServerInfo) (base []string, ot string) {
 // It is derived rather than recorded, because it is a reading of two figures
 // the tape already carries and not an observation of its own. Without it the
 // card shows a healthy decode rate beside an empty completion, and the reader
-// blames the tool instead of --n-predict (TTP-20, 2026-09-13). A run that
+// blames the tool instead of the budget (TTP-20, 2026-09-13). A run that
 // thought and then answered is not cut and gets no warning: the thinking
 // clause on the Context row already says how much of the budget went where.
+//
+// The advice names the flag that would actually help, which is not the same
+// flag in both cases (TTP-139, 2026-09-20). "raise --n-predict" was printed
+// on every cut run, and on a default run it is wrong: naming --n-predict
+// turns the clock off (see Options.limit's table), so on a run that had a
+// clock the reader is being told to change the axis that did not end it —
+// and a bigger cap under the same clock just hands the run to the clock
+// mid-thought instead. What did not hold on a default run is the budget as
+// a whole. On a run whose cap the user named there is no clock, the cap is
+// the only thing that could have ended it, and raising it is exactly right.
+//
+// The rate itself is not what this warns about. A reasoning model's tokens
+// are decode tokens at the decode rate — the server counts reasoning_content
+// in predicted_n like any other token — so the figure beside this sentence
+// is a measurement either way. What the run has no answer to show for it is
+// the reader's problem, and the flags are how they fix it.
 func answerCutWarning(s *tape.RunSummary) string {
 	t := s.Timings
 	if t.PredictedN <= 0 || t.ReasoningN < t.PredictedN {
 		return ""
 	}
-	return fmt.Sprintf("answer cut: all %s predicted tokens were reasoning — raise --n-predict",
-		formatInt(t.PredictedN))
+	head := fmt.Sprintf("answer cut: all %s predicted tokens were reasoning", formatInt(t.PredictedN))
+	if s.Limit.MaxTokensNamed {
+		return head + " — raise --n-predict"
+	}
+	// --think-budget is chat-only: it caps the template's thinking, and a
+	// raw /completion prompt has none for it to cap (samplingOptions rejects
+	// the pair). Advising it there would be a flag the next run errors on.
+	if s.Sampling.Endpoint == tape.EndpointCompletion {
+		return head + " — the default budget did not hold the thinking; try --for"
+	}
+	return head + " — the default budget did not hold the thinking; try --for or --think-budget"
 }
 
 // warningSection is the card's last block before the footer: the caveats that

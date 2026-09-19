@@ -586,13 +586,33 @@ func TestAnswerCutWarning(t *testing.T) {
 			PredictedN: predicted, ReasoningN: reasoning,
 		}}
 	}
+	// 2026-09-20 (TTP-139): the advice names the flag that would help, and
+	// that is not "raise --n-predict" on a default run. FAIL-first was the
+	// ticket's own card, which printed it under a clock the reader was not
+	// being told about. The named-cap row below is the old assertion, kept
+	// exactly: there the cap is the only thing that could have ended the run.
 	if got := answerCutWarning(cut(128, 128)); got == "" {
 		t.Error("no warning for a run that was all reasoning")
 	} else {
-		want := "answer cut: all 128 predicted tokens were reasoning — raise --n-predict"
+		want := "answer cut: all 128 predicted tokens were reasoning — the default budget did not hold the thinking; try --for or --think-budget"
 		if got != want {
 			t.Errorf("warning = %q, want %q", got, want)
 		}
+	}
+	named := cut(128, 128)
+	named.Limit.MaxTokensNamed = true
+	if got, want := answerCutWarning(named), "answer cut: all 128 predicted tokens were reasoning — raise --n-predict"; got != want {
+		t.Errorf("named --n-predict: warning = %q, want %q", got, want)
+	}
+	// --think-budget has nothing to cap on a raw prompt, and samplingOptions
+	// rejects the pair, so the advice must not name a flag the next run
+	// errors on.
+	raw := cut(128, 128)
+	raw.Sampling.Endpoint = tape.EndpointCompletion
+	if got := answerCutWarning(raw); strings.Contains(got, "--think-budget") {
+		t.Errorf("raw endpoint advice = %q, want no --think-budget: it errors there", got)
+	} else if !strings.Contains(got, "--for") {
+		t.Errorf("raw endpoint advice = %q, want it to still name --for", got)
 	}
 	for _, tc := range []struct {
 		name                 string
@@ -645,13 +665,19 @@ func TestAnswerCutOnExampleConcurrent(t *testing.T) {
 	if !strings.Contains(after, want) {
 		t.Errorf("card does not carry %q:\n%s", want, after)
 	}
-	// The fix is in the warning. The sentence is 71 columns and the warning
-	// column is 66, so it wraps and "--n-predict" starts the continuation
-	// line, indented under the "!" the way every wrapped card field is.
-	if !strings.Contains(after, "raise") || !strings.Contains(after, "--n-predict") {
+	// The fix is in the warning: it names a flag, and the sentence is longer
+	// than the 66-column warning field, so it wraps with the continuation
+	// indented under the "!" the way every wrapped card field is.
+	//
+	// 2026-09-20 (TTP-139): the flag named here is the default run's, not
+	// "--n-predict" — this fixture names no cap, and telling its reader to
+	// raise one would point at the axis that did not end the run. The
+	// contract this gate holds is the shape, so it asserts a flag rather
+	// than a spelling; answerCutWarning's own table gate holds the words.
+	if !strings.Contains(after, "--for") {
 		t.Errorf("the warning does not say what to do:\n%s", after)
 	}
-	if !strings.Contains(after, "\n│   --n-predict") {
+	if !strings.Contains(after, "\n│   budget did not hold") {
 		t.Errorf("the continuation line is not indented under the warning:\n%s", after)
 	}
 	// The Context row says the same thing in its own voice.
@@ -666,7 +692,7 @@ func TestAnswerCutOnExampleConcurrent(t *testing.T) {
 	// The warning wraps onto at most two lines inside the box.
 	var warn int
 	for _, line := range strings.Split(after, "\n") {
-		if strings.Contains(line, "answer cut") || strings.Contains(line, "raise --n-predict") {
+		if strings.Contains(line, "answer cut") || strings.Contains(line, "budget did not hold") {
 			warn++
 		}
 	}
