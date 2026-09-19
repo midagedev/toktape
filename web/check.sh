@@ -215,8 +215,10 @@ grep -q '"schema": *1' "$work/row.json" || { cat "$work/row.json"; die "the inde
 
 say "the security headers"
 # Set once around the router (web/src/index.js:secured), so the thing worth
-# asserting is not "the front page has them" but "no path answers without
-# them" — a header added per handler is a header the next handler forgets.
+# asserting is not "the front page has them" but "no routed path answers
+# without them" — a header added per handler is a header the next handler
+# forgets. Static assets are deliberately not in this list: they never reach
+# the Worker, and the comment beside `secured` says why that is left alone.
 # Every shape of response this service produces is probed: HTML, JSON, a
 # PNG out of R2, the record itself, an API listing, and a 404, which is the
 # one a per-handler approach always misses.

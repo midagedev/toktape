@@ -39,9 +39,16 @@ const USER_PAGE = /^\/u\/([a-z0-9][a-z0-9-]{1,31})$/;
 // before touching R2.
 const AVATAR = /^\/a\/([0-9a-f]{64})\.png$/;
 
-// The two headers every response carries, set in one place because a header
-// added at each `return` is a header missing from the next one somebody
-// writes. Both are answers to a question this service does actually raise:
+// The two headers every response *this Worker writes* carries, set in one
+// place because a header added at each `return` is a header missing from the
+// next one somebody writes. Static assets (`/player/*`, the mascot, the
+// favicons) are served by Cloudflare's asset layer before `fetch` runs, so
+// they do not pass through here — measured 2026-09-19. That is left alone:
+// each of those carries its real content type and a Referrer-Policy on a
+// subresource means nothing, and routing every asset hit through the Worker
+// to add two headers is a cost with no matching benefit.
+//
+// Both are answers to a question this service does actually raise:
 //
 //   nosniff — anonymous uploads become bytes we serve back. An avatar is
 //     stored only after its PNG signature matches (upload.js:isPNG) and a
