@@ -195,16 +195,23 @@ ${rowGrid(q.rows, url)}`;
       // A run page's preview is its own card. This one had no image at all,
       // so the link a person posts to announce the service — the one link
       // that matters most — previewed as plain text (user, 2026-09-19, meta
-      // inspector). /og.png is the hero run's card, rendered by `toktape
-      // card` from assets/hero.tape and committed under web/static, so the
-      // preview is the artifact the site is about rather than a logo.
+      // inspector).
+      //
+      // /og.png was a run's card for half a day and is now the mascot plate
+      // (web/static/og.html renders it; the provenance is in that directory's
+      // README). A card is the right preview for a *run*, where the figures
+      // are the subject. For the service the subject is what the service is,
+      // and a dense card arrives at feed size as two legible numbers over a
+      // grey field — which is the unqualified figure this whole site argues
+      // against. Every line of the plate survives the 600 px a timeline
+      // gives it, and the one accent on it is the install command.
       meta: head({
         title: SOCIAL_TITLE,
         description: SOCIAL_DESCRIPTION,
         url: `${publicBase(request, env)}/`,
         image: `${publicBase(request, env)}/og.png`,
         imageAlt:
-          "a toktape card: 144 tok/s aggregate decode over four streams of a 35B sparse MoE on one RTX A6000, with the rig, the engine and the flags under it",
+          "the toktape mascot, a mint-haired chibi in headphones hugging a cassette, beside the words \"the record, not a recording of it\" and the command brew install midagedev/tap/toktape",
         imageWidth: 1200,
         imageHeight: 675,
       }),

@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "JB"; font-weight: 400;
+    src: url("../../assets/fonts/JetBrainsMono-Regular.ttf"); }
+  @font-face { font-family: "JB"; font-weight: 700;
+    src: url("../../assets/fonts/JetBrainsMono-Bold.ttf"); }
+  @font-face { font-family: "JB"; font-weight: 800;
+    src: url("../../assets/fonts/JetBrainsMono-ExtraBold.ttf"); }
+
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1200px; height: 675px; }
+  body { background: #0b100f; font-family: "JB", ui-monospace, monospace; }
+
+  .panel {
+    position: absolute; inset: 20px;
+    background: #141d1b; border: 1px solid #202d2a; border-radius: 18px;
+    display: flex; align-items: center; overflow: hidden;
+  }
+  .left { padding: 0 0 0 56px; width: 700px; }
+
+  .mark { font-weight: 800; font-size: 82px; letter-spacing: -1px; line-height: 1; }
+  .mark .tok { color: #86c2b4; }
+  .mark .tape { color: #e6e2d8; }
+
+  .tag { color: #a6a49d; font-size: 23px; margin-top: 18px; letter-spacing: .2px; }
+  /* 23px, not 25: at 25 the accented middle line measures past the column and
+     wraps, which puts "quotable," alone on a line of its own. */
+  .say { color: #e6e2d8; font-size: 23px; line-height: 1.55; margin-top: 30px; font-weight: 400; }
+  /* The accent is spent once on this image, and it is spent on the command.
+     It was on this clause as well, which made the loudest thing in the lower
+     half a sentence rather than the one block a reader is meant to act on
+     (vision, 2026-09-19). The clause keeps its weight; it gives up its hue. */
+  .say b { color: #e6e2d8; font-weight: 700; }
+
+  .cmd {
+    display: inline-block; margin-top: 34px;
+    border: 1px solid #86c2b4; border-radius: 8px; background: #0b100f;
+    color: #e6e2d8; font-size: 23px; padding: 14px 20px;
+  }
+
+  /* The whole sticker, outline included, sits inside the panel: clipped at
+     the panel edge its white keyline reads as a rendering mistake. */
+  .figure { position: absolute; right: 48px; bottom: 34px; height: 520px; }
+</style>
+<body>
+  <div class="panel">
+    <div class="left">
+      <div class="mark"><span class="tok">tok</span><span class="tape">tape</span></div>
+      <div class="tag">the record, not a recording of it</div>
+      <div class="say">Published LLM inference runs — the rate,<br>
+        <b>the caveats that say when it is not quotable</b>,<br>and a replay in the browser.</div>
+      <!-- No domain line: every platform this card appears on prints the
+           host in its own chrome, so the line was a duplicate that arrived
+           as grey mush at feed size anyway (vision, 2026-09-19). -->
+      <div class="cmd">brew install midagedev/tap/toktape</div>
+    </div>
+    <img class="figure" src="./mascot-sit.webp" alt="">
+  </div>
+</body>
