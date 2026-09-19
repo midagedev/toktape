@@ -124,6 +124,19 @@ const MAX_Q = 48;
 // has no facet counts — just these fixed options.
 const VRAM_TIERS = [8, 12, 16, 24, 48, 80];
 
+// The axes that live behind the form's disclosure — every param the selects
+// write, and nothing else. `q` is deliberately absent: it is the control a
+// visitor actually reaches for, and if it counted here the panel would open
+// itself on every text search, which is the state this closes.
+const FACET_PARAMS = [...FILTERS.map(([param]) => param), "min_vram", "size", "moe", "min_predicted"];
+
+// Whether any of those is set, which is what decides the disclosure's `open`.
+// An empty string is not set (`?engine=` is what an unchanged select posts),
+// and `moe=0` is — "dense only" narrows as much as "MoE only" does.
+function facetsNarrowed(url) {
+  return FACET_PARAMS.some((p) => (url.searchParams.get(p) || "") !== "");
+}
+
 export async function searchAPI(request, env) {
   const url = new URL(request.url);
   const scope = await scopeOf(request, env, url);
@@ -141,6 +154,17 @@ export async function searchAPI(request, env) {
     next: q.next,
   });
 }
+
+// The front page's own title and description, one copy for the tab, the
+// search result and the link preview. Both are cut to the length the
+// readers actually show: a description over ~150 characters is truncated by
+// Google and by most social previews, and the old one was 174 and lost its
+// last clause everywhere (measured 2026-09-19). The title is the other
+// direction — "published runs" was 24 characters in a 50-60 character slot,
+// so it says what kind of run and what travels with it.
+const SOCIAL_TITLE = "toktape — published LLM inference runs and their caveats";
+const SOCIAL_DESCRIPTION =
+  "Recorded llama.cpp and vLLM runs: the tok/s, the card that says when a figure is not quotable, and a replay in the browser.";
 
 export async function searchPage(request, env) {
   const url = new URL(request.url);
@@ -163,19 +187,44 @@ ${rowGrid(q.rows, url)}`;
 
   return new Response(
     layout({
-      title: "toktape — published runs",
+      title: SOCIAL_TITLE,
       // The front page is a search, and a filtered search is the same page:
       // the canonical is the bare front page so a crawler indexes it once,
       // and the run pages carry the model names into the index themselves.
+      //
+      // A run page's preview is its own card. This one had no image at all,
+      // so the link a person posts to announce the service — the one link
+      // that matters most — previewed as plain text (user, 2026-09-19, meta
+      // inspector). /og.png is the hero run's card, rendered by `toktape
+      // card` from assets/hero.tape and committed under web/static, so the
+      // preview is the artifact the site is about rather than a logo.
       meta: head({
-        title: "toktape — published LLM inference runs",
-        description:
-          "Recorded llama.cpp and vLLM runs with their tok/s, the card that qualifies each figure, and a replay in the browser. Search by model, size, quant, prompt set, GPU and engine.",
+        title: SOCIAL_TITLE,
+        description: SOCIAL_DESCRIPTION,
         url: `${publicBase(request, env)}/`,
+        image: `${publicBase(request, env)}/og.png`,
+        imageAlt:
+          "a toktape card: 144 tok/s aggregate decode over four streams of a 35B sparse MoE on one RTX A6000, with the rig, the engine and the flags under it",
+        imageWidth: 1200,
+        imageHeight: 675,
       }),
       style: PAGE_STYLE,
       figure: ["peek", "wave"],
+      // The runs still lead — but a reader who arrives from a post has no
+      // way to know this is a thing they can run until they have scrolled
+      // past twenty of them to the footer (user, 2026-09-19: "깃헙링크나
+      // 인스톨 안내가 너무 눈에 안띈다"). Two lines and a command, above the
+      // search rather than in place of it.
       body: `
+<div class="intro">
+<p>Every run on this page is the file <code>toktape</code> wrote on somebody's
+own server: the card, the caveats that say when a figure is not quotable, and
+a replay, all drawn from those same bytes. One word on the machine already
+running llama-server records yours.</p>
+<p class="get"><code class="cmd">brew install midagedev/tap/toktape</code>
+<a href="https://github.com/midagedev/toktape#install">other ways to install</a>
+<a href="https://github.com/midagedev/toktape">GitHub</a></p>
+</div>
 ${filterForm(url, facets)}
 ${active}
 ${mid}
@@ -900,10 +949,27 @@ export function filterForm(url, facets) {
   })();
   // The current path, not "/": on /u/<handle> the filters used to submit to
   // the front page (2026-09-19).
+  //
+  // Three controls stand, eight fold away. All eleven at once read as an
+  // admin console standing between a visitor and the runs they came for
+  // (user, 2026-09-19: "검색 필터가 너무 다 펼쳐져 있고") — and the two rows
+  // they filled were the whole first screen. The box, the order and the
+  // button are what a visitor uses; the axes are what they go looking for,
+  // so the summary names them rather than saying "Filters", which would
+  // hide the fact that this search knows what a quantisation is.
+  //
+  // <details> and not a script: the panel is open in the markup or it is
+  // not, so a listing narrowed by a link arrives showing why, and this adds
+  // no inline handler to the ones TTP-132 is already about.
   return `<form class="filters" method="get" action="${esc(url.pathname)}">
   <input type="search" name="q" maxlength="${MAX_Q}" value="${esc(url.searchParams.get("q") || "")}"
     placeholder="model, repo, GPU, engine…" autocomplete="off">
   <kbd title="press / to search">/</kbd>
+  ${sortSel}
+  <button type="submit">Search</button>
+  <details class="axes"${facetsNarrowed(url) ? " open" : ""}>
+  <summary>Narrow by model, size, engine, quantisation, GPU, host, VRAM, prompt set</summary>
+  <div class="axrow">
   ${sel("model", "any model", facets.model)}
   ${size}
   ${sel("engine", "any engine", facets.engine)}
@@ -913,8 +979,8 @@ export function filterForm(url, facets) {
   ${vram}
   ${sel("set", "any prompt set", facets.set)}
   ${moe}
-  ${sortSel}
-  <button type="submit">Search</button>
+  </div>
+  </details>
 </form>`;
 }
 
@@ -966,17 +1032,52 @@ main { max-width: 84rem; }
   .figure.peek { width: 9rem; margin-bottom: -.5rem; }
   .figure.wave { position: absolute; top: .75rem; right: 1.25rem; width: 5.5rem; margin: 0; z-index: 0; }
   /* The filter row stops short of her corner, or she stands on Search
-     (main-scoped so it outranks the shorthand margin declared below). */
-  main .filters { margin-right: 6.5rem; }
+     (main-scoped so it outranks the shorthand margin declared below). The
+     intro sits in the same top-right zone and needs the same clearance, or
+     its first line runs under her. */
+  main .filters, main .intro { margin-right: 6.5rem; }
 }
+/* The intro: what this is and how to get it, in the place a reader's eye
+   already is. Kept to a prose column even though the grid below is 84rem —
+   a sentence measured across a monitor is a sentence nobody reads — and the
+   command is the loud thing in it, because it is the thing to copy. */
+.intro { max-width: 46rem; margin: 0 0 1.75rem; color: #99a0aa; font-size: .9rem; }
+.intro p { margin: 0 0 .7rem; }
+.intro .get { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem;
+  margin: 0; font-size: .85rem; }
+/* The command box takes the links' own blue for its border rather than the
+   page's hairline grey: at #242932 the box sat at the ground's luminance and
+   the blue link text beside it was the brightest thing in the band, which
+   put the eye on "other ways to install" before the command itself (vision,
+   2026-09-19). The fill rises with it so the box reads as raised, not
+   outlined. */
+.intro .cmd { background: #171c26; border: 1px solid #38507a; border-radius: 6px;
+  padding: .4rem .65rem; color: #e6eaf1; font-size: .85rem; user-select: all; }
 .filters { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 2rem; }
+/* The folded axes take a row of their own inside the form's flex, or the
+   selects flow in beside the button when the panel opens. */
+.filters details { flex: 1 0 100%; margin: .15rem 0 0; }
+/* The summary is a control, so it is shaped like the controls beside it
+   rather than like a caption — inline-block so the chip hugs its text
+   instead of running the width of the row it owns. */
+.filters summary { display: inline-block; list-style: none; cursor: pointer;
+  background: #14171d; border: 1px solid #242932; border-radius: 6px;
+  color: #7d848f; font-size: .8rem; padding: .4rem .6rem; }
+.filters details[open] summary { color: #a8aeb8; }
+.filters summary::-webkit-details-marker { display: none; }
+.filters summary::before { content: "\\25B8\\00a0"; }
+.filters details[open] summary::before { content: "\\25BE\\00a0"; }
+.filters summary:hover { color: #d7dae0; }
+.filters .axrow { display: flex; flex-wrap: wrap; gap: .5rem; padding: .5rem 0 .1rem; }
 .filters input, .filters select, .filters button {
   background: #14171d; color: #d7dae0; border: 1px solid #242932; border-radius: 6px;
   padding: .45rem .6rem; font: inherit; font-size: .875rem; }
 .filters kbd { align-self: center; }
-/* The box gets its own row so the selects and the button share the next one
-   rather than leaving one of them stranded below on a narrow window. */
-.filters input { flex: 1 1 14rem; min-width: 0; }
+/* The box grows to fill the row it shares with the order and the button, but
+   stops: with the axes folded away there is nothing left to take the rest of
+   a wide row, and a search field run to 60rem for "model, repo, GPU" is a
+   field that looks like it wants a paragraph (2026-09-19). */
+.filters input { flex: 1 1 14rem; min-width: 0; max-width: 34rem; }
 .filters select { flex: 0 1 auto; min-width: 0; }
 .filters button { background: #1f2630; border-color: #2c3542; cursor: pointer; }
 .filters button:hover { background: #262f3b; }
@@ -988,6 +1089,16 @@ main { max-width: 84rem; }
 .fact .v { color: #6b727d; margin-left: .35rem; }
 kbd { font: .7rem ui-monospace, Menlo, monospace; color: #6b727d; border: 1px solid #242932; border-radius: 4px; padding: 0 .35rem; }
 @media (max-width: 48rem) { .filters kbd { display: none; } }
+/* On a phone the brand row wraps its tagline to a second line, so its 2.75rem
+   bottom margin plus five lines of intro pushed the first run clean off the
+   screen: the whole viewport was header (vision, 2026-09-19). The gap halves
+   and the prose steps down one size, which brings the run count and the top
+   of the first tile back above the fold without shortening what it says. */
+@media (max-width: 48rem) {
+  main .brand { margin-bottom: 1.75rem; }
+  .intro { font-size: .85rem; margin-bottom: 1.5rem; }
+  .intro p { margin-bottom: .6rem; }
+}
 /* The grid: as many 26rem columns as fit, so a laptop gets two and a
    monitor three; each row is its run on top and the words as its caption. */
 .rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(26rem, 1fr));

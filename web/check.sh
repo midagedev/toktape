@@ -552,9 +552,54 @@ grep -q 'without engine' "$work/fetched" || die "the empty state offers no way b
 curl -fsS "$base/" >"$work/front.html" && grep -q 'class="total"' "$work/front.html" ||
   die "the front page carries no total"
 grep -qE 'class="total"><b>[0-9]+</b> runs?,' "$work/front.html" || die "the total names no population size"
+# The first screen (2026-09-19). Both halves of this section are here because
+# the user found them by looking at the page, which is the signal that the
+# gate had no axis for what a first-time visitor meets: it checked what the
+# listing says and never what stands above it.
+#
+# A reader who arrives from a post has to be able to see that this is a thing
+# they can run, without scrolling past the runs to the footer.
+grep -q 'brew install midagedev/tap/toktape' "$work/front.html" ||
+  die "the front page names no way to install toktape above the listing"
+grep -q 'href="https://github.com/midagedev/toktape#install"' "$work/front.html" ||
+  die "the front page links at no install instructions"
+# And the eight axis selects stay folded until something is narrowing by
+# them: eleven controls between the brand and the runs is the state the
+# disclosure exists to end.
+grep -q '<details class="axes">' "$work/front.html" ||
+  die "the filter axes are not folded away on the bare front page"
+grep -q '<details class="axes" open>' "$work/front.html" &&
+  die "the filter axes are open on a page nothing is narrowing"
+# The link preview. A run page's image is its own card; this page had none at
+# all, so the one link that announces the service previewed as plain text.
+grep -q '<meta property="og:image" content="[^"]*/og.png">' "$work/front.html" ||
+  die "the front page offers no preview image"
+curl -fsS "$base/og.png" >"$work/og.png" || die "og.png is not served"
+python3 - "$work/og.png" <<'PY' || die "og.png is not a 1200x675 PNG"
+import struct, sys
+b = open(sys.argv[1], "rb").read()
+assert b[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+w, h = struct.unpack(">II", b[16:24])
+assert (w, h) == (1200, 675), f"{w}x{h}"
+PY
+# The description has to survive the readers that show it: Google truncates
+# around 150 characters and most social previews around 125.
+python3 - "$work/front.html" <<'PY' || die "the front page description is too long to survive a preview"
+import re, sys
+html = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r'<meta name="description" content="([^"]*)">', html)
+assert m, "no description"
+n = len(m.group(1))
+print(f"note: the front page description is {n} characters")
+assert n <= 150, n
+PY
 # The active line on a narrowed page, with its way out.
 curl -fsS "$base/?engine=ik_llama.cpp" >"$work/eng.html" && grep -q 'Narrowed to' "$work/eng.html" ||
   die "the filtered page names no active filters"
+# ...and on that page the axes are open, because a listing narrowed by a link
+# has to show what narrowed it.
+grep -q '<details class="axes" open>' "$work/eng.html" ||
+  die "the filter axes stayed folded on a page narrowed by one of them"
 grep -q 'engine: ik_llama.cpp' "$work/eng.html" || die "the active line does not name the engine filter"
 grep -q 'class="clear" href="/"' "$work/eng.html" || die "the active line has no Clear all link"
 # On that page the hero row's engine chip is marked active rather than

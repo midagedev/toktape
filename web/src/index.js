@@ -122,7 +122,13 @@ async function route(request, env) {
   if ((m = USER_PAGE.exec(path))) return serveUserPage(m[1], request, env);
 
   // The front page is the search: the thing a visitor came for is other
-  // people's runs, not an explanation of the service.
+  // people's runs, not an explanation of the service. Amended 2026-09-19 —
+  // the runs still lead, but they are now preceded by two lines and an
+  // install command, because a reader arriving from a post could not tell
+  // this was a thing they could run without scrolling past twenty runs to
+  // the footer (user: "깃헙링크나 인스톨 안내가 너무 눈에 안띈다"). The rule
+  // that survives is the ordering, not the absence: no landing page above
+  // the listing, and nothing there a visitor has to read to use the search.
   if (path === "/") return searchPage(request, env);
   if (path === "/robots.txt") return robots(publicBase(request, env));
   if (path === "/sitemap.xml") return sitemap(env, publicBase(request, env));
