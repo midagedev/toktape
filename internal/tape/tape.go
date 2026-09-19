@@ -948,6 +948,29 @@ type LimitSummary struct {
 	// pairing ShortStreams has with MinPredictedN. An engine that reports no
 	// finish reason leaves both 0 and the card prints `?`.
 	EndingsObserved int `json:"endings_observed,omitempty"`
+	// ContextExhaustedStreams is how many answered streams stopped because
+	// the sequence ran out of context, not because the token cap was reached
+	// (lead, 2026-09-19). Counted from PromptRecord.Truncated.
+	//
+	// It is disjoint from CappedStreams, not a subset of it: a stream that
+	// ran out of context did not reach MaxTokens, which is what CappedStreams
+	// counts. The two plus the streams that finished on their own add up to
+	// EndingsObserved. A renderer reads either count directly and never
+	// subtracts — a subset would mean every renderer had to remember to, and
+	// the one that forgot would print the sentence this field exists to
+	// prevent.
+	//
+	// llama-server reports "limit" for both, so without this the card would
+	// say "4 of 4 hit the cap" about a run that filled its context — the
+	// same sentence for two different problems, and only one of them is
+	// fixed by asking for fewer tokens.
+	//
+	// 0 is "none observed", and on the OpenAI-compatible path it is always
+	// 0 because that path cannot express the distinction (PromptRecord.
+	// Truncated says why). A renderer must not read 0 here as proof the
+	// streams hit the cap; it may only read a non-zero count as proof some
+	// did not.
+	ContextExhaustedStreams int `json:"context_exhausted_streams,omitempty"`
 }
 
 // ProbeSummary is what the run measured about itself before it measured the
@@ -1014,6 +1037,27 @@ type PrefillPoint struct {
 	PromptN  int     `json:"prompt_n"`
 	PromptMs float64 `json:"prompt_ms"`
 	TTFTMs   float64 `json:"ttft_ms,omitempty"`
+	// CacheN is how many of this point's tokens the server took from its
+	// prefix cache instead of evaluating — timings.cache_n, the same figure
+	// ReplayProbe carries and the same one CacheSummary is built from.
+	//
+	// The probe's prompts are generated so that no two of them, and none of
+	// the published set, share a prefix, precisely so that every point is a
+	// cold prefill. A point that comes back with CacheN > 0 says that
+	// assumption did not hold on this server, and a fit through it is a fit
+	// through a cache lookup: llama-server's cache_prompt defaults to true
+	// and it routes a request to the slot with the longest common prefix, so
+	// a hit is the scheduler working as designed, not a fluke. Recording it
+	// is what lets a fit refuse instead of reporting a flattering slope
+	// (lead, 2026-09-19).
+	//
+	// 0 is both "no hit" and "the engine reports no cache figure at all".
+	// The two are told apart the way the rest of the schema tells them
+	// apart: a point exists only because a server answered, and an engine
+	// with no cache_n leaves every point at 0, which is also what a
+	// correctly cold probe looks like. A fit refused on this ground names
+	// the point.
+	CacheN int `json:"cache_n,omitempty"`
 }
 
 // ReplayProbe is the longer probe prompt sent a second time, to see what this
@@ -1050,6 +1094,29 @@ type PromptRecord struct {
 	// not an estimate. What truncation costs is the late-run behaviour
 	// (thermal, cache growth), not the rate's validity.
 	Cut bool `json:"cut,omitempty"`
+	// Truncated is llama-server's own `truncated` field, recorded verbatim
+	// beside FinishReason (lead, 2026-09-19). It does NOT mean the prompt
+	// was cut down to fit: its only meanings upstream are that the sequence
+	// ran out of context capacity during generation with context shift off
+	// (generation stops, and stop_type becomes "limit" in the same breath),
+	// or that the context-shift path evicted the early KV cells and carried
+	// on with them gone.
+	//
+	// It exists here because stop_type == "limit" is set by four different
+	// paths — context capacity, the n_predict budget, the indentation limit
+	// and the time limit — so the word alone cannot say whether the token
+	// cap ended a stream. The pair can: "limit" with Truncated false is the
+	// cap, "limit" with Truncated true is the context running out, which is
+	// a different fact with a different fix, and a card that calls the
+	// second one a cap is stating a condition that did not hold.
+	//
+	// Only the native /completion path carries it. The OpenAI-compatible
+	// path collapses eos and word into "stop" and all four limit paths into
+	// "length", and has no field for this at all — so on a chat-path run it
+	// is false because nothing said otherwise, never because something did.
+	// That is a reason to prefer the raw path for measurement, and it is
+	// recorded so a reader can tell which kind of tape they have.
+	Truncated bool `json:"truncated,omitempty"`
 	// Endpoint is the server path the request went to (TTP-55, 2026-09-14):
 	// EndpointChat, the default, or EndpointCompletion for a raw
 	// /completion request whose prompt was sent verbatim with no template.
