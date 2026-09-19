@@ -616,8 +616,37 @@ type AggregateTimings struct {
 	AggregatePredictedPerSecond float64 `json:"aggregate_predicted_per_second"` // TotalPredictedN / decode window
 	AggregatePromptPerSecond    float64 `json:"aggregate_prompt_per_second"`
 	PerStreamPredictedPerSecond float64 `json:"per_stream_predicted_per_second"` // mean of streams
-	TTFTp50Ms                   float64 `json:"ttft_p50_ms"`
-	TTFTp95Ms                   float64 `json:"ttft_p95_ms"`
+	// The window in which every answered stream was decoding at once, and
+	// what was produced inside it (TTP-138, lead, 2026-09-19).
+	//
+	// AggregatePredictedPerSecond runs from the first token of the run to the
+	// last, which stops being one concurrency the moment a stream finishes
+	// early: the tail is the survivors, and the figure is a mean across two
+	// different machines. Measured on a four-stream run whose answers were
+	// allowed to end where the model was finished — 3102, 1455, 2050 and 1328
+	// tokens:
+	//
+	//	over the whole wall     138.0 aggregate · 42.9 each · 4 x 42.9 = 171.8
+	//	over the all-four window 148.6 aggregate · 37.1 each · 4 x 37.1 = 148.4
+	//
+	// The first cannot be reconciled with its own per-stream figure, and
+	// `ragged_aggregate` exists to say so. The second reconciles by
+	// construction. And the same box, capped so every stream ended together,
+	// reports 148 — so 148 is the machine and 138 was the arithmetic.
+	//
+	// A throughput figure must not move because the answers happened to have
+	// different lengths. This is the one that does not.
+	//
+	// The whole-wall figures above stay exactly as they are: they are the
+	// honest answer to how long the run took, they are what a clip replays
+	// against, and published runs carry them. 0 here = not computed, which is
+	// every tape older than the field and any run of one stream, where the
+	// window is the run.
+	ConcurrentWindowMs           float64 `json:"concurrent_window_ms,omitempty"`
+	ConcurrentPredictedN         int     `json:"concurrent_predicted_n,omitempty"`
+	ConcurrentPredictedPerSecond float64 `json:"concurrent_predicted_per_second,omitempty"`
+	TTFTp50Ms                    float64 `json:"ttft_p50_ms"`
+	TTFTp95Ms                    float64 `json:"ttft_p95_ms"`
 	// SlotsBusyMax is the highest number of busy slots observed via /slots.
 	SlotsBusyMax int `json:"slots_busy_max,omitempty"`
 	// PeakDecodingStreams is the most answered streams that were decoding at
@@ -871,6 +900,28 @@ type LimitSummary struct {
 	// until the slowest live stream had MinTokens, so on that box the run is
 	// longer than was asked for and the card should say so.
 	CutAt time.Duration `json:"cut_at,omitempty"`
+	// CappedStreams is how many answered streams stopped because they reached
+	// MaxTokens rather than because the model had finished (TTP-135, lead,
+	// 2026-09-19).
+	//
+	// The clock has CutAt and the card says when it fired. The cap had
+	// nothing: a run whose every stream was guillotined mid-word rendered as
+	// `1024 out`, which is exactly what a run that wrote 1024 tokens and
+	// stopped looks like. Measured on a four-stream take whose tails were
+	// "func New", "(e.g", "created_at` efficiently." and "100 milliseconds." —
+	// four of four capped, and the card said nothing, because the only
+	// existing caveat for it (answerCutWarning) fires solely when every
+	// predicted token was reasoning and so cannot fire with thinking off.
+	//
+	// The per-request finish reason has always been in the tape. This is the
+	// count a renderer can reach, since a renderer reads a RunSummary.
+	CappedStreams int `json:"capped_streams,omitempty"`
+	// EndingsObserved is how many answered streams reported why they stopped.
+	// It is what makes CappedStreams readable: 0 capped beside 4 observed is
+	// an observed none, while 0 beside 0 is a tape that cannot say — the same
+	// pairing ShortStreams has with MinPredictedN. An engine that reports no
+	// finish reason leaves both 0 and the card prints `?`.
+	EndingsObserved int `json:"endings_observed,omitempty"`
 }
 
 // ProbeSummary is what the run measured about itself before it measured the
