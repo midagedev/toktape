@@ -547,14 +547,28 @@ case "$href" in *engine=ik_llama.cpp*) ;; *) die "the streams chip did not accum
 grep -q 'class="v">c10fbbcc<' "$work/eng.html" || die "the engine chip carries no build"
 grep -q '>linux</a>' "$work/eng.html" || die "the row carries no OS chip"
 # The caveat chip links at the reasons; the run page carries the anchor.
-if grep -q '"caveat_count":1' "$work/row.json"; then
+#
+# 2026-09-19: this used to read `grep '"caveat_count":1'` and to assert the
+# absent case by grepping the whole front page for `#caveats`. Both halves
+# were wrong for the same reason — they described the fixture rather than
+# the rule. A new caveat rule (the card round's ragged_aggregate) moved the
+# hero's count from 1 to 2 and the gate started asserting *absence* for a
+# run that has two of them, while the listing holds every earlier run this
+# gate ever published, so any one of them carrying a caveat failed it. The
+# count is read, not matched, and the absent case asks about this run's own
+# id. Not a loosened assertion: both branches still fail on the defect they
+# were written for (a chip that does not link, an anchor that is missing,
+# and now a chip that appears for a run with nothing to qualify).
+caveats="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["index"].get("caveat_count", 0))' "$work/row.json")"
+if [ "$caveats" -gt 0 ]; then
   grep -q "/r/$id#caveats" "$work/front.html" || die "the caveat chip does not link at the reasons"
   grep -q 'id="caveats"' "$work/page.html" || die "the run page carries no caveats anchor"
 else
-  grep -q '#caveats' "$work/front.html" && die "a run with no caveats links at reasons"
+  grep -q "/r/$id#caveats" "$work/front.html" && die "a run with no caveats links at reasons"
   grep -q 'id="caveats"' "$work/page.html" && die "a run with no caveats carries the anchor"
   printf 'note: the hero currently has no caveats, so the caveat-link checks asserted absence\n'
 fi
+printf 'note: the hero run carries %s caveat(s)\n' "$caveats"
 # The VRAM floor: impossible empties the listing, 1 GB keeps the hero (whose
 # card says 48 GiB, and whose row must say so in bytes).
 grep -q '"vram_bytes": *[1-9]' "$work/row.json" || { cat "$work/row.json"; die "the hero row carries no vram_bytes"; }
