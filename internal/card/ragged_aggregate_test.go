@@ -76,10 +76,20 @@ func TestRaggedAggregateNamesTheTailAgainstTheWall(t *testing.T) {
 	if ragged == nil {
 		t.Fatalf("Caveats = %+v, want ragged_aggregate: the window figure does not un-rag the run", got)
 	}
-	for _, want := range []string{"4", "3600 ms", "16552 ms", "58.0", "66.7"} {
+	// Re-pinned stronger, 2026-09-19 (FAIL-first above: the sentence as first
+	// authored named "3600 ms" and a bare "58.0"). Both rates must carry
+	// "tok/s" — a caveat that exists so a reader can check arithmetic may not
+	// state two of its four figures without a unit — and the window and wall
+	// must be spelled the way the Streams row three lines above spells the
+	// same window, in seconds, because one card saying a figure two ways is
+	// the defect this caveat is about.
+	for _, want := range []string{"4", "3.6 s", "16.6 s", "58.0 tok/s", "66.7 tok/s"} {
 		if !strings.Contains(ragged.Text, want) {
 			t.Errorf("ragged_aggregate sentence = %q, which does not name %q", ragged.Text, want)
 		}
+	}
+	if strings.Contains(ragged.Text, "3600 ms") {
+		t.Errorf("ragged_aggregate sentence = %q, spelling the window in ms disagrees with the Streams row", ragged.Text)
 	}
 	if strings.Contains(ragged.Text, "cannot say how long") {
 		t.Errorf("ragged_aggregate sentence = %q, a tape that carries the window can say", ragged.Text)

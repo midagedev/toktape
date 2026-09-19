@@ -469,15 +469,25 @@ func RaggedClauseShort(s *tape.RunSummary) string {
 // their product, and the aggregate the card printed instead — now with the
 // mechanism named and the tail's length honestly declared unknown, rather
 // than the old sentence's shrug that said nothing about the shape at all.
+//
+// The window branch's figures carry their units and the row's own spelling
+// (lead, 2026-09-19, the same day it was authored): it first shipped with
+// formatRate, which is unitless because every row that uses it appends
+// "tok/s" itself, so the sentence read "58.0 over the whole wall" — two
+// bare numbers in a caveat whose entire job is that a reader can check the
+// arithmetic. formatMs was the same mistake one level down: it spelled the
+// window "3600 ms" while the Streams row three lines above spelled the same
+// number "3.6 s", and one card saying a figure two ways is what this one
+// disputes about throughput.
 func raggedAggregateText(s *tape.RunSummary) string {
 	n := streamsSent(s)
 	a := s.Aggregate
 	if a.ConcurrentWindowMs > 0 {
 		return fmt.Sprintf(
 			"ragged run: all %d decoded together for only %s of the %s wall — %s over the whole wall, %s while they overlapped",
-			n, formatMs(a.ConcurrentWindowMs), formatMs(a.WallMs),
-			formatRate(a.AggregatePredictedPerSecond),
-			formatRate(a.ConcurrentPredictedPerSecond))
+			n, formatSeconds(a.ConcurrentWindowMs), formatSeconds(a.WallMs),
+			formatRateUnit(a.AggregatePredictedPerSecond),
+			formatRateUnit(a.ConcurrentPredictedPerSecond))
 	}
 	per := a.PerStreamPredictedPerSecond
 	return fmt.Sprintf(

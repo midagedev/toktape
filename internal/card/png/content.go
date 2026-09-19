@@ -824,6 +824,17 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 	// spelling of it would fit. The steps are written out rather than
 	// derived by trailingPartsLine, which only knows how to drop whole
 	// parts.
+	//
+	// The same rule, one rung further down (lead, 2026-09-19): the endings
+	// pill's both spelling — "cap 3 of 4 · ctx 1", 144 px — leaves 152 px
+	// here on the reference fixture, 24 short of "all in VRAM · 46.6 GiB",
+	// and the chain used to fall to the word alone, dropping the measured
+	// figure for the derived one. The layout word is derived from the
+	// placement and the bar under this line already draws the shape; the
+	// placed figure is measured and is on nothing else the reader sees. So
+	// below "word · number" the word goes and the number stays, down to the
+	// bare figure; the word alone is the floor only for a placement with no
+	// placed figure at all.
 	placedPart := placedStr + " placed"
 	word := layoutWord(s.Placement)
 	var spellings []string
@@ -842,6 +853,8 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 		// The number without its noun. Not offered when the figure is "?":
 		// a bare "?" on this line names nothing.
 		add(word, placedStr)
+		add(placedPart)
+		add(placedStr)
 	}
 	add(word)
 	c.sum = fallbackLine{preferred: spellings[0], fallbacks: spellings[1:]}
@@ -866,7 +879,7 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 		// "! answer cut" warning line (TTP-20, 2026-09-13).
 		c.pills = append(c.pills, p)
 	}
-	if p, ok := cappedPill(s); ok {
+	if p, ok := limitPill(s); ok {
 		// TTP-135 (2026-09-19): the text card's Context row carries the
 		// clause; the pill is the PNG's form of it. Only when endings were
 		// observed, so the ordinary card keeps its pill count.
@@ -941,29 +954,34 @@ func answerCutPill(s *tape.RunSummary) (pill, bool) {
 	return pill{text: "answer cut", col: colBad}, true
 }
 
-// cappedPill counts the streams the token cap ended, against the endings
-// observed (TTP-135, 2026-09-19) — "4 of 4 hit the cap", the text card's
-// Context row clause in the pill row's voice, not a bare flag: a reader
-// asking "was the whole run guillotined or one long-winded stream" needs
-// the denominator. Warn rather than Bad: the capped tokens are real tokens,
+// limitPill counts the streams a limit ended, against the endings observed
+// (TTP-135, 2026-09-19) — "cap 4 of 4", "ctx full 4 of 4", "cap 3 of 4 ·
+// ctx 1" — the text card's Context row clause in the pill row's voice, not a
+// bare flag: a reader asking "was the whole run guillotined or one
+// long-winded stream" needs the denominator. The spellings are
+// card.EndingsClauseShort's, so the two renderers cannot disagree about the
+// counts or about which case they are in — the ragged clause was authored
+// twice in this repo and the two cards ended up saying opposite things about
+// one run. Warn rather than Bad: the capped tokens are real tokens,
 // truncated by a limit the user set — a caution about where the run stopped,
 // not a defect in the figures beside it. Silent when EndingsObserved is 0:
 // an engine that never said why streams stopped leaves the count unreadable,
 // and no pill may invent it.
-func cappedPill(s *tape.RunSummary) (pill, bool) {
-	if s.Limit.CappedStreams <= 0 || s.Limit.EndingsObserved <= 0 {
+func limitPill(s *tape.RunSummary) (pill, bool) {
+	// The clause, not a sentence built here (lead, 2026-09-19). The other
+	// four pills are a label and a value — maj/tok 0.0, cache warm 25% hit,
+	// contended no, throttled no — and a sentence among them reads as an
+	// alarm rather than a reading, on a card that states conditions and does
+	// not warn. It is also the shortest form that keeps the denominator,
+	// which the pill row needs: the row shares its line with the placement
+	// summary, and the sentence pushed "46.6 GiB placed" — an observed
+	// figure — off the card to make room for itself.
+	clause := card.EndingsClauseShort(s.Limit)
+	if clause == "" {
 		return pill{}, false
 	}
-	// "cap 4 of 4", not the text card's whole sentence (lead, 2026-09-19).
-	// The other four pills are a label and a value — maj/tok 0.0, cache warm
-	// 25% hit, contended no, throttled no — and a sentence among them reads
-	// as an alarm rather than a reading, on a card that states conditions
-	// and does not warn. It is also the shortest form that keeps the
-	// denominator, which the pill row needs: the row shares its line with
-	// the placement summary, and the sentence pushed "46.6 GiB placed" —
-	// an observed figure — off the card to make room for itself.
 	return pill{
-		text: fmt.Sprintf("cap %d of %d", s.Limit.CappedStreams, s.Limit.EndingsObserved),
+		text: clause,
 		col:  colWarn,
 		bg:   alpha(colDim, 0x2b),
 	}, true

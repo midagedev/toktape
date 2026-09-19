@@ -542,25 +542,34 @@ func TestQueuedStreamsAreNamed(t *testing.T) {
 // The capped cases extend the table; the FAIL-first evidence for the clause
 // is context_cap_test.go's row-level gates, which failed against the
 // four-argument signature of the same day.
+//
+// 2026-09-19 (again, same day): the endings counts arrive as one
+// tape.LimitSummary now that there are three of them, and the table gained
+// the context-exhaustion spellings. The FAIL-first evidence for those is
+// context_cap_test.go's TestContextRowNamesContextExhaustion, which failed
+// against the two-count signature of the same day.
 func TestContextString(t *testing.T) {
 	cases := []struct {
 		name                   string
 		ctx, in, out, thinking int
-		capped, endings        int
+		limit                  tape.LimitSummary
 		want                   string
 	}{
-		{"no thinking", 16384, 43, 96, 0, 0, 0, "16384 (43 in / 96 out)"},
-		{"all thinking", 16384, 43, 96, 96, 0, 0, "16384 (43 in / 96 out · 96 thinking)"},
-		{"some thinking", 16384, 43, 240, 96, 0, 0, "16384 (43 in / 240 out · 96 thinking)"},
-		{"unknown ctx", 0, 43, 96, 0, 0, 0, "? (43 in / 96 out)"},
-		{"all four capped", 16384, 43, 96, 0, 4, 4, "16384 (43 in / 96 out · 4 of 4 hit the cap)"},
-		{"one of four capped", 16384, 43, 96, 0, 1, 4, "16384 (43 in / 96 out · 1 of 4 hit the cap)"},
-		{"capped but no endings observed", 16384, 43, 96, 0, 4, 0, "16384 (43 in / 96 out)"},
-		{"thinking and capped together", 16384, 43, 96, 96, 4, 4, "16384 (43 in / 96 out · 96 thinking · 4 of 4 hit the cap)"},
+		{"no thinking", 16384, 43, 96, 0, tape.LimitSummary{}, "16384 (43 in / 96 out)"},
+		{"all thinking", 16384, 43, 96, 96, tape.LimitSummary{}, "16384 (43 in / 96 out · 96 thinking)"},
+		{"some thinking", 16384, 43, 240, 96, tape.LimitSummary{}, "16384 (43 in / 240 out · 96 thinking)"},
+		{"unknown ctx", 0, 43, 96, 0, tape.LimitSummary{}, "? (43 in / 96 out)"},
+		{"all four capped", 16384, 43, 96, 0, tape.LimitSummary{CappedStreams: 4, EndingsObserved: 4}, "16384 (43 in / 96 out · 4 of 4 hit the cap)"},
+		{"one of four capped", 16384, 43, 96, 0, tape.LimitSummary{CappedStreams: 1, EndingsObserved: 4}, "16384 (43 in / 96 out · 1 of 4 hit the cap)"},
+		{"capped but no endings observed", 16384, 43, 96, 0, tape.LimitSummary{CappedStreams: 4}, "16384 (43 in / 96 out)"},
+		{"thinking and capped together", 16384, 43, 96, 96, tape.LimitSummary{CappedStreams: 4, EndingsObserved: 4}, "16384 (43 in / 96 out · 96 thinking · 4 of 4 hit the cap)"},
+		{"all four ran out of context", 16384, 43, 96, 0, tape.LimitSummary{ContextExhaustedStreams: 4, EndingsObserved: 4}, "16384 (43 in / 96 out · 4 of 4 ran out of context)"},
+		{"three capped, one exhausted", 16384, 43, 96, 0, tape.LimitSummary{CappedStreams: 3, ContextExhaustedStreams: 1, EndingsObserved: 4}, "16384 (43 in / 96 out · 3 of 4 hit the cap · 1 ran out of context)"},
+		{"exhausted but no endings observed", 16384, 43, 96, 0, tape.LimitSummary{ContextExhaustedStreams: 4}, "16384 (43 in / 96 out)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := contextString(tc.ctx, tc.in, tc.out, tc.thinking, tc.capped, tc.endings); got != tc.want {
+			if got := contextString(tc.ctx, tc.in, tc.out, tc.thinking, tc.limit); got != tc.want {
 				t.Errorf("contextString = %q, want %q", got, tc.want)
 			}
 		})

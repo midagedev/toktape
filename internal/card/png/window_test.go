@@ -247,6 +247,132 @@ func TestPlacementSummaryKeepsItsFigureBesideFivePills(t *testing.T) {
 	}
 }
 
+// The limit pill's three spellings and its silence (lead, 2026-09-19). The
+// text card's Context row spells the same counts out in full; the pill is
+// that clause in the pill row's voice, and the two cannot disagree about
+// which streams ended how — the counts come from one place (see
+// TestBothRenderersUseOneEndingsClause).
+func TestLimitPillSpellings(t *testing.T) {
+	pillTexts := func(s *tape.RunSummary) []string {
+		var out []string
+		for _, p := range contentOf(t, s).pills {
+			out = append(out, p.text)
+		}
+		return out
+	}
+	has := func(s *tape.RunSummary, want string) bool {
+		for _, txt := range pillTexts(s) {
+			if txt == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	capped := card.Example()
+	capped.Limit.CappedStreams, capped.Limit.EndingsObserved = 4, 4
+	if !has(capped, "cap 4 of 4") {
+		t.Errorf("pills = %v, want the capped-only spelling \"cap 4 of 4\"", pillTexts(capped))
+	}
+
+	ctx := card.Example()
+	ctx.Limit.ContextExhaustedStreams, ctx.Limit.EndingsObserved = 4, 4
+	if !has(ctx, "ctx full 4 of 4") {
+		t.Errorf("pills = %v, want the context-only spelling \"ctx full 4 of 4\"", pillTexts(ctx))
+	}
+
+	both := card.Example()
+	both.Limit.CappedStreams, both.Limit.ContextExhaustedStreams, both.Limit.EndingsObserved = 3, 1, 4
+	if !has(both, "cap 3 of 4 · ctx 1") {
+		t.Errorf("pills = %v, want the both spelling \"cap 3 of 4 · ctx 1\"", pillTexts(both))
+	}
+
+	// EndingsObserved == 0 is the tape that cannot say, and no pill may
+	// invent it — for either count.
+	silent := card.Example()
+	silent.Limit.CappedStreams, silent.Limit.ContextExhaustedStreams = 4, 4
+	if got, want := len(pillTexts(silent)), len(pillTexts(card.Example())); got != want {
+		t.Errorf("a tape that cannot say why streams stopped added a pill: %d pills, want the ordinary %d", got, want)
+	}
+}
+
+// The placement summary keeps its measured figure beside the "both" spelling
+// too (lead, 2026-09-19): "cap 3 of 4 · ctx 1" is the widest the pill gets,
+// and the row it shares must still name the placed figure whole. If this
+// ever fails, the measurement belongs in a report, not a smaller type size.
+func TestPlacementSummaryKeepsItsFigureBesideTheBothSpelling(t *testing.T) {
+	s := card.ExampleWindow()
+	s.Limit.CappedStreams, s.Limit.ContextExhaustedStreams, s.Limit.EndingsObserved = 3, 1, 4
+	c, err := renderCanvas(s)
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	if n := len(contentOf(t, s).pills); n != 5 {
+		t.Fatalf("pills = %d, want the 5 this gate is about", n)
+	}
+	m, ok := c.markByID("memory.sum")
+	if !ok {
+		t.Fatal("memory.sum was never drawn")
+	}
+	if !strings.Contains(m.Text, "GiB") {
+		t.Errorf("placement summary = %q, want it to still name the placed figure", m.Text)
+	}
+	if strings.Contains(m.Text, "…") {
+		t.Errorf("placement summary = %q, want it shortened by a whole word, never cut inside a number", m.Text)
+	}
+}
+
+// The two renderers say the same thing about the same run (lead,
+// 2026-09-19): every spelling the pill prints, the text card's Context row
+// prints the same counts of, from one fixture. This is the endings counts'
+// form of TestBothRenderersUseOneRaggedClause — the ragged clause was
+// authored twice in this repo and the two renderers ended up saying opposite
+// things about one run, which is why shared clauses have one owner.
+func TestBothRenderersUseOneEndingsClause(t *testing.T) {
+	for name, s := range map[string]*tape.RunSummary{
+		"capped only": func() *tape.RunSummary {
+			s := card.Example()
+			s.Limit.CappedStreams, s.Limit.EndingsObserved = 4, 4
+			return s
+		}(),
+		"context only": func() *tape.RunSummary {
+			s := card.Example()
+			s.Limit.ContextExhaustedStreams, s.Limit.EndingsObserved = 4, 4
+			return s
+		}(),
+		"both": func() *tape.RunSummary {
+			s := card.Example()
+			s.Limit.CappedStreams, s.Limit.ContextExhaustedStreams, s.Limit.EndingsObserved = 3, 1, 4
+			return s
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			want := map[string]string{
+				"capped only":  "4 of 4 hit the cap",
+				"context only": "4 of 4 ran out of context",
+				"both":         "3 of 4 hit the cap · 1 ran out of context",
+			}[name]
+			if !strings.Contains(card.Text(s), want) {
+				t.Errorf("text card does not carry %q", want)
+			}
+			wantPill := map[string]string{
+				"capped only":  "cap 4 of 4",
+				"context only": "ctx full 4 of 4",
+				"both":         "cap 3 of 4 · ctx 1",
+			}[name]
+			found := false
+			for _, p := range contentOf(t, s).pills {
+				if p.text == wantPill {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("PNG pills do not carry %q beside the text card's %q", wantPill, want)
+			}
+		})
+	}
+}
+
 // The cap pill rejoins the row it sits in (vision, 2026-09-19): the same
 // fill as its four neighbours, with the colour kept for the text. Measured
 // on the first spelling: the warm fill made 111 pixels that appear nowhere

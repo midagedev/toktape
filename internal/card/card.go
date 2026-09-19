@@ -179,6 +179,36 @@ func wrapJoin(parts []string, sep string, avail int) []string {
 	return lines
 }
 
+// wrapJoinContinued is wrapJoin for a value whose parts are one bracketed
+// group: a line that continues keeps the separator at its end, so the row
+// says it is not finished (vision, 2026-09-19).
+//
+// wrapJoin drops the separator at the break, which is right for ENGINE,
+// FLAGS and the Streams block — each of their continuation lines starts a
+// complete clause, and a trailing mark on those would be noise. The Context
+// row is the one value that is a parenthesised group, so its first line ends
+// on an open bracket with nothing closing it and nothing saying more is
+// coming: measured as reading like a broken line rather than a continued
+// row, against the same row one character shorter, which fits and closes.
+// Closing the bracket on the first line instead would move the endings
+// clause outside the group, which is a different claim about what the
+// parentheses hold.
+//
+// The mark is the separator's own non-space text, so the row cannot invent
+// a punctuation the card does not use. A line with no room for it wraps
+// unmarked rather than overflowing: the bracket is a reading aid and the
+// column width is a contract.
+func wrapJoinContinued(parts []string, sep string, avail int) []string {
+	mark := strings.TrimRight(sep, " ")
+	lines := wrapJoin(parts, sep, avail)
+	for i := 0; i < len(lines)-1; i++ {
+		if Width(lines[i])+Width(mark) <= avail {
+			lines[i] += mark
+		}
+	}
+	return lines
+}
+
 // center left-pads s so it sits in the middle of w columns. pad fills the right.
 func center(s string, w int) string {
 	s = truncate(s, w)
@@ -388,10 +418,16 @@ func speedSection(s *tape.RunSummary) []string {
 		out = append(out, field("Draft", speedLabelW, " · ", parts...)...)
 	}
 
-	out = append(out, labelled("Context", speedLabelW, []string{
-		contextString(s.Server.CtxSize, promptTotal, t.PredictedN, reasoningTokens(s),
-			s.Limit.CappedStreams, s.Limit.EndingsObserved),
-	})...)
+	// The row wraps at its clause boundaries rather than truncating (lead,
+	// 2026-09-19): the both spelling of the endings clause is 66 columns of
+	// value against the 54 the gutter leaves, and a truncation there cuts the
+	// second count — the sentence the clause exists to say. Wrapping is what
+	// every other row that overflows already does (ENGINE, FLAGS, the Streams
+	// block), and contextParts hands the units over so the clause moves whole
+	// to the continuation line instead of breaking between its counts.
+	out = append(out, labelled("Context", speedLabelW,
+		wrapJoinContinued(contextParts(s.Server.CtxSize, promptTotal, t.PredictedN, reasoningTokens(s), s.Limit),
+			" · ", innerWidth-speedLabelW))...)
 
 	out = append(out, labelled("Prefix cache", speedLabelW, []string{cacheString(s.Cache)})...)
 
@@ -1022,6 +1058,79 @@ func DraftNMax(s *tape.RunSummary) string {
 	return strings.Join(parts, ",")
 }
 
+// EndingsClause is the words, not just the counts: what a renderer says
+// about how the answered streams ended — "4 of 4 hit the cap", "4 of 4 ran
+// out of context", or both joined. "" when the tape cannot say (no endings
+// observed) and when neither limit ended a stream.
+//
+// It lives here for the reason RaggedClause does (2026-09-19): the two
+// renderers authored the same sentence twice and drifted. The counts were
+// already shared — they come straight off tape.LimitSummary — but each
+// renderer spelled them itself, which is exactly the shape that made the
+// ragged clause look safe while the two cards said opposite things about one
+// run. The PNG asks for EndingsClauseShort instead of respelling these
+// figures; the two voices differ, the counts and the case selection cannot.
+//
+// The denominator is EndingsObserved in every spelling, and the two counts
+// are disjoint (a stream that ran out of context did not reach the cap), so
+// the "both" case names each against the same denominator rather than
+// nesting one inside the other: the denominator rides the first count and
+// the second stands alone — "3 of 4 hit the cap · 1 ran out of context" —
+// because "1 of 4" beside "3 of 4" says the same 4 twice and the counts
+// already sum to it. A lone exhausted count keeps its own denominator, or
+// "4 ran out of context" would be a count with no whole to be a part of.
+// Nothing is added when the tape cannot say, and no count is invented.
+func EndingsClause(l tape.LimitSummary) string {
+	if l.EndingsObserved <= 0 || (l.CappedStreams <= 0 && l.ContextExhaustedStreams <= 0) {
+		return ""
+	}
+	var parts []string
+	if l.CappedStreams > 0 {
+		parts = append(parts, fmt.Sprintf("%s of %s hit the cap",
+			formatInt(l.CappedStreams), formatInt(l.EndingsObserved)))
+	}
+	if l.ContextExhaustedStreams > 0 {
+		if l.CappedStreams > 0 {
+			parts = append(parts, fmt.Sprintf("%s ran out of context",
+				formatInt(l.ContextExhaustedStreams)))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s of %s ran out of context",
+				formatInt(l.ContextExhaustedStreams), formatInt(l.EndingsObserved)))
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// EndingsClauseShort is the same counts in the pill row's voice — "cap 4 of
+// 4", "ctx full 4 of 4", "cap 3 of 4 · ctx 1" — for the renderer whose line
+// will not hold the sentence. It lives beside the long form so the two
+// cannot drift: that drift is what this pair was extracted to stop.
+//
+// The same denominator rule as the long form: "ctx 1" alone beside "cap 3 of
+// 4" reads against the 4 that is already on the row, but a lone exhausted
+// count must carry its own — hence "ctx full", the pill's "of", in the
+// context-only spelling. Like the long form it is "" when the tape cannot
+// say, so the ordinary card keeps its pill count.
+func EndingsClauseShort(l tape.LimitSummary) string {
+	if l.EndingsObserved <= 0 || (l.CappedStreams <= 0 && l.ContextExhaustedStreams <= 0) {
+		return ""
+	}
+	var parts []string
+	if l.CappedStreams > 0 {
+		parts = append(parts, fmt.Sprintf("cap %s of %s",
+			formatInt(l.CappedStreams), formatInt(l.EndingsObserved)))
+	}
+	if l.ContextExhaustedStreams > 0 {
+		if l.CappedStreams > 0 {
+			parts = append(parts, fmt.Sprintf("ctx %s", formatInt(l.ContextExhaustedStreams)))
+		} else {
+			parts = append(parts, fmt.Sprintf("ctx full %s of %s",
+				formatInt(l.ContextExhaustedStreams), formatInt(l.EndingsObserved)))
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
 // contextString is the value of the Context row: the window the server was
 // started with and how much of it this run used.
 //
@@ -1041,18 +1150,34 @@ func DraftNMax(s *tape.RunSummary) string {
 //	hit the cap" — because a bare "1024 out" is exactly what a run that wrote
 //
 // 1024 tokens and stopped looks like, and a reader asking "was the whole run
-// guillotined or one long-winded stream" needs the denominator. Endings
-// observed == 0 means the engine never said why streams stopped: nothing is
-// added and nothing is guessed, and the row reads exactly as it did.
-func contextString(ctxSize, in, out, thinking, capped, endings int) string {
-	used := fmt.Sprintf("%s in / %s out", formatInt(in), formatInt(out))
+// guillotined or one long-winded stream" needs the denominator. The clause
+// grew its second and third spellings the same day the tape learned to tell
+// the cap from the context running out (EndingsClause): "limit" with
+// `truncated` set is a different problem with a different fix, and the row
+// says which it was. Endings observed == 0 means the engine never said why
+// streams stopped: nothing is added and nothing is guessed, and the row
+// reads exactly as it did.
+func contextString(ctxSize, in, out, thinking int, l tape.LimitSummary) string {
+	return strings.Join(contextParts(ctxSize, in, out, thinking, l), " · ")
+}
+
+// contextParts is contextString's value as its wrap units (lead, 2026-09-19):
+// the counts, the thinking clause, and the endings clause — each whole, never
+// split by a line break, because the endings clause is one decided sentence
+// and a break between its counts would print "3 of 4 hit the cap" and "1 ran
+// out of context" as two findings. The opening paren rides the first part and
+// the closing one the last, so a wrapped row closes where the value ends.
+func contextParts(ctxSize, in, out, thinking int, l tape.LimitSummary) []string {
+	parts := []string{fmt.Sprintf("%s in / %s out", formatInt(in), formatInt(out))}
 	if thinking > 0 {
-		used += " · " + formatInt(thinking) + " thinking"
+		parts = append(parts, formatInt(thinking)+" thinking")
 	}
-	if capped > 0 && endings > 0 {
-		used += fmt.Sprintf(" · %s of %s hit the cap", formatInt(capped), formatInt(endings))
+	if clause := EndingsClause(l); clause != "" {
+		parts = append(parts, clause)
 	}
-	return fmt.Sprintf("%s (%s)", formatInt(ctxSize), used)
+	parts[0] = formatInt(ctxSize) + " (" + parts[0]
+	parts[len(parts)-1] += ")"
+	return parts
 }
 
 // reasoningTokens is how many of the run's generated tokens were a thinking
