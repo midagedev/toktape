@@ -227,8 +227,21 @@ export function whereFor(url, scope, skipParam) {
     if (column === null) continue; // the gpu axis: membership, special-cased below
     const v = url.searchParams.get(param);
     if (v) {
+      // sessions is the one numeric axis in this list, and a value that is
+      // not a number used to bind NaN — which SQLite compares as NULL, so
+      // `?sessions=abc` answered "no runs" instead of "that is not a stream
+      // count" (lead, 2026-09-19). An empty answer to a question nobody
+      // asked is the silent fallback this file refuses everywhere else.
+      if (column === "sessions") {
+        if (!/^\d+$/.test(v)) {
+          return { where, args, error: fail(400, `bad sessions: ${JSON.stringify(v)}; a whole number of streams travels`) };
+        }
+        where.push(`${column} = ?`);
+        args.push(Number(v));
+        continue;
+      }
       where.push(`${column} = ?`);
-      args.push(column === "sessions" ? Number(v) : v);
+      args.push(v);
     }
   }
   // The GPU filter is membership in the per-card ids (TTP-124): a mixed rig
@@ -239,8 +252,14 @@ export function whereFor(url, scope, skipParam) {
     args.push(url.searchParams.get("gpu"));
   }
   if (skipParam !== "min_vram" && url.searchParams.get("min_vram")) {
+    // The same rule as sessions: NaN * GB is NaN, and a NaN threshold
+    // matches nothing rather than saying so (lead, 2026-09-19).
+    const raw = url.searchParams.get("min_vram");
+    if (!/^\d+(\.\d+)?$/.test(raw)) {
+      return { where, args, error: fail(400, `bad min_vram: ${JSON.stringify(raw)}; a number of gigabytes travels`) };
+    }
     where.push("vram_bytes >= ?");
-    args.push(Number(url.searchParams.get("min_vram")) * GB);
+    args.push(Number(raw) * GB);
   }
   // The params band (TTP-130): `size=<lower bound in B>` over
   // active_params. Anything outside the five bounds is a 400, never a

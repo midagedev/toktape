@@ -368,6 +368,16 @@ code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/?q=$q49")
 curl -fsS "$base/" >"$work/body" && grep -q 'name="q" maxlength="48"' "$work/body" ||
   { die "the search box carries no maxlength, so a person can type past the limit"; }
 
+# A numeric axis given something that is not a number refuses by name rather
+# than binding NaN, which SQLite compares as NULL — so these used to answer
+# "no runs", which is an answer to a question nobody asked (lead, 2026-09-19).
+for bad in "sessions=abc" "min_vram=abc"; do
+  code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?$bad")
+  [ "$code" = "400" ] || { cat "$work/body"; die "$bad was not refused (got $code)"; }
+done
+curl -fsS "$base/api/v1/runs?sessions=4&limit=1" >/dev/null || die "a real stream count was refused"
+curl -fsS "$base/api/v1/runs?min_vram=24&limit=1" >/dev/null || die "a real VRAM floor was refused"
+
 code=$(curl -s -o "$work/body" -w '%{http_code}' "$base/api/v1/runs?size=999")
 [ "$code" = "400" ] || { cat "$work/body"; die "an unknown size was not refused (got $code)"; }
 grep -q 'unknown size' "$work/body" || { cat "$work/body"; die "the size refusal does not name the size"; }
