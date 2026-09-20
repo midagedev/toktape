@@ -102,81 +102,52 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **The record has a home on the web.** `toktape publish` puts a run at
-    tape.midagedev.com, where it replays in the browser from the record itself
-    — not a video of it — and the card that qualifies the figure rides along.
+    **The first try is the release.** The default command used to need luck:
+    on a real 4-slot server it lost streams to the context, measured a cached
+    prompt on the second run, and spent the whole clock in prefill. One planner
+    now decides prompt length, answer cap and clock together, before the first
+    request, from what it measured on your server — and prints that decision as
+    one `plan:` line.
 
-    The run file's extension changed with it. A recording is now `run.toktape`,
-    because Charm's VHS uses `.tape` for the opposite kind of file, a script of
-    what to type, and a record that says "this really happened" cannot wear the
-    extension that means staging. Both are read everywhere, so a `~/.toktape/runs`
-    full of the old name keeps working and nothing has to be renamed.
+    **What the plan does.** Every run salts its prompts, so a prefix cache never
+    answers for the machine. Prompts are counted by the server's own tokenizer
+    and trimmed to the tightest of two ceilings: a quarter of the clock, using
+    the prefill rate measured with as many prompts at once as the run will send
+    (several prefills at once ran at a fifth of the one-stream rate on the box
+    this was built on — it is measured, not assumed), and the slot's context
+    less the answer. The trim converges to within 3% in tokens, because equal
+    characters were 4901 to 7458 tokens on one tokenizer.
 
-    **What the site is.** The listing is a feed at every width: each run leads its
-    row and replays in place as it scrolls past, one across on a phone and two or
-    three on a desktop. Newest first, with no rank column and no score — a
-    run's caveats travel with it, and a search result that drops them is a
-    leaderboard with the sorting removed. An order is there when you ask for it
-    (`?sort=decode`), and the total line says in words that it is putting
-    different models, streams and quantisations side by side.
+    **Ollama, LM Studio and vLLM work on the first try too.** Bare `toktape`
+    finds ports 11434 and 1234, and `--model <id>` picks a model when the server
+    lists several (the card names the one that was sent). These servers count
+    tokens only in a closing `usage` message, which a stream cut by the clock
+    never sends, so the card printed `?`. toktape now sends two short requests
+    to measure decode and prefill, then sizes prompts and the cap so streams end
+    on their own inside the clock. vLLM's `max_model_len` is read as the
+    context and its count is requested on every chunk; the server's prompt
+    count is recorded; `system_fingerprint` names the engine. Measured on
+    Ollama 0.34 and vLLM 0.29: about twenty seconds, a rate on the card.
 
-    **The figures behind a rate.** A row used to carry the rate and the hardware,
-    which is not enough to say why two runs of one model on one GPU differ. It now
-    carries the workload (`P238 · G214 · cache 0%`), the configuration (`fa on ·
-    kv q8_0`, `offload partial`), the size (`35B · 3.5B active`) and, beside the
-    measured prompt and deliberately quieter than it, the context window the
-    server reserved. That order is the point: a research pass found the
-    reservation is near the bottom of what moves a decode rate on a short prompt,
-    and the things above it are stream count, generated length, spill, weight
-    bits, speculative acceptance, throttling and a cold mmap.
+    **A run that went wrong says why, and what to type.** Failed streams open
+    the closing lines with the server's own words and one lever that follows
+    the engine — `--max-model-len` on vLLM, `OLLAMA_CONTEXT_LENGTH` on Ollama,
+    `-c` on llama-server. A run that finished but is no measurement says so
+    before the file list. An unknown flag prints its error, the nearest flag and
+    one pointer instead of 123 lines of help. A 401 is answered as a 401, and a
+    connection closed mid-answer no longer reads `unexpected EOF`. Nineteen
+    first-run scenarios are a gate (`TestFirstRunMatrix`).
 
-    Size bands stand on active parameters, so a 35B mixture that touches 3.5B per
-    token is searched as the 3.5B model a decode experiences, not grouped with
-    dense 35B weights it has nothing in common with.
+    **Take a run down, or host the hub yourself.** `toktape publish --delete <id>`
+    removes a published run; an anonymous upload's delete key is kept in
+    `~/.toktape/published.json` so it is not lost with the scrollback.
+    `service = "https://…"` in `config.toml` (or `TOKTAPE_SERVICE`, or `--url`)
+    points every verb at your own deployment — `web/README.md` has the steps —
+    and the journal token is sent only to the service it belongs to.
 
-    **Read it from the terminal.** `toktape runs` prints the site's listing as a
-    table and takes the same filters, `toktape show <id> --save run.toktape`
-    fetches one record so `toktape card` can draw it again locally, and
-    `toktape reindex <id>` recomputes a published run's search row from the record
-    the service already holds — which is how a run published last week gains the
-    fields a newer toktape knows how to derive. Reading is free and needs no
-    token; recording is not.
-
-    **Any OpenAI-compatible server.** A server that does not answer `/props` is
-    attached through `/v1/models` (`--engine-kind auto|llama|openai`), and when it
-    reports no timings of its own the recorder's clock becomes the record and says
-    so — `client-timed` on the card and a caveat on the run. Chunks are not tokens,
-    so the count comes from the final chunk's `usage`; without one the rate prints
-    `?` rather than a number derived from chunk arrivals.
-
-    **What does not go up.** The published view was already dropping the machine's
-    name, the listening host and every absolute path — including the parsed copy of
-    argv that the card actually prints, which is where a model path escaped once.
-    It now also drops the UTC offset: the instant is published, the time zone is
-    not. `+09:00` beside a GPU model and a quantisation narrows a person further
-    than any of them alone, and nobody typed it — `time.Time` carried it. A
-    publisher who wants "benchmarked at 2am local" in the record writes it in the
-    title, which is the same test the host label passes. `toktape publish
-    --dry-run` prints the whole record that would go up, field by field.
-
-    **The card qualifies three figures it used to leave quotable.** A prefill
-    rate is a measurement of a prefill, and a prompt the server had already
-    cached is not one — a run whose prompt came back mostly out of the prefix
-    cache now says which part of it did, beside the rate rather than in another
-    row. A concurrent run whose streams did not share a decode window says so at
-    the Decode row itself, where the arithmetic is: four streams at 42.1 tok/s
-    are not the 144 aggregate, and the sentence that explains it is now next to
-    both numbers instead of five rows away. And a p50 beside a p95 computed from
-    two samples prints as one figure, because two percentiles of two samples are
-    a pair only in the typography.
-
-    New since v0.2.4 or earlier? The
-    [v0.2.6 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.6)
-    cover the four-card layout and the de-duplicated figures, the
-    [v0.2.5 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.5)
-    engines that name themselves and the Windows zips, and the
-    [v0.2.0 notes](https://github.com/midagedev/toktape/releases/tag/v0.2.0)
-    the release where `-n` changed meaning.
+    The closing lines stopped advertising: they name the commands
+    (`→ Markdown:`, `→ Replay:`) and nothing else. CONTRIBUTING says forks and
+    AI-written pull requests are welcome.
   footer: |
     ## Install
 

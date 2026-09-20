@@ -377,6 +377,16 @@ timings come back, so the recorder's own clock is the record, the card says
 `client-timed` beside the rate, and you compare it only with other
 client-timed runs.
 
+Ollama (port 11434) and LM Studio (1234) are found without `--url`, and
+`--model <id>` picks one when the server lists several. These servers count
+tokens only in a closing `usage` message, which a stream cut by the clock
+never sends — so toktape first sends two short requests to measure decode
+and prefill, then sizes the prompts and the answer cap so every stream ends
+on its own inside the clock. vLLM's `max_model_len` is read as the context,
+and its token count is requested on every chunk. Measured on Ollama 0.34 and
+vLLM 0.29: the default command finishes in about twenty seconds with a rate
+on the card.
+
 ## The `.toktape` format
 
 Gzipped JSON, one file per run, schema version 1 (plain JSON is read too). It

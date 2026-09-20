@@ -171,6 +171,14 @@ func (r *run) capAnswersToSlot(ctx context.Context, reqs []server.StreamRequest,
 	}
 	r.limit.MaxTokens = allowed
 	r.opts.MaxTokens = allowed
+	if !r.limit.MaxTokensNamed && r.calibration() != nil {
+		// Lead, 2026-09-21: a first run on vLLM opened with "n-predict 8000
+		// capped to 6478" — a warning about a flag nobody typed — and then
+		// ran with the calibrated cap of 239, which the plan line reports.
+		// When the calibration is about to set the cap, this figure is never
+		// the one the run uses, so it is not announced.
+		return nil
+	}
 	if r.kind == tape.ServerOpenAI {
 		// The same numbers, the vocabulary the server's user has: a vLLM's
 		// context limit is a model property, not a slot (TTP-165).
