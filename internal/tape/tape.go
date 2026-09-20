@@ -197,6 +197,47 @@ type RunSummary struct {
 	// and the streams stay distinct from their first token. A prompt shorter
 	// than this is sent whole; the number is a cap, not a pad.
 	PromptTrimChars int `json:"prompt_trim_chars,omitempty"`
+	// PromptTrimTokens is the token length every set prompt was cut to, when
+	// the run sized them with the server's own tokenizer (lead, 2026-09-20).
+	// 0 means it did not: no /tokenize route, or no trim at all.
+	//
+	// PromptTrimChars cut every prompt at one character count, and four
+	// takes on the reference box showed what that buys: 18116 characters
+	// each, and 4901, 5793, 6828 and 7458 tokens — the set is prose, logs
+	// and code, and their bytes-per-token ran from 2.43 to 3.70 on one
+	// tokenizer. The streams did unequal work, and the densest one overran
+	// an 8192-token slot the other three fitted. Equal work is equal tokens,
+	// and only the server can count them.
+	//
+	// When this is set each prompt has its own character length and
+	// PromptTrimChars is 0. The verifier's question survives the change,
+	// because it never needed the tokenizer: what was sent must be a
+	// character prefix of this binary's copy of the prompt at that index
+	// (after PromptSalt is taken off the front). How long a prefix is this
+	// run's business; that it is a prefix of the published text is the claim.
+	PromptTrimTokens int `json:"prompt_trim_tokens,omitempty"`
+	// PromptSalt is the line this run put in front of every set prompt, so
+	// that no server has seen these bytes before (lead, 2026-09-20; the
+	// user's question of the same day: would a timestamp in the prompt not
+	// defeat the cache). "" means the prompts went unsalted.
+	//
+	// The set is fixed text, and a server this tool has measured before
+	// holds it in its prefix cache. The second run against the same server
+	// came back "5 prompt tokens", and on an engine that reports no cache_n
+	// the card beside it said "0% hit". A cached prefill is not the
+	// machine's, and the run cannot tell unless the engine volunteers it;
+	// so the run makes the hit impossible instead of hoping to detect it.
+	// The probe has carried its own salt for the same reason (ProbeSummary
+	// .Salt).
+	//
+	// It is recorded whole, newline included, exactly as sent: the verifier
+	// strips these bytes from the front before comparing, and a salt it has
+	// to reconstruct from a clock is a salt it can get wrong.
+	PromptSalt string `json:"prompt_salt,omitempty"`
+	// Plan is what the run decided before its first request, and which
+	// limit decided it (lead, 2026-09-20). nil on a tape from before the
+	// field, and on a run that planned nothing (a user's own prompts).
+	Plan *RunPlan `json:"plan,omitempty"`
 	// Tag and Note label the experiment this run belongs to (`--tag ngl=40
 	// --note "fa on"`). They are the user's words, recorded so the run ledger
 	// (`toktape log`) can group a sweep; empty when not given.
@@ -206,6 +247,52 @@ type RunSummary struct {
 	// ("cold run: 1.4 major faults per token", "pid not found, no /proc view").
 	Warnings []string `json:"warnings,omitempty"`
 }
+
+// RunPlan is the one place a run's three budgets meet (lead, 2026-09-20).
+//
+// Prompt length, answer cap and clock were each chosen by their own code,
+// each reasonable alone: the trim kept prompts long so prefill would be a
+// throughput, the cap was priced from bytes, the clock was twenty seconds.
+// Together, on the first four-stream take after prompts@v2, they spent 17.5
+// of the 20 seconds prefilling and left each stream 2.5 seconds to decode
+// ~95 tokens; a second take lost a stream to context_length_exceeded. Every
+// number was defensible and the tape was useless. The plan exists so they
+// are decided together, before the first request, and so the tape says
+// which limit bound — a reader comparing two cards with different prompt
+// lengths can see why they differ.
+type RunPlan struct {
+	// TargetTokens is the prompt length the plan chose, per stream. 0 when
+	// the prompts went whole.
+	TargetTokens int `json:"target_tokens,omitempty"`
+	// Binding names the limit that set TargetTokens: PlanBoundWhole (the
+	// prompts fitted every budget untrimmed), PlanBoundClock (the prefill
+	// share of the clock, divided over the streams), PlanBoundSlot (the
+	// slot's context, less the answer it must leave room for), or
+	// PlanBoundFixedShare (the length past which the fixed cost is a small
+	// enough share — the only one that asks for more, not less).
+	Binding string `json:"binding,omitempty"`
+	// PrefillBudgetMs is the share of the clock the plan allowed all
+	// streams' prefill together. 0 when no clock bound the run.
+	PrefillBudgetMs float64 `json:"prefill_budget_ms,omitempty"`
+	// SlotCtx is the smallest per-slot context the server reported, 0 when
+	// it reported none.
+	SlotCtx int `json:"slot_ctx,omitempty"`
+	// Tokenized says the prompt lengths were counted by the server's
+	// /tokenize, not priced from bytes. false is the fallback, and a plan
+	// made on it is deliberately more conservative.
+	Tokenized bool `json:"tokenized,omitempty"`
+	// LongestPromptTokens is the longest prompt as sent, in tokens: counted
+	// when Tokenized, priced otherwise. The answer cap was set against it.
+	LongestPromptTokens int `json:"longest_prompt_tokens,omitempty"`
+}
+
+// The values of RunPlan.Binding.
+const (
+	PlanBoundWhole      = "whole"
+	PlanBoundClock      = "clock"
+	PlanBoundSlot       = "slot"
+	PlanBoundFixedShare = "fixed_share"
+)
 
 // ServerKind identifies the serving engine.
 type ServerKind string
