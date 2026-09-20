@@ -59,6 +59,12 @@ type run struct {
 	// did not all come from one (TTP-112). Read where the requests are built
 	// because that is the only place that knows.
 	promptSet string
+	// promptTrim is how many characters of each set prompt this run sends,
+	// 0 when whole (TTP-144). Resolved once, after the probe measured the
+	// machine; the trim itself is applied to the requests where they are
+	// built, before the template renders them, so the tape records what was
+	// sent.
+	promptTrim int
 	// prefill is the prefill measurement pass's own figures (TTP-137), nil
 	// when the run did not make one. Named for the pass, not the schema
 	// type, because run already has a probe method — the attach gate.
@@ -111,7 +117,17 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 		return r.recordRounds(ctx)
 	}
 
+	// The prefill probe pass (TTP-137): two prompts the set never used,
+	// before the first run request, so the run's own timeline and the
+	// sampler's fault baseline start clean after it. It runs before the
+	// requests are built because its fit is what sizes the prefix of each
+	// set prompt this run sends (TTP-144) — the measurement has to exist
+	// before the thing it measures for.
+	r.prefillProbe(ctx)
+
 	reqs := buildRequests(opts, r.model.ActiveBytesPerToken)
+	r.resolvePromptTrim(setTexts(reqs))
+	r.trimSetPrompts(reqs)
 	if shaped, err := r.shapeOpenAIRequests(reqs); err != nil {
 		return nil, err
 	} else {
@@ -120,10 +136,6 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	r.promptSet = promptSetOf(reqs)
 	r.collectTemplate(ctx, reqs)
 	r.emitAttached()
-	// The prefill probe pass (TTP-137): two prompts the set never used,
-	// before the first run request, so the run's own timeline and the
-	// sampler's fault baseline start clean after it.
-	r.prefillProbe(ctx)
 
 	startedAt := opts.Clock.Now()
 	recs, st, err := r.stream(ctx, reqs)

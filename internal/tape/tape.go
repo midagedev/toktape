@@ -1074,6 +1074,18 @@ type ProbeSummary struct {
 	FixedMs float64 `json:"fixed_ms,omitempty"`
 	// Replay is the second send of the longer prompt, when it was made.
 	Replay *ReplayProbe `json:"replay,omitempty"`
+	// Salt is the nonce the short fit prompt opened with (lead, 2026-09-20):
+	// base36 of twice the unix second the pass started. The long prompt's
+	// salt is its base36 successor, which keeps the two from sharing a first
+	// token while no two runs — and no run's long prompt against another's
+	// short one — ever send the same bytes. A reader with this field
+	// re-derives the exact prompt bytes of both fit points and the replay
+	// from the deterministic material the probe builds them from, which is
+	// the whole point of salting rather than randomising: same material,
+	// never the same prompt twice, reproducible from the tape alone.
+	// Empty on a tape written before the salt, which reads as the
+	// deterministic prompts those versions sent.
+	Salt string `json:"salt,omitempty"`
 	// MajFaults is how many major page faults the server took while the pass
 	// ran, and MajFaultsPerToken that over the prompt tokens it evaluated
 	// (TTP-143, lead, 2026-09-19).

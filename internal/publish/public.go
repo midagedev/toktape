@@ -83,7 +83,7 @@ func PublicView(t *tape.Tape, policy TextPolicy) *tape.Tape {
 	// same rule as everywhere else in this package: the server never
 	// verifies, so the client does, and a claim it cannot confirm is blanked
 	// rather than forwarded.
-	if s.PromptSet != "" && !sentTheSet(out.Requests, s.Concurrency, s.PromptSet) {
+	if s.PromptSet != "" && !sentTheSet(out.Requests, s.Concurrency, s.PromptSet, s.PromptTrimChars) {
 		s.PromptSet = ""
 	}
 
@@ -197,6 +197,15 @@ func rewritePublicID(out *tape.Tape) {
 // sentTheSet reports whether these requests are the published prompt set,
 // checked against the set this binary carries.
 //
+// A run may have sent a prefix of each set prompt rather than the whole
+// thing (RunSummary.PromptTrimChars, TTP-144): the machine's prefill
+// measured, the length chosen from the measurement. So the comparison is
+// against this binary's own copy trimmed the same way — the recorded count
+// says how much of its own copy the verifier cuts, and what was sent must
+// be exactly that, byte for byte, still. A count that overruns this
+// binary's copy is the same answer as a mismatch: a claim the verifier
+// cannot reproduce.
+//
 // An id this binary does not know fails: a future prompts@v3 is a set whose
 // contents are not here to compare, and forwarding an unverifiable claim is
 // the thing this exists to stop. A run recorded without text — one already
@@ -205,7 +214,7 @@ func rewritePublicID(out *tape.Tape) {
 //
 // A multi-round run sends the same Concurrency prompts every round, so each
 // record is compared against the prompt at its own index within its round.
-func sentTheSet(recs []tape.RequestRecord, concurrency int, id string) bool {
+func sentTheSet(recs []tape.RequestRecord, concurrency int, id string, trimChars int) bool {
 	if id != server.PromptSetID || concurrency <= 0 || len(recs) == 0 {
 		return false
 	}
@@ -220,7 +229,15 @@ func sentTheSet(recs []tape.RequestRecord, concurrency int, id string) bool {
 		if len(r.Prompt.Messages) != 1 || len(want[r.Index].Messages) != 1 {
 			return false
 		}
-		if r.Prompt.Messages[0].Content != want[r.Index].Messages[0].Content {
+		wantText := want[r.Index].Messages[0].Content
+		if trimChars > 0 {
+			runes := []rune(wantText)
+			if trimChars > len(runes) {
+				return false
+			}
+			wantText = string(runes[:trimChars])
+		}
+		if r.Prompt.Messages[0].Content != wantText {
 			return false
 		}
 	}

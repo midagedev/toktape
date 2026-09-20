@@ -535,3 +535,41 @@ func walkStrings(v reflect.Value, path string, fn func(path, s string)) {
 		}
 	}
 }
+
+// A run that sent a prefix of each set prompt is still the set, when the
+// recorded count says exactly how much of it (TTP-144, lead, 2026-09-20).
+// The verifier cuts its own copy by the same count and the byte-for-byte
+// comparison stands on what was sent. Three cases: the honest trimmed run
+// passes; a trimmed run whose summary claims 0 sent-whole fails; one
+// character off either way fails. The first case is the FAIL this gate was
+// written on — before the count reached the comparison, every trimmed run
+// read as "not the set".
+func TestPublicViewAcceptsATrimmedRunWithItsCountAndNothingElse(t *testing.T) {
+	const n, trim = 4, 8000
+	trimmed := &tape.Tape{}
+	trimmed.Summary.Concurrency = n
+	trimmed.Summary.PromptSet = server.PromptSetID
+	trimmed.Summary.PromptTrimChars = trim
+	for i, req := range server.DefaultPrompts(n) {
+		trimmed.Requests = append(trimmed.Requests, tape.RequestRecord{
+			Index:  i,
+			Prompt: tape.PromptRecord{Messages: []tape.Message{{Role: "user", Content: string([]rune(req.Messages[0].Content)[:trim])}}},
+		})
+	}
+
+	if got := PublicView(trimmed, WithText).Summary.PromptSet; got != server.PromptSetID {
+		t.Errorf("PromptSet = %q on a run that sent the set's first %d characters and said so, want %q", got, trim, server.PromptSetID)
+	}
+
+	unrecorded := &tape.Tape{Summary: trimmed.Summary, Requests: append([]tape.RequestRecord(nil), trimmed.Requests...)}
+	unrecorded.Summary.PromptTrimChars = 0
+	if got := PublicView(unrecorded, WithText).Summary.PromptSet; got != "" {
+		t.Errorf("PromptSet = %q on a trimmed run claiming 0, want blank: the count is the only way the verifier knows what to cut", got)
+	}
+
+	offByOne := &tape.Tape{Summary: trimmed.Summary, Requests: append([]tape.RequestRecord(nil), trimmed.Requests...)}
+	offByOne.Summary.PromptTrimChars = trim + 1
+	if got := PublicView(offByOne, WithText).Summary.PromptSet; got != "" {
+		t.Errorf("PromptSet = %q on a run off by one character, want blank", got)
+	}
+}

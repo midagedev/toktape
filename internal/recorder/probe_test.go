@@ -16,6 +16,7 @@ import (
 
 	"github.com/midagedev/toktape/internal/gpu"
 	"github.com/midagedev/toktape/internal/recorder"
+	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -686,5 +687,130 @@ func TestProbeFaultsAreZeroWithoutAProcView(t *testing.T) {
 	}
 	if p.MajFaults != 0 || p.MajFaultsPerToken != 0 {
 		t.Errorf("fault figures without a counter: %d faults, %v per token; both want 0", p.MajFaults, p.MajFaultsPerToken)
+	}
+}
+
+// Gate 5 (lead, 2026-09-20): a second measurement of the same warm server
+// still measures. The probe material is deterministic, so against a server
+// this binary probed a moment ago both prompts came back whole from the
+// prefix cache — prompt_n 0, no points recorded, no fit, and the run that
+// most wanted a prefill figure (the re-measurement) carried none. The salt
+// is the fix: each run's probe prompts begin with a nonce derived from the
+// run's own clock, so no two runs send the same bytes and the second run is
+// as cold as the first. The fake /completion route caches exact prompt
+// strings the way the fixture always has, so against the unsalted pass the
+// second run below records nothing — which is the FAIL this gate was written
+// on.
+func TestASecondRunAgainstTheSameWarmServerStillFits(t *testing.T) {
+	mux, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	record := func(hour int) *tape.ProbeSummary {
+		o := probeOpts(t, srv)
+		o.Clock = fixedClock{time.Date(2026, 9, 20, hour, 0, 0, 0, time.UTC)}
+		tp, err := recorder.Record(context.Background(), o)
+		if err != nil {
+			t.Fatalf("Record: %v", err)
+		}
+		if tp.Summary.Probe == nil {
+			t.Fatalf("run at %d:00: Summary.Probe = nil, the pass did not record anything", hour)
+		}
+		return tp.Summary.Probe
+	}
+
+	first := record(8)
+	if !near(first.PrefillPerSecond, 2000, 0.01) {
+		t.Fatalf("the first run fitted %v tok/s; want the planted 2000 — the fixture is not measuring what this gate says it is", first.PrefillPerSecond)
+	}
+
+	second := record(9)
+	if len(second.Prefill) != 2 {
+		t.Fatalf("the second run recorded %d points, want the pair: a warm re-measurement is the run this pass exists for", len(second.Prefill))
+	}
+	for i, pt := range second.Prefill {
+		if pt.PromptN <= 0 {
+			t.Errorf("the second run's point %d has prompt_n %d, want > 0: both probe prompts were served whole from the prefix cache", i, pt.PromptN)
+		}
+	}
+	if !near(second.PrefillPerSecond, 2000, 0.01) || !near(second.FixedMs, 30, 0.01) {
+		t.Errorf("the second run fitted %v tok/s, fixed %v ms; want the planted 2000 and 30", second.PrefillPerSecond, second.FixedMs)
+	}
+}
+
+// Gate 6 (lead, 2026-09-20): a run that measured its machine sends a
+// prefix the machine can pay for, and says how much. The planted machine is
+// 0.5 ms/token (2000 tok/s) with a 30 ms fixed cost, so the twentieth-share
+// target is 20 x 30 ms x 2000 tok/s = 1200 tokens, under the 2048-token
+// floor the probe already treats as one honest long point — the floor binds,
+// and at the fixture's planted 5 bytes a token that is a 10,240-byte budget.
+// The gate's oracle walks the set's own prompt text for the rune count that
+// fits the budget, independently of the implementation, and the run must
+// send exactly that many characters of each set prompt and record the same
+// number. A refused fit (the inverted cost shape) trims nothing: a run that
+// could not measure the machine does not act on the measurement.
+func TestARunThatMeasuredItsMachineTrimsTheSetAndSaysHowMuch(t *testing.T) {
+	mux, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if tp.Summary.Probe == nil || !near(tp.Summary.Probe.PrefillPerSecond, 2000, 0.01) {
+		t.Fatalf("the probe did not produce the planted fit, so the trim below has no measurement to come from: %+v", tp.Summary.Probe)
+	}
+
+	// The oracle: the floor of 2048 tokens (20 x 30 ms x 2000 tok/s = 1200
+	// is under it) at the bytes-per-token the probe actually recorded — the
+	// fixture's n = len/5 floors, so the measured ratio sits a hair above 5
+	// and the budget with it — and the rune count of the first set prompt
+	// whose UTF-8 bytes fit that budget, computed here from the text itself.
+	bpt := 0.0
+	for _, pt := range tp.Summary.Probe.Prefill {
+		if v := float64(pt.PromptBytes) / float64(pt.PromptN); v > bpt {
+			bpt = v
+		}
+	}
+	budgetBytes := 2048 * bpt
+	want := 0
+	runes, size := 0, 0
+	for _, r := range server.DefaultPrompts(1)[0].Messages[0].Content {
+		if float64(size+len(string(r))) > budgetBytes {
+			break
+		}
+		size += len(string(r))
+		runes++
+	}
+	want = runes
+
+	if tp.Summary.PromptTrimChars != want {
+		t.Errorf("PromptTrimChars = %d, want %d (the rune count of the first set prompt that fits the %.0f-byte budget)", tp.Summary.PromptTrimChars, want, budgetBytes)
+	}
+	if tp.Summary.PromptSet != server.PromptSetID {
+		t.Fatalf("PromptSet = %q, want %q: this gate is about the set's own prompts", tp.Summary.PromptSet, server.PromptSetID)
+	}
+	for i, rec := range tp.Requests {
+		if got := len([]rune(rec.Prompt.Messages[0].Content)); got != want {
+			t.Errorf("request %d sent %d characters, want the recorded %d", i, got, want)
+		}
+	}
+}
+
+// Gate 7 (lead, 2026-09-20): a refused fit trims nothing — no measurement,
+// no action on it.
+func TestARefusedFitTrimsNothing(t *testing.T) {
+	mux, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5, inverted: true})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if tp.Summary.Probe != nil && tp.Summary.Probe.PrefillPerSecond != 0 {
+		t.Fatalf("the inverted fixture produced a fit (%v tok/s); this gate is not testing a refusal", tp.Summary.Probe.PrefillPerSecond)
+	}
+	if tp.Summary.PromptTrimChars != 0 {
+		t.Errorf("PromptTrimChars = %d on a refused fit, want 0: a run that could not measure the machine does not get to act on the measurement", tp.Summary.PromptTrimChars)
 	}
 }

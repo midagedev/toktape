@@ -2,7 +2,9 @@ package recorder
 
 import (
 	"context"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
@@ -70,13 +72,13 @@ const (
 // to report, so the budget only has to land near the constant.
 const probeCharsPerToken = 4.9
 
-// The leads and cycle offsets of the two prompts. Different leads make the
-// first token differ; different offsets over a 64-word list make every
-// position after it differ too, so the two prompts share no prefix at all
-// and neither one's prefill can be cache-served by the other's. Neither lead
-// is the first word of any prompt in the published set (nor of the "Request"
-// lead its cycled extras use), so the pass cannot poison the set's cache
-// either.
+// The leads and cycle offsets of the two prompts. With the per-run salts in
+// front, the salts make the first token differ and the leads and offsets
+// keep every position after it differing too, so the two prompts share no
+// prefix at all and neither one's prefill can be cache-served by the
+// other's. Neither lead nor any salt shape is the first word of any prompt
+// in the published set (nor of the "Request" lead its cycled extras use), so
+// the pass cannot poison the set's cache either.
 const (
 	probeLeadShort  = "toktape"
 	probeLeadLong   = "probe"
@@ -85,10 +87,19 @@ const (
 )
 
 // probeWords is the material the probe prompts are made of: 64 plain words,
-// no sentence in them, cycled deterministically so every run of the same
-// version sends the same two prompts. filler words instead of real material
-// is deliberate here — the prompt exists to cost prefill, not to be
-// answered, and one generated token is all that is ever read of it.
+// no sentence in them, cycled deterministically. filler words instead of
+// real material is deliberate here — the prompt exists to cost prefill, not
+// to be answered, and one generated token is all that is ever read of it.
+//
+// Deterministic material under a per-run salt (lead, 2026-09-20): the words
+// are the same in every run, and what made them so — "every run of the same
+// version sends the same two prompts" — was the defect, not the design.
+// A server this binary probed before holds both prompts whole in its prefix
+// cache, so the re-measurement, the run this pass exists for, came back with
+// prompt_n 0 on both points, recorded nothing, and carried no fit. The salt
+// is derived from the run's own clock and recorded on the summary, so a
+// reader with the tape re-derives the exact prompt bytes: same material,
+// never the same prompt twice.
 var probeWords = []string{
 	"harbor", "cinder", "plume", "granite", "thistle", "marble", "ember", "fjord",
 	"lantern", "quartz", "meadow", "spruce", "cobalt", "dune", "ivory", "jasper",
@@ -100,11 +111,28 @@ var probeWords = []string{
 	"drift", "elm", "fern", "glen", "heath", "iris", "knot", "cord",
 }
 
-// probePrompt builds one probe prompt: the lead word, then the word list
-// cycled from offset, up to a byte budget of about tokens prompt tokens.
-func probePrompt(lead string, offset, tokens int) string {
+// probeSalts is the pair of per-run nonces the two probe prompts open with.
+// One number from the clock — twice the unix second, so the short prompt's
+// salt is always even and the long prompt's its successor — gives both
+// prompts a first token no previous run sent while keeping the pair from
+// sharing one with each other: the two salts differ, so the two prompts
+// share no prefix, and the even split keeps one run's long salt from ever
+// being another run's short salt. The short salt is what the summary
+// records; base36 at seven characters covers unix seconds past the year
+// 4000.
+func probeSalts(now time.Time) (short, long string) {
+	twice := now.Unix() * 2
+	return strconv.FormatInt(twice, 36), strconv.FormatInt(twice+1, 36)
+}
+
+// probePrompt builds one probe prompt: the salt, the lead word, then the
+// word list cycled from offset, up to a byte budget of about tokens prompt
+// tokens.
+func probePrompt(salt, lead string, offset, tokens int) string {
 	budget := int(float64(tokens) * probeCharsPerToken)
 	var b strings.Builder
+	b.WriteString(salt)
+	b.WriteByte(' ')
 	b.WriteString(lead)
 	for i := 0; b.Len() < budget; i++ {
 		b.WriteByte(' ')
@@ -152,11 +180,14 @@ func (r *run) prefillProbe(ctx context.Context) {
 		return
 	}
 	p := &tape.ProbeSummary{}
+	saltShort, saltLong := probeSalts(r.opts.Clock.Now())
+	p.Salt = saltShort
 	sampler, _ := r.newFaultSampler()
 	if sampler != nil {
 		defer sampler.Close()
 	}
-	st, ttft, ok := r.probeSend(ctx, probePrompt(probeLeadShort, probeCycleShort, probeShortTokens))
+	shortPrompt := probePrompt(saltShort, probeLeadShort, probeCycleShort, probeShortTokens)
+	st, ttft, ok := r.probeSend(ctx, shortPrompt)
 	if ok && st.PromptN > 0 {
 		// A point with no evaluated tokens is not a cost measurement
 		// (a fully cache-served prompt), so it is not recorded as one.
@@ -166,24 +197,27 @@ func (r *run) prefillProbe(ctx context.Context) {
 		// what a hit can break is the span, which fitPrefill checks on
 		// the pair (its doc, 2026-09-20).
 		p.Prefill = append(p.Prefill, tape.PrefillPoint{
-			PromptN:  st.PromptN,
-			PromptMs: st.PromptMs,
-			TTFTMs:   ttft,
-			CacheN:   st.CacheN,
+			PromptN:     st.PromptN,
+			PromptMs:    st.PromptMs,
+			PromptBytes: len(shortPrompt),
+			TTFTMs:      ttft,
+			CacheN:      st.CacheN,
 		})
 	}
 	if long := probeLongLength(st); long > 0 {
-		if st, ttft, ok = r.probeSend(ctx, probePrompt(probeLeadLong, probeCycleLong, long)); ok && st.PromptN > 0 {
+		longPrompt := probePrompt(saltLong, probeLeadLong, probeCycleLong, long)
+		if st, ttft, ok = r.probeSend(ctx, longPrompt); ok && st.PromptN > 0 {
 			p.Prefill = append(p.Prefill, tape.PrefillPoint{
-				PromptN:  st.PromptN,
-				PromptMs: st.PromptMs,
-				TTFTMs:   ttft,
-				CacheN:   st.CacheN,
+				PromptN:     st.PromptN,
+				PromptMs:    st.PromptMs,
+				PromptBytes: len(longPrompt),
+				TTFTMs:      ttft,
+				CacheN:      st.CacheN,
 			})
 		}
 		// The replay resends the prompt the long point actually used, never a
 		// fixed one: the prefix cache is being asked about that prompt.
-		if st, _, ok = r.probeSend(ctx, probePrompt(probeLeadLong, probeCycleLong, long)); ok {
+		if st, _, ok = r.probeSend(ctx, longPrompt); ok {
 			p.Replay = &tape.ReplayProbe{
 				PromptN:  st.PromptN,
 				CacheN:   st.CacheN,
@@ -329,4 +363,32 @@ func fitPrefill(points []tape.PrefillPoint) (perSecond, fixedMs float64) {
 		return 0, 0
 	}
 	return 1000 / msPerTok, fixed
+}
+
+// resolvePromptTrim sizes the prefix of each set prompt this run sends,
+// from the fit the pass just measured, against the set's own texts. Called
+// once per run, after the probe and before the requests go out; a refused
+// or absent fit leaves it 0 and the prompts go whole.
+func (r *run) resolvePromptTrim(setTexts []string) {
+	r.promptTrim = setTrimChars(r.prefill, setTexts)
+}
+
+// trimSetPrompts applies the resolved trim to the set's requests in place:
+// each one whose Set is the published id is cut to its first promptTrim
+// characters, on rune boundaries. A request shorter than the trim, or not
+// the set's own, is left alone — the user's prompts are never cut, and a
+// prompt the budget already fits is already the right length.
+func (r *run) trimSetPrompts(reqs []server.StreamRequest) {
+	if r.promptTrim <= 0 {
+		return
+	}
+	for i := range reqs {
+		if reqs[i].Set != server.PromptSetID {
+			continue
+		}
+		runes := []rune(reqs[i].Messages[0].Content)
+		if len(runes) > r.promptTrim {
+			reqs[i].Messages[0].Content = string(runes[:r.promptTrim])
+		}
+	}
 }

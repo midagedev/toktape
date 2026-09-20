@@ -88,8 +88,20 @@ func roundPrefill(rr []tape.RequestRecord) (promptN int, perSecond float64) {
 
 // recordRounds is Record from the first request on, for a multi-round run.
 func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
+	// The prefill probe pass (TTP-137), once per tape and first of all —
+	// before round one's first request, so no round's cache picture or
+	// fault baseline sees it, and before the rounds are built because its
+	// fit sizes the prefix of each set prompt every round sends (TTP-144).
+	r.prefillProbe(ctx)
+
 	rounds := roundRequests(r.opts, r.model.ActiveBytesPerToken)
+	// The trim is one number for the whole tape, sized from the first
+	// round's set texts — a rounds run sends the same set every round, and
+	// where it does not, the set's rounds are still cut to one length so
+	// the recorded number stays the truth for every one of them.
+	r.resolvePromptTrim(setTexts(rounds[0]))
 	for k := range rounds {
+		r.trimSetPrompts(rounds[k])
 		if shaped, err := r.shapeOpenAIRequests(rounds[k]); err != nil {
 			return nil, err
 		} else {
@@ -114,9 +126,6 @@ func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 		rounds[k] = flat[k*n : (k+1)*n]
 	}
 	r.emitAttached()
-	// The prefill probe pass (TTP-137), once per tape: before round one's
-	// first request, so no round's cache picture or fault baseline sees it.
-	r.prefillProbe(ctx)
 
 	startedAt := r.opts.Clock.Now()
 	recs, st, err := r.streamRounds(ctx, rounds)
