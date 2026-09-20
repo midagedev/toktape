@@ -1,13 +1,472 @@
-Yesterday a teammate ran the commands below on a shared feature branch, and now three days of commits by two people are gone from it.
+Yesterday a teammate ran the commands below on a shared feature branch, and now three days of commits by two people are gone from it. Explain to them, as a patient senior engineer, what each command did to their local branch and to the remote one, and why the pull refused to run. Say where the lost commits still exist and for how long — their own reflog, the other author's clone, the hosting service — with the commands to recover from each. Then explain pull.rebase, pull.ff and push --force-with-lease, and how branch protection would have stopped this.
 
-~~~
+The teammate is Sam, the other author is Priya, the branch is feature/billing in a private repository on GitHub, and everything below is real state as of this morning: his terminal scrollback and shell history first, then everything his clone still holds, then his git configuration, then what GitHub recorded, then what Priya's clone holds, then the repository's own workflow rules and CI. Nobody has committed, merged, rebased, pulled or pushed anywhere since the force push; the only command anyone has run that wrote anything is Priya's single fetch, and that is on purpose.
+
+## The session, from Sam's still-open terminal
+
+~~~text
+sam@wks-041 ~/work/ledger (feature/billing)
 $ git pull
+remote: Enumerating objects: 5, done.
+remote: Counting objects: 100% (5/5), done.
+remote: Compressing objects: 100% (3/3), done.
+remote: Total 5 (delta 2), reused 0 (delta 0), pack-reused 0
+Unpacking objects: 100% (5/5), 2.41 KiB | 2.41 MiB/s, done.
+From github.com:arborbank/ledger
+   5d1c8f4..8a41e07  feature/billing -> origin/feature/billing
 hint: You have divergent branches and need to specify how to reconcile them.
+hint: You can do so by running one of the following commands sometime before
+hint: your next pull:
+hint:
+hint:   git config pull.rebase false  # merge (the default strategy)
+hint:   git config pull.rebase true   # rebase
+hint:   git config pull.ff only       # fast-forward only
+hint:
+hint: You can replace "git config" with "git config --global" to set a default
+hint: preference for all repositories. You can also pass --rebase, --no-rebase,
+hint: or --ff-only on the command line to override the configured default per invocation.
 fatal: Need to specify how to reconcile divergent branches.
+sam@wks-041 ~/work/ledger (feature/billing)
 $ git reset --hard origin/main
-HEAD is now at 4e1c9a2 Merge pull request #412 from ci/bump-node
+HEAD is now at 3f9c2ad Merge pull request #412 from ci/bump-node
+sam@wks-041 ~/work/ledger (feature/billing)
 $ git push --force
- + 9b07d31...4e1c9a2 feature/billing -> feature/billing (forced update)
+To github.com:arborbank/ledger.git
+ + 8a41e07...3f9c2ad feature/billing -> feature/billing (forced update)
+sam@wks-041 ~/work/ledger (feature/billing)
+$
 ~~~
 
-Explain to them, as a patient senior engineer, what each command did to their local branch and to the remote one, and why the pull refused to run. Say where the lost commits still exist and for how long — their own reflog, the other author's clone, the hosting service — with the commands to recover from each. Then explain pull.rebase, pull.ff and push --force-with-lease, and how branch protection would have stopped this.
+The times: the pull ran at 14:05:41, the reset at 14:06:02, the push at 14:06:12, all yesterday, 19 September.
+
+Two more outputs survive in the same terminal, from either side of those three commands. From an hour before the pull, where his afternoon stood:
+
+~~~text
+sam@wks-041 ~/work/ledger (feature/billing)
+$ git log --oneline -5
+c7d5520 (HEAD -> feature/billing) billing: one integration test for the flag
+e1b90aa billing: flag wired into the router
+5d1c8f4 billing: migration 0041 adds the refunds column
+4b2aa91 billing: totals recomputed on refund, not on read
+9c0e4d3 billing: refund state machine, with table tests
+~~~
+
+And from between the failed pull and the reset — the moment he was looking at when he decided to "start clean", with the remote-tracking branch already moved by the pull's fetch:
+
+~~~text
+sam@wks-041 ~/work/ledger (feature/billing)
+$ git log --oneline --graph -8
+* c7d5520 (HEAD -> feature/billing) billing: one integration test for the flag
+* e1b90aa billing: flag wired into the router
+| * 8a41e07 (origin/feature/billing) billing: refund endpoints behind a feature flag
+|/
+* 5d1c8f4 billing: migration 0041 adds the refunds column
+* 4b2aa91 billing: totals recomputed on refund, not on read
+* 9c0e4d3 billing: refund state machine, with table tests
+* f3a7b62 billing: partial refunds accepted by the writer
+* b81c4e0 billing: totals exposed on the API response
+~~~
+
+Two tips over one shared base is exactly what the word "divergent" in the pull's hint meant; Sam's response to this picture was the reset.
+
+Sam's shell history for the hour around it, from `history | tail -25`:
+
+~~~text
+ 981  cd ~/work/ledger
+ 982  git status
+ 983  git log --oneline -5
+ 984  go test ./...
+ 985  git add -A
+ 986  git commit -m "billing: one integration test for the flag"
+ 987  go test ./internal/billing/...
+ 988  git status
+ 989  git pull
+ 990  git status
+ 991  git log --oneline --graph -8
+ 992  git reset --hard origin/main
+ 993  git push --force
+ 994  git log --oneline -3
+ 995  git status
+ 996  git log --oneline origin/main..HEAD
+ 997  go test ./...
+ 998  git reflog -5
+ 999  git log --oneline -g -12
+1000  git reflog show feature/billing
+1001  git reflog show origin/feature/billing
+1002  git log --oneline --graph --decorate --all -20
+1003  git branch -vv
+1004  git config --list --show-origin
+1005  git --version
+~~~
+
+Everything from 998 onward is Sam, this morning, trying to work out what he did. The outputs of 998 through 1003 are the next section, pasted in the order he ran them; the configuration section after that shows the two files his command 1004 was reading about, printed in full rather than as the interleaved list the command itself gives.
+
+## What Sam's clone still holds
+
+`git reflog -5` — the HEAD reflog, newest first:
+
+~~~text
+3f9c2ad (HEAD -> feature/billing, origin/feature/billing, origin/main, main) HEAD@{0}: reset: moving to origin/main
+c7d5520 HEAD@{1}: commit: billing: one integration test for the flag
+e1b90aa HEAD@{2}: commit: billing: flag wired into the router
+5d1c8f4 HEAD@{3}: pull: fast-forward
+4b2aa91 HEAD@{4}: commit: billing: totals recomputed on refund, not on read
+~~~
+
+`git log --oneline -g -12`, the whole of it:
+
+~~~text
+3f9c2ad (HEAD -> feature/billing, origin/feature/billing, origin/main, main) HEAD@{0}: reset: moving to origin/main
+c7d5520 HEAD@{1}: commit: billing: one integration test for the flag
+e1b90aa HEAD@{2}: commit: billing: flag wired into the router
+5d1c8f4 HEAD@{3}: pull: fast-forward
+4b2aa91 HEAD@{4}: commit: billing: totals recomputed on refund, not on read
+9c0e4d3 HEAD@{5}: pull: fast-forward
+f3a7b62 HEAD@{6}: commit: billing: partial refunds accepted by the writer
+b81c4e0 HEAD@{7}: commit: billing: totals exposed on the API response
+7e2d945 HEAD@{8}: checkout: moving from main to feature/billing
+3f9c2ad HEAD@{9}: clone: from github.com:arborbank/ledger.git
+~~~
+
+`git reflog show feature/billing`:
+
+~~~text
+3f9c2ad feature/billing@{0}: reset: moving to origin/main
+c7d5520 feature/billing@{1}: commit: billing: one integration test for the flag
+e1b90aa feature/billing@{2}: commit: billing: flag wired into the router
+5d1c8f4 feature/billing@{3}: pull: fast-forward
+4b2aa91 feature/billing@{4}: commit: billing: totals recomputed on refund, not on read
+9c0e4d3 feature/billing@{5}: pull: fast-forward
+f3a7b62 feature/billing@{6}: commit: billing: partial refunds accepted by the writer
+b81c4e0 feature/billing@{7}: commit: billing: totals exposed on the API response
+7e2d945 feature/billing@{8}: branch: Created from origin/feature/billing
+~~~
+
+`git reflog show origin/feature/billing` — the remote-tracking branch's own log, which is where the failed pull's fetch left the tip it had just learned about:
+
+~~~text
+3f9c2ad origin/feature/billing@{0}: update by push
+8a41e07 origin/feature/billing@{1}: pull: fast-forward
+5d1c8f4 origin/feature/billing@{2}: pull: fast-forward
+4b2aa91 origin/feature/billing@{3}: update by push
+9c0e4d3 origin/feature/billing@{4}: pull: fast-forward
+f3a7b62 origin/feature/billing@{5}: update by push
+b81c4e0 origin/feature/billing@{6}: update by push
+7e2d945 origin/feature/billing@{7}: clone: from github.com:arborbank/ledger.git
+~~~
+
+`git log --oneline --graph --decorate --all -20` — every branch and remote-tracking branch he has, all agreeing now:
+
+~~~text
+*   3f9c2ad (HEAD -> feature/billing, tag: v1.14.0, origin/feature/billing, origin/main, main) Merge pull request #412 from ci/bump-node
+|\  
+| * aecc1aa (origin/ci/bump-node) ci: node 20 -> 22 in the workflows
+* | 0051467 ledger: statement export honours the row limit
+* | 09413f8 ledger: statement export streams its rows
+* | 7aeb885 ledger: fix the flaky pool test under -race
+* | 4fd56b2 ledger: counterparty reads go through the pool
+* | a2b8e58 ledger: migration 0037 renames the counterparty table
+* | bdc696b ledger: connection pool sized by config, not code
+* | cdf11c5 ledger: split the HTTP layer from the domain package
+|/  
+* 8f14b2d ledger: initial import
+~~~
+
+None of the billing work is in that picture: not on his branch, not on the remote-tracking branches, not anywhere `--all` reaches. It survives only in the reflogs above.
+
+`git branch -vv`:
+
+~~~text
+* feature/billing 3f9c2ad [origin/feature/billing] Merge pull request #412 from ci/bump-node
+  main           3f9c2ad [origin/main] Merge pull request #412 from ci/bump-node
+~~~
+
+`git status`, run over his clone this morning, for completeness, because it is the one output that reads as though nothing is wrong:
+
+~~~text
+On branch feature/billing
+Your branch is up to date with 'origin/feature/billing'.
+
+nothing to commit, working tree clean
+~~~
+
+The branch tracks its upstream, the upstream agrees with it, and the tree is clean; the reset moved feature/billing itself, so nothing here so much as hints that nine other commits used to sit on top of 3f9c2ad. The commit dates and authors of the nine his branch held before the reset, from `git log --format='%h %ci %an %s' 3f9c2ad..feature/billing@{1}` run over his clone this morning — `feature/billing@{1}` is the branch's own reflog naming c7d5520, the tip the reset moved away from:
+
+~~~text
+c7d5520 2026-09-19 13:20:02 +0000 Sam Reyes   billing: one integration test for the flag
+e1b90aa 2026-09-19 11:47:36 +0000 Sam Reyes   billing: flag wired into the router
+5d1c8f4 2026-09-18 17:22:41 +0000 Priya Nair  billing: migration 0041 adds the refunds column
+4b2aa91 2026-09-18 11:33:19 +0000 Sam Reyes   billing: totals recomputed on refund, not on read
+9c0e4d3 2026-09-17 16:49:05 +0000 Priya Nair  billing: refund state machine, with table tests
+f3a7b62 2026-09-17 10:26:52 +0000 Sam Reyes   billing: partial refunds accepted by the writer
+b81c4e0 2026-09-16 18:02:14 +0000 Sam Reyes   billing: totals exposed on the API response
+7e2d945 2026-09-16 15:18:47 +0000 Priya Nair  billing: currency table loaded from config
+1a4e8c7 2026-09-16 09:41:22 +0000 Priya Nair  billing: extract invoice totals into their own module
+~~~
+
+Note that these nine are Sam's local view. Sam's reflog tip before the reset, c7d5520, contains the first seven of them plus his two unpushed ones; Priya's push from yesterday morning, 8a41e07, is the one commit none of Sam's local history contains, and it exists in exactly three places now: his remote-tracking reflog above, Priya's clone, and GitHub.
+
+## Sam's git, and the configuration the session ran under
+
+~~~text
+$ git --version
+git version 2.34.1
+~~~
+
+His ~/.gitconfig, in full:
+
+~~~text
+[user]
+	name = Sam Reyes
+	email = sam.reyes@arborbank.example
+[init]
+	defaultBranch = main
+[core]
+	editor = vim
+[alias]
+	st = status -sb
+	co = checkout
+	pu = push
+~~~
+
+The repository's .git/config, in full:
+
+~~~text
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+[remote "origin"]
+	url = git@github.com:arborbank/ledger.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+	remote = origin
+	merge = refs/heads/main
+[branch "feature/billing"]
+	remote = origin
+	merge = refs/heads/feature/billing
+~~~
+
+Nothing in either file says anything about pull.rebase, pull.ff, or push behaviour; no hook, no alias, and no server-side setting anywhere in this story changes what those three commands did.
+
+## What GitHub recorded
+
+The repository's events, as fetched this morning — the two PushEvents on the branch, yesterday, in order. The second one is the disaster:
+
+~~~json
+[
+  {
+    "id": "43925421018",
+    "type": "PushEvent",
+    "actor": { "id": 81044, "login": "pnair", "display_login": "pnair" },
+    "repo": { "id": 519023441, "name": "arborbank/ledger" },
+    "payload": {
+      "push_id": 9126883107,
+      "size": 1,
+      "distinct_size": 1,
+      "ref": "refs/heads/feature/billing",
+      "head": "8a41e07d3c9b26f5a1e084d7b6c2f39e5d1a47c6",
+      "before": "5d1c8f4bd2a9e7c105f418a3b6d9e0c27f4a5139",
+      "commits": [
+        {
+          "sha": "8a41e07d3c9b26f5a1e084d7b6c2f39e5d1a47c6",
+          "author": { "email": "priya.nair@arborbank.example", "name": "Priya Nair" },
+          "message": "billing: refund endpoints behind a feature flag",
+          "distinct": true
+        }
+      ],
+      "forced": false
+    },
+    "public": false,
+    "created_at": "2026-09-19T10:04:31Z"
+  },
+  {
+    "id": "43928174655",
+    "type": "PushEvent",
+    "actor": { "id": 88213, "login": "sreyas", "display_login": "sreyas" },
+    "repo": { "id": 519023441, "name": "arborbank/ledger" },
+    "payload": {
+      "push_id": 9127446102,
+      "size": 0,
+      "distinct_size": 0,
+      "ref": "refs/heads/feature/billing",
+      "head": "3f9c2ad9e1b4f07c2aa5d8e3f1b09c47d2e5a680",
+      "before": "8a41e07d3c9b26f5a1e084d7b6c2f39e5d1a47c6",
+      "commits": [],
+      "forced": true
+    },
+    "public": false,
+    "created_at": "2026-09-19T14:06:12Z"
+  }
+]
+~~~
+
+The branch had an open pull request, #415, "Refunds, end to end [WIP]", opened by Priya on 17 September. Its conversation, as the timeline renders it this morning:
+
+~~~text
+#415  Refunds, end to end [WIP]
+
+pnair wants to merge feature/billing into main
+
+pnair opened this on 17 Sep at 16:55 (edited)
+
+  Opening early so the shape is reviewable. In so far, in order:
+  totals extracted into their own module (1a4e8c7), currency table
+  from config (7e2d945), totals on the API response (b81c4e0),
+  partial refunds in the writer (f3a7b62), the refund state machine
+  with table tests (9c0e4d3), totals recomputed on refund rather than
+  read (4b2aa91), and migration 0041 (5d1c8f4).
+
+  Left: endpoints behind a feature flag, the rollout plan, and an
+  integration test. Do not merge before the flag is in.
+
+sreyas reviewed 18 Sep at 09:40
+
+  internal/billing/refund.go:88
+    A refund in REFUNDED landing back to PENDING on a duplicate event
+    reads like a bug we will find in production. Can duplicates be a
+    no-op rather than a transition?
+
+  internal/billing/refund.go:121
+    This error names the state but not the event that was rejected;
+    on-call at 3 a.m. will want both.
+
+pnair marked the review conversation as resolved 18 Sep at 12:10
+
+sreyas force-pushed the feature/billing branch from 8a41e07 to 3f9c2ad
+  19 Sep at 14:06
+
+Checks — last checked on 3f9c2ad, 19 Sep 14:09
+  ci / test (go 1.23)      pass  2m41s
+  ci / web                 pass  1m08s
+~~~
+
+The head GitHub shows for the pull request is now 3f9c2ad; the eight commits its conversation still links to are no longer reachable through the branch, only through the two PushEvents above, Priya's clone, and Sam's reflogs.
+
+The repository's branch protections, as fetched this morning:
+
+~~~text
+$ gh api repos/arborbank/ledger/branches --jq '.[] | {name, protected}'
+{"name":"main","protected":true}
+{"name":"feature/billing","protected":false}
+~~~
+
+~~~json
+{
+  "url": "https://api.github.com/repos/arborbank/ledger/branches/main/protection",
+  "required_pull_request_reviews": {
+    "dismiss_stale_reviews": false,
+    "require_code_owner_reviews": false,
+    "require_last_push_approval": false,
+    "required_approving_review_count": 1
+  },
+  "required_linear_history": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false,
+  "block_creations": false,
+  "enforce_admins": { "enabled": false },
+  "restrictions": null
+}
+~~~
+
+## What Priya's clone holds
+
+Her message in the team channel this morning, pasted verbatim. Her checkout was last touched yesterday morning when she pushed 8a41e07:
+
+~~~text
+pnair 09:58
+haven't fetched since yesterday morning, my checkout still has
+everything i pushed. pasted before touching anything:
+
+$ git log --oneline origin/main..feature/billing
+8a41e07 (HEAD -> feature/billing, origin/feature/billing) billing: refund endpoints behind a feature flag
+5d1c8f4 billing: migration 0041 adds the refunds column
+4b2aa91 billing: totals recomputed on refund, not on read
+9c0e4d3 billing: refund state machine, with table tests
+f3a7b62 billing: partial refunds accepted by the writer
+b81c4e0 billing: totals exposed on the API response
+7e2d945 billing: currency table loaded from config
+1a4e8c7 billing: extract invoice totals into their own module
+
+$ git status
+On branch feature/billing
+Your branch is up to date with 'origin/feature/billing'.
+nothing to commit, working tree clean
+
+pnair 10:15
+after git fetch origin, the status line now reads:
+Your branch is ahead of 'origin/feature/billing' by 8 commits.
+
+$ git show --stat --oneline 8a41e07
+8a41e07 billing: refund endpoints behind a feature flag
+ internal/billing/http.go    | 94 ++++++++++++++++++++++++++++++++++++++++
+ internal/billing/flag.go    | 21 +++++++++
+ internal/billing/http_test.go | 133 +++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 248 insertions(+)
+
+leaving everything alone until someone who knows reflogs says what to do.
+~~~
+
+## The rules the repository set for itself
+
+docs/git-workflow.md in arborbank/ledger, the whole of the section on branches:
+
+~~~text
+## Branches
+
+main is trunk. Everything else is a branch off it, and branches are
+short-lived: days, not weeks.
+
+feature/* branches are shared when two people work on one thing. Say
+so at standup, so nobody rewrites underneath anyone.
+
+Never rewrite history that someone else may have pulled. If a shared
+branch must be rebased, coordinate in the channel first.
+
+Force-push only to branches you alone own, and with --force-with-lease,
+never bare --force.
+
+A diverged pull is git refusing to guess. Pick merge or rebase once,
+in your configuration, so the refusal never surprises you; we
+standardise on pull.rebase false, and feature-branch merge commits
+are squashed when the pull request lands.
+~~~
+
+And the CI workflow those rules refer to, .github/workflows/ci.yml, in full:
+
+~~~yaml
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        go: ["1.23"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - run: go vet ./...
+      - run: go test -race ./...
+  web:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+~~~
+
+The rule that names --force-with-lease has been in that file since before anyone now on the team joined; it is not enforced anywhere, and nothing in Sam's configuration would have reminded him of it. Sam's clone has been read and nothing else, Priya's has had exactly one fetch, GitHub has been read from but not written to, and the push that did the damage is the only write to the remote since Priya's at 10:04 yesterday.

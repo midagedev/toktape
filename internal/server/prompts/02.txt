@@ -1,19 +1,399 @@
-Diagnose why this PostgreSQL 16 query went from 40 ms to 9 s after a nightly import added forty thousand customers and two million orders.
+Diagnose why this PostgreSQL 16 query went from 40 ms to 9 s after a nightly import added forty thousand customers and two million orders. Walk through the plan and say what each gap between estimated and actual rows tells you. Rank the likely causes, give the commands that confirm each, and propose the index or query change you would make, with the plan you expect after it. Everything the on-call collected overnight is below, in the order it was gathered, and nothing in it has been touched since.
 
-~~~
+The query, from the EU revenue dashboard. The panel has been live since the 2026-09-05 release and, until last night, had always returned an empty top list:
+
+~~~sql
 SELECT c.id, c.name, sum(o.total) AS spent
 FROM customers c JOIN orders o ON o.customer_id = c.id
 WHERE o.created_at >= now() - interval '30 days' AND c.region = 'EU'
 GROUP BY c.id, c.name ORDER BY spent DESC LIMIT 20;
-
--> HashAggregate (rows=3) (actual rows=48211 loops=1)
-     -> Nested Loop (rows=12) (actual rows=1203311 loops=1)
-          -> Seq Scan on customers c (rows=3) (actual rows=48211 loops=1)
-               Filter: (region = 'EU')
-          -> Index Scan using orders_customer_id_idx (rows=4) (actual rows=25 loops=48211)
-               Rows Removed by Filter: 212
-               Buffers: shared hit=402113 read=1893022
-Execution Time: 9121.0 ms
 ~~~
 
-Walk through the plan and say what each gap between estimated and actual rows tells you. Rank the likely causes, give the commands that confirm each, and propose the index or query change you would make, with the plan you expect after it.
+The dashboard's own refresh log first, one line per panel refresh, every five minutes. The day before, for the baseline:
+
+~~~
+2026-09-18 09:35:02  eu-revenue  refresh ok  38 ms   0 rows
+2026-09-18 13:20:02  eu-revenue  refresh ok  40 ms   0 rows
+2026-09-18 13:20:02  eu-top      refresh ok  41 ms   0 rows
+2026-09-18 17:45:03  eu-revenue  refresh ok  39 ms   0 rows
+2026-09-18 22:10:02  eu-revenue  refresh ok  38 ms   0 rows
+2026-09-18 22:10:02  eu-top      refresh ok  39 ms   0 rows
+~~~
+
+And the night in question:
+
+~~~
+2026-09-19 03:35:02  eu-revenue  refresh ok     39 ms   0 rows
+2026-09-19 03:35:02  eu-top      refresh ok     41 ms   0 rows
+2026-09-19 03:40:02  eu-revenue  refresh ok   2128 ms   0 rows
+2026-09-19 03:40:02  eu-top      refresh ok   2131 ms   0 rows
+2026-09-19 03:45:03  eu-revenue  refresh ok   9204 ms  20 rows
+2026-09-19 03:45:03  eu-top      refresh ok   9188 ms  20 rows
+2026-09-19 03:50:02  eu-revenue  refresh ok   9217 ms  20 rows
+2026-09-19 03:50:02  eu-top      refresh ok   9195 ms  20 rows
+2026-09-19 03:55:03  eu-revenue  refresh ok   9082 ms  20 rows
+2026-09-19 03:55:03  eu-top      refresh ok   9131 ms  20 rows
+~~~
+
+What the primary was doing with this query at 03:52, from pg_stat_activity. The on-call had the dashboard open by then, and opening it refreshes the panel:
+
+~~~
+prod=# SELECT pid, state, wait_event_type, wait_event, now() - query_start AS running,
+prod-#        left(query, 80) AS query FROM pg_stat_activity
+prod-#   WHERE state <> 'idle' ORDER BY query_start;
+  pid  | state  | wait_event_type |    wait_event     |    running    |                             query
+-------+--------+-----------------+-------------------+---------------+----------------------------------------------------------------
+ 24831 | active | IO              | DataFileRead      | 00:00:06.412  | SELECT c.id, c.name, sum(o.total) AS spent FROM customers c JOIN
+ 24902 | active |                 |                   | 00:00:00.002  | SELECT pid, state, wait_event_type, wait_event, now() - query_st
+ 25011 | active | IO              | DataFileRead      | 00:00:00.081  | UPDATE job_runners SET heartbeat = now() WHERE runner = 'acq-im
+(3 rows)
+~~~
+
+And what the data volume was doing at the same moment, five seconds of iostat:
+
+~~~
+Device   r/s     rMB/s   rrqm/s  %util  await
+nvme0n1  41210   379.4   0.0    98.7   0.24
+nvme0n1  39877   366.1   0.0    98.9   0.25
+nvme0n1  41502   382.0   0.0    99.0   0.23
+nvme0n1  41044   377.3   0.0    98.6   0.24
+nvme0n1  40666   373.5   0.0    98.8   0.24
+~~~
+
+The query's own history, from pg_stat_statements on the primary, read at 03:56. The counters were reset by the 2026-09-05 release:
+
+~~~
+prod=# SELECT calls, mean_exec_time, max_exec_time, min_exec_time, stddev_exec_time, rows
+prod-#   FROM pg_stat_statements WHERE queryid = 4827368542319776863;
+ calls | mean_exec_time | max_exec_time | min_exec_time | stddev_exec_time | rows
+-------+----------------+---------------+---------------+-----------------+-------
+  4219 |           51.7 |        9217.0 |          21.3 |           344.1 |   120
+(1 row)
+~~~
+
+The plan it produces now, captured with EXPLAIN (ANALYZE, BUFFERS) at 03:58, after track_io_timing was switched on:
+
+~~~
+Limit  (cost=242604.97..242605.37 rows=20 width=76) (actual time=9120.641..9120.652 rows=20 loops=1)
+  ->  Sort  (cost=242582.57..242604.97 rows=912 width=76) (actual time=9120.638..9120.649 rows=20 loops=1)
+        Sort Key: (sum(o.total)) DESC
+        Sort Method: top-N heapsort  Memory: 32kB
+        ->  HashAggregate  (cost=242568.89..242582.57 rows=912 width=76) (actual time=9118.022..9119.814 rows=48211 loops=1)
+              Group Key: c.id, c.name
+              Batches: 1  Memory Usage: 9161kB
+              ->  Nested Loop  (cost=0.43..242568.89 rows=3648 width=76) (actual time=0.043..8791.317 rows=1203311 loops=1)
+                    ->  Seq Scan on customers c  (cost=0.00..4929.05 rows=912 width=68) (actual time=0.012..26.404 rows=48211 loops=1)
+                          Filter: ((region)::text = 'EU'::text)
+                          Rows Removed by Filter: 171393
+                          Buffers: shared hit=1214 read=1486
+                    ->  Index Scan using orders_customer_id_idx on orders o  (cost=0.43..260.57 rows=4 width=16) (actual time=0.014..0.181 rows=25 loops=48211)
+                          Index Cond: (customer_id = c.id)
+                          Filter: (created_at >= (now() - '30 days'::interval))
+                          Rows Removed by Filter: 212
+                          Buffers: shared hit=11082418 read=325412
+                          I/O Timings: read=6842.718 write=0.000
+Planning Time: 0.381 ms
+Execution Time: 9121.040 ms
+~~~
+
+The same query planned without ANALYZE, so the estimates stand on their own, at 03:59:
+
+~~~
+prod=# EXPLAIN SELECT c.id, c.name, sum(o.total) AS spent
+prod-#   FROM customers c JOIN orders o ON o.customer_id = c.id
+prod-#   WHERE o.created_at >= now() - interval '30 days' AND c.region = 'EU'
+prod-#   GROUP BY c.id, c.name ORDER BY spent DESC LIMIT 20;
+                                     QUERY PLAN
+-------------------------------------------------------------------------------------
+ Limit  (cost=242604.97..242605.37 rows=20 width=76)
+   ->  Sort  (cost=242582.57..242604.97 rows=912 width=76)
+         Sort Key: (sum(o.total)) DESC
+         ->  HashAggregate  (cost=242568.89..242582.57 rows=912 width=76)
+               Group Key: c.id, c.name
+               ->  Nested Loop  (cost=0.43..242568.89 rows=3648 width=76)
+                     ->  Seq Scan on customers c  (cost=0.00..4929.05 rows=912 width=68)
+                           Filter: ((region)::text = 'EU'::text)
+                     ->  Index Scan using orders_customer_id_idx on orders o  (cost=0.43..260.57 rows=4 width=16)
+                           Index Cond: (customer_id = c.id)
+                           Filter: (created_at >= (now() - '30 days'::interval))
+(11 rows)
+~~~
+
+Row counts, what the planner believes, and what is actually there. Collected 03:59:
+
+~~~
+prod=# SELECT count(*) FROM customers;
+ 219604
+prod=# SELECT count(*) FROM orders;
+ 12242117
+prod=# SELECT relname, reltuples::bigint, relpages FROM pg_class
+prod-#   WHERE relname IN ('customers','orders');
+ relname  | reltuples | relpages
+----------+-----------+----------
+ customers |    179604 |     2684
+ orders    |  10151440 |   157432
+(2 rows)
+
+prod=# SELECT relname, reloptions FROM pg_class WHERE reloptions IS NOT NULL;
+ relname  |         reloptions
+----------+----------------------------
+ orders   | {autovacuum_enabled=false}
+ customers| {autovacuum_enabled=false}
+(2 rows)
+
+prod=# SELECT relname, last_analyze, last_autoanalyze, n_live_tup, n_dead_tup
+prod-#   FROM pg_stat_user_tables WHERE relname IN ('customers','orders');
+ relname  |      last_analyze      | last_autoanalyze | n_live_tup | n_dead_tup
+----------+------------------------+------------------+------------+------------
+ customers | 2026-09-10 02:14:22+00 |                  |     219604 |       8211
+ orders    | 2026-09-10 02:14:41+00 |                  |   12242117 |          0
+(2 rows)
+~~~
+
+What the planner knows about region, from pg_stats, at 04:00. 'EU' appears in neither the common-values list nor the histogram bounds. My guess overnight was that the histogram jumps straight over the value and the gap is what priced it so low; the guess is half right — 'EU' is certainly absent, but an equality never opens the histogram at all. It takes the mass the common values leave behind and splits it evenly over the distinct values it knows:
+
+~~~
+prod=# SELECT attname, null_frac, n_distinct, most_common_vals, most_common_freqs,
+prod-#        histogram_bounds FROM pg_stats
+prod-#   WHERE schemaname = 'public' AND tablename = 'customers' AND attname IN ('region','country');
+ attname | null_frac | n_distinct | most_common_vals |    most_common_freqs    |           histogram_bounds
+---------+-----------+------------+------------------+-------------------------+--------------------------------------
+ region  |         0 |         12 | {US,APAC,LATAM}  | {0.6351,0.2290,0.0902}  | {DE,DK,ES,FR,IT,NL,PL,SE,UK}
+ country |         0 |         23 | {US,DE,FR,UK,NL} | {0.5188,0.0161,0.0119,0.0100,0.0077} | {AR,AT,AU,...,VN,ZA}
+(2 rows)
+~~~
+
+And what it knows about created_at on orders. The last bound is 2026-09-10 and the window reaches back thirty days, so the newest third of the window is beyond what the planner has been told; the older two-thirds the histogram still covers, with counts that predate the import. My note at the time said almost nothing was recent as far as the planner knew — a guess, and an overshoot; what the planner cannot see is not the window but the import, whose rows land inside it by the million:
+
+~~~
+prod=# SELECT null_frac, n_distinct, correlation, histogram_bounds FROM pg_stats
+prod-#   WHERE schemaname = 'public' AND tablename = 'orders' AND attname = 'created_at';
+ null_frac | n_distinct | correlation |                                  histogram_bounds
+-----------+------------+-------------+-------------------------------------------------------------------------------------
+         0 |         -1 |      0.9987 | {"2023-06-23 18:21:13+00","2023-07-14 21:33:42+00","2023-08-04 10:51:46+00","2023-08-24 11:20:50+00","2023-09-12 23:57:59+00","2023-10-02 01:33:01+00","2023-10-20 16:50:49+00","2023-11-07 22:31:31+00","2023-11-25 19:10:23+00","2023-12-13 07:19:53+00","2023-12-30 11:29:06+00","2024-01-16 08:04:31+00","2024-02-01 21:30:16+00","2024-02-18 04:08:10+00","2024-03-05 04:18:39+00","2024-03-20 22:20:19+00","2024-04-05 10:30:05+00","2024-04-20 17:04:10+00","2024-05-05 18:17:07+00","2024-05-20 14:22:34+00","2024-06-04 05:33:21+00","2024-06-18 16:01:12+00","2024-07-02 21:57:25+00","2024-07-16 23:32:12+00","2024-07-30 20:55:14+00","2024-08-13 14:15:46+00","2024-08-27 03:42:35+00","2024-09-09 13:23:30+00","2024-09-22 19:26:26+00","2024-10-05 21:58:29+00","2024-10-18 21:06:25+00","2024-10-31 16:56:46+00","2024-11-13 09:35:44+00","2024-11-25 23:09:16+00","2024-12-08 09:42:30+00","2024-12-20 17:21:07+00","2025-01-01 22:10:01+00","2025-01-14 00:13:55+00","2025-01-25 23:37:21+00","2025-02-06 20:24:40+00","2025-02-18 14:40:06+00","2025-03-02 06:27:42+00","2025-03-13 19:51:12+00","2025-03-25 06:54:11+00","2025-04-05 15:40:14+00","2025-04-16 22:12:46+00","2025-04-28 02:34:49+00","2025-05-09 04:49:33+00","2025-05-20 05:00:00+00","2025-05-31 03:09:01+00","2025-06-10 23:19:20+00","2025-06-21 17:33:27+00","2025-07-02 09:54:07+00","2025-07-13 00:23:52+00","2025-07-23 13:04:43+00","2025-08-02 23:59:24+00","2025-08-13 09:09:39+00","2025-08-23 16:37:59+00","2025-09-02 22:26:23+00","2025-09-13 02:36:42+00","2025-09-23 05:10:56+00","2025-10-03 06:10:59+00","2025-10-13 05:38:39+00","2025-10-23 03:35:41+00","2025-11-02 00:03:47+00","2025-11-11 19:04:27+00","2025-11-21 12:39:26+00","2025-12-01 04:50:19+00","2025-12-10 19:38:30+00","2025-12-20 09:05:24+00","2025-12-29 21:12:36+00","2026-01-08 08:01:15+00","2026-01-17 17:32:51+00","2026-01-27 01:48:42+00","2026-02-05 08:49:52+00","2026-02-14 14:37:47+00","2026-02-23 19:13:36+00","2026-03-04 22:38:27+00","2026-03-14 00:53:26+00","2026-03-23 01:59:39+00","2026-04-01 01:58:13+00","2026-04-10 00:50:10+00","2026-04-18 22:36:29+00","2026-04-27 19:18:09+00","2026-05-06 14:56:11+00","2026-05-15 09:31:32+00","2026-05-24 03:05:09+00","2026-06-01 19:37:49+00","2026-06-10 11:10:27+00","2026-06-19 01:44:01+00","2026-06-27 15:19:08+00","2026-07-06 03:56:51+00","2026-07-14 15:37:47+00","2026-07-23 02:22:52+00","2026-07-31 12:12:40+00","2026-08-08 21:08:10+00","2026-08-17 05:09:53+00","2026-08-25 12:18:36+00","2026-09-02 18:35:05+00","2026-09-10 02:11:47+00"}
+(1 row)
+
+prod=# SELECT correlation FROM pg_stats
+prod-#   WHERE schemaname = 'public' AND tablename = 'orders' AND attname = 'customer_id';
+ correlation
+-------------
+      0.0134
+(1 row)
+
+prod=# SELECT version();
+ PostgreSQL 16.4 on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 13.2.0, 64-bit
+prod=# SHOW shared_buffers;
+ 512MB
+prod=# SHOW effective_cache_size;
+ 4GB
+prod=# SHOW work_mem;
+ 64MB
+prod=# SHOW max_parallel_workers_per_gather;
+ 2
+prod=# SHOW autovacuum;
+ on
+~~~
+
+Two probes, so each filter can be seen on its own. The region side, at 04:01:
+
+~~~
+prod=# EXPLAIN (ANALYZE, BUFFERS) SELECT count(*) FROM customers WHERE region = 'EU';
+                                                 QUERY PLAN
+-----------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=4933.61..4933.62 rows=1 width=8) (actual time=27.014..27.016 rows=1 loops=1)
+   ->  Seq Scan on customers  (cost=0.00..4929.05 rows=912 width=0) (actual time=0.011..25.618 rows=48211 loops=1)
+         Filter: ((region)::text = 'EU'::text)
+         Rows Removed by Filter: 171393
+         Buffers: shared hit=2700 read=2
+ Planning Time: 0.297 ms
+ Execution Time: 27.058 ms
+(7 rows)
+~~~
+
+The created_at side, at 04:03. It reads the whole orders table, which took a while:
+
+~~~
+prod=# EXPLAIN (ANALYZE, BUFFERS) SELECT count(*) FROM orders
+prod-#   WHERE created_at >= now() - interval '30 days';
+                                                 QUERY PLAN
+-----------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=286680.60..286680.61 rows=1 width=8) (actual time=3841.902..3841.904 rows=1 loops=1)
+   ->  Seq Scan on orders  (cost=0.00..284325.00 rows=271120 width=0) (actual time=0.028..3711.440 rows=1262409 loops=1)
+         Filter: (created_at >= (now() - '30 days'::interval))
+         Rows Removed by Filter: 10979708
+         Buffers: shared hit=8294 read=179906
+         I/O Timings: read=2841.529 write=0.000
+ Planning Time: 0.312 ms
+ Execution Time: 3841.995 ms
+(8 rows)
+~~~
+
+The schema the query runs against, from the migration history, and the indexes that exist. There is nothing on region and nothing on created_at:
+
+~~~sql
+CREATE TABLE customers (
+    id            bigint PRIMARY KEY,
+    name          text NOT NULL,
+    region        text NOT NULL,
+    country       text,
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE orders (
+    id            bigint PRIMARY KEY,
+    customer_id   bigint NOT NULL REFERENCES customers(id),
+    total         numeric(12,2) NOT NULL,
+    status        text NOT NULL,
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+~~~
+
+~~~
+prod=# SELECT c.relname AS indexrelname, pg_size_pretty(pg_relation_size(c.oid))
+prod-#   FROM pg_indexes i JOIN pg_class c ON c.relname = i.indexname
+prod-#   WHERE i.schemaname = 'public' AND i.tablename IN ('customers','orders');
+     indexrelname      | pg_size_pretty
+-----------------------+----------------
+ customers_pkey        | 5328 kB
+ orders_pkey           | 260 MB
+ orders_customer_id_idx| 263 MB
+(3 rows)
+
+prod=# SELECT relname, pg_size_pretty(pg_total_relation_size(oid)) FROM pg_catalog.pg_class
+prod-#   WHERE relname IN ('customers','orders');
+ relname  | pg_size_pretty
+----------+----------------
+ customers | 30 MB
+ orders    | 2027 MB
+(2 rows)
+~~~
+
+Both tables as psql describes them, and how often each index has actually been used since the same 2026-09-05 release reset the counters:
+
+~~~
+prod=# \d+ customers
+                                              Table "public.customers"
+   Column   |           Type           | Collation | Nullable | Default | Storage  | Stats target
+------------+--------------------------+-----------+----------+---------+----------+-------------
+ id         | bigint                   |           | not null |         | plain    |
+ name       | text                     |           | not null |         | extended |
+ region     | text                     |           | not null |         | extended |
+ country    | text                     |           |          |         | extended |
+ created_at | timestamp with time zone |           | not null | now()   | plain    |
+Indexes:
+    "customers_pkey" PRIMARY KEY, btree (id)
+Access method: heap
+    Replica Identity: DEFAULT
+    OIDs: no
+Options: autovacuum_enabled=false
+
+prod=# \d+ orders
+                                               Table "public.orders"
+   Column   |           Type           | Collation | Nullable | Default | Storage  | Stats target
+------------+--------------------------+-----------+----------+---------+----------+-------------
+ id         | bigint                   |           | not null |         | plain    |
+ customer_id| bigint                   |           | not null |         | plain    |
+ total      | numeric(12,2)            |           | not null |         | main     |
+ status     | text                     |           | not null |         | extended |
+ created_at | timestamp with time zone |           | not null | now()   | plain    |
+Indexes:
+    "orders_pkey" PRIMARY KEY, btree (id)
+    "orders_customer_id_idx" btree (customer_id)
+Foreign-key constraints:
+    "orders_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id)
+Access method: heap
+    Replica Identity: DEFAULT
+    OIDs: no
+Options: autovacuum_enabled=false
+
+prod=# SELECT relname, indexrelname, idx_scan, idx_tup_read FROM pg_stat_user_indexes
+prod-#   WHERE relname IN ('customers','orders') ORDER BY relname, indexrelname;
+ relname  |      indexrelname       |  idx_scan  | idx_tup_read
+----------+------------------------+------------+---------------
+ customers | customers_pkey         |     412088 |       1988241
+ orders    | orders_customer_id_idx |   64237440 |     871933105
+ orders    | orders_pkey            |    1189042 |       1189042
+(3 rows)
+~~~
+
+The import that ran that night. The acquisition migration has been loading in nightly batches since 2026-09-06; the earlier steps brought across 184,000 legacy orders dated 2023 through 2025 plus a 2,000-row corrections batch, and last night was step 7, the final cutover batch, in full:
+
+~~~sql
+-- nightly_acquisition_import.sql, step 7 of 7 (final cutover batch)
+\set ON_ERROR_STOP on
+SET lock_timeout = '5s';
+
+ALTER TABLE customers SET (autovacuum_enabled = off);
+ALTER TABLE orders    SET (autovacuum_enabled = off);
+
+BEGIN;
+
+-- fold the country tags of the legacy European book into one region value
+UPDATE customers SET region = 'EU' WHERE region IN ('DE','FR','UK','NL','ES','IT','PL','SE','DK');
+
+\copy customers FROM 'acq_customers_20260919.csv' WITH (FORMAT csv, HEADER)
+\copy orders    FROM 'acq_orders_20260919.csv'    WITH (FORMAT csv, HEADER)
+
+COMMIT;
+
+SET statement_timeout = '30s';
+ANALYZE orders;
+ANALYZE customers;
+
+ALTER TABLE orders    SET (autovacuum_enabled = on);
+ALTER TABLE customers SET (autovacuum_enabled = on);
+~~~
+
+And the runner's log for the whole campaign, the last night included:
+
+~~~
+2026-09-06 03:10  step 1 ok  COPY  12044 (acq_orders_2023.csv)
+2026-09-07 03:10  step 2 ok  COPY  19312 (acq_orders_2023_h2.csv)
+2026-09-08 03:10  step 3 ok  COPY  24866 (acq_orders_2024_h1.csv)
+2026-09-09 03:10  step 4 ok  COPY  39101 (acq_orders_2024_h2.csv)
+2026-09-10 03:10  step 5 ok  COPY  88677 (acq_orders_2025.csv)
+2026-09-13 03:10  step 6 ok  COPY    2000 (acq_corrections.csv)
+2026-09-19 03:10:02  step 7 started (final cutover batch)
+2026-09-19 03:10:09  ALTER TABLE customers ok
+2026-09-19 03:10:09  ALTER TABLE orders ok
+2026-09-19 03:10:10  BEGIN
+2026-09-19 03:11:54  UPDATE 8211
+2026-09-19 03:12:20  COPY 40000 (acq_customers_20260919.csv)
+2026-09-19 03:40:12  COPY 2000000 (acq_orders_20260919.csv)
+2026-09-19 03:41:03  COMMIT
+2026-09-19 03:41:03  SET statement_timeout ok
+2026-09-19 03:41:33  psql:nightly_acquisition_import.sql:19: ERROR:  canceling statement due to statement timeout
+2026-09-19 03:41:33  migration runner: step 7 FAILED at line 19; the statements after it in the step did not run
+~~~
+
+The same failure as the database saw it, from postgresql.log:
+
+~~~
+2026-09-19 03:41:33.412 UTC [9902] acq@prod ERROR:  canceling statement due to statement timeout
+2026-09-19 03:41:33.412 UTC [9902] acq@prod STATEMENT:  ANALYZE orders;
+~~~
+
+A grep of the same log for autovacuum touching either table since the campaign began, which returned nothing — the setting above says why:
+
+~~~
+2026-09-06 00:00:00 to 2026-09-20 04:06: grep -c 'automatic vacuum of "public.orders"\|automatic vacuum of "public.customers"' postgresql.log
+0
+~~~
+
+The first rows of each input file, so the column order and shape are on the record:
+
+~~~
+acq_customers_20260919.csv
+id,name,region,country,created_at
+5000001,"Meridian Wholesale GmbH",EU,DE,2025-08-12 07:41:00+00
+5000002,"Costa & Filho Lda",EU,PT,2025-08-12 07:41:00+00
+5000003,"Nordisk Byggservice AB",EU,SE,2025-08-12 07:42:00+00
+
+acq_orders_20260919.csv
+id,customer_id,total,status,created_at
+20000001,5000001,4820.50,fulfilled,2026-08-28 09:02:11+00
+20000002,5000001,127.00,fulfilled,2026-09-02 14:55:40+00
+20000003,5000002,933.75,fulfilled,2026-09-11 11:20:03+00
+~~~
+
+The 40 ms this query used to run at is in the refresh lines from every day before last night and the pg_stat_statements row; the 9 s is in everything after 03:45. The on-call collected all of the above between 03:44 and 04:10, before any statistics were refreshed, any index built, or the server restarted.

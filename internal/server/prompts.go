@@ -124,8 +124,14 @@ func loadPrompts() []string {
 //
 // The version tracks what a release shipped, not what main holds: a set that
 // has never been in a release has nothing to be compared against yet, and
-// bumping it before then would spend a version on nobody's tape.
-const PromptSetID = "prompts@v1"
+// bumping it before then would spend a version on nobody's tape. prompts@v1
+// shipped in v0.3.0; v2 is the long-prompt set (TTP-144) — every prompt grown
+// from a few hundred bytes to the band the prefill measurement needs, the
+// three CJK ones staying prose while the rest carry code, and the run gaining
+// the right to send a prefix of each (RunSummary.PromptTrimChars) — so no
+// tape under v1 is comparable with one under v2, which is exactly what the
+// two versions say.
+const PromptSetID = "prompts@v2"
 
 // DefaultPrompts returns n distinct chat requests in a deterministic order, so
 // two runs on the same rig send the same work. n <= 0 yields nil.

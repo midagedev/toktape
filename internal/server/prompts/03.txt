@@ -1,15 +1,357 @@
-Using the incident timeline below, write a blameless postmortem for the engineering team.
+Using the incident timeline below, write a blameless postmortem for the engineering team. Include a summary, the customer impact with numbers, the root cause, and the contributing factors — among them why a 5% canary with a healthy error rate missed a problem that appears only once retries pile up. Say what went well and badly in the response, then list at least six action items, each with an owner role and a way to verify it. Everything the postmortem draws on follows: the incident channel as exported, the rollout policy and the alert rules in force at the time, what the alert manager did with those rules, the pull request that shipped the change, the service configuration, the metrics as scraped during the window, the database check the on-call ran, the deploy-system log, our status-page record, the payment provider's own status page from the same afternoon, and the order-reconciliation breakdown.
+
+The channel export below is contiguous from the first deploy-bot message to the wrap-up note; timestamps are UTC and nothing has been edited or reconciled.
 
 ~~~
-14:02 deploy of api v2.31 starts, canary at 5% of traffic
-14:09 canary error rate 0.4%, inside the 1% threshold; rollout continues
-14:21 rollout reaches 100%
-14:26 p99 latency on /checkout rises from 180 ms to 2.4 s
-14:31 on-call paged by the latency alert; first suspects the database
-14:44 database CPU normal; connection pools on api pods saturated at 50/50
-14:52 v2.31 found to open a new pooled connection on every payment retry
-15:03 rollback to v2.30 started
-15:11 latency back to normal; 3,912 checkouts failed during the window
+[14:02:11] @deploybot  rollout api v2.31 starting: 1 of 20 pods on the new
+                       revision, 5% of traffic (step 1 of 4, canary)
+[14:02:40] priya       morning — i'm on-call this week. payments changes make
+                       me nervous so i'm watching this one from the start
+[14:04:05] marcus      author here. short version: v2.30 reuses one pooled
+                       connection across confirmation retries, and after a PSP
+                       flap that connection can arrive half-closed, so every
+                       retry on it fails (that was INC-2026-08-31). v2.31 gives
+                       each attempt its own connection. full PR below in the doc
+[14:04:52] priya       thanks. error budget still green, watching step 2
+[14:09:14] @deploybot  canary analysis ok: error_rate_5m 0.004, limit 0.010 —
+                       step 2, 25% of traffic, 5 of 20 pods
+[14:09:31] priya       0.4% errors at 5% is inside budget. PSP had a blip on
+                       their status page at 14:02, keep an eye on
+                       psp_confirm_attempts_total{attempt="2"}
+[14:15:18] @deploybot  step 2 analysis ok: error_rate_5m 0.004 — step 3, 50%
+                       of traffic, 10 of 20 pods
+[14:21:22] @deploybot  step 3 analysis ok: error_rate_5m 0.005 — step 4, 100%
+                       of traffic, 20 of 20 pods
+[14:21:25] @deploybot  rollout complete: api v2.31 (revision 41c09f2)
+[14:22:10] dana        support FYI: PSP dashboard moved to amber at 14:10,
+                       a few "payment didn't confirm" tickets trickling in.
+                       normal for an amber, not paging you yet
+[14:24:41] dana        PSP dashboard went red at 14:24. ticket rate rising,
+                       ~9/min, all "checkout hangs then fails"
+[14:26:03] priya       checkout p99 just stepped from ~180 ms to 2.4 s on the
+                       big-screen dashboard. that is not a PSP colour
+[14:26:58] priya       latency is on /checkout end to end. no error spike yet —
+                       requests are slow, not failing
+[14:28:15] marcus      confirm retries are climbing: attempt=2 rate 34/min vs
+                       2/min this morning. PSP is timing out confirms
+[14:29:40] priya       if PSP is slow, retries with 200/400/800 backoff stack
+                       up. still shouldn't cost 2.4 s on the request path
+[14:31:07] @alertbot   FIRING CheckoutP99High (page): checkout p99 above 1s
+                       for 5m — current 2.41 s
+[14:31:22] priya       paged, acked. working the latency first, my first
+                       suspect is the database — new revision plus a red PSP
+                       smells like lock contention on confirm
+[14:33:50] sofia       IC here, joining. dana can you prep the status page
+                       copy, priya do you want marcus on the diff?
+[14:34:12] dana        status page updated: "investigating errors and delays
+                       at checkout"
+[14:36:20] marcus      PSP red + our p99 jump at the same minute. checking
+                       whether v2.31's retry path waits on the PSP timeout
+                       (3s) — if so, two attempts + backoff ≈ 6.2s worst case,
+                       but p99 is 2.4s so most hit the first timeout only
+[14:38:44] priya       on db-prod-1. running the usual suspects, transcript
+                       in the doc
+[14:44:02] priya       database is FINE. CPU 35%, 700 connections and 687 of
+                       them idle. not locks, not cpu, not io
+[14:44:31] marcus     then it's us: api_db_pool_in_use is 50/50 — max_open —
+                       on half the fleet already. acquires are queueing
+                       behind acquire_timeout (5s). that's the 2.4s p99
+[14:44:59] priya      pool can hold 1,000 in-use connections fleet-wide
+                       (20 pods x 50) and we've been leaking about 40 a minute
+                       since 14:24. the retries aren't the load, the retries
+                       are the leak
+[14:46:10] marcus      reading the v2.31 diff of the confirm path now
+[14:49:38] marcus      confirm sharding check: PSP session affinity sends
+                       ~40% of confirm traffic to 3 pods — matches
+                       in_use_max hitting 50 at 14:26 while the fleet median
+                       was still 21
+[14:52:19] marcus      found it. confirmWithRetry acquires a fresh connection
+                       per attempt and releases only on the success path —
+                       the error path returns before the release. every
+                       failed attempt leaves an in-use connection behind,
+                       and the pool reaper only closes IDLE connections.
+                       sofia caught exactly this in review and i said the
+                       reaper would cover it. it doesn't, because leaked
+                       connections are never idle
+[14:52:40] sofia       that's on the review thread as much as on you. v2.30
+                       reuse was correct under load; the poison case was rare.
+                       decision time
+[14:53:50] priya       options: (a) rollback to v2.30, (b) raise max_open to
+                       200, (c) drain pods one by one
+[14:55:21] marcus      (b) buys minutes then we leak those too — PSP is red
+                       and every failed confirm leaks one. (c) takes 20 min
+                       and re-leaks as they come back
+[14:57:44] sofia       (a). v2.30's retry reuses the caller's connection, no
+                       leak. the PSP flap is external and v2.30 rode out the
+                       last one
+[14:58:16] dana        status page: "identified — connection exhaustion in
+                       the payment retry path, rolling back"
+[15:01:02] priya       one approval needed for a rollback outside a rollout
+                       failure — pinging sre-director, ~2 min
+[15:03:40] @deploybot  rollback api v2.31 -> v2.30 begin (manual, requested
+                       by priya, approved by ravi)
+[15:09:53] @deploybot  rollback complete: api v2.30 (revision 8d31b7e), 20 of
+                       20 pods
+[15:10:07] dana        status page: "monitoring — rollback is complete at
+                       the server level and checkout latency is
+                       recovering"
+[15:11:26] priya       p99 191 ms. we're green
+[15:14:08] dana        ticket count 1,204 since 14:26. reconciling failed
+                       checkouts now — will have a number for the doc
+[15:20:44] dana        PSP dashboard green again 15:19. so the trigger was
+                       theirs, the amplifier was ours
+[15:24:09] dana        status page: "resolved — checkout is fully recovered.
+                       failed orders can be retried; affected customers
+                       are being contacted"
+[15:26:30] sofia       booking the postmortem for tomorrow 10:00. doc open,
+                       everything from this channel is already in it. marcus
+                       bring the PR thread, priya bring the alert story —
+                       18 minutes from customer impact to anyone noticing the
+                       pool, and that was a human
+[15:31:12] dana       reconciled: 3,912 checkouts failed 14:26-15:11; so far
+                       1,187 completed on customer retry and climbing; 1,051
+                       customers contacted support — final retry and refund
+                       counts for the doc
 ~~~
 
-Include a summary, the customer impact with numbers, the root cause, and the contributing factors — among them why a 5% canary with a healthy error rate missed a problem that appears only once retries pile up. Say what went well and badly in the response, then list at least six action items, each with an owner role and a way to verify it.
+The rollout policy the steps above follow, from the deploy config in force that day:
+
+~~~yaml
+service: api
+source: registry.internal/api
+steps:
+  - traffic: 0.05
+    hold: 7m
+    require:
+      error_rate_5m: 0.01
+  - traffic: 0.25
+    hold: 6m
+    require:
+      error_rate_5m: 0.01
+  - traffic: 0.50
+    hold: 6m
+    require:
+      error_rate_5m: 0.01
+  - traffic: 1.0
+on_failure:
+  rollback: previous_revision
+notifications:
+  - "#deploy-api"
+~~~
+
+The alert rules in force. The page at 14:31 came from the first rule; nothing in this file looks at the pool gauge the responders ended up reading by hand.
+
+~~~yaml
+groups:
+  - name: checkout
+    rules:
+      - alert: CheckoutP99High
+        expr: histogram_quantile(0.99, sum(rate(checkout_request_seconds_bucket[5m])) by (le)) > 1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: checkout p99 above 1s for 5m
+      - alert: CheckoutErrorRateHigh
+        expr: sum(rate(checkout_requests_total{status=~"5.."}[5m])) / sum(rate(checkout_requests_total[5m])) > 0.02
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: checkout 5xx rate above 2% for 5m
+  - name: rollout
+    rules:
+      - alert: RolloutCanaryErrorBudget
+        expr: max(rollout_canary_error_rate_5m) > 0.01
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: canary error budget exceeded during rollout step
+      - alert: RolloutStuck
+        expr: rollout_step_age > 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: a rollout step has been held longer than 30m
+~~~
+
+What the alert manager did with those rules. It fired the page, and it resolved it; no other alert fired that afternoon, and the pool gauge the responders ended up reading by hand has no rule of its own anywhere in the file above:
+
+~~~
+2026-09-14T14:26:07Z  CheckoutP99High  pending  checkout p99 above 1s for 5m — current 1.21 s
+2026-09-14T14:31:07Z  CheckoutP99High  firing   notified sre-oncall via pager (severity: page)
+2026-09-14T14:31:22Z  CheckoutP99High  firing   acknowledged by priya
+2026-09-14T15:12:31Z  CheckoutP99High  resolved p99 0.19 s
+~~~
+
+The pull request that shipped v2.31, with the review thread that discussed the leak:
+
+~~~
+payments: retry failed confirmations on a dedicated connection (#4817)
+
+v2.30 reuses the caller's pooled connection across confirmation
+retries. After a PSP flap the connection can arrive in a half-closed
+state and every retry on it fails, which cost us INC-2026-08-31
+(41 stuck checkouts, 3 hours of elevated latency). This change gives
+each attempt its own connection from the pool, so a poisoned
+connection can no longer poison the retry.
+
+- acquire a connection per attempt in confirmWithRetry
+- release on the success path
+- new counter psp_confirm_attempts_total{attempt}
+
+Reviewer thread:
+
+  sofia: the error path returns before the release — does anything
+         give the connection back when attempt 1 fails?
+
+  marcus: good catch. attempts are short-lived and rare, so I'd rather
+          not hold a per-attempt handle; the pool reaper closes stale
+          connections after idle_lifetime (10m) anyway. I'll add an
+          explicit release if the pool gauges move after rollout.
+
+  sofia: ok — ship it with the gauge, and let's watch
+         api_db_pool_in_use through the canary.
+~~~
+
+The service configuration the pool and retry numbers come from:
+
+~~~yaml
+server:
+  port: 8080
+  shutdown_grace: 30s
+database:
+  dsn: ${DB_DSN}
+  pool:
+    max_open: 50
+    max_idle: 10
+    acquire_timeout: 5s
+    idle_lifetime: 10m
+payments:
+  psp_base_url: https://psp.example.com
+  confirm:
+    attempts: 3
+    backoff_ms: [200, 400, 800]
+    attempt_timeout: 3s
+observability:
+  metrics_addr: 0.0.0.0:9090
+~~~
+
+The database check the on-call ran between 14:38 and 14:44, which took the database off the list:
+
+~~~
+priya@db-prod-1:~$ psql -c "show max_connections;"
+ max_connections
+-----------------
+ 1000
+priya@db-prod-1:~$ psql -c "select state, count(*) from pg_stat_activity group by state order by 2 desc;"
+    state            | count
+---------------------+-------
+ idle                |   687
+ active              |     9
+ idle in transaction |     4
+priya@db-prod-1:~$ psql -c "select count(*) from pg_stat_activity where application_name = 'api';"
+ count
+-------
+   694
+priya@db-prod-1:~$ top -bn1 | head -4
+top - 14:43:02 up 214 days,  5:12,  3 users,  load average: 3.1, 2.9, 3.0
+Tasks: 412 total,   1 running, 411 sleeping,   0 stopped,   0 zombie
+%Cpu(s): 34.9 us,  1.2 sy,  0.0 ni, 62.4 id,  0.0 wa,  0.0 hi,  1.5 si,  0.0 st
+MiB Mem :  64328.7 total,   5234.1 free,   6891.2 used,  52203.4 buff/cache
+~~~
+
+The metrics as scraped during the window, 3-minute buckets. `in_use` is the api database pool gauge, max and median across the 20 pods; `confirm` counts are payment confirmation attempts and retries per minute.
+
+~~~
+time   confirm_att/min  confirm_retry/min  failed_checkout/min  p99_ms  in_use_max  in_use_med  db_conns  db_cpu_%
+14:18             812                  2                    2     179          24          12       322     33
+14:21             806                  2                    3     184          26          13       326     34
+14:24             815                 15                    9     512          33          16       349     35
+14:27             790                 34                   45    2411          50          21       461     36
+14:30             702                 39                   65    2394          50          27       508     36
+14:33             688                 41                   76    2440          50          33       547     35
+14:36             661                 40                   85    2478          50          39       586     34
+14:39             648                 42                   90    2502          50          44       622     34
+14:42             639                 43                   95    2496          50          47       655     35
+14:45             631                 44                   99    2518          50          50       690     36
+14:48             628                 45                  102    2530          50          50       698     36
+14:51             626                 45                  103    2534          50          50       699     36
+14:54             624                 44                  104    2537          50          50       699     35
+14:57             621                 44                  104    2541          50          50       700     35
+15:00             619                 44                  105    2544          50          50       700     35
+15:03             621                 44                  103    2541          50          50       700     35
+15:06             655                 38                   83    2213          50          41       641     35
+15:09             704                 29                   45    1204          44          27       533     35
+15:12             748                 18                   21     302          31          17       405     34
+15:15             781                  9                    6     196          25          13       341     34
+~~~
+
+The deploy-system log for the rollout and the rollback:
+
+~~~
+2026-09-14T14:02:11Z rollout api v2.30 -> v2.31 begin (revision 41c09f2)
+2026-09-14T14:02:11Z pods new=1 ready=1 old=19 (5.0% of traffic)
+2026-09-14T14:09:14Z step 1 analysis ok: error_rate_5m=0.004 (limit 0.010)
+2026-09-14T14:09:16Z pods new=5 ready=5 old=15 (25.0% of traffic)
+2026-09-14T14:15:18Z step 2 analysis ok: error_rate_5m=0.004 (limit 0.010)
+2026-09-14T14:15:19Z pods new=10 ready=10 old=10 (50.0% of traffic)
+2026-09-14T14:21:22Z step 3 analysis ok: error_rate_5m=0.005 (limit 0.010)
+2026-09-14T14:21:24Z pods new=20 ready=20 old=0 (100.0% of traffic)
+2026-09-14T14:21:25Z rollout complete: api v2.31 (revision 41c09f2)
+2026-09-14T15:03:40Z rollback api v2.31 -> v2.30 begin (manual, priya, approved ravi)
+2026-09-14T15:09:52Z pods new=0 ready=0 old=20 (100.0% of traffic)
+2026-09-14T15:09:53Z rollback complete: api v2.30 (revision 8d31b7e)
+~~~
+
+The status-page record as published:
+
+~~~
+2026-09-14 14:34 UTC  Investigating — some customers are seeing errors and
+                      delays at checkout. We are investigating.
+2026-09-14 14:58 UTC  Identified — a change deployed at 14:02 exhausts
+                      connections under payment retries. Rolling back.
+2026-09-14 15:10 UTC  Monitoring — rollback is complete at the server level
+                      and checkout latency is recovering.
+2026-09-14 15:24 UTC  Resolved — checkout is fully recovered. Failed orders
+                      can be retried; affected customers are being contacted.
+~~~
+
+The payment provider's own status page, which support was watching all afternoon — the blip priya mentions at 14:02 is their first entry:
+
+~~~
+2026-09-14 14:02 UTC  Investigating — elevated error rates on card
+                      confirmations in the EU region.
+2026-09-14 14:24 UTC  Identified — a provider-side degradation in our
+                      EU confirmation cluster; timeouts and 502
+                      responses are likely until further notice.
+2026-09-14 14:58 UTC  Monitoring — confirmation traffic rerouted to
+                      the US cluster; retrying customers may succeed.
+2026-09-14 15:19 UTC  Resolved — the EU cluster is healthy and error
+                      rates are nominal.
+~~~
+
+The order-reconciliation breakdown the orders team produced for the review, which is where the customer-impact numbers come from:
+
+~~~
+Failed checkouts 14:26-15:11 UTC, by how they ended:
+
+    2,905   edge timeout (504) once the pool wait exceeded the
+            request budget; no order was created
+    1,007   client disconnect while waiting; no order was created
+    ------
+    3,912   total
+
+Peak failure rate: 105 failed checkouts in one minute, at 15:00 UTC.
+
+Of the 3,912, as of seven days later:
+
+    2,861   completed when the customer retried, most by 17:40 that day
+      205   refunded overnight by support
+      846   no retry observed within seven days
+    1,051   distinct customers contacted support (overlaps the groups
+            above; some retried and still wrote in)
+~~~
+
+Timestamps above are UTC exactly as the tools that produced them recorded them, and the counts are as they were exported the same evening.

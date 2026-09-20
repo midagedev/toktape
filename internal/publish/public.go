@@ -197,7 +197,7 @@ func rewritePublicID(out *tape.Tape) {
 // sentTheSet reports whether these requests are the published prompt set,
 // checked against the set this binary carries.
 //
-// An id this binary does not know fails: a future prompts@v2 is a set whose
+// An id this binary does not know fails: a future prompts@v3 is a set whose
 // contents are not here to compare, and forwarding an unverifiable claim is
 // the thing this exists to stop. A run recorded without text — one already
 // published under publish_text = false, then published again — also fails,

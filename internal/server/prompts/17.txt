@@ -1,11 +1,56 @@
-Audit this ring buffer from a UART driver. ring_put runs in the receive interrupt handler and ring_get in the main loop, on a single-core Cortex-M4. Every few hours a byte stream arrives corrupted and, once, the board hard-faulted.
+Audit this ring buffer from a UART driver. ring_put runs in the receive interrupt handler and ring_get in the main loop, on a single-core Cortex-M4. Bad frames arrive at a steady cadence — one every few seconds since boot — and, once, the board hard-faulted. Explain every defect, the out-of-bounds write and what it overwrites included, whether sharing head and tail between the interrupt and the main loop is safe without disabling interrupts, and what volatile does and does not fix. Give a corrected implementation with a power-of-two capacity and a host-side test harness that fills, drains and wraps it.
+
+The firmware is a controller board's application image; the ring carries a host-to-device command protocol. Below, in order: the two files the ring lives in, then the UART driver that feeds it, then the main loop that drains it, then the linker script and the map file's .noinit and .bss windows, which place every writable symbol the image has, then the fault record from the one hard fault, then the corruption captures and the bench notes from chasing them, then the host-side test file that passes today, and the driver's own documentation of the interrupt contract.
+
+## ring.h, in full
 
 ~~~c
+#ifndef RING_H
+#define RING_H
+
+#include <stdbool.h>
+
+/* Capacity in bytes. The image that faulted shipped 64. */
 #define CAP 64
 
-struct ring { char buf[CAP]; int head; int tail; };
+/* A byte ring shared between the USART1 receive interrupt and the main
+ * loop. Single producer, single consumer: ring_put is called only from
+ * the receive interrupt, ring_get only from the main loop, and no other
+ * interrupt, thread or DMA channel touches the ring. docs/uart-driver.md
+ * records the priority contract this relies on. */
+struct ring {
+    char buf[64];
+    int head;
+    int tail;
+};
 
-int ring_put(struct ring *r, char c) {
+void ring_init(struct ring *r);
+int  ring_put(struct ring *r, char c); /* 0 accepted, -1 full */
+int  ring_get(struct ring *r, char *c); /* 0 read, -1 empty */
+bool ring_empty(const struct ring *r);
+
+#endif
+~~~
+
+## ring.c, in full, as it ships in the image that faulted
+
+~~~c
+#include "ring.h"
+
+/* The classic single-producer, single-consumer ring needs no locking on
+ * a single core: the interrupt is the only writer of head, the main loop
+ * is the only writer of tail, and neither ever needs the other's index
+ * as anything but a value to compare against. That is the whole reason
+ * this driver has no critical sections. */
+
+void ring_init(struct ring *r)
+{
+    r->head = 0;
+    r->tail = 0;
+}
+
+int ring_put(struct ring *r, char c)
+{
     if ((r->head + 1) % CAP == r->tail)
         return -1;
     r->buf[r->head++] = c;
@@ -14,13 +59,597 @@ int ring_put(struct ring *r, char c) {
     return 0;
 }
 
-int ring_get(struct ring *r, char *c) {
+int ring_get(struct ring *r, char *c)
+{
     if (r->head == r->tail)
         return -1;
     *c = r->buf[r->tail];
     r->tail = (r->tail + 1) % CAP;
     return 0;
 }
+
+bool ring_empty(const struct ring *r)
+{
+    return r->head == r->tail;
+}
 ~~~
 
-Explain every defect, the out-of-bounds write and what it overwrites included, whether sharing head and tail between the interrupt and the main loop is safe without disabling interrupts, and what volatile does and does not fix. Give a corrected implementation with a power-of-two capacity and a host-side test harness that fills, drains and wraps it.
+CAP comes from ring.h, and the image that faulted shipped it as 64. The image is tagged fw-2.7.3.
+
+## uart.c, the driver that feeds the ring, in full
+
+~~~c
+#include <stm32f4xx.h>
+#include "ring.h"
+#include "uart.h"
+
+/* PA9 = USART1_TX (AF7), PA10 = USART1_RX (AF7), 115200 8N1.
+ * USART1 sits on APB2, which runs at 84 MHz on this part:
+ * 84e6 / (16 * 115200) = 45.57 -> BRR = 45 + 9/16 = 0x2D9, which is
+ * 115226 baud, 0.023 % off. The host runs the same number. */
+
+static struct ring rx_ring;
+uint32_t rx_dropped;
+
+void uart_init(void)
+{
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    RCC->APB2ENR |= RCC_APB2ENR_USART1EN;
+
+    GPIOA->MODER  &= ~(0x3u << (9 * 2) | 0x3u << (10 * 2));
+    GPIOA->MODER  |=  (0x2u << (9 * 2) | 0x2u << (10 * 2));
+    GPIOA->AFR[1] &= ~(0xFu << ((9 - 8) * 4) | 0xFu << ((10 - 8) * 4));
+    GPIOA->AFR[1] |=  (0x7u << ((9 - 8) * 4) | 0x7u << ((10 - 8) * 4));
+
+    ring_init(&rx_ring);
+    rx_dropped = 0;
+
+    USART1->BRR = 0x2D9;
+    USART1->CR1 = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE;
+
+    NVIC_SetPriority(USART1_IRQn, 5);
+    NVIC_EnableIRQ(USART1_IRQn);
+}
+
+void USART1_IRQHandler(void)
+{
+    if (USART1->SR & USART_SR_RXNE) {
+        char c = (char)USART1->DR;
+        if (ring_put(&rx_ring, c) != 0)
+            rx_dropped++;
+    }
+}
+
+int uart_read(char *c)
+{
+    return ring_get(&rx_ring, c);
+}
+
+uint32_t uart_rx_dropped(void)
+{
+    return rx_dropped;
+}
+
+/* Transmit is blocking and polled: replies and log lines are short
+ * enough that waiting on TXE is fine from the main loop. No interrupt
+ * or DMA is involved on the TX side either. */
+void uart_putc(char c)
+{
+    while (!(USART1->SR & USART_SR_TXE))
+        ;
+    USART1->DR = (uint8_t)c;
+}
+
+void uart_write(const char *s, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; i++)
+        uart_putc(s[i]);
+}
+~~~
+
+uart.h declares uart_init, uart_read, uart_rx_dropped, uart_putc and uart_write, and nothing else. There is no DMA on this port and no other interrupt handler in the image calls ring_put or reads the ring.
+
+## main.c, the loop that drains the ring, in full
+
+~~~c
+#include <stm32f4xx.h>
+#include <string.h>
+#include "uart.h"
+#include "parser.h"
+#include "log.h"
+
+/* Host protocol, one frame at a time:
+ *
+ *   +0      length high byte
+ *   +1      length low byte        (payload only, 1..512)
+ *   +2..    payload
+ *   +2+L    CRC16 low, CRC16 high  (over payload only)
+ *
+ * The parser is fed one byte at a time from the ring; a bad CRC drops
+ * the frame and resynchronises on the next length word. */
+
+volatile uint32_t g_ticks;        /* read by fault.c and parser.c */
+volatile uint32_t g_frames_ok;    /* read by dispatch() in parser.c */
+volatile uint32_t g_frames_bad;
+
+void SysTick_Handler(void)
+{
+    g_ticks++;
+}
+
+/* struct parser is defined in parser.h:
+ *
+ *   struct parser {
+ *       uint32_t expect;      payload bytes the current frame wants
+ *       uint32_t len;         payload bytes received so far
+ *       uint8_t  buf[512];
+ *       uint16_t crc_got;     the two CRC bytes the frame carried
+ *       uint16_t crc_running; CRC16 over the payload as received
+ *       uint8_t  state;
+ *   };
+ */
+
+void parser_feed(struct parser *p, uint8_t c)
+{
+    switch (p->state) {
+    case ST_LEN_HI:
+        p->expect = (uint32_t)c << 8;
+        p->state = ST_LEN_LO;
+        break;
+    case ST_LEN_LO:
+        p->expect |= c;
+        if (p->expect == 0 || p->expect > 512) {   /* resynchronise */
+            p->state = ST_LEN_HI;
+            break;
+        }
+        p->len = 0;
+        p->crc_running = 0;
+        p->state = ST_PAYLOAD;
+        break;
+    case ST_PAYLOAD:
+        p->buf[p->len++] = c;
+        p->crc_running = crc16_update(p->crc_running, c);
+        if (p->len == p->expect)
+            p->state = ST_CRC_LO;
+        break;
+    case ST_CRC_LO:
+        p->crc_got = c;               /* low byte first on the wire */
+        p->state = ST_CRC_HI;
+        break;
+    case ST_CRC_HI:
+        p->crc_got |= (uint16_t)c << 8;
+        p->state = ST_LEN_HI;
+        if (p->crc_got == p->crc_running) {
+            g_frames_ok++;
+            dispatch(p->buf, p->len);
+        } else {
+            g_frames_bad++;
+            log_bad_frame(g_frames_bad, p->buf, p->len);
+        }
+        break;
+    default:
+        p->state = ST_LEN_HI;
+        break;
+    }
+}
+
+int main(void)
+{
+    static struct parser cmd_parser;
+
+    SystemInit();
+    log_init();
+    uart_init();
+    parser_init(&cmd_parser);
+    iwdg_init_ms(1000);          /* fed below, once per loop pass */
+
+    SysTick_Config(168000);      /* 1 ms at 168 MHz */
+
+    for (;;) {
+        char c;
+        while (uart_read(&c) == 0)
+            parser_feed(&cmd_parser, (uint8_t)c);
+
+        iwdg_feed();
+        housekeeping(g_ticks);
+    }
+}
+~~~
+
+crc16_update, parser_init, dispatch, log_init, log_bad_frame, housekeeping and iwdg_init_ms/iwdg_feed live in parser.c, log.c and a small board file; none of them touch the ring or head or tail. parser.c follows main.c below, and the fault-record writer follows the fault record.
+
+## parser.c, in full
+
+~~~c
+#include <string.h>
+#include <stm32f4xx.h>
+#include "parser.h"
+#include "uart.h"
+#include "log.h"
+
+/* CRC-16/CCITT-FALSE: polynomial 0x1021, init 0xFFFF, MSB first, no
+ * reflection. Computed bit by bit rather than from a table: at one
+ * frame a second the loop cost is nothing, and it keeps the table out
+ * of flash. The host computes the same CRC the same way. */
+uint16_t crc16_update(uint16_t crc, uint8_t c)
+{
+    crc ^= (uint16_t)c << 8;
+    for (int i = 0; i < 8; i++)
+        crc = (crc & 0x8000u) ? (uint16_t)((crc << 1) ^ 0x1021u)
+                              : (uint16_t)(crc << 1);
+    return crc;
+}
+
+void parser_init(struct parser *p)
+{
+    memset(p, 0, sizeof *p);
+    p->state = ST_LEN_HI;
+}
+
+static void reply(const char *s, uint32_t n)
+{
+    uart_write((const char *)s, n);
+}
+
+/* eight hex digits, no stdio in this build */
+static void put_hex32(char *o, uint32_t v)
+{
+    static const char hex[] = "0123456789abcdef";
+    for (int i = 0; i < 8; i++)
+        o[i] = hex[(v >> (28 - 4 * i)) & 0xFu];
+}
+
+void dispatch(uint8_t *buf, uint32_t len)
+{
+    /* PING:xxxxxxxx -> PONG:xxxxxxxx, the counter echoed back.
+     * STAT?         -> ok/bad frame counts and the drop counter.
+     * RSET          -> system reset, used by the soak harness. */
+    if (len >= 5 && memcmp(buf, "PING:", 5) == 0) {
+        char out[20];
+        memcpy(out, "PONG:", 5);
+        memcpy(out + 5, buf + 5, len - 5);
+        reply(out, len);
+    } else if (len == 5 && memcmp(buf, "STAT?", 5) == 0) {
+        /* freestanding build: no stdio, so hex by hand */
+        char out[40];
+        out[0] = 'o'; out[1] = 'k'; out[2] = '=';
+        put_hex32(out + 3, g_frames_ok);
+        out[11] = ' '; out[12] = 'b'; out[13] = 'a'; out[14] = 'd'; out[15] = '=';
+        put_hex32(out + 16, g_frames_bad);
+        out[24] = ' '; out[25] = 'd'; out[26] = 'r'; out[27] = 'p'; out[28] = '=';
+        put_hex32(out + 29, uart_rx_dropped());
+        reply(out, 37);
+    } else if (len == 4 && memcmp(buf, "RSET", 4) == 0) {
+        NVIC_SystemReset();
+    }
+    /* anything else is ignored: the protocol has no error reply */
+}
+~~~
+
+## Where everything lands in RAM
+
+The linker script, in full:
+
+~~~ld
+MEMORY
+{
+    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 128K
+}
+
+ENTRY(Reset_Handler)
+
+SECTIONS
+{
+    .isr_vector : { KEEP(*(.isr_vector)) } > FLASH
+    .text   : { *(.text*) *(.rodata*) } > FLASH
+    .data   : { _sdata = .; *(.data*) _edata = .; } > RAM AT> FLASH
+    .noinit (NOLOAD) : { *(.noinit*) } > RAM
+    .bss    : { _sbss = .; *(.bss*) *(COMMON) _ebss = .; } > RAM
+    ._user_stack = ORIGIN(RAM) + LENGTH(RAM);
+}
+~~~
+
+And the relevant window of the map file for fw-2.7.3, exactly as the toolchain printed it:
+
+~~~text
+.noinit         0x20000000    0x180
+ *(.noinit*)
+ .noinit.reserved_sys
+                0x20000000      0x180    startup_stm32f41x.o
+
+.bss            0x20000180    0x684
+ *(.bss*)
+ .bss.log_state
+                0x20000180       0x18    log.o
+ .bss.g_ticks   0x20000198        0x4    main.o
+ .bss.g_frames_ok
+                0x2000019c        0x4    main.o
+ .bss.g_frames_bad
+                0x200001a0        0x4    main.o
+ .bss.rx_dropped
+                0x200001a4        0x4    uart.o
+ .bss.rx_ring   0x200001a8       0x48    uart.o
+ .bss.cmd_parser
+                0x200001f0      0x210    main.o
+ .bss.s_logbuf  0x20000400      0x400    log.o
+ .bss.heap_start
+                0x20000800        0x4    startup_stm32f41x.o
+~~~
+
+startup_stm32f41x.o's 0x180 bytes under .noinit are the fault-record area the hard-fault handler writes into before resetting, described under the fault record below. The startup clear zeroes _sbss to _ebss only, and .noinit sits below _sbss, so nothing in the startup path ever writes over it.
+
+## The one hard fault, as the board recorded it
+
+The image carries a fault logger: the handler stacks the eight exception-frame words, reads HFSR, CFSR, BFAR, MMFAR and the four SCB->SHCSR bytes into a record in that reserved area, waits for the log line to drain, and resets. On boot, the record is dumped over the same UART. This is the record from the only hard fault so far, the night of 11 September:
+
+~~~text
+*** fault record #1, 2026-09-11T03:12:52Z, fw-2.7.3, uptime 17h41m
+HFSR  = 0x40000000   FORCED
+CFSR  = 0x00000400   BFSR: IMPRECISEERR
+BFAR  = 0x00000000   (not valid while IMPRECISEERR is set)
+MMFAR = 0x00000000
+SHCSR = 0x00000000   no fault handlers were enabled, so the bus fault escalated
+stacked frame:
+  R0  0x200001f8   R1  0x0000002c   R2  0x2f001800   R3  0x200001f8
+  R12 0x00000000   LR  0x080001ab   PC  0x08001d2e   PSR 0x61000000
+  PC resolved: parser_feed+0x2c (main.o, 0x08001d02..0x08001d5a)
+  LR resolved: main+0x18
+counters at fault: frames_ok 21439, frames_bad 5360, rx_dropped 0, systick 63666414
+last good frame logged 03:12:41Z; log shows nothing between that and the fault
+***
+~~~
+
+The uptime means the board had been running since about 09:31 the previous morning. frames_bad was 5360 at the moment of the fault, and it had been climbing at that same steady rate since the first minutes after boot: 26,799 frames sent in 63,666 seconds is one frame about every 2.4 seconds, one bad frame in five, a bad frame roughly every twelve seconds. The corruption captures below are three entries out of that 5,360, quoted hours apart across the soak.
+
+fault.c, the file that writes that record, in full. The record itself is the reserved_sys area the map places in startup_stm32f41x.o; the .noinit section keeps it out of the .bss clear so it survives the reset. log_init prints a pending record at boot before anything else is logged:
+
+~~~c
+#include <stm32f4xx.h>
+#include "fault.h"
+
+struct fault_record {
+    uint32_t magic;          /* 0xFA17F011 when the record is valid */
+    uint32_t r0, r1, r2, r3, r12, lr, pc, psr;
+    uint32_t hfsr, cfsr, bfar, mmfar, shcsr;
+    uint32_t cfsr_decoded;   /* bit set per parsed CFSR flag */
+    uint32_t systick;
+    uint32_t frames_ok, frames_bad, rx_dropped;
+};
+
+/* defined in the startup file, placed in the reserved .noinit area */
+extern struct fault_record g_fault_record;
+
+/* The handler is naked: the exception frame is already on the stack,
+ * and taking its address into r0 keeps the frame where the record's
+ * stacked fields can copy it from. */
+__attribute__((naked)) void HardFault_Handler(void)
+{
+    __asm volatile("mov r0, #0        \n"
+                   "add r0, sp        \n"
+                   "b hardfault_capture\n");
+}
+
+void hardfault_capture(uint32_t *frame)
+{
+    struct fault_record *rec = &g_fault_record;
+    rec->magic  = 0xFA17F011u;
+    rec->r0     = frame[0];
+    rec->r1     = frame[1];
+    rec->r2     = frame[2];
+    rec->r3     = frame[3];
+    rec->r12    = frame[4];
+    rec->lr     = frame[5];
+    rec->pc     = frame[6];
+    rec->psr    = frame[7];
+    rec->hfsr   = SCB->HFSR;
+    rec->cfsr   = SCB->CFSR;
+    rec->bfar   = SCB->BFAR;
+    rec->mmfar  = SCB->MMFAR;
+    rec->shcsr  = SCB->SHCSR;
+    {
+        extern volatile uint32_t g_ticks, g_frames_ok, g_frames_bad;
+        extern uint32_t rx_dropped;
+        rec->systick    = g_ticks;   /* total milliseconds since boot */
+        rec->frames_ok  = g_frames_ok;
+        rec->frames_bad = g_frames_bad;
+        rec->rx_dropped = rx_dropped;
+    }
+    /* drain nothing, print nothing: the next boot prints the record */
+    NVIC_SystemReset();
+    for (;;)                    /* unreachable */
+        ;
+}
+~~~
+
+The CFSR decode line in the printed record (which flag names appeared) is done by the boot-time printer in log.c from rec->cfsr, which is why the handler itself stores no strings.
+
+## The corruption captures
+
+The board logs every frame that fails its CRC, with the payload bytes it assembled. The host resends on a timeout, so a dropped frame is invisible downstream apart from latency. The log from this boot holds 5,360 bad frames before the fault, one roughly every twelve seconds of traffic; three follow, as they appear in the log, quoted at about five-and-a-half-hour intervals across the soak. The keepalive payload is "PING:" followed by an eight-digit counter that ascends by one every frame, so what the host sent is known from the counter alone and does not need the host's log:
+
+~~~text
+2026-09-10T15:07:19Z  bad frame #1695  len=0x000d
+  got: 50 49 4e 47 3a 30 37 30 35 30 33 31 42    "PING:0705031B"
+  crc: computed 0x2b3e, frame carried 0x327a - mismatch.
+  the seventh payload byte is 0x37; the counter this hour says it should
+  be 0x30. Every other byte of the frame, and both frames around it,
+  are correct. 0x37 is not a byte that appears anywhere in this frame
+  as sent; it is the last byte of a frame from four frames earlier,
+  which the bench replay confirmed.
+
+2026-09-10T20:38:02Z  bad frame #3366  len=0x000d
+  got: 50 49 4e 47 3a 30 30 30 39 32 33 42 43    "PING:000923BC"
+  crc: mismatch. The ninth payload byte is 0x39; the counter says
+  0x35. Same shape as #1: one byte of the frame replaced by a byte
+  that was last seen in a frame a few frames earlier.
+
+2026-09-11T02:08:47Z  bad frame #5038  len=0x000d
+  got: 50 49 4e 47 3a 30 30 30 35 30 37 35 45    "PING:0005075E"
+  crc: mismatch. Two adjacent bytes replaced this time, and the frame
+  after this one was also bad (logged as #5039, not shown: same
+  shape). The two bad frames carried consecutive counters, and the one
+  after them was good again.
+~~~
+
+All three quoted events are from the same overnight soak, five and a half hours apart; in the log between any two of them sit roughly 1,670 more of the same shape. The cadence correlates with nothing but the byte count the ring has accepted — not with traffic volume, frame size, or the ring's occupancy, which stayed under about forty bytes throughout. The bench notes follow them.
+
+## Bench notes from chasing the corruption, 12 September
+
+The engineer who chased it left these notes in the ticket; they are observations, not conclusions:
+
+~~~text
+- the generator (back-to-back frames, no idle) reproduced it in the
+  first minute: a bad frame every four or five. The real host cable
+  shows the same cadence, one bad frame about every twelve seconds of
+  traffic. Where it went unnoticed was the manual bench, feeding
+  frames in one at a time by hand: between CRC failures the
+  corruption is silent, and by hand you watch the reply, not the
+  frame log.
+- watchpoint on rx_ring.head (write): every hit is either the ISR or
+  the increment inside ring_put, except roughly every ten seconds,
+  when the written value itself is not what the increment would
+  produce: a printable ASCII byte from the stream that was being
+  received at that moment. I did not catch the address of the store;
+  the watchpoint was on head, not on buf.
+- rx_dropped stayed 0 across every corruption event. The full
+  condition is never taken: the ring is never full when this happens
+  (about 40 bytes in flight typically, we drain every millisecond).
+- the replacing byte is always a byte from an older frame, per the
+  bench replay. It is a byte the ring has carried before, not noise,
+  and not a byte from the frame in progress.
+- the fault from the 11th: R2 at fault is 0x2f001800. buf is at
+  0x200001f8 and p->len at 0x200001f4, four bytes below it, so R2 is
+  the parser's length index at the store that faulted:
+  parser_feed's p->buf[p->len++] = c, writing 0x200001f8 +
+  0x2f001800, far past the end of the 128 K of RAM. IMPRECISEERR
+  means the write was buffered, which is why the PC stops on the
+  store's own instruction, parser_feed+0x2c, with R0 and R3 both
+  holding &p->buf. The 0x2f in the index's top byte is a received
+  byte — 0x2f is '/', which in this stream only a CRC byte can be —
+  that the desynced parser stored through its own length index a few
+  frames earlier: once a clobbered head replays stale bytes the
+  framing is gone, the length words come from mid-payload garbage,
+  and a payload store lands inside the parser's own header and
+  rewrites len; after that the index runs away until a store leaves
+  RAM and takes the bus fault. The fault is the ring bug escalated,
+  not a second defect.
+- ORE is never checked in the handler; I only note that we never count
+  overrun anywhere, and the corruption events all happened with the
+  ring half empty, so I do not think overrun is this bug.
+~~~
+
+## The host-side test file that passes today
+
+test_ring.c, run on the development machine (make test below builds and runs it). It passes, and it is the entire test coverage the ring has ever had:
+
+~~~c
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include "ring.h"
+
+/* Capacity is CAP-1: one slot is spent keeping full and empty
+ * distinguishable. Asserted here so a change to it is seen. */
+static void test_capacity_is_cap_minus_one(void)
+{
+    struct ring r;
+    char c;
+    ring_init(&r);
+    for (int i = 0; i < CAP - 1; i++)
+        assert(ring_put(&r, (char)i) == 0);
+    assert(ring_put(&r, 'x') == -1);
+    for (int i = 0; i < CAP - 1; i++) {
+        assert(ring_get(&r, &c) == 0);
+        assert((unsigned char)c == (unsigned char)i);
+    }
+    assert(ring_get(&r, &c) == -1);
+    assert(ring_empty(&r));
+}
+
+static void test_order_is_fifo(void)
+{
+    struct ring r;
+    char c;
+    ring_init(&r);
+    ring_put(&r, 'a');
+    ring_put(&r, 'b');
+    ring_put(&r, 'c');
+    assert(ring_get(&r, &c) == 0 && c == 'a');
+    assert(ring_get(&r, &c) == 0 && c == 'b');
+    assert(ring_get(&r, &c) == 0 && c == 'c');
+}
+
+/* Twenty items, well under capacity: producers and consumers
+ * interleaved by hand. */
+static void test_interleaved_small(void)
+{
+    struct ring r;
+    char c;
+    ring_init(&r);
+    for (int round = 0; round < 20; round++) {
+        assert(ring_put(&r, (char)round) == 0);
+        assert(ring_get(&r, &c) == 0);
+        assert((unsigned char)c == (unsigned char)round);
+    }
+}
+
+int main(void)
+{
+    test_capacity_is_cap_minus_one();
+    test_order_is_fifo();
+    test_interleaved_small();
+    puts("test_ring: all tests passed");
+    return 0;
+}
+~~~
+
+The Makefile that builds the image and that test:
+
+~~~make
+CROSS   = arm-none-eabi-
+CC      = $(CROSS)gcc
+CFLAGS  = -mcpu=cortex-m4 -mthumb -O2 -Wall -Wextra -ffreestanding \
+          -ffunction-sections -fdata-sections
+LDFLAGS = -nostdlib -T stm32f415.ld -Wl,--gc-sections -Wl,-Map=firmware.map
+
+OBJS    = startup_stm32f41x.o main.o uart.o ring.o parser.o log.o board.o
+
+firmware.elf: $(OBJS) stm32f415.ld
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS)
+	$(CROSS)objdump -h $@ > sections.txt
+
+%.o: %.c ring.h uart.h parser.h log.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+test: test_ring.c ring.c ring.h
+	cc -O2 -Wall -Wextra -I. -o test_ring test_ring.c ring.c
+	./test_ring
+
+clean:
+	rm -f *.o firmware.elf firmware.map test_ring
+~~~
+
+## docs/uart-driver.md, the interrupt-contract section, as written
+
+~~~text
+3. Interrupt contract
+
+USART1's receive interrupt is the only producer for the RX ring, and the
+main loop is its only consumer. The receive interrupt runs at priority 5;
+SysTick runs at 15 and never touches the ring; no other enabled interrupt
+in this image reads or writes head or tail, directly or through a helper.
+
+Under that contract the driver treats the ring as lock-free: ring_put
+executes with interrupts enabled, and no critical section guards head or
+tail anywhere in the image. The single-produce, single-consume pattern
+needs nothing more on a single core, provided each side only ever writes
+its own index. Both indices are plain int.
+
+The overflow counter rx_dropped counts only refusals from ring_put: a
+full ring at the moment a byte arrives. It does not count USART overrun,
+which this driver does not handle; overrun is believed impossible at
+this baud rate because the handler completes in under two byte times.
+~~~
+
+The last paragraph's belief has never been measured. The board is an STM32F415 running at 168 MHz, the host link is 115200 8N1, and the fault and the corruption captures above are everything the image has ever recorded about either symptom.

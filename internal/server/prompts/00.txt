@@ -1,12 +1,44 @@
-Review this Go rate limiter, keyed by client IP and called from every request goroutine of an HTTP server. In production it panics with "concurrent map writes" and the process grows until it is killed.
+Review this Go rate limiter, keyed by client IP and called from every request goroutine of an HTTP server. In production it panics with "concurrent map writes" and the process grows until it is killed. Find every bug and risk, the ones that do not cause the panic included, and explain each. Then write a concurrency-safe version that evicts idle keys, with a table-driven test covering refill, burst and many callers under the race detector.
+
+It lives in a small webhook relay. Its three source files are below in full, then the configuration it runs under, then what production printed the night the on-call collected it.
+
+
+limiter.go, in full:
 
 ~~~go
+package main
+
+import "time"
+
+// bucket is the token state for one key. A Limiter is shared by every
+// request goroutine of the server, so a bucket is read and written by
+// whichever callers arrive with the same key at the same time.
+type bucket struct {
+	tokens float64
+	last   time.Time
+}
+
+// Limiter is a token-bucket rate limiter keyed by client IP. Allow is
+// called from every request goroutine of the HTTP server, once per
+// request, so at any moment several goroutines are inside it.
 type Limiter struct {
-	buckets map[string]*bucket // bucket{tokens float64; last time.Time}
-	rate    float64            // tokens per second
+	buckets map[string]*bucket
+	rate    float64 // tokens per second
 	burst   float64
 }
 
+// NewLimiter returns a Limiter that refills rate tokens per second for
+// each key, up to burst.
+func NewLimiter(rate, burst float64) *Limiter {
+	return &Limiter{
+		buckets: make(map[string]*bucket),
+		rate:    rate,
+		burst:   burst,
+	}
+}
+
+// Allow reports whether key may make one more request, spending one token
+// if so. A key with no bucket yet starts with a full one.
 func (l *Limiter) Allow(key string) bool {
 	b, ok := l.buckets[key]
 	if !ok {
@@ -25,6 +57,474 @@ func (l *Limiter) Allow(key string) bool {
 	b.tokens--
 	return true
 }
+
+// Len reports how many keys the limiter is holding state for. The metrics
+// handler exports it as hookrelay_limiter_keys, which is how the on-call
+// first saw the memory growth.
+func (l *Limiter) Len() int {
+	return len(l.buckets)
+}
 ~~~
 
-Find every bug and risk, the ones that do not cause the panic included, and explain each. Then write a concurrency-safe version that evicts idle keys, with a table-driven test covering refill, burst and many callers under the race detector.
+server.go, in full:
+
+~~~go
+package main
+
+import (
+	"encoding/json"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
+)
+
+// IngestEvent is one webhook as it sits in the queue, already validated.
+type IngestEvent struct {
+	Source  string
+	Event   string
+	Payload json.RawMessage
+}
+
+// knownSources is the allowlist of webhook publishers. A POST to any other
+// source path is a 400 before the body is read.
+var knownSources = map[string]bool{
+	"billing":    true,
+	"shipping":   true,
+	"support":    true,
+	"marketing":  true,
+	"fulfilment": true,
+}
+
+// Server holds the shared state the handlers touch: the queue the ingest
+// handler feeds, the drain that empties it, and the rate limiter every
+// request passes through first.
+type Server struct {
+	queue    chan IngestEvent
+	limiter  *Limiter
+	accepted atomic.Int64
+	rejected atomic.Int64
+	overflow atomic.Int64
+	debugLog bool
+}
+
+func NewServer(queueSize int, limiter *Limiter) *Server {
+	return &Server{
+		queue:    make(chan IngestEvent, queueSize),
+		limiter:  limiter,
+		debugLog: os.Getenv("HOOKRELAY_DEBUG") != "",
+	}
+}
+
+// clientIP returns the address a request is rate limited by. Behind the
+// edge proxy every request arrives with X-Forwarded-For set, so the header
+// wins when present.
+func clientIP(r *http.Request) string {
+	if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
+		return strings.TrimSpace(strings.Split(xf, ",")[0])
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// withRateLimit wraps h so that each client IP spends one token per
+// request. A spent key answers 429 and the handler never runs.
+func (s *Server) withRateLimit(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.limiter.Allow(clientIP(r)) {
+			s.rejected.Add(1)
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		h(w, r)
+	}
+}
+
+func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
+	source := strings.TrimPrefix(r.URL.Path, "/ingest/")
+	if !knownSources[source] {
+		http.Error(w, "unknown source", http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Event   string          `json:"event"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		http.Error(w, "bad json body", http.StatusBadRequest)
+		return
+	}
+	if body.Event == "" {
+		http.Error(w, "missing event", http.StatusBadRequest)
+		return
+	}
+	select {
+	case s.queue <- IngestEvent{Source: source, Event: body.Event, Payload: body.Payload}:
+		s.accepted.Add(1)
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte("queued\n"))
+	default:
+		s.overflow.Add(1)
+		http.Error(w, "queue full", http.StatusServiceUnavailable)
+	}
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("ok\n"))
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	w.Write([]byte("# HELP hookrelay_limiter_keys Keys currently held by the rate limiter.\n" +
+		"# TYPE hookrelay_limiter_keys gauge\n" +
+		"hookrelay_limiter_keys " + strconv.Itoa(s.limiter.Len()) + "\n" +
+		"# HELP hookrelay_queue_depth Events waiting in the ingest queue.\n" +
+		"# TYPE hookrelay_queue_depth gauge\n" +
+		"hookrelay_queue_depth " + strconv.Itoa(len(s.queue)) + "\n" +
+		"# HELP hookrelay_events_accepted_total Webhooks accepted since start.\n" +
+		"# TYPE hookrelay_events_accepted_total counter\n" +
+		"hookrelay_events_accepted_total " + strconv.FormatInt(s.accepted.Load(), 10) + "\n" +
+		"# HELP hookrelay_events_rejected_total Requests answered 429 by the limiter.\n" +
+		"# TYPE hookrelay_events_rejected_total counter\n" +
+		"hookrelay_events_rejected_total " + strconv.FormatInt(s.rejected.Load(), 10) + "\n" +
+		"# HELP hookrelay_events_overflow_total Webhooks dropped with 503, queue full.\n" +
+		"# TYPE hookrelay_events_overflow_total counter\n" +
+		"hookrelay_events_overflow_total " + strconv.FormatInt(s.overflow.Load(), 10) + "\n"))
+}
+
+// drain consumes the queue forever. It is the only reader; handlers are
+// the only writers.
+func (s *Server) drain() {
+	for ev := range s.queue {
+		if s.debugLog {
+			log.Printf("drain source=%s event=%s bytes=%d", ev.Source, ev.Event, len(ev.Payload))
+		}
+	}
+}
+
+func main() {
+	addr := os.Getenv("HOOKRELAY_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	srv := NewServer(4096, NewLimiter(10, 20))
+	go srv.drain()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ingest/", srv.withRateLimit(srv.handleIngest))
+	mux.HandleFunc("/healthz", srv.handleHealth)
+	mux.HandleFunc("/metricsz", srv.handleMetrics)
+
+	httpSrv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+	}
+	log.Printf("hookrelay listening on %s", addr)
+	if err := httpSrv.ListenAndServe(); err != nil {
+		log.Fatal(err)
+	}
+}
+~~~
+
+limiter_test.go, the suite as it stands today. Everything in it passes, including under -race:
+
+~~~go
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestAllowSpendsBurstThenDenies(t *testing.T) {
+	l := NewLimiter(1, 3)
+	for i := 1; i <= 3; i++ {
+		if !l.Allow("203.0.113.7") {
+			t.Fatalf("call %d of the burst was denied", i)
+		}
+	}
+	if l.Allow("203.0.113.7") {
+		t.Fatal("a fourth call inside the burst was allowed")
+	}
+}
+
+func TestKeysAreIndependent(t *testing.T) {
+	l := NewLimiter(1, 2)
+	if !l.Allow("198.51.100.4") || !l.Allow("198.51.100.4") {
+		t.Fatal("the first key could not spend its burst")
+	}
+	if !l.Allow("192.0.2.9") {
+		t.Fatal("the second key was denied by the first key's spending")
+	}
+	if l.Len() != 2 {
+		t.Fatalf("limiter holds %d keys, want 2", l.Len())
+	}
+}
+
+// TestRefillOverTime waits for real time to pass, so it needs a rate at
+// which 150 ms of refill is a whole token with room to spare.
+func TestRefillOverTime(t *testing.T) {
+	l := NewLimiter(10, 1)
+	if !l.Allow("198.51.100.4") {
+		t.Fatal("the first call was denied")
+	}
+	if l.Allow("198.51.100.4") {
+		t.Fatal("the second call was allowed with no refill time")
+	}
+	time.Sleep(150 * time.Millisecond)
+	if !l.Allow("198.51.100.4") {
+		t.Fatal("the call after 150 ms was denied at 10 tokens per second")
+	}
+}
+
+// TestRefillCapsAtBurst: 300 ms at 10 per second earns 3 tokens, but the
+// bucket only holds burst = 2.
+func TestRefillCapsAtBurst(t *testing.T) {
+	l := NewLimiter(10, 2)
+	if !l.Allow("192.0.2.55") || !l.Allow("192.0.2.55") {
+		t.Fatal("the burst could not be spent")
+	}
+	time.Sleep(300 * time.Millisecond)
+	if !l.Allow("192.0.2.55") || !l.Allow("192.0.2.55") {
+		t.Fatal("the capped refill was not spendable")
+	}
+	if l.Allow("192.0.2.55") {
+		t.Fatal("a third call was allowed above the burst cap")
+	}
+}
+
+func TestClientIPPrefersForwardedFor(t *testing.T) {
+	l := NewLimiter(1, 1)
+	srv := NewServer(8, l)
+	h := srv.withRateLimit(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	// Same socket address, two different forwarded clients: two keys.
+	r1 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r1.RemoteAddr = "10.0.0.44:50211"
+	r1.Header.Set("X-Forwarded-For", "203.0.113.7")
+	r2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r2.RemoteAddr = "10.0.0.44:50211"
+	r2.Header.Set("X-Forwarded-For", "198.51.100.4")
+	for i, r := range []*http.Request{r1, r2} {
+		w := httptest.NewRecorder()
+		h(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d through a fresh forwarded key got %d", i, w.Code)
+		}
+	}
+
+	// A left-most entry in a comma list is the key, not the whole header.
+	r3 := httptest.NewRequest(http.MethodGet, "/", nil)
+	r3.RemoteAddr = "10.0.0.44:50211"
+	r3.Header.Set("X-Forwarded-For", "203.0.113.7, 10.0.0.9")
+	w := httptest.NewRecorder()
+	h(w, r3)
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("the spent key 203.0.113.7 inside a list was not honoured, got %d", w.Code)
+	}
+}
+
+func TestMiddlewareDeniesWhenBurstSpent(t *testing.T) {
+	l := NewLimiter(1, 2)
+	srv := NewServer(8, l)
+	h := srv.withRateLimit(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	codes := []int{}
+	for i := 0; i < 3; i++ {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = "192.0.2.30:40001"
+		w := httptest.NewRecorder()
+		h(w, r)
+		codes = append(codes, w.Code)
+	}
+	want := []int{http.StatusOK, http.StatusOK, http.StatusTooManyRequests}
+	for i := range want {
+		if codes[i] != want[i] {
+			t.Fatalf("call %d answered %d, want %d (codes %v)", i, codes[i], want[i], codes)
+		}
+	}
+	if got := srv.rejected.Load(); got != 1 {
+		t.Fatalf("rejected counter is %d, want 1", got)
+	}
+}
+
+func TestIngestRoutes(t *testing.T) {
+	srv := NewServer(8, NewLimiter(1000, 1000))
+	h := srv.withRateLimit(srv.handleIngest)
+	post := func(path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		r.RemoteAddr = "192.0.2.77:40044"
+		w := httptest.NewRecorder()
+		h(w, r)
+		return w
+	}
+
+	if w := post("/ingest/billing", `{"event":"invoice.paid","payload":{"id":"in_91"}}`); w.Code != http.StatusAccepted {
+		t.Fatalf("a valid billing webhook got %d: %s", w.Code, w.Body.String())
+	}
+	if w := post("/ingest/nope", `{"event":"x"}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("an unknown source got %d, want 400", w.Code)
+	}
+	if w := post("/ingest/billing", `not json`); w.Code != http.StatusBadRequest {
+		t.Fatalf("a broken body got %d, want 400", w.Code)
+	}
+	if w := post("/ingest/billing", `{"payload":{}}`); w.Code != http.StatusBadRequest {
+		t.Fatalf("a body without an event got %d, want 400", w.Code)
+	}
+	if got := srv.accepted.Load(); got != 1 {
+		t.Fatalf("accepted counter is %d, want 1", got)
+	}
+}
+
+func TestIngestQueueFullAnswers503(t *testing.T) {
+	srv := NewServer(1, NewLimiter(1000, 1000))
+	h := srv.withRateLimit(srv.handleIngest)
+	r1 := httptest.NewRequest(http.MethodPost, "/ingest/shipping", strings.NewReader(`{"event":"ship.scan"}`))
+	r1.RemoteAddr = "192.0.2.78:40045"
+	w1 := httptest.NewRecorder()
+	h(w1, r1)
+	r2 := httptest.NewRequest(http.MethodPost, "/ingest/shipping", strings.NewReader(`{"event":"ship.scan"}`))
+	r2.RemoteAddr = "192.0.2.78:40045"
+	w2 := httptest.NewRecorder()
+	h(w2, r2)
+	if w1.Code != http.StatusAccepted {
+		t.Fatalf("the first event got %d, want 202", w1.Code)
+	}
+	if w2.Code != http.StatusServiceUnavailable {
+		t.Fatalf("the event over a full queue got %d, want 503", w2.Code)
+	}
+	if got := srv.overflow.Load(); got != 1 {
+		t.Fatalf("overflow counter is %d, want 1", got)
+	}
+}
+~~~
+
+go.mod:
+
+~~~
+module hookrelay
+
+go 1.26
+~~~
+
+deploy/docker-compose.yml. The memory limit is the one the process died against:
+
+~~~yaml
+services:
+  hookrelay:
+    image: registry.internal/hookrelay:2026.09.12
+    ports:
+      - "8080:8080"
+    environment:
+      HOOKRELAY_ADDR: ":8080"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    restart: unless-stopped
+~~~
+
+The edge proxy in front of the service logged this at 03:57, between the second restart and the kill. Its access log runs to a couple of thousand lines a second at that hour, so the on-call cut it down to the one webhook scanner behind most of the traffic, keeping the tail of the match out of `grep wkforge access.log` — a different client address on almost every line, and far more requests between the lines than the nine kept here:
+
+~~~text
+198.51.100.203 - - [14/Sep/2026:03:56:58 +0000] "POST /ingest/support HTTP/1.1" 202 7 "-" "wkforge/1.2"
+203.0.113.44 - - [14/Sep/2026:03:56:58 +0000] "POST /ingest/billing HTTP/1.1" 202 7 "-" "wkforge/1.2"
+198.51.100.87 - - [14/Sep/2026:03:56:59 +0000] "POST /ingest/billing HTTP/1.1" 429 20 "-" "wkforge/1.2"
+203.0.113.129 - - [14/Sep/2026:03:56:59 +0000] "POST /ingest/marketing HTTP/1.1" 202 7 "-" "wkforge/1.2"
+198.51.100.203 - - [14/Sep/2026:03:57:00 +0000] "POST /ingest/support HTTP/1.1" 429 20 "-" "wkforge/1.2"
+203.0.113.8 - - [14/Sep/2026:03:57:01 +0000] "POST /ingest/billing HTTP/1.1" 429 20 "-" "wkforge/1.2"
+198.51.100.231 - - [14/Sep/2026:03:57:03 +0000] "POST /ingest/fulfilment HTTP/1.1" 202 7 "-" "wkforge/1.2"
+203.0.113.129 - - [14/Sep/2026:03:57:04 +0000] "POST /ingest/billing HTTP/1.1" 429 20 "-" "wkforge/1.2"
+203.0.113.201 - - [14/Sep/2026:03:57:05 +0000] "POST /ingest/shipping HTTP/1.1" 429 20 "-" "wkforge/1.2"
+~~~
+
+The first crash, 02:14:07, from the container log. The runtime's dump carried 413 goroutines in all, 397 of them inside net/http.(*conn).serve; the on-call kept the two that matter, the panicking goroutine and the Accept loop, so what is below is the head of the dump, not the whole of it:
+
+~~~
+fatal error: concurrent map writes
+
+goroutine 418 [running]:
+internal/runtime/maps.fatal({0x104ea4dc19?, 0x102a041138?})
+	/usr/local/go/src/runtime/panic.go:1181 +0x20
+main.(*Limiter).Allow(0x40000c4028, {0x40001248f0, 0x9})
+	/build/limiter.go:38 +0xbc
+main.(*Server).withRateLimit.func1(0x4000248500?, 0x40000b8b40?)
+	/build/server.go:70 +0x5c
+net/http.HandlerFunc.ServeHTTP(0x4d51a0?, {0x501200?, 0x4000248500}, 0x400012470?)
+	/usr/local/go/src/net/http/server.go:2171 +0x44
+net/http.(*ServeMux).ServeHTTP(0x40000bc000?, {0x501200, 0x4000248500}, {0x400012460, 0x0, 0x0})
+	/usr/local/go/src/net/http/server.go:2731 +0x1b0
+net/http.serverHandler.ServeHTTP({0x40000b8a70?}, {0x501200, 0x4000248500}, {0x400012460, 0x0, 0x0})
+	/usr/local/go/src/net/http/server.go:3222 +0x8c
+net/http.(*conn).serve(0x40000b8a70, {0x503c90, 0x4000096c20})
+	/usr/local/go/src/net/http/server.go:2098 +0x5b4
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3358 +0x48c
+
+goroutine 1 [IO wait, 2 seconds]:
+internal/poll.(*pollDesc).wait(0x40000c21a8?, 0x3?, 0x0?)
+	/usr/local/go/src/internal/poll/fd_poll.go:84 +0x8c
+internal/poll.(*FD).Accept(0x40000c2190?, 0x0?, 0x0?)
+	/usr/local/go/src/internal/fd_unix.go:611 +0xd4
+net.(*netFD).accept(0x40000c2190?, 0x40000b8a70?, 0x0?)
+	/usr/local/go/src/net/fd_unix.go:172 +0x45
+net.(*TCPListener).accept(0x40000c2180?, {0x0?, 0x0?})
+	/usr/local/go/src/net/tcpsock_posix.go:16 +0x2e
+net/http.(*Server).Serve(0x40000b8a70, {0x503c90, 0x4000096c20})
+	/usr/local/go/src/net/http/server.go:3356 +0x4d
+main.main()
+	/build/server.go:163 +0x1f4
+~~~
+
+The second crash, 03:02:44, fifty minutes after the first restart, the panicking goroutine of its dump:
+
+~~~
+fatal error: concurrent map read and map write
+
+goroutine 606 [running]:
+internal/runtime/maps.fatal({0x104ea4eac4?, 0x0?})
+	/usr/local/go/src/runtime/panic.go:1181 +0x20
+main.(*Limiter).Allow(0x40000c6018, {0x40001a2c60, 0xa})
+	/build/limiter.go:35 +0x40
+main.(*Server).withRateLimit.func1(0x4000310500?, 0x40000b9c10?)
+	/build/server.go:70 +0x5c
+net/http.HandlerFunc.ServeHTTP(0x4d51a0?, {0x501200?, 0x4000310500}, 0x40001a240?)
+	/usr/local/go/src/net/http/server.go:2171 +0x44
+net/http.(*ServeMux).ServeHTTP(0x40000bd200?, {0x501200, 0x4000310500}, {0x40001a230, 0x0, 0x0})
+	/usr/local/go/src/net/http/server.go:2731 +0x1b0
+net/http.serverHandler.ServeHTTP({0x40000b9c10?}, {0x501200, 0x4000310500}, {0x40001a230, 0x0, 0x0})
+	/usr/local/go/src/net/http/server.go:3222 +0x8c
+net/http.(*conn).serve(0x40000b9c10, {0x503c90, 0x40000a1c20})
+	/usr/local/go/src/net/http/server.go:2098 +0x5b4
+created by net/http.(*Server).Serve in goroutine 1
+	/usr/local/go/src/net/http/server.go:3358 +0x48c
+~~~
+
+/metricsz as the on-call scraped it across the night. The process restarted at 02:14 and at 03:02, which resets the counters:
+
+~~~text
+2026-09-13T23:40:02Z  limiter_keys 41203     queue_depth 138   accepted 1894413   rejected 220916    rss 84MiB
+2026-09-14T01:12:47Z  limiter_keys 58204     queue_depth 96    accepted 2101933   rejected 1409880    rss 96MiB
+2026-09-14T02:19:11Z  limiter_keys 3911      queue_depth 0     accepted 61002     rejected 88417      rss 38MiB
+2026-09-14T03:07:52Z  limiter_keys 241880    queue_depth 12    accepted 811209    rejected 1103444    rss 121MiB
+2026-09-14T03:20:31Z  limiter_keys 611540    queue_depth 44    accepted 1327461   rejected 2013418    rss 149MiB
+2026-09-14T03:58:40Z  limiter_keys 2120766   queue_depth 64    accepted 2441907   rejected 4198225    rss 389MiB
+2026-09-14T05:36:17Z  limiter_keys 3748213   queue_depth 51    accepted 3881521   rejected 6904219    rss 507MiB
+2026-09-14T05:37:03Z  scrape failed: dial tcp 10.0.0.44:8080: connect: connection refused
+~~~
+
+The container was restarted twice by the runtime that night and killed by its 512 MiB limit the third time, docker inspect reporting OOMKilled: true. Nothing else changed: the image running at 23:40, at both crashes, and at the kill is the same one, registry.internal/hookrelay:2026.09.12, deployed on 12 September.

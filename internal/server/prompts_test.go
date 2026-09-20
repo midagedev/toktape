@@ -22,22 +22,34 @@ import (
 // one bound: a floor counted at 4.9 characters per token is a floor for every
 // prompt in the set, a ceiling counted at 3.5 a ceiling for every one.
 //
-// The floor is 150 tokens, not the 2 x tape.MinPrefillPromptTokens this file
-// claimed before. That claim was wrong in fact — at the measured 4.9, the 800
-// characters it demanded are 163 tokens, never the 200 it named — and the
-// honest restatement is a margin: half again the threshold the card tests, so
-// a tokenizer that differs from this one still clears it without counting on
-// the template's share, which differs per model.
+// The floor is a margin over the threshold the card tests against, so the two
+// are pinned to each other here rather than only in the prose: raising
+// tape.MinPrefillPromptTokens past the floor would leave this file's numbers
+// reading as a margin while they had stopped being one. The floor's token
+// reading is counted at the least dense 5.2 bytes a token, so the margin
+// holds for every prompt in the set, not just the dense ones.
 //
-// The ceiling is 300 tokens, and it is the half that moved. It used to be 500,
-// justified at the 60 tok/s low end of ordinary prefill, where 500 tokens is
-// about 8 s of a 20 s budget. But the run that produced the conversion above
-// took 21 s to reach its first token: that rig pages a 445 GB model through
-// 251 GB of RAM and prefills at 16.8 tok/s per stream, so 500 tokens would be
-// half a minute before a single token of decode. A box whose prefill is bound
-// by its memory is exactly the box this tool exists for, so the ceiling is set
-// where such a box still gets a run: 300 tokens is about 5 s on the 60 tok/s
-// rig and about 12 s on the paging one.
+// The band was moved to bytes and raised by an order of magnitude for TTP-144
+// (lead, 2026-09-20). The published set sent about 283 tokens a stream, which
+// on the reference box is 240 ms of prefill against a 28 ms per-request fixed
+// cost — 12% of the figure the card calls "prefill" was not prefill. A
+// throughput needs the fixed cost to be a small share of what it measures,
+// and the only honest way there is a longer input: at 18,000 bytes (roughly
+// 4,500 tokens at the 4.0 bytes-per-token midband) the same box spends about
+// 3.8 s in prefill and the fixed cost is under one percent of it. The floor
+// is pinned in bytes because that is the unit the set measures itself in.
+//
+// The ceiling is 30,000 bytes, and it changed jobs. It used to be 300 tokens
+// because a paging box had to send the whole prompt: that rig prefilled at
+// 16.8 tok/s per stream, and 300 tokens was where it still got a run. The run
+// now trims each prompt to a length it sizes for the machine it is on
+// (RunSummary.PromptTrimChars), so a slow box is protected by the trim, not
+// by the band — and the ceiling keeps the two jobs it still has on a fast
+// box that sends whole prompts: bounding one stream's prefill at about six
+// seconds on the reference rig, and refusing the padding a prompt past
+// 30,000 bytes almost always is. The no-filler contract the set is grown
+// under says it outright: real material runs out before 30,000 bytes, and
+// past it a prompt is words about material, not material.
 // The set gained Korean and Japanese prompts on 2026-09-18 (TTP-112), and the
 // band survived them unchanged — which was measured, not assumed, because
 // len(text) counts BYTES and a Korean character is three of them.
@@ -59,20 +71,20 @@ import (
 // this file's inputs are UTF-8; for the Latin-script prompts they are the same
 // number, and for the CJK ones the byte reading is the one that transfers.
 //
-// The conversion is a conversion, not a proof. Measured over the whole set,
-// real token counts run 197 to 310 against a band that claims 150 to 300: the
-// extremes above put the band's true reach at about 140 to 316 tokens, so this
-// catches a prompt that is wrong by a factor and not one that is five percent
-// over. Two prompts sit a little past 300 and are left there — they were sized
-// by the measurement in the paragraphs above, and trimming them to satisfy a
-// digit of precision the instrument does not have would be the tail wagging.
+// The conversion is a conversion, not a proof. At the measured extremes the
+// new band's token reach is about 3,500 (18,000 bytes at the least dense 5.2)
+// to about 9,100 (30,000 at the densest 3.3), so it catches a prompt that is
+// wrong by a factor and not one that is five percent over — the same honesty
+// the 150-to-300 band carried, moved up with it.
 const (
-	proseCharsPerToken = 4.9
-	codeCharsPerToken  = 3.5
-	minPromptTokens    = 150
-	maxPromptTokens    = 300
-	minPromptChars     = int(minPromptTokens * proseCharsPerToken) // 735
-	maxPromptChars     = int(maxPromptTokens * codeCharsPerToken)  // 1050
+	// The band is bytes now (TTP-144, 2026-09-20); the token readings are
+	// kept for the margin check below and the error message. The old
+	// per-script conversions (4.9, 3.5) retired with the derivation they
+	// served: a byte floor needs no conversion to reach bytes.
+	minPromptTokens = 3500
+	maxPromptTokens = 9100
+	minPromptChars  = 18000 // bytes: Go's len, and this file's inputs are UTF-8
+	maxPromptChars  = 30000
 )
 
 // TestDefaultPromptsArePrefillMeasurements: every built-in prompt is long
@@ -93,7 +105,7 @@ func TestDefaultPromptsArePrefillMeasurements(t *testing.T) {
 	shortest, longest := 0, 0
 	for i, text := range defaultPrompts {
 		if n := len(text); n < minPromptChars || n > maxPromptChars {
-			t.Errorf("prompt %d is %d characters, want %d to %d (about %d to %d tokens): %.80q",
+			t.Errorf("prompt %d is %d bytes, want %d to %d (about %d to %d tokens): %.80q",
 				i, n, minPromptChars, maxPromptChars, minPromptTokens, maxPromptTokens, text)
 		}
 		if len(text) < len(defaultPrompts[shortest]) {
@@ -105,7 +117,7 @@ func TestDefaultPromptsArePrefillMeasurements(t *testing.T) {
 	}
 	for _, i := range []int{shortest, longest} {
 		text := defaultPrompts[i]
-		t.Logf("prompt %d: %d characters, %d words", i, len(text), len(strings.Fields(text)))
+		t.Logf("prompt %d: %d bytes, %d words", i, len(text), len(strings.Fields(text)))
 	}
 }
 
@@ -262,7 +274,7 @@ func TestStreamRequestBodyParamsCannotBreakTheStream(t *testing.T) {
 //
 // Updating the hash to make the test pass, without asking that question, is
 // the one move this gate exists to prevent.
-const promptSetHash = "9b2838be026b7d649b11219c3e44c95b9ce62b7c3ef3bbaeb79778d5f01b9bc3"
+const promptSetHash = "f02836757a468b51cf92a3f4a41326882bf7a3698450b35cc9451257c30dbe8a"
 
 func TestDefaultPromptsMatchTheirID(t *testing.T) {
 	sum := sha256.Sum256([]byte(strings.Join(defaultPrompts, "\x00")))

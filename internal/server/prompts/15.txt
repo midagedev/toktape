@@ -1,18 +1,585 @@
-Implement the cache interface below in TypeScript without any library.
+Implement the cache interface below in TypeScript without any library. Explain the data structure you choose, and whether a plain Map alone is enough given that it keeps insertion order. Write the implementation with comments on the subtle parts, especially how expired entries are kept out of size without a timer. Then write a Jest suite with an injected fake clock, and close with what would change if many async callers shared the cache and computed missing values on a miss.
+
+The cache is for a small Node service, meridian-quotes, that fronts a slow and strictly rate-limited vendor API for an internal dashboard. Below, in order: the interface and the two small modules it plugs into, then the vendor client whose limits make the cache load-bearing, then the service and HTTP layer that call it, then the configuration it is constructed from, then a first attempt at this same interface that was rejected in review, and the review that rejected it, and finally the project and test setup your Jest suite will run in, and the vendor's documented rate-limit contract.
+
+## src/cache.ts, the interface to implement
 
 ~~~ts
-interface Cache<K, V> {
+/**
+ * A bounded, expiry-aware key-value cache.
+ *
+ * - capacity is fixed at construction; a set past it evicts the least
+ *   recently used
+ * - an expired entry is never returned and does not count toward size
+ * - get, set and delete are O(1)
+ * - onEvict(key, value, reason), reason "capacity" | "expired" | "deleted"
+ * - the clock is injectable, so tests never sleep
+ */
+export interface Cache<K, V> {
   get(key: K): V | undefined; // marks the entry as recently used
   set(key: K, value: V, ttlMs?: number): void;
   delete(key: K): boolean;
   readonly size: number;
 }
 
-// - capacity is fixed at construction; a set past it evicts the least recently used
-// - an expired entry is never returned and does not count toward size
-// - get, set and delete are O(1)
-// - onEvict(key, value, reason), reason "capacity" | "expired" | "deleted"
-// - the clock is injectable, so tests never sleep
+export type EvictReason = "capacity" | "expired" | "deleted";
+
+export type OnEvict<K, V> = (key: K, value: V, reason: EvictReason) => void;
 ~~~
 
-Explain the data structure you choose, and whether a plain Map alone is enough given that it keeps insertion order. Write the implementation with comments on the subtle parts, especially how expired entries are kept out of size without a timer. Then write a Jest suite with an injected fake clock, and close with what would change if many async callers shared the cache and computed missing values on a miss.
+There is deliberately no options type beside the interface: capacity, clock and the eviction callback are constructor concerns of the concrete class, and each implementation declares its own options type closing `OnEvict<K, V>` over its concrete K and V. The service is written against this file alone, and nothing in it imports a cache implementation — only the interface.
+
+## src/clock.ts, in full
+
+~~~ts
+/** Injectable time. Everything that reads a clock takes one of these;
+ * production wires systemClock, tests wire FakeClock. */
+export interface Clock {
+  /** Epoch milliseconds, as Date.now() reports them. */
+  now(): number;
+}
+
+export const systemClock: Clock = {
+  now: () => Date.now(),
+};
+~~~
+
+## src/metrics.ts, in full
+
+~~~ts
+/** The smallest counter registry that still answers /statsz. Names are
+ * dotted strings; tags are string key-values folded into the name as
+ * name{tag=value} so the snapshot stays a flat sorted record. */
+export class Metrics {
+  private counters = new Map<string, number>();
+
+  incr(name: string, tags: Record<string, string> = {}): void {
+    const key = this.key(name, tags);
+    this.counters.set(key, (this.counters.get(key) ?? 0) + 1);
+  }
+
+  snapshot(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const k of [...this.counters.keys()].sort()) {
+      out[k] = this.counters.get(k)!;
+    }
+    return out;
+  }
+
+  private key(name: string, tags: Record<string, string>): string {
+    const parts = Object.keys(tags).sort().map((t) => `${t}=${tags[t]}`);
+    return parts.length === 0 ? name : `${name}{${parts.join(",")}}`;
+  }
+}
+~~~
+
+The eviction callback's whole job in this service is `metrics.incr("cache.evict", { reason })`, which is why the reason strings are part of the interface contract and not an implementation detail: the dashboard graphs `cache.evict{reason=capacity}` against `cache.evict{reason=expired}` to tell a capacity problem from a TTL problem.
+
+## src/vendor.ts, the client the cache exists to protect, in full
+
+~~~ts
+import type { Clock } from "./clock.js";
+
+export interface Profile {
+  id: string;
+  legalName: string;
+  currency: string;
+  updatedAt: string; // vendor's ISO timestamp
+}
+
+export interface Price {
+  id: string;
+  bid: string; // decimal strings: no float arithmetic on money here
+  ask: string;
+  asOf: string;
+}
+
+interface Bucket {
+  tokens: number; // 1.0 = one request
+  lastMs: number;
+}
+
+/** Token bucket matching the vendor's documented limit: 60 requests per
+ * minute, sustained, with a burst of 10. The vendor does not forgive. */
+export class VendorClient {
+  private bucket: Bucket;
+
+  constructor(
+    private readonly baseUrl: string,
+    private readonly clock: Clock,
+    private readonly opts: { timeoutMs?: number } = {},
+  ) {
+    this.bucket = { tokens: 10, lastMs: clock.now() };
+  }
+
+  async getProfile(id: string): Promise<Profile> {
+    return this.requestJson(`/v2/instruments/${id}/profile`);
+  }
+
+  async getPrice(id: string): Promise<Price> {
+    return this.requestJson(`/v2/instruments/${id}/price`);
+  }
+
+  private async requestJson<T>(path: string): Promise<T> {
+    await this.spendToken();
+    let res = await this.fetch(path);
+    if (res.status === 429) {
+      // one retry, after the vendor's own Retry-After, then give up
+      const waitMs = Number(res.headers.get("retry-after") ?? "1") * 1000;
+      await sleep(waitMs);
+      await this.spendToken();
+      res = await this.fetch(path);
+    }
+    if (!res.ok) {
+      throw new Error(`vendor ${path}: ${res.status} ${res.statusText}`);
+    }
+    return (await res.json()) as T;
+  }
+
+  private async fetch(path: string): Promise<Response> {
+    const timeoutMs = this.opts.timeoutMs ?? 5000;
+    return fetch(`${this.baseUrl}${path}`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  }
+
+  /** Resolves when a token is available; refills 1 per second. */
+  private async spendToken(): Promise<void> {
+    for (;;) {
+      const nowMs = this.clock.now();
+      const elapsed = Math.max(0, nowMs - this.bucket.lastMs);
+      const refill = elapsed / 1000; // 60/min = 1 token per second
+      this.bucket.tokens = Math.min(10, this.bucket.tokens + refill);
+      this.bucket.lastMs = nowMs;
+      if (this.bucket.tokens >= 1) {
+        this.bucket.tokens -= 1;
+        return;
+      }
+      const deficitMs = Math.ceil((1 - this.bucket.tokens) * 1000);
+      await sleep(deficitMs);
+    }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+~~~
+
+The vendor's own accounting is the record and ours is the check: when our bucket says a request was legal and the vendor still answers 429, that retry is the disagreement being reported, not hidden.
+
+## src/service.ts, the caller, in full
+
+~~~ts
+import type { Cache } from "./cache.js";
+import { Metrics } from "./metrics.js";
+import { VendorClient } from "./vendor.js";
+import type { Profile, Price } from "./vendor.js";
+
+export interface ServiceStats {
+  cacheSize: number;
+  metrics: Record<string, number>;
+}
+
+export class ProfileService {
+  constructor(
+    private readonly cache: Cache<string, Profile>,
+    private readonly priceCache: Cache<string, Price>,
+    private readonly vendor: VendorClient,
+    private readonly opts: {
+      profileTtlMs: number;
+      priceTtlMs: number;
+      metrics: Metrics;
+    },
+  ) {}
+
+  async getProfile(id: string): Promise<Profile> {
+    const hit = this.cache.get(id);
+    if (hit !== undefined) return hit;
+    const profile = await this.vendor.getProfile(id);
+    this.cache.set(id, profile, this.opts.profileTtlMs);
+    return profile;
+  }
+
+  async getPrice(id: string): Promise<Price> {
+    const hit = this.priceCache.get(id);
+    if (hit !== undefined) return hit;
+    const price = await this.vendor.getPrice(id);
+    this.priceCache.set(id, price, this.opts.priceTtlMs);
+    return price;
+  }
+
+  stats(): ServiceStats {
+    return {
+      cacheSize: this.cache.size,
+      metrics: this.opts.metrics.snapshot(),
+    };
+  }
+}
+~~~
+
+A miss is a vendor round trip, and this file does nothing to make two concurrent misses into one: two dashboard panels asking for the same instrument both miss and both spend tokens. Keeping that unfixed here is deliberate — it is the closing question of this task, not an oversight in the caller.
+
+## src/http.ts, in full
+
+~~~ts
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { loadConfig } from "./config.js";
+import { ProfileService } from "./service.js";
+import { VendorClient } from "./vendor.js";
+import { systemClock } from "./clock.js";
+import { Metrics } from "./metrics.js";
+import type { EvictReason } from "./cache.js";
+import { makeCaches } from "./caches.js";
+
+export function main(): void {
+  const cfg = loadConfig();
+  const vendor = new VendorClient(cfg.vendorBaseUrl, systemClock);
+  const metrics = new Metrics();
+  const onEvict = (_key: unknown, _value: unknown, reason: EvictReason) =>
+    metrics.incr("cache.evict", { reason });
+  const { profileCache, priceCache } = makeCaches(cfg, systemClock, onEvict);
+  const svc = new ProfileService(profileCache, priceCache, vendor, {
+    profileTtlMs: cfg.profileTtlMs,
+    priceTtlMs: cfg.priceTtlMs,
+    metrics,
+  });
+
+  const server = createServer((req, res) => route(req, res, svc));
+  server.listen(cfg.port, () => {
+    process.stdout.write(`meridian-quotes on :${cfg.port}\n`);
+  });
+}
+
+function route(req: IncomingMessage, res: ServerResponse, svc: ProfileService): void {
+  const url = new URL(req.url ?? "/", "http://local");
+  const parts = url.pathname.split("/").filter(Boolean);
+
+  if (req.method !== "GET" || parts.length < 2) {
+    res.writeHead(404).end();
+    return;
+  }
+  if (parts[0] === "profiles" && parts.length === 2) {
+    void svc
+      .getProfile(parts[1])
+      .then((p) => json(res, 200, p))
+      .catch(() => json(res, 502, { error: "vendor unavailable" }));
+    return;
+  }
+  if (parts[0] === "profiles" && parts[2] === "price" && parts.length === 3) {
+    void svc
+      .getPrice(parts[1])
+      .then((p) => json(res, 200, p))
+      .catch(() => json(res, 502, { error: "vendor unavailable" }));
+    return;
+  }
+  if (parts[0] === "statsz" && parts.length === 1) {
+    json(res, 200, svc.stats());
+    return;
+  }
+  res.writeHead(404).end();
+}
+
+function json(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+~~~
+
+makeCaches in src/caches.ts is the wiring point this task's implementation lands in: it takes the onEvict sink as its third parameter, constructs the two Cache instances with cfg.capacity and the clock it is given, threads the sink into both, and returns them. It is a dozen lines and it is the file that imports whatever cache implementation you write; everything above it compiles against the interface alone.
+
+## src/config.ts, in full
+
+~~~ts
+export interface Config {
+  port: number;
+  capacity: number;
+  profileTtlMs: number;
+  priceTtlMs: number;
+  vendorBaseUrl: string;
+}
+
+/** Environment over defaults; every default is a real decision, and the
+ * numbers come from docs/vendor-api.md, quoted below. */
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  return {
+    port: int(env.PORT, 8080),
+    capacity: int(env.QUOTE_CAPACITY, 500),
+    profileTtlMs: int(env.PROFILE_TTL_MS, 15 * 60 * 1000),
+    priceTtlMs: int(env.PRICE_TTL_MS, 30 * 1000),
+    vendorBaseUrl: env.VENDOR_BASE_URL ?? "https://api.meridian.example",
+  };
+}
+
+function int(env: string | undefined, dflt: number): number {
+  const n = env === undefined ? NaN : Number.parseInt(env, 10);
+  return Number.isFinite(n) && n > 0 ? n : dflt;
+}
+~~~
+
+And the deployed config/default.json, which the service reads for labels only, all runtime numbers coming from the environment above:
+
+~~~json
+{
+  "service": "meridian-quotes",
+  "team": "marketdata",
+  "oncall": "#md-oncall",
+  "notes": "capacity and TTLs come from the environment; see docs/vendor-api.md"
+}
+~~~
+
+## The first attempt at this interface, and the review that rejected it
+
+src/naive-map-cache.ts, in full, from PR #48, closed unmerged:
+
+~~~ts
+import type { Cache, EvictReason, OnEvict } from "./cache.js";
+import type { Clock } from "./clock.js";
+
+interface Entry<V> {
+  value: V;
+  expiresAtMs: number | null; // null = no TTL
+}
+
+/** Map-based Cache. Map remembers insertion order, so eviction takes
+ * the first key. Expiry is checked on read; nothing sweeps. */
+export class NaiveMapCache<K, V> implements Cache<K, V> {
+  private map = new Map<K, Entry<V>>();
+
+  constructor(
+    private readonly capacity: number,
+    private readonly clock: Clock,
+    private readonly onEvict?: OnEvict<K, V>,
+  ) {}
+
+  get(key: K): V | undefined {
+    const e = this.map.get(key);
+    if (e === undefined) return undefined;
+    if (e.expiresAtMs !== null && e.expiresAtMs <= this.clock.now()) {
+      this.map.delete(key);
+      this.onEvict?.(key, e.value, "expired");
+      return undefined;
+    }
+    return e.value;
+  }
+
+  set(key: K, value: V, ttlMs?: number): void {
+    if (this.map.has(key)) this.map.delete(key);
+    while (this.map.size >= this.capacity) {
+      const oldest = this.map.keys().next().value as K;
+      const e = this.map.get(oldest)!;
+      this.map.delete(oldest);
+      this.onEvict?.(oldest, e.value, "capacity");
+    }
+    this.map.set(key, {
+      value,
+      expiresAtMs: ttlMs === undefined ? null : this.clock.now() + ttlMs,
+    });
+  }
+
+  delete(key: K): boolean {
+    const e = this.map.get(key);
+    if (e === undefined) return false;
+    this.map.delete(key);
+    this.onEvict?.(key, e.value, "deleted");
+    return true;
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+}
+~~~
+
+The review on PR #48, closed three weeks ago. The reviewer's summary first, then the three inline comments in file order:
+
+> Closing this rather than requesting changes, because I think the fix is a different structure, not patches on this one. Three problems, all visible in the dashboard staging graph: size lies, eviction order lies, and the two lies compound. Whoever picks this up should start from the interface contract, not from this file. The interface is fine; the Map is the question.
+
+Inline, on `get`:
+
+> This marks nothing. The contract's one comment on get — "marks the entry as recently used" — is the whole LRU requirement, and Map's insertion order can't express it: re-set is a delete-plus-insert, get is a read. I let this run against staging traffic for an hour: with capacity 500 and a 30 s price TTL, eviction was taking entries that had been *read* two seconds ago while entries that had only ever been *written* stayed. On our access pattern that is close to worst-case.
+
+Inline, on `size`:
+
+> size counts entries that expired a week ago. In staging, QUOTE_CAPACITY=500 was reached by 10:04 every morning and everything after that was an eviction loop over dead entries, which the cache.evict{reason=capacity} graph shows as a flat climb while reason=expired stays at zero. Expired entries must not count toward size, and "without a timer" is in the task because a per-entry setTimeout at this churn is a thousand live timers.
+
+Inline, on `set`:
+
+> The while-loop is honest about what it does, which is the problem: it will evict as many live entries as it takes to fit one more, including when the live entries are the newest thing in the cache and the dead ones are only dead by the clock. Also note `has` + `delete` + `set` here is the only recency behaviour this class has, and it only applies to writes.
+
+## The project and test setup your Jest suite runs in
+
+package.json, in full:
+
+~~~json
+{
+  "name": "meridian-quotes",
+  "version": "0.9.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node dist/http.js",
+    "test": "jest",
+    "lint": "tsc -p . --noEmit"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.13",
+    "@types/node": "^20.14.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.6.2"
+  }
+}
+~~~
+
+There are no runtime dependencies: the service is node:http and fetch and nothing else, and the cache this task adds is to stay that way.
+
+jest.config.mjs, in full:
+
+~~~js
+export default {
+  preset: "ts-jest/presets/default-esm",
+  testEnvironment: "node",
+  extensionsToTreatAsEsm: [".ts"],
+  setupFiles: ["<rootDir>/test/setup.ts"],
+  testMatch: ["<rootDir>/test/**/*.test.ts"],
+};
+~~~
+
+test/setup.ts, in full:
+
+~~~ts
+// A test that leaks a timer or a rejected promise fails the run, not
+// just its own assertions.
+process.on("unhandledRejection", (reason) => {
+  throw reason;
+});
+~~~
+
+test/fake-clock.ts, the helper every suite already uses, in full:
+
+~~~ts
+import type { Clock } from "../src/clock.js";
+
+/** Deterministic epoch milliseconds. advance() is the only way time
+ * moves; anything reading this clock and then sleeping real time is a
+ * bug in the test, and the vendor suite below shows the pattern. */
+export class FakeClock implements Clock {
+  private ms: number;
+
+  constructor(startMs = 1_700_000_000_000) {
+    this.ms = startMs;
+  }
+
+  now(): number {
+    return this.ms;
+  }
+
+  advance(deltaMs: number): void {
+    if (deltaMs < 0) throw new Error("clocks only move forward here");
+    this.ms += deltaMs;
+  }
+}
+~~~
+
+And the existing suite for the vendor client, in full, which is the pattern the cache suite is expected to follow: FakeClock for everything that reads a clock, jest fake timers only around real sleeps:
+
+~~~ts
+import { FakeClock } from "./fake-clock.js";
+import { VendorClient } from "../src/vendor.js";
+
+describe("VendorClient rate bucket", () => {
+  it("spends the burst and then admits one request per second", async () => {
+    const clock = new FakeClock();
+    const client = new VendorClient("https://api.meridian.example", clock);
+    const fetchMock = jest
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(okJson({ id: "X" }));
+
+    for (let i = 0; i < 10; i++) {
+      await client.getPrice("X");
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+
+    // The burst is spent; the next call must wait for a refill token.
+    jest.useFakeTimers();
+    try {
+      const pending = client.getPrice("X");
+      // spendToken's sleep runs on the fake timer queue; a refill token
+      // takes one second of wall time by the clock, not the timer.
+      clock.advance(1000);
+      await Promise.resolve(); // let spendToken observe the refill
+      await jest.runAllTimersAsync();
+      await pending;
+      expect(fetchMock).toHaveBeenCalledTimes(11);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("retries once on a 429, after the vendor's Retry-After", async () => {
+    const clock = new FakeClock();
+    const client = new VendorClient("https://api.meridian.example", clock);
+    const fetchMock = jest
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(tooManyRequests(2))
+      .mockResolvedValue(okJson({ id: "X" }));
+
+    jest.useFakeTimers();
+    try {
+      const pending = client.getPrice("X");
+      await jest.advanceTimersByTimeAsync(2000);
+      const price = await pending;
+      expect(price.id).toBe("X");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+function okJson(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function tooManyRequests(retryAfterS: number): Response {
+  return new Response("rate limited", {
+    status: 429,
+    headers: { "retry-after": String(retryAfterS) },
+  });
+}
+~~~
+
+## docs/vendor-api.md, the rate-limit section, as the vendor publishes it
+
+~~~text
+Rate limits
+
+The API permits 60 requests per minute per customer key, measured as a
+rolling token bucket with a burst allowance of 10 requests. A request
+over the limit receives 429 with a Retry-After header in seconds. The
+bucket does not reset at minute boundaries.
+
+Responses carry X-RateLimit-Remaining. When it reaches zero the next
+request will be rejected even if fewer than 60 requests were made in
+the last minute: burst tokens spent earlier in the window are still
+refilling.
+
+Data freshness
+
+Instrument profiles are immutable for a given profile version; a new
+version replaces the whole record and changes updatedAt. Customers are
+advised that profile data may be cached safely for fifteen minutes.
+
+Prices are indicative and change without notice at any frequency. There
+is no push channel; polling is the supported access pattern. Customers
+requiring fresher than thirty-second prices must contact sales.
+~~~
+
+That fifteen-minute and thirty-second text is where the deployed TTL defaults come from, and the polling line is why the cache's miss path is a vendor round trip the service cannot afford to waste on a stampede.

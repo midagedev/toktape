@@ -1,20 +1,415 @@
-Intermittent 502s started after we put nginx in front of a Node.js API. About one request in two thousand fails, and it is always one that reuses an upstream connection that sat idle for a few seconds.
+Trace, step by step, the race that produces the 502s in the logs below — they started after we put nginx in front of a Node.js API, about one request in two thousand fails, and it is always one that reuses an upstream connection that sat idle for a few seconds — including which side closes the idle connection and why nginx does not retry the POST on another one. Give the settings on both sides that fix it and the rule for choosing their values, then describe how you would reproduce the failure deterministically before and after the change.
 
-~~~
-# nginx error.log
-[error] 311#311: *918273 upstream prematurely closed connection while reading
-response header from upstream, request: "POST /v1/orders HTTP/1.1"
+Everything from both sides of the wire is below: the whole nginx.conf, the error and access logs from the worst two windows, the Node service it proxies to, its own log over the same minutes, and the diagnostics taken during the incident — one on the API host, one on the proxy.
 
-# nginx.conf
-upstream api { server 10.0.9.3:3000; keepalive 64; }
-location /v1/ {
-    proxy_pass http://api;
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
+/etc/nginx/nginx.conf on the proxy host, 10.0.9.2, the whole file:
+
+~~~nginx
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+include /etc/nginx/modules-enabled/*.conf;
+
+error_log /var/log/nginx/error.log warn;
+
+events {
+    worker_connections 2048;
 }
 
-# server.js
-const server = app.listen(3000); // keepAliveTimeout left at its default
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    log_format upstreamlog '$remote_addr - $remote_user [$time_local] '
+                           '"$request" $status $body_bytes_sent '
+                           '"$http_referer" "$http_user_agent" '
+                           'upstream=$upstream_addr '
+                           'ustatus=$upstream_status utime=$upstream_response_time';
+
+    access_log /var/log/nginx/access.log upstreamlog;
+
+    sendfile on;
+    tcp_nopush on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    client_max_body_size 2m;
+    gzip on;
+    gzip_types application/json text/css application/javascript;
+
+    upstream api {
+        server 10.0.9.3:3000;
+        keepalive 64;
+    }
+
+    server {
+        listen 80;
+        server_name api.internal;
+
+        location /healthz {
+            access_log off;
+            return 200 "ok\n";
+        }
+
+        location /v1/ {
+            proxy_pass http://api;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_connect_timeout 5s;
+            proxy_send_timeout 30s;
+            proxy_read_timeout 30s;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+            proxy_next_upstream_tries 2;
+        }
+
+        location / {
+            return 404;
+        }
+    }
+}
 ~~~
 
-Explain step by step the race that produces this error, including which side closes the idle connection and why nginx does not retry the POST on another one. Give the settings on both sides that fix it and the rule for choosing their values, then describe how you would reproduce the failure deterministically before and after the change.
+/var/log/nginx/error.log, the two windows the failures cluster in — the night crew's lull after the 05:00 restock import, and the start of the afternoon rush. Nothing was removed from between these lines:
+
+~~~
+2026/09/17 05:02:58 [warn] 311#311: *917806 an upstream response is buffered to a temporary file /var/lib/nginx/body/0000009178 while reading upstream, client: 10.0.8.14, server: api.internal, request: "GET /v1/parts?page=3 HTTP/1.1", upstream: "http://10.0.9.3:3000/v1/parts?page=3", host: "api.internal"
+2026/09/17 05:03:07 [error] 311#311: *917849 upstream prematurely closed connection while reading response header from upstream, client: 10.0.8.14, server: api.internal, request: "POST /v1/orders HTTP/1.1", upstream: "http://10.0.9.3:3000/v1/orders", host: "api.internal"
+2026/09/17 05:03:07 [error] 311#311: *917850 recv() failed (104: Connection reset by peer) while reading response header from upstream, client: 10.0.8.22, server: api.internal, request: "POST /v1/orders HTTP/1.1", upstream: "http://10.0.9.3:3000/v1/orders", host: "api.internal"
+2026/09/17 05:03:07 [warn] 311#311: *917850 upstream server temporarily disabled while connecting to upstream, client: 10.0.8.22, server: api.internal, request: "POST /v1/orders HTTP/1.1", upstream: "http://10.0.9.3:3000/v1/orders", host: "api.internal"
+2026/09/17 05:03:08 [error] 311#311: *917861 no live upstreams while connecting to upstream, client: 10.0.8.14, server: api.internal, request: "POST /v1/orders HTTP/1.1", host: "api.internal"
+2026/09/17 05:03:17 [warn] 311#311: *917902 an upstream response is buffered to a temporary file /var/lib/nginx/body/0000009181 while reading upstream, client: 10.0.8.14, server: api.internal, request: "GET /v1/parts?page=1 HTTP/1.1", upstream: "http://10.0.9.3:3000/v1/parts?page=1", host: "api.internal"
+2026/09/17 05:41:02 [warn] 311#311: *918241 an upstream response is buffered to a temporary file /var/lib/nginx/body/0000009182 while reading upstream, client: 10.0.8.14, server: api.internal, request: "GET /v1/parts?page=7 HTTP/1.1", upstream: "http://10.0.9.3:3000/v1/parts?page=7", host: "api.internal"
+2026/09/17 05:41:18 [error] 311#311: *918273 upstream prematurely closed connection while reading response header from upstream, client: 10.0.8.14, server: api.internal, request: "POST /v1/orders HTTP/1.1", upstream: "http://10.0.9.3:3000/v1/orders", host: "api.internal"
+2026/09/17 05:41:18 [warn] 311#311: *918273 upstream server temporarily disabled while connecting to upstream, client: 10.0.8.14, server: api.internal, request: "POST /v1/orders HTTP/1.1", upstream: "http://10.0.9.3:3000/v1/orders", host: "api.internal"
+2026/09/17 05:41:29 [error] 311#311: *918301 recv() failed (104: Connection reset by peer) while reading response header from upstream, client: 10.0.8.22, server: api.internal, request: "POST /v1/orders HTTP/1.1", upstream: "http://10.0.9.3:3000/v1/orders", host: "api.internal"
+~~~
+
+/var/log/nginx/access.log over the same minutes, in the upstreamlog format the config above defines:
+
+~~~
+10.0.8.14 - - [17/Sep/2026:05:02:44 +0000] "GET /v1/parts?page=1 HTTP/1.1" 200 18730 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=200 utime=0.038
+10.0.8.14 - - [17/Sep/2026:05:02:58 +0000] "GET /v1/parts?page=3 HTTP/1.1" 200 41822 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=200 utime=0.141
+10.0.8.14 - - [17/Sep/2026:05:03:06 +0000] "POST /v1/orders HTTP/1.1" 201 24 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=201 utime=0.015
+10.0.8.14 - - [17/Sep/2026:05:03:07 +0000] "POST /v1/orders HTTP/1.1" 502 157 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=502 utime=0.004
+10.0.8.22 - - [17/Sep/2026:05:03:07 +0000] "POST /v1/orders HTTP/1.1" 502 157 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=502 utime=0.001
+10.0.8.14 - - [17/Sep/2026:05:03:08 +0000] "POST /v1/orders HTTP/1.1" 502 157 "-" "warehouse-terminal/1.8" upstream=- ustatus=- utime=-
+10.0.8.14 - - [17/Sep/2026:05:03:17 +0000] "GET /v1/parts?page=1 HTTP/1.1" 200 22104 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=200 utime=0.052
+10.0.8.14 - - [17/Sep/2026:05:03:52 +0000] "GET /v1/parts?page=2 HTTP/1.1" 200 21009 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=200 utime=0.047
+10.0.8.14 - - [17/Sep/2026:05:41:02 +0000] "GET /v1/parts?page=7 HTTP/1.1" 200 40968 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=200 utime=0.136
+10.0.8.14 - - [17/Sep/2026:05:41:12 +0000] "GET /v1/parts/MTR-2210 HTTP/1.1" 200 412 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=200 utime=0.011
+10.0.8.14 - - [17/Sep/2026:05:41:16 +0000] "POST /v1/orders HTTP/1.1" 201 24 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=201 utime=0.015
+10.0.8.14 - - [17/Sep/2026:05:41:18 +0000] "POST /v1/orders HTTP/1.1" 502 157 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=502 utime=0.004
+10.0.8.22 - - [17/Sep/2026:05:41:29 +0000] "POST /v1/orders HTTP/1.1" 502 157 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=502 utime=0.001
+10.0.8.14 - - [17/Sep/2026:05:41:33 +0000] "POST /v1/orders HTTP/1.1" 201 24 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=201 utime=0.014
+10.0.8.22 - - [17/Sep/2026:05:41:41 +0000] "GET /v1/parts?page=1 HTTP/1.1" 200 18730 "-" "warehouse-terminal/1.8" upstream=10.0.9.3:3000 ustatus=200 utime=0.033
+~~~
+
+The API host, 10.0.9.3. /srv/orders-api/package.json:
+
+~~~json
+{
+  "name": "orders-api",
+  "version": "1.4.2",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "5.1.0",
+    "pg": "8.16.0",
+    "pino": "10.1.0"
+  }
+}
+~~~
+
+/srv/orders-api/server.js:
+
+~~~js
+"use strict";
+
+const express = require("express");
+const { requestLog } = require("./middleware/requestLog");
+const parts = require("./routes/parts");
+const orders = require("./routes/orders");
+
+const app = express();
+
+app.disable("x-powered-by");
+app.use(express.json({ limit: "1mb" }));
+app.use(requestLog);
+
+app.get("/healthz", (_req, res) => {
+  res.status(200).send("ok\n");
+});
+
+app.use("/v1", parts);
+app.use("/v1", orders);
+
+// Started by systemd (deploy/api.service); the port and the database pool
+// settings come from the environment file named there. keepAliveTimeout
+// and headersTimeout are left at their defaults.
+const port = Number(process.env.PORT || 3000);
+const server = app.listen(port, () => {
+  requestLog.logger.info({ port }, "orders api listening");
+});
+
+module.exports = { app, server };
+~~~
+
+/srv/orders-api/routes/parts.js, the read side the terminal browses:
+
+~~~js
+"use strict";
+
+const express = require("express");
+const { pool } = require("../db");
+
+const router = express.Router();
+
+// The terminal's catalogue list: one page at a time, recently touched
+// parts first. The terminal polls page 1 while idle.
+router.get("/parts", async (req, res, next) => {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const size = 50;
+  try {
+    const total = await pool.query("select count(*)::int as n from parts");
+    const rows = await pool.query(
+      `select sku, title, category, stock, unit_price_cents, updated_at
+         from parts
+        order by updated_at desc
+        limit $1 offset $2`,
+      [size, (page - 1) * size],
+    );
+    res.json({ total: total.rows[0].n, rows: rows.rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/parts/:sku", async (req, res, next) => {
+  try {
+    const found = await pool.query(
+      `select sku, title, category, stock, unit_price_cents, updated_at
+         from parts
+        where sku = $1`,
+      [req.params.sku],
+    );
+    if (found.rowCount === 0) {
+      return res.status(404).json({ error: `no part with sku ${req.params.sku}` });
+    }
+    res.json(found.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;
+~~~
+
+/srv/orders-api/routes/orders.js, the write side that fails:
+
+~~~js
+"use strict";
+
+const express = require("express");
+const { logger } = require("../middleware/requestLog");
+const { pool } = require("../db");
+
+const router = express.Router();
+
+// POST /v1/orders — one order, one part, a quantity. Small on purpose:
+// the warehouse terminal posts one line at a time as the picker works.
+router.post("/orders", async (req, res, next) => {
+  const { sku, quantity } = req.body || {};
+  if (typeof sku !== "string" || sku.length === 0) {
+    return res.status(400).json({ error: "sku is required" });
+  }
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) {
+    return res.status(400).json({ error: "quantity must be an integer between 1 and 999" });
+  }
+
+  const client = await pool.connect();
+  try {
+    // One transaction per order: the row lock only exists between a
+    // BEGIN and a COMMIT, so it has to span the select for update and
+    // the stock update that must not race another picker's order.
+    await client.query("begin");
+    const part = await client.query(
+      "select id, stock, unit_price_cents from parts where sku = $1 for update",
+      [sku],
+    );
+    if (part.rowCount === 0) {
+      await client.query("rollback");
+      return res.status(404).json({ error: `no part with sku ${sku}` });
+    }
+    if (part.rows[0].stock < quantity) {
+      await client.query("rollback");
+      return res.status(409).json({ error: `only ${part.rows[0].stock} left of ${sku}` });
+    }
+    const inserted = await client.query(
+      `insert into orders (part_id, quantity, unit_price_cents)
+       values ($1, $2, $3) returning id`,
+      [part.rows[0].id, quantity, part.rows[0].unit_price_cents],
+    );
+    await client.query("update parts set stock = stock - $1, updated_at = now() where id = $2", [
+      quantity,
+      part.rows[0].id,
+    ]);
+    await client.query("commit");
+    logger.info({ orderId: inserted.rows[0].id, sku, quantity }, "order taken");
+    return res.status(201).json({ id: inserted.rows[0].id, done: true });
+  } catch (err) {
+    await client.query("rollback").catch(() => {});
+    return next(err);
+  } finally {
+    client.release();
+  }
+});
+
+router.use((err, _req, res, _next) => {
+  logger.error({ err }, "unhandled error");
+  res.status(500).json({ error: "internal error" });
+});
+
+module.exports = router;
+~~~
+
+/srv/orders-api/db.js and /srv/orders-api/middleware/requestLog.js:
+
+~~~js
+"use strict";
+
+const { Pool } = require("pg");
+
+const pool = new Pool({
+  host: process.env.PGHOST || "10.0.9.4",
+  database: process.env.PGDATABASE || "warehouse",
+  user: process.env.PGUSER || "warehouse_app",
+  password: process.env.PGPASSWORD,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+
+module.exports = { pool };
+~~~
+
+~~~js
+"use strict";
+
+const pino = require("pino");
+
+const logger = pino({
+  level: process.env.LOG_LEVEL || "info",
+  base: null,
+  timestamp: pino.stdTimeFunctions.isoTime,
+});
+
+// One line per finished response. Requests whose connection dies before
+// the response is written never reach "finish", so they leave no line.
+function requestLog(req, res, next) {
+  const start = process.hrtime.bigint();
+  res.on("finish", () => {
+    logger.info(
+      {
+        method: req.method,
+        path: req.originalUrl,
+        status: res.statusCode,
+        durationMs: Number(process.hrtime.bigint() - start) / 1e6,
+      },
+      "request",
+    );
+  });
+  next();
+}
+
+module.exports = { requestLog, logger };
+~~~
+
+deploy/api.service, the unit systemd runs it under; the environment file it names holds PORT, the database settings and LOG_LEVEL:
+
+~~~ini
+[Unit]
+Description=Orders API (warehouse terminal backend)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=api
+Group=api
+WorkingDirectory=/srv/orders-api
+EnvironmentFile=/etc/orders-api/env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+~~~
+
+The API's own log over the same minutes as both windows — the pickers' requests that made it through, and nothing at all where the failed POSTs would be:
+
+~~~
+{"time":"2026-09-17T05:02:44.671Z","level":30,"msg":"request","method":"GET","path":"/v1/parts?page=1","status":200,"durationMs":36.9}
+{"time":"2026-09-17T05:02:58.221Z","level":30,"msg":"request","method":"GET","path":"/v1/parts?page=3","status":200,"durationMs":138.7}
+{"time":"2026-09-17T05:03:06.974Z","level":30,"msg":"order taken","orderId":40116,"sku":"CBL-0093","quantity":1}
+{"time":"2026-09-17T05:03:06.988Z","level":30,"msg":"request","method":"POST","path":"/v1/orders","status":201,"durationMs":14.1}
+{"time":"2026-09-17T05:03:17.283Z","level":30,"msg":"request","method":"GET","path":"/v1/parts?page=1","status":200,"durationMs":50.8}
+{"time":"2026-09-17T05:03:52.114Z","level":30,"msg":"request","method":"GET","path":"/v1/parts?page=2","status":200,"durationMs":45.6}
+{"time":"2026-09-17T05:41:02.633Z","level":30,"msg":"request","method":"GET","path":"/v1/parts?page=7","status":200,"durationMs":135.9}
+{"time":"2026-09-17T05:41:12.402Z","level":30,"msg":"request","method":"GET","path":"/v1/parts/MTR-2210","status":200,"durationMs":10.8}
+{"time":"2026-09-17T05:41:16.918Z","level":30,"msg":"order taken","orderId":40117,"sku":"SEN-0444","quantity":4}
+{"time":"2026-09-17T05:41:16.930Z","level":30,"msg":"request","method":"POST","path":"/v1/orders","status":201,"durationMs":14.1}
+{"time":"2026-09-17T05:41:33.575Z","level":30,"msg":"order taken","orderId":40118,"sku":"MTR-2210","quantity":2}
+{"time":"2026-09-17T05:41:33.587Z","level":30,"msg":"request","method":"POST","path":"/v1/orders","status":201,"durationMs":13.7}
+{"time":"2026-09-17T05:41:41.205Z","level":30,"msg":"request","method":"GET","path":"/v1/parts?page=1","status":200,"durationMs":32.1}
+~~~
+
+Two diagnostics were taken during the incident, one on the API host and one on the proxy. The first is a one-off script and its output, run by hand:
+
+~~~js
+"use strict";
+
+// One-off, run by hand on the API host during the incident: what are the
+// HTTP server's idle-connection timeouts actually set to?
+const http = require("http");
+
+const server = http.createServer(() => {});
+server.listen(0, () => {
+  console.log("node", process.version);
+  console.log("keepAliveTimeout", server.keepAliveTimeout);
+  console.log("headersTimeout", server.headersTimeout);
+  console.log("requestTimeout", server.requestTimeout);
+  server.close();
+});
+~~~
+
+~~~
+$ node scripts/timeouts.js
+node v24.18.0
+keepAliveTimeout 5000
+headersTimeout 60000
+requestTimeout 300000
+~~~
+
+The second is the proxy's view of the connection pool to the API, taken a minute after a 502:
+
+~~~
+$ sudo ss -tanpo 'dst 10.0.9.3:3000'
+State      Recv-Q Send-Q Local Address:Port  Peer Address:Port  Timer                     Process
+ESTAB      0      0      10.0.9.2:44896      10.0.9.3:3000      keepalive,(7.2min,0ms),0  users:(("nginx",pid=311,fd=29))
+ESTAB      0      0      10.0.9.2:44912      10.0.9.3:3000      keepalive,(6.8min,0ms),0  users:(("nginx",pid=311,fd=31))
+ESTAB      0      0      10.0.9.2:44930      10.0.9.3:3000      keepalive,(6.8min,0ms),0  users:(("nginx",pid=311,fd=33))
+CLOSE-WAIT 0      0      10.0.9.2:44944      10.0.9.3:3000      off(0.000/0/0)             users:(("nginx",pid=311,fd=35))
+ESTAB      0      0      10.0.9.2:44958      10.0.9.3:3000      keepalive,(6.5min,0ms),0  users:(("nginx",pid=311,fd=37))
+CLOSE-WAIT 0      0      10.0.9.2:44971      10.0.9.3:3000      off(0.000/0/0)             users:(("nginx",pid=311,fd=39))
+ESTAB      0      0      10.0.9.2:44988      10.0.9.3:3000      keepalive,(5.9min,0ms),0  users:(("nginx",pid=311,fd=41))
+ESTAB      0      0      10.0.9.2:44994      10.0.9.3:3000      keepalive,(5.7min,0ms),0  users:(("nginx",pid=311,fd=43))
+CLOSE-WAIT 0      0      10.0.9.2:45003      10.0.9.3:3000      off(0.000/0/0)             users:(("nginx",pid=311,fd=45))
+~~~
+
+Both hosts are on the same rack: nginx 1.24.0 from the nginx.org repository on 10.0.9.2 under Debian 12, the API on 10.0.9.3 under the same, the database on 10.0.9.4. A monitor polls /healthz every five seconds and nginx answers that itself, so nothing keeps the upstream pool warm. Order traffic has a daily shape — busy from six in the morning, quiet over lunch — and every cluster of 502s sits at the end of a quiet spell. The migration that put nginx in front happened last Tuesday; before it the terminal talked to the Node process directly, and its old logs contain no such error.

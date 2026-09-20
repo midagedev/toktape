@@ -1,5 +1,438 @@
-A vendor published the benchmark summary below to claim their inference server is 3.4 times faster than the open-source one, and a colleague forwarded it as the reason we should switch.
+A vendor published the benchmark summary below to claim their inference server is 3.4 times faster than the open-source one, and a colleague forwarded it as the reason we should switch. Write the reply I should send. Separate what these numbers can support from what they cannot, and list the specific figures I should ask for before the comparison means anything. Below are the colleague's email, the report as published, the example the report says the baseline was run from — including the suite runner and the prompt file it sends — the engine's own getting-started page and release note, the Arclight server's own reference page, the spec sheet for the node, the model file details, the vendor's pricing page, the vendor's answers to the questions already asked, and notes on what we run ourselves. Nothing else is known about the test.
 
-Both servers ran on one eight-card node with the same 70B model in 4-bit. The vendor's server was given all eight cards. The open-source server was started from the vendor's published example, which places the model on four. Each test sent two hundred requests of roughly nine hundred prompt tokens and recorded the mean time to the last token: 11.2 seconds for the vendor, 38.1 for the alternative. Each configuration was run once, back to back, on a machine the vendor describes as otherwise idle. The report gives no per-request figures, no token counts for the answers, and no time to the first token.
+The email that started this, last Tuesday morning:
 
-Write the reply I should send. Separate what these numbers can support from what they cannot, and list the specific figures I should ask for before the comparison means anything.
+From: J. Okonkwo
+To: platform-eng
+Subject: arclight claims 3.4x over the open-source engine — time to switch?
+
+Saw this first thing this morning and it roughly matches what I got on
+the small box back in July. If it's real we should just buy it and stop
+tuning. Can someone poke holes in it before I take it to budget?
+
+    https://arclight.example.com/reports/r-2026-08-70b
+
+The report as published (report R-2026-08-70b, revision 1.2, dated 18 August):
+
+---- begin quoted report --------------------------------------------
+
+Arclight Inference Server 2.4.1 and the open-source engine 0.9.2
+A single-node comparison on a 70-billion-parameter model in 4-bit
+
+Prepared by Arclight Performance Labs. Results are reproducible with
+the compatibility example referenced below.
+
+Executive summary
+
+On one eight-accelerator node, serving the same 70B chat model from
+the same 4-bit weights file, Arclight Inference Server 2.4.1 completed
+a two-hundred-request suite with a mean time to last token of 11.2
+seconds. The open-source engine 0.9.2, started exactly as our
+published example starts it, completed the identical suite with a mean
+time to last token of 38.1 seconds. Arclight is 3.4 times faster on
+this workload. The gap is not explained by the model, the node, the
+prompt, or the request pattern, which were identical; it is explained
+by the serving stack.
+
+Test environment
+
+Component        Specification
+Node             Arclight AN-8 reference node
+Accelerators     8 x 24 GB (192 GB total)
+Host CPU         2 x 24-core, 2.1 GHz base
+Host memory      512 GB DDR5
+Local storage    3.8 TB NVMe
+Operating system Arclight OS 11.4 (kernel 6.9)
+Power mode       Balanced (vendor default)
+Other load       None — the node is otherwise idle
+
+Both servers ran on this node, back to back, with no configuration
+change between the two runs apart from the serving software itself.
+
+Software under test
+
+Arclight Inference Server 2.4.1, the current stable release at the
+time of writing, installed from the vendor package.
+
+The open-source engine 0.9.2, the current stable release at the time
+of writing, installed from its own release page and started exactly as
+our published compatibility example starts it. We maintain this
+example, arclight-examples/oss-baseline, as the recommended way to run
+the engine on this hardware, and it is the configuration we would
+advise a customer to deploy.
+
+How each server was started
+
+Arclight:
+
+    arclight-serve --model 70b-q4.bin --all-accelerators \
+                   --context 8192 --batch auto --port 881
+
+The open-source engine, from arclight-examples/oss-baseline/run.sh:
+
+    engine serve --model 70b-q4.bin --accelerator-count 4 \
+                 --context 8192
+
+Both commands load the same weights file from the same NVMe volume.
+
+Methodology
+
+A representative production prompt of about 900 tokens was used for
+every request. The suite sends two hundred such requests at a
+sustained concurrency of sixteen and records, for each server, the
+time from sending the request to receiving the final token of the
+response. We report the mean of those two hundred times. Responses
+were not tokenized after generation; both servers sampled with their
+own default settings, as a customer would run them. Each
+configuration was run once, back to back, on a node that is otherwise
+idle. The suite sends no warm-up requests; the first request of each
+run is part of the measured two hundred.
+
+Results
+
+Metric                              Arclight 2.4.1   open-source 0.9.2
+Requests completed                       200 / 200         200 / 200
+Failed requests                                  0                 0
+Prompt tokens per request (approx.)            900               900
+Mean time to last token                     11.2 s             38.1 s
+Suite wall time                           2 m 20 s           7 m 56 s
+Speed-up (mean time to last token)          baseline           3.4x
+
+Why the gap is this large
+
+Three things in the Arclight stack compound on this workload. The
+scheduler batches the sixteen in-flight requests into one accelerator
+pass whenever their token positions align, where the engine schedules
+each request independently. Our kernels fuse the attention and
+feed-forward stages for 4-bit weights, which halves the host-side
+launch count on this generation of hardware. And the engine in this
+configuration re-evaluates the full shared prompt prefix on every
+request, because the example's configuration leaves the engine's
+cross-request prefix cache off — the default in its current release,
+and the setting most of its own users run. A customer who measures
+this workload on the defaults will see what we saw.
+
+Fairness statement
+
+The baseline was run from our published example without modification.
+We consider this its recommended configuration for this hardware, and
+we did not tune it, so that the numbers reflect a typical deployment
+rather than a best effort. We did not disable any baseline feature;
+the example's defaults apply, whatever they are. Customers are of
+course free to tune the engine further and to enable its prefix cache;
+a tuned baseline is a different experiment, and one we have not run.
+
+Frequently asked questions
+
+Why one run per configuration? The reported figure is already the mean
+of two hundred requests, which averages away per-request variance.
+
+Why mean time to last token and not time to first token? For batch
+and offline workloads the total time to complete a request is what the
+operator pays for. Interactive time-to-first-token results for both
+servers are forthcoming in a follow-up report.
+
+Why concurrency sixteen? This is the steady-state concurrency of a
+mid-size deployment of a support workflow, which the prompt comes
+from.
+
+Can I reproduce this? Yes. The example repository contains the run
+script, the suite runner, the prompt file, and the node specification
+used here.
+
+Is the quantization identical? Yes. The same 4-bit weights file was
+loaded by both servers from the same volume.
+
+What sampling settings were used? The server-side defaults of each
+product, as a customer would deploy them.
+
+Limitations
+
+This is one workload shape — long prompt, one concurrency level, one
+model size. Other prompt lengths, output lengths, and concurrency
+levels will produce different ratios, in either direction.
+
+Revision history
+
+1.0 (12 August) Initial publication. The baseline was placed on six
+    of the eight accelerators; its mean time to last token was 32.4 s,
+    a 2.9x gap.
+1.1 (15 August) Baseline placement corrected to the four accelerators
+    the example's run script actually names; its mean time to last
+    token moved to 38.1 s, a 3.4x gap.
+1.2 (18 August) Fairness statement added; no measurements changed.
+
+---- end quoted report ----------------------------------------------
+
+The compatibility example the report says the baseline was run from, as it stood on the report's date. The README first:
+
+arclight-examples/oss-baseline/README.md
+
+    Running the open-source engine on an Arclight reference node
+
+    This example starts the engine with the settings we validate for
+    each reference node family. It is the configuration our reports
+    use and the one we recommend as a starting point.
+
+    Usage:
+
+        ./run.sh /path/to/70b-q4.bin
+        ./run-suite.sh          # after the server is up
+
+    Requirements: the weights file, the engine 0.9.x binary on PATH,
+    and the NVMe volume mounted at /models.
+
+    Notes on placement: the AN-8 family gives the engine four
+    accelerators. The model is 39 GB and fits comfortably; four is the
+    smallest placement our validation passes, and it leaves the rest
+    of the node free for a second workload.
+
+    What the suite measures: run-suite.sh sends the prompt file to
+    whichever server is listening, two hundred times, holding sixteen
+    requests in flight, and reports the mean time from request sent to
+    the final token received. It sends no warm-up request. Run it on
+    the node itself — it is part of the reference image and uses
+    little CPU.
+
+    Troubleshooting: if the server fails to start with an out-of-
+    memory error, lower --accelerator-count to 2 and keep --context
+    at or below 4096. If generation is slower than expected,
+    confirm no other process holds the accelerators.
+
+The server script:
+
+arclight-examples/oss-baseline/run.sh
+
+    #!/bin/sh
+    # Start the open-source engine the way report R-2026-08-70b did.
+    set -eu
+
+    MODEL="${1:?usage: run.sh /path/to/70b-q4.bin}"
+
+    exec engine serve \
+        --model "$MODEL" \
+        --accelerator-count 4 \
+        --context 8192 \
+        --host 0.0.0.0 \
+        --port 881
+
+The suite runner:
+
+arclight-examples/oss-baseline/run-suite.sh
+
+    #!/bin/sh
+    # Run the report suite against whichever server is on port 881.
+    set -eu
+
+    REQUESTS=200
+    CONCURRENCY=16
+    PROMPT=prompt.txt
+
+    exec python3 suite.py \
+        --host 127.0.0.1 --port 881 \
+        --prompt "$PROMPT" \
+        --requests "$REQUESTS" \
+        --concurrency "$CONCURRENCY"
+
+arclight-examples/oss-baseline/suite.py
+
+    #!/usr/bin/env python3
+    """Send one prompt file n times at a fixed concurrency; time each
+    request from send to its last token. Prints the mean."""
+
+    import argparse
+    import json
+    import time
+    import urllib.request
+    from concurrent.futures import ThreadPoolExecutor
+
+
+    def run_one(url, prompt):
+        body = json.dumps({"prompt": prompt, "stream": True,
+                           "n_predict": 256}).encode()
+        req = urllib.request.Request(url, data=body,
+                                     headers={"Content-Type":
+                                              "application/json"})
+        start = time.perf_counter()
+        with urllib.request.urlopen(req) as resp:
+            for _ in resp:
+                pass  # consume the stream to its last token
+        return time.perf_counter() - start
+
+
+    def main():
+        ap = argparse.ArgumentParser()
+        ap.add_argument("--host", default="127.0.0.1")
+        ap.add_argument("--port", type=int, default=881)
+        ap.add_argument("--prompt", required=True)
+        ap.add_argument("--requests", type=int, default=200)
+        ap.add_argument("--concurrency", type=int, default=16)
+        args = ap.parse_args()
+
+        prompt = open(args.prompt).read()
+        url = f"http://{args.host}:{args.port}/completion"
+        with ThreadPoolExecutor(args.concurrency) as pool:
+            times = list(pool.map(
+                lambda _: run_one(url, prompt), range(args.requests)))
+        print(f"requests {len(times)}")
+        print(f"mean time to last token {sum(times) / len(times):.1f} s")
+
+
+    if __name__ == "__main__":
+        main()
+
+And the prompt file the suite sends — the report's "representative production prompt of about 900 tokens", in full:
+
+arclight-examples/oss-baseline/prompt.txt
+
+    You are the triage assistant on the support desk of a company that
+    sells running gear online. Read the conversation below and answer
+    with a triage card and nothing else, in exactly this format:
+
+    Category: one of ORDER, REFUND, SHIPPING, PRODUCT, ACCOUNT, OTHER
+    Sentiment: one of calm, frustrated, angry
+    Priority: one of low, normal, high, urgent — urgent only when money
+    has already been lost or the customer says they will stop buying
+    Summary: two sentences at most, in plain words
+    Suggested reply: one sentence the agent could send as it stands
+    Refund exposure: the amount at risk in dollars, or 0
+
+    Conversation:
+
+    [customer] Hi. I placed order 128834 on Friday morning, the card
+    was charged right away, and the confirmation page said it would
+    arrive Tuesday. It is now Thursday evening and the tracking link
+    still says "label created". Nobody has answered the phone all day.
+
+    [agent] I'm sorry about the wait. Let me look up the order. I can
+    see it was charged on Friday at 09:41 for $184.60 and the parcel
+    was handed to the carrier on Monday, but the carrier's first scan
+    is missing. What I can do today is open a trace with the carrier
+    and, if you agree, ship a replacement by express so it reaches you
+    Saturday, and chase the trace in parallel.
+
+    [customer] I'd rather have the money back, honestly. This was a
+    birthday present and the birthday is Saturday. If it can't be here
+    by Friday evening it's no use to me.
+
+    [agent] Understood. I can refund the full $184.60 today, and if
+    the parcel does turn up you can refuse it or I'll send a return
+    label. The refund lands in one to three working days depending on
+    your bank.
+
+    [customer] Do the refund then. And I want to say the phone queue
+    being empty all day is worse than the parcel being late.
+
+    Triage this conversation now.
+
+The engine's own getting-started page, which the example README links to, and which is where the report's claims about engine defaults can be checked:
+
+    Starting the engine
+
+        engine serve --model <file> --accelerator-count N
+
+    Common flags:
+
+        --context N       context window in tokens, default 4096
+        --batch N         maximum requests batched into one scheduler
+                          pass, default 1 — each request runs alone
+        --prefix-cache    reuse the evaluated prompt prefix across
+                          requests that share it. Off by default; turn
+                          it on when your prompts share a prefix.
+
+And the engine's release note for 0.9.2, from the same page, which is when that default changed:
+
+    0.9.2 — 21 July
+      * --prefix-cache is now off by default. Under parallel slots a
+        cached prefix could be reused from a pass computed under a
+        different batch shape, which produced occasional wrong
+        continuations. Pass --prefix-cache to restore the 0.9.1
+        behaviour if your prompts share a prefix and you accept that
+        risk.
+
+For symmetry, the Arclight server's own reference page, the flags their command relies on:
+
+      --batch N        requests coalesced into one accelerator pass.
+                       "auto" tracks the in-flight request count.
+                       Default: auto.
+      --all-accelerators
+                       spread the model across every accelerator in
+                       the node. Default: on. Use --accelerators N to
+                       pin a placement instead.
+
+The node's spec sheet, from the report's environment appendix:
+
+    Node family            AN-8 reference
+    Accelerators           8 x 24 GB, 900 W total board power
+    Interconnect           900 GB/s bidirectional ring
+    Host CPU               2 x 24-core, 2.1 GHz base / 3.0 GHz boost
+    Host memory            512 GB DDR5-5600, 16 channels
+    Local storage          3.8 TB NVMe, sequential read 12 GB/s
+    Network                2 x 25 GbE
+    Power mode during test Balanced (vendor default)
+    Cooling                Chassis steady-state, no thermal events
+                             logged during either run
+
+The model file both servers loaded:
+
+    Family          dense 70B chat model
+    Quantization    4-bit, as distributed by the vendor
+    File            70b-q4.bin, 39.4 GB
+    Context set     8192 tokens on both servers
+    Weights         identical file, same volume, both runs
+
+The pricing page, which is what the budget case would rest on:
+
+    Arclight Inference Server
+
+    Serve production models at 3.4x the speed of open source on the
+    same hardware — measured, not marketed. Report R-2026-08-70b.
+
+    Editions:
+
+    Community    $0      one accelerator, community support only
+    Standard     $1,900  per accelerator-month, 8x5 support
+    Enterprise   $3,400  per accelerator-month, 24x7 support and
+                         certified builds
+
+    All editions run the same server binary; the difference is
+    support, the certified builds, and the indemnity.
+
+The vendor's answers to the questions already asked, from the email thread with their solutions team last Thursday:
+
+From: J. Okonkwo
+To: Arclight Solutions
+Subject: two questions about report R-2026-08-70b
+
+    First, were the responses the two servers generated the same
+    length? You report time to last token, and I want to be sure the
+    two servers were producing comparable outputs. Second, did the
+    suite warm up before timing, or is the first request part of the
+    measured set?
+
+From: K. Kessler, Arclight Solutions
+
+    The prompts were identical across both servers and all two hundred
+    requests. The responses were whatever each server produced under
+    its default sampling settings; we do not tokenize responses after
+    generation, so I don't have a token count to share for either
+    server's output. There was no warm-up — the first request is part
+    of the measured two hundred, for both servers, as the report's
+    methodology section states.
+
+From: J. Okonkwo
+To: Arclight Solutions
+Subject: re: two questions about report R-2026-08-70b
+
+    One more: where did the load generator run during the suite — on
+    the node itself, or on a separate client machine?
+
+From: K. Kessler, Arclight Solutions
+
+    On the node itself, both times; it is part of the reference image
+    and uses little CPU. Whatever it costs, it cost both servers
+    equally.
+
+For context on our side: we run the open-source engine today, on two four-accelerator nodes, with the prefix cache on and our own prompts, which share a long system prefix. J.'s informal test in July — one four-accelerator node, our workload, a hundred requests at concurrency eight — gave a mean time to last token of 31.4 s with the cache on and 36.9 s with it off, which is where the "roughly matches" in the email above comes from. A switch decision has to hold up on that workload, not only on theirs.
+
+Everything above is the complete record — the report, the example with its prompt file, the engine defaults, the spec sheet, the pricing, and the thread — and nothing about the test is known beyond it.

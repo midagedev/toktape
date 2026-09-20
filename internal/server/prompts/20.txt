@@ -1,6 +1,14 @@
-Write a complete test file for the Go function below, which a log shipper uses to split text into batches.
+Write a complete test file for the Go function below, which a log shipper uses to split text into batches. Use table-driven cases for empty input, a trailing newline, no newline at all, a line of exactly max bytes, a line longer than max, a max of zero or less, and multi-byte UTF-8. Add property tests that joining the chunks gives back the input and that no chunk exceeds max unless it is one line. For each case, state what the code does today and where it contradicts its doc comment. Below are the whole package the function lives in — the wire type its output feeds, the shipper that calls it, the tests that pass today — the command that wires it up, the receiver-side frame check that judges what it sends, the wire-format page both sides were built from, the journal of the night a single line outgrew the cap, and the runbook page written after it.
+
+The function and its neighbours, internal/shipper/chunk.go, in full:
 
 ~~~go
+// Package shipper batches log lines off an application's stdout and
+// writes them to the LTS receiver as framed batches.
+package shipper
+
+import "strings"
+
 // ChunkLines splits text into chunks of at most max bytes, breaking only
 // after a newline. A single line longer than max becomes its own chunk.
 func ChunkLines(text string, max int) []string {
@@ -20,4 +28,552 @@ func ChunkLines(text string, max int) []string {
 }
 ~~~
 
-Use table-driven cases for empty input, a trailing newline, no newline at all, a line of exactly max bytes, a line longer than max, a max of zero or less, and multi-byte UTF-8. Add property tests that joining the chunks gives back the input and that no chunk exceeds max unless it is one line. For each case, state what the code does today and where it contradicts its doc comment.
+The wire type a chunk becomes, internal/shipper/batch.go:
+
+~~~go
+package shipper
+
+import "encoding/binary"
+
+// The wire frame, version 1 (docs/wire-format.md):
+//
+//	 0..3   magic "LTS1"
+//	 4      version, 1
+//	 5..6   flags, 0
+//	 7..10  line count, big endian
+//	11..14  payload length in bytes, big endian
+//	15..    payload: whole lines, exactly what ChunkLines produced
+const (
+	magic     = "LTS1"
+	version   = byte(1)
+	HeaderLen = 15
+)
+
+// Batch is one frame's worth of payload: the lines of one chunk.
+type Batch struct {
+	Lines   int
+	Payload []byte
+}
+
+// Encode appends the wire form of b to dst and returns the extended slice.
+func (b Batch) Encode(dst []byte) []byte {
+	dst = append(dst, magic...)
+	dst = append(dst, version)
+	dst = append(dst, 0, 0) // flags
+	var head [8]byte
+	binary.BigEndian.PutUint32(head[0:4], uint32(b.Lines))
+	binary.BigEndian.PutUint32(head[4:8], uint32(len(b.Payload)))
+	dst = append(dst, head[:]...)
+	return append(dst, b.Payload...)
+}
+~~~
+
+The caller, internal/shipper/shipper.go:
+
+~~~go
+package shipper
+
+import (
+	"fmt"
+	"log"
+	"strings"
+	"time"
+)
+
+// Conn is the transport frames are written to; *net.TCPConn satisfies it.
+type Conn interface {
+	Write(p []byte) (int, error)
+}
+
+// Config is one shipper's knobs, as production runs them.
+type Config struct {
+	Endpoint   string        // host:port of the receiver
+	MaxBatch   int           // payload cap per frame, bytes
+	FlushEvery time.Duration // flush pending lines even under the cap
+}
+
+// Shipper buffers lines and turns them into frames on demand.
+type Shipper struct {
+	cfg  Config
+	conn Conn
+	pend strings.Builder
+	n    int // lines pending
+}
+
+// New returns a Shipper that writes frames for cfg to conn.
+func New(cfg Config, conn Conn) *Shipper {
+	return &Shipper{cfg: cfg, conn: conn}
+}
+
+// Add buffers one line, newline included.
+func (s *Shipper) Add(line string) {
+	s.pend.WriteString(line)
+	s.n++
+}
+
+// Full reports whether the pending payload has outgrown the cap, which
+// is the signal to flush early instead of waiting for the tick.
+func (s *Shipper) Full() bool {
+	return s.pend.Len() >= s.cfg.MaxBatch
+}
+
+// Flush frames everything pending and writes it. On a write error the
+// remaining pending lines are dropped: the receiver is the authority on
+// what it accepted, and a half-flushed buffer is a lie either way.
+func (s *Shipper) Flush() error {
+	defer func() { s.pend.Reset(); s.n = 0 }()
+	frames, payloadBytes := 0, 0
+	for _, chunk := range ChunkLines(s.pend.String(), s.cfg.MaxBatch) {
+		frame := Batch{Lines: strings.Count(chunk, "\n"), Payload: []byte(chunk)}
+		if _, err := s.conn.Write(frame.Encode(nil)); err != nil {
+			return fmt.Errorf("write frame %d bytes: %w", HeaderLen+len(chunk), err)
+		}
+		frames++
+		payloadBytes += len(chunk)
+	}
+	if frames > 0 {
+		log.Printf("flush: %d frames, %d payload bytes, %d lines", frames, payloadBytes, s.n)
+	}
+	return nil
+}
+
+// Run reads lines until the channel closes, flushing on the cap or the
+// tick, and returns the first write error it could not recover from.
+func (s *Shipper) Run(lines <-chan string) error {
+	tick := time.NewTicker(s.cfg.FlushEvery)
+	defer tick.Stop()
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				return s.Flush()
+			}
+			s.Add(line)
+			if s.Full() {
+				if err := s.Flush(); err != nil {
+					return err
+				}
+			}
+		case <-tick.C:
+			if err := s.Flush(); err != nil {
+				return err
+			}
+		}
+	}
+}
+~~~
+
+The tests that pass today, internal/shipper/shipper_test.go — all of them about the framing and the flush, none of them a table over the chunker itself:
+
+~~~go
+package shipper
+
+import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"testing"
+	"time"
+)
+
+type memConn struct {
+	writes [][]byte
+}
+
+func (c *memConn) Write(p []byte) (int, error) {
+	c.writes = append(c.writes, append([]byte(nil), p...))
+	return len(p), nil
+}
+
+type failConn struct{}
+
+func (failConn) Write(p []byte) (int, error) {
+	return 0, errors.New("connection reset")
+}
+
+func TestBatchEncodeCarriesHeaderAndPayload(t *testing.T) {
+	payload := []byte("two\nlines\n")
+	frame := Batch{Lines: 2, Payload: payload}.Encode(nil)
+	if len(frame) != HeaderLen+len(payload) {
+		t.Fatalf("frame is %d bytes, want %d", len(frame), HeaderLen+len(payload))
+	}
+	if string(frame[:4]) != "LTS1" || frame[4] != 1 {
+		t.Fatalf("magic/version = %q/%d", frame[:4], frame[4])
+	}
+	if got := binary.BigEndian.Uint32(frame[7:11]); got != 2 {
+		t.Errorf("line count = %d, want 2", got)
+	}
+	if got := binary.BigEndian.Uint32(frame[11:15]); int(got) != len(payload) {
+		t.Errorf("payload length = %d, want %d", got, len(payload))
+	}
+	if !bytes.Equal(frame[HeaderLen:], payload) {
+		t.Errorf("payload = %q, want %q", frame[HeaderLen:], payload)
+	}
+}
+
+func TestFlushWritesOneFramePerChunk(t *testing.T) {
+	conn := new(memConn)
+	s := New(Config{MaxBatch: 32}, conn)
+	for _, line := range []string{"0123456789\n", "0123456789\n", "0123456789\n", "0123456789\n"} {
+		s.Add(line)
+	}
+	if err := s.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	// 44 bytes pending, cap 32: two chunks, two frames.
+	if len(conn.writes) != 2 {
+		t.Fatalf("%d frames written, want 2", len(conn.writes))
+	}
+	for i, w := range conn.writes {
+		if len(w) <= HeaderLen {
+			t.Errorf("frame %d is %d bytes, want more than the header", i, len(w))
+		}
+	}
+}
+
+func TestFlushWithNothingPendingWritesNothing(t *testing.T) {
+	conn := new(memConn)
+	s := New(Config{MaxBatch: 32}, conn)
+	if err := s.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if len(conn.writes) != 0 {
+		t.Fatalf("%d frames written, want 0", len(conn.writes))
+	}
+}
+
+func TestFlushDropsWhatItCannotWrite(t *testing.T) {
+	s := New(Config{MaxBatch: 32}, failConn{})
+	s.Add("first\n")
+	if err := s.Flush(); err == nil {
+		t.Fatal("flush succeeded, want the write error")
+	}
+	// The pending line went with the error, so a flush onto a working
+	// connection afterwards writes nothing.
+	conn := new(memConn)
+	s.conn = conn
+	if err := s.Flush(); err != nil {
+		t.Fatalf("second flush: %v", err)
+	}
+	if len(conn.writes) != 0 {
+		t.Fatalf("%d frames after the drop, want 0", len(conn.writes))
+	}
+}
+
+func TestFullTripsAtTheCap(t *testing.T) {
+	s := New(Config{MaxBatch: 10}, new(memConn))
+	if s.Full() {
+		t.Fatal("empty shipper reports Full")
+	}
+	s.Add("0123456789\n")
+	if !s.Full() {
+		t.Fatal("11 pending bytes against a cap of 10, want Full")
+	}
+}
+
+func TestRunFlushesWhenTheChannelCloses(t *testing.T) {
+	conn := new(memConn)
+	s := New(Config{MaxBatch: 1 << 20, FlushEvery: time.Hour}, conn)
+	lines := make(chan string, 2)
+	lines <- "only line\n"
+	close(lines)
+	if err := s.Run(lines); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(conn.writes) != 1 {
+		t.Fatalf("%d frames written on close, want 1", len(conn.writes))
+	}
+}
+~~~
+
+The command that wires it up, cmd/ltship/main.go, in full:
+
+~~~go
+// Command ltship reads lines from stdin and ships them to the LTS
+// receiver, reconnecting forever. Every knob is an environment default.
+package main
+
+import (
+	"bufio"
+	"log"
+	"net"
+	"os"
+	"time"
+
+	"example.com/infra/internal/shipper"
+)
+
+func main() {
+	log.SetFlags(0)
+	cfg := shipper.Config{
+		Endpoint:   env("LTS_ENDPOINT", "ltsrecv.internal:5514"),
+		MaxBatch:   524288, // 512 KiB, half the receiver's hard limit
+		FlushEvery: 5 * time.Second,
+	}
+	lines := make(chan string, 4096)
+	go readStdin(lines)
+	for {
+		runOnce(cfg, lines)
+		log.Print("reconnect: ", cfg.Endpoint, " in 5s")
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// runOnce ships until the connection fails; the error is already logged.
+func runOnce(cfg shipper.Config, lines <-chan string) {
+	conn, err := net.Dial("tcp", cfg.Endpoint)
+	if err != nil {
+		log.Print("dial: ", err)
+		return
+	}
+	defer conn.Close()
+	if err := shipper.New(cfg, conn).Run(lines); err != nil {
+		log.Print("flush error: ", err)
+	}
+}
+
+func readStdin(lines chan<- string) {
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
+	for sc.Scan() {
+		lines <- sc.Text() + "\n"
+	}
+	log.Print("stdin ended")
+	select {} // a shipper outlives its input; the pipe is re-opened by the unit
+}
+
+func env(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+~~~
+
+And the module it all builds in, go.mod:
+
+~~~text
+module example.com/infra
+
+go 1.22
+~~~
+How ltship gets its input — the application's unit pipes its own stdout and stderr into the shipper, which is why readStdin ends by blocking instead of returning:
+
+~~~ini
+# /etc/systemd/system/webapp.service.d/shipper.conf
+[Service]
+StandardOutput=exec:/usr/bin/ltship
+StandardError=inherit
+~~~
+
+The receiver in full, cmd/ltsrecv/main.go — the frame check in readFrame is where every size in the journal below was decided:
+
+~~~go
+// Command ltsrecv accepts LTS frames from the fleet's shippers and
+// appends their payloads to one file per day.
+package main
+
+import (
+	"encoding/binary"
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"os"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+var (
+	flagListen    = flag.String("listen", ":5514", "listen address")
+	flagHardLimit = flag.Int("hard-limit", 1<<20, "drop frames whose total size exceeds this")
+	flagStats     = flag.Bool("stats", true, "log one line per 1000 accepted frames")
+	flagOutDir    = flag.String("out-dir", "/var/lib/ltsrecv", "directory for the day files")
+)
+
+// readFrame reads one frame and returns its payload. A frame whose
+// header plus payload exceeds the hard limit is rejected and the
+// connection closed: the sender is expected to drop what it was
+// holding and reconnect, which is what ltship does.
+func readFrame(conn net.Conn) ([]byte, error) {
+	var head [15]byte
+	if _, err := io.ReadFull(conn, head[:]); err != nil {
+		return nil, err
+	}
+	if string(head[:4]) != "LTS1" || head[4] != 1 || head[5] != 0 || head[6] != 0 {
+		return nil, fmt.Errorf("bad header %q", head[:7])
+	}
+	size := int(binary.BigEndian.Uint32(head[11:15]))
+	if 15+size > *flagHardLimit {
+		return nil, fmt.Errorf("frame %d bytes exceeds hard limit %d", 15+size, *flagHardLimit)
+	}
+	payload := make([]byte, size)
+	if _, err := io.ReadFull(conn, payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+var (
+	accepted atomic.Int64
+	day      = &dayFile{}
+)
+
+// dayFile is the one-file-per-day sink, shared by every connection.
+type dayFile struct {
+	mu     sync.Mutex
+	window int64 // payload bytes accepted since the last stats line
+}
+
+func (d *dayFile) append(payload []byte) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	path := filepath.Join(*flagOutDir, time.Now().UTC().Format("2006-01-02")+".log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(payload)
+	d.window += int64(len(payload))
+	return err
+}
+
+func (d *dayFile) windowAvg(n int64) int64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if n == 0 {
+		return 0
+	}
+	avg := d.window / n
+	d.window = 0
+	return avg
+}
+
+func main() {
+	log.SetFlags(0)
+	flag.Parse()
+	log.Print("listening on ", *flagListen, ", hard limit ", *flagHardLimit, " bytes")
+	ln, err := net.Listen("tcp", *flagListen)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Print("accept: ", err)
+			continue
+		}
+		go serve(conn)
+	}
+}
+
+func serve(conn net.Conn) {
+	defer conn.Close()
+	for {
+		payload, err := readFrame(conn)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("rejected frame from %s: %v", conn.RemoteAddr(), err)
+			}
+			return
+		}
+		if err := day.append(payload); err != nil {
+			log.Print("day file: ", err)
+			return
+		}
+		if n := accepted.Add(1); *flagStats && n%1000 == 0 {
+			log.Printf("stats: %d frames accepted, avg payload %d bytes", n, day.windowAvg(1000))
+		}
+	}
+}
+~~~
+
+The page both sides were built from, docs/wire-format.md, "Frame layout":
+
+~~~text
+  A frame is a 15-byte header followed by the payload. All integers
+  big endian.
+
+      offset  size  field
+      0       4     magic, the four bytes "LTS1"
+      4       1     version, currently 1
+      5       2     flags, reserved; send zero, reject nonzero
+      7       4     line count
+      11      4     payload length
+      15      ...   payload
+
+  The payload is whole lines, each newline-terminated, except that the
+  final line of a burst may lack its newline. Senders build payloads
+  with ChunkLines, so a payload never exceeds the sender's cap unless
+  it is a single line that does. Receivers must hold a hard limit above
+  every sender's cap for exactly that case, and drop what crosses it:
+  a sender's cap is a batching preference, a receiver's hard limit is
+  the physical promise.
+
+  Sending rules, from the same page:
+
+    - Flush on the cap or on the tick, whichever comes first; a
+      sender may hold lines for no longer than its tick.
+    - Chunks leave in order and frames are written sequentially on
+      one connection; the receiver never reorders.
+    - A reconnect starts a fresh sequence with no preamble; what was
+      in flight when the connection failed is lost, and both sides
+      log it as lost.
+    - The line count in the header counts newline characters in the
+      payload, so a final line without its newline is not counted.
+~~~
+
+The journal of that night, both boxes interleaved. The receiver serves every app host, which is why its frame counter moves faster than app-4's five-second flushes alone would move it. At 02:36 a new build of the application, 2026.09.19-1, started emitting one 3,145,741-byte line per panic, roughly every forty seconds. The slice below keeps the lines around the rejects and the reconnects; the steady tick flushes between them — one every five seconds across the 4m48s gap after 02:31 — are omitted:
+
+~~~
+Sep 19 02:30:41 app-4 systemd[1]: Started webapp.service.
+Sep 19 02:30:46 app-4 ltship[1183]: flush: 1 frames, 498872 payload bytes, 8914 lines
+Sep 19 02:31:03 app-4 ltship[1183]: flush: 1 frames, 510204 payload bytes, 9123 lines
+Sep 19 02:31:08 app-4 ltship[1183]: flush: 1 frames, 498311 payload bytes, 8902 lines
+Sep 19 02:31:13 app-4 ltship[1183]: flush: 1 frames, 521733 payload bytes, 9310 lines
+Sep 19 02:31:18 ltsrecv-1 ltsrecv[772]: stats: 1000 frames accepted, avg payload 312104 bytes
+Sep 19 02:31:23 app-4 ltship[1183]: flush: 1 frames, 509872 payload bytes, 9104 lines
+Sep 19 02:33:47 ltsrecv-1 ltsrecv[772]: stats: 2000 frames accepted, avg payload 310987 bytes
+Sep 19 02:36:11 app-4 ltship[1183]: flush error: write frame 3145756 bytes: write tcp 10.4.29.11:52318->10.6.1.7:5514: write: broken pipe
+Sep 19 02:36:11 ltsrecv-1 ltsrecv[772]: rejected frame from 10.4.29.11:52318: frame 3145756 bytes exceeds hard limit 1048576
+Sep 19 02:36:12 app-4 ltship[1183]: reconnect: ltsrecv.internal:5514 in 5s
+Sep 19 02:36:22 app-4 ltship[1183]: flush: 1 frames, 62109 payload bytes, 1109 lines
+Sep 19 02:36:53 app-4 ltship[1183]: flush error: write frame 3145756 bytes: write tcp 10.4.29.11:52319->10.6.1.7:5514: write: broken pipe
+Sep 19 02:36:53 ltsrecv-1 ltsrecv[772]: rejected frame from 10.4.29.11:52319: frame 3145756 bytes exceeds hard limit 1048576
+Sep 19 02:36:54 app-4 ltship[1183]: reconnect: ltsrecv.internal:5514 in 5s
+Sep 19 02:37:04 app-4 ltship[1183]: flush: 1 frames, 58420 payload bytes, 1041 lines
+Sep 19 02:37:34 app-4 ltship[1183]: flush error: write frame 3145756 bytes: write tcp 10.4.29.11:52320->10.6.1.7:5514: write: broken pipe
+Sep 19 02:37:34 ltsrecv-1 ltsrecv[772]: rejected frame from 10.4.29.11:52320: frame 3145756 bytes exceeds hard limit 1048576
+Sep 19 02:37:35 app-4 ltship[1183]: reconnect: ltsrecv.internal:5514 in 5s
+Sep 19 02:37:45 app-4 ltship[1183]: flush: 1 frames, 96117 payload bytes, 1702 lines
+Sep 19 02:39:12 ltsrecv-1 ltsrecv[772]: stats: 3000 frames accepted, avg payload 309844 bytes
+~~~
+
+The runbook page written after that night, LT-SHIP-3, "frame exceeds hard limit":
+
+~~~text
+  Symptom: ltsrecv logs "rejected frame ... exceeds hard limit" and
+  closes the connection; ltship on the app host logs "flush error:
+  write frame N bytes" and drops the one chunk it was holding, then
+  reconnects within 5 s. Loss is that chunk and nothing else — the
+  frames written before it in the same flush were already accepted.
+
+  Cause: a single line bigger than the sender cap (524288) becomes its
+  own chunk, by design — the chunker only breaks after newlines — and a
+  line whose frame passes the receiver's hard limit (1048576) cannot be
+  shipped at all. The margins are deliberate: hard limit one mebibyte,
+  sender cap half of it, so a single line ships whenever the line and
+  its fifteen-byte frame header together stay within a mebibyte, and
+  only the pathological ones drop.
+
+  Action: find the offender in the application's own log — it is one
+  line, and the receiver's reject names its size — and tell that team
+  to stop logging blobs. Do not raise the hard limit to make a symptom
+  disappear; the next thing past it would be a Kafka page.
+~~~
+
+The package, its callers, the wire page and the night's journal are everything the new tests have to hold to.

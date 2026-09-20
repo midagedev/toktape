@@ -1,6 +1,26 @@
-Port this Python function to idiomatic Go, returning a time.Duration and an error, without time.ParseDuration.
+Port this Python function to idiomatic Go, returning a time.Duration and an error, without time.ParseDuration. First list the inputs on which the Python version behaves questionably — "1.2.3s", non-ASCII digits that isdigit accepts, an empty string — and say what the Go version should do instead. Then write the port, table-driven tests for every case, and a fuzz test that it never panics. Below are the whole module the function lives in, the test file that passes against it today, the config loader, the config file both callers read, the scheduler loop, the database half of the scrub, the unit file as it was deployed on the night of the incident, the journal of that night and the morning after, the REPL session in which the questionable inputs were probed on the box, the Go file the port will live beside with its test, the CLI entry point, and the packaging.
+
+The module, retention/duration.py, in full:
 
 ~~~python
+"""Durations the way the config files write them: "1h30m", "45s", "2.5m".
+
+One format, parsed by everything in this package and formatted back for
+logs. The unit set is deliberately small — hours, minutes, seconds,
+milliseconds — because that is all the schedules use.
+"""
+
+# For callers that need the unit set without parsing (config validation).
+UNIT_SECONDS = {
+    "h": 3600.0,
+    "m": 60.0,
+    "s": 1.0,
+    "ms": 0.001,
+}
+
+__all__ = ["format_duration", "parse_duration"]
+
+
 def parse_duration(s: str) -> float:
     """Parse "1h30m", "45s", "2.5m" or "500ms" into seconds."""
     units = {"h": 3600, "m": 60, "s": 1, "ms": 0.001}
@@ -20,6 +40,460 @@ def parse_duration(s: str) -> float:
     if num:
         raise ValueError(f"missing unit in {s!r}")
     return total
+
+
+def format_duration(seconds: float) -> str:
+    """Format seconds the way the config files write them."""
+    parts = []
+    for unit, size in (("h", 3600), ("m", 60)):
+        whole, seconds = divmod(seconds, size)
+        if whole:
+            parts.append(f"{int(whole)}{unit}")
+    if seconds.is_integer():
+        if seconds or not parts:
+            parts.append(f"{int(seconds)}s")
+    else:
+        parts.append(f"{seconds:g}s")
+    return "".join(parts)
 ~~~
 
-First list the inputs on which the Python version behaves questionably — "1.2.3s", non-ASCII digits that isdigit accepts, an empty string — and say what the Go version should do instead. Then write the port, table-driven tests for every case, and a fuzz test that it never panics.
+The test file that passes against it today, retention/test_duration.py:
+
+~~~python
+import pytest
+
+from retention.duration import format_duration, parse_duration
+
+
+@pytest.mark.parametrize(
+    "text,seconds",
+    [
+        ("1h30m", 5400.0),
+        ("45s", 45.0),
+        ("2.5m", 150.0),
+        ("500ms", 0.5),
+        ("1h30m15s", 5415.0),
+        ("0ms", 0.0),
+    ],
+)
+def test_parse_examples(text, seconds):
+    assert parse_duration(text) == seconds
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["5sms", "1 s", "h", "1e3s", "-5s", "1m30", "ms", "1mms"],
+)
+def test_parse_rejects(text):
+    with pytest.raises(ValueError):
+        parse_duration(text)
+
+
+def test_parse_accepts_arabic_indic_digits():
+    # Found when a staging schedule was hand-edited: the parser took the
+    # line as written and the sweep ran 123 s, silently. Pinned since,
+    # with a note in SCRUB-14.
+    assert parse_duration("١٢٣s") == 123.0
+
+
+def test_parse_accepts_an_empty_string():
+    # Pinned in SCRUB-14: callers decide what an empty override means;
+    # the parser itself returns zero for it.
+    assert parse_duration("") == 0.0
+
+
+@pytest.mark.parametrize(
+    "seconds,text",
+    [
+        (45.0, "45s"),
+        (5400.0, "1h30m"),
+        (150.0, "2m30s"),
+        (0.5, "0.5s"),
+        (0.0, "0s"),
+        (1209600.0, "336h"),
+    ],
+)
+def test_format(seconds, text):
+    assert format_duration(seconds) == text
+
+
+@pytest.mark.parametrize(
+    "seconds", [45.0, 5400.0, 150.0, 0.5, 3661.0, 1209600.0, 7320.5]
+)
+def test_format_then_parse_round_trips(seconds):
+    assert parse_duration(format_duration(seconds)) == seconds
+~~~
+
+The config loader, retention/config.py:
+
+~~~python
+"""Load retention.toml: three durations and nothing else."""
+
+import tomllib
+from pathlib import Path
+
+from .duration import parse_duration
+
+REQUIRED_KEYS = ("interval", "retention", "grace_period")
+
+
+class ConfigError(Exception):
+    """A retention file is missing a key or carries a bad duration."""
+
+
+def load_config(path):
+    """Return {key: seconds} for the three required durations."""
+    path = Path(path)
+    with path.open("rb") as f:
+        raw = tomllib.load(f)
+    missing = [k for k in REQUIRED_KEYS if k not in raw]
+    if missing:
+        raise ConfigError(f"{path}: missing keys: {', '.join(missing)}")
+    out = {}
+    for key in REQUIRED_KEYS:
+        try:
+            out[key] = parse_duration(raw[key])
+        except ValueError as e:
+            raise ConfigError(f"{path}: key {key!r}: {e}") from e
+    return out
+~~~
+
+The file both callers read, /etc/retention/retention.toml:
+
+~~~toml
+# retention policy for the warehouse scrubber
+interval = "45s"      # one sweep pass, then sleep
+retention = "336h"    # two weeks. "336h", not "14d": the parser has
+                      # no day unit (duration.py, UNIT_SECONDS)
+grace_period = "1h"   # a row past retention is deleted only after this
+~~~
+
+The sweep loop, retention/scheduler.py — the environment handling in load_interval is where September's incident lives:
+
+~~~python
+"""The scrub loop: sleep the configured interval, delete past retention."""
+
+import logging
+import os
+import time
+from pathlib import Path
+
+from .config import load_config
+from .duration import parse_duration
+
+log = logging.getLogger("retention.scheduler")
+
+DEFAULT_CONFIG = Path("/etc/retention/retention.toml")
+
+
+def load_interval(config_path=DEFAULT_CONFIG):
+    """The sweep interval: $SCRUB_INTERVAL if it is set, the file otherwise.
+
+    "If it is set" is presence, not truth: an empty value is a value, so
+    an operator can distinguish SCRUB_INTERVAL="" from no override at
+    all. That distinction is why the environment is read this way.
+    """
+    override = os.environ.get("SCRUB_INTERVAL")
+    if override is not None:
+        return parse_duration(override)
+    return parse_duration(load_config(config_path)["interval"])
+
+
+def run(config_path=DEFAULT_CONFIG):
+    config = load_config(config_path)
+    interval = load_interval(config_path)
+    log.info(
+        "starting: interval %.3fs, retention %.0fs",
+        interval, config["retention"],
+    )
+    passes = 0
+    while True:
+        started = time.monotonic()
+        scanned, deleted = scrub(config)
+        passes += 1
+        took = time.monotonic() - started
+        log.info(
+            "scrub pass %d in %.3fs: scanned %d rows past retention %.1fs, "
+            "deleted %d; sleeping %.3fs",
+            passes, took, scanned, config["retention"], deleted, interval,
+        )
+        time.sleep(interval)
+
+
+def scrub(config):
+    """One pass: count what is past retention, delete what is past it
+    and the grace period too."""
+    from . import warehouse  # imported late: it opens the database
+
+    cutoff = time.time() - config["retention"]
+    scanned = warehouse.count_events_before(cutoff)
+    deleted = warehouse.delete_events_before(cutoff - config["grace_period"])
+    return scanned, deleted
+~~~
+
+The database half, retention/warehouse.py:
+
+~~~python
+"""The database side of the scrub: count and delete old events."""
+
+import os
+
+import psycopg
+
+_DSN = os.environ.get("WAREHOUSE_DSN", "dbname=warehouse")
+
+
+def count_events_before(ts):
+    with psycopg.connect(_DSN) as conn, conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM events WHERE created_at < %s", (ts,))
+        return cur.fetchone()[0]
+
+
+def delete_events_before(ts):
+    with psycopg.connect(_DSN) as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM events WHERE created_at < %s", (ts,))
+        return cur.rowcount
+~~~
+
+The unit file as it was deployed on the night of 15 September — the interval moved from the config file to the environment, and the deploy template writes the variable whether or not the operator set it:
+
+~~~ini
+# /etc/systemd/system/retention-scheduler.service, as deployed 16 September
+[Unit]
+Description=Retention scrub for the warehouse events table
+After=network-online.target
+
+[Service]
+User=retention
+Environment=SCRUB_INTERVAL=
+ExecStart=/usr/bin/python3 -m retention
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+~~~
+
+The journal of that night and the morning after, two slices, both of them excerpts — only the pass lines and the restart lines are kept, and everything between them, from this unit or any other, is left out. First the deploy — the last two passes of the old process, the restart, and the first twenty-four passes of the new one; the timestamps advance by each pass's own duration plus two milliseconds, and nothing else ran on the box:
+
+~~~
+Sep 16 03:10:28 db-warehouse retention-scheduler[2733]: scrub pass 54 in 0.388s: scanned 14 rows past retention 1209600.0s, deleted 14; sleeping 45.000s
+Sep 16 03:11:13 db-warehouse retention-scheduler[2733]: scrub pass 55 in 0.391s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 45.000s
+Sep 16 03:11:58 db-warehouse systemd[1]: retention-scheduler.service: Deactivated successfully.
+Sep 16 03:11:58 db-warehouse systemd[1]: Stopped retention-scheduler.service.
+Sep 16 03:11:58 db-warehouse systemd[1]: Started retention-scheduler.service.
+Sep 16 03:11:58 db-warehouse retention-scheduler[2841]: scrub pass 1 in 0.412s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:11:59 db-warehouse retention-scheduler[2841]: scrub pass 2 in 0.401s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:11:59 db-warehouse retention-scheduler[2841]: scrub pass 3 in 0.398s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:11:59 db-warehouse retention-scheduler[2841]: scrub pass 4 in 0.415s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:00 db-warehouse retention-scheduler[2841]: scrub pass 5 in 0.427s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:00 db-warehouse retention-scheduler[2841]: scrub pass 6 in 0.402s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:01 db-warehouse retention-scheduler[2841]: scrub pass 7 in 0.411s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:01 db-warehouse retention-scheduler[2841]: scrub pass 8 in 0.419s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:01 db-warehouse retention-scheduler[2841]: scrub pass 9 in 0.400s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:02 db-warehouse retention-scheduler[2841]: scrub pass 10 in 0.413s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:02 db-warehouse retention-scheduler[2841]: scrub pass 11 in 0.390s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:03 db-warehouse retention-scheduler[2841]: scrub pass 12 in 0.408s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:03 db-warehouse retention-scheduler[2841]: scrub pass 13 in 0.421s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:03 db-warehouse retention-scheduler[2841]: scrub pass 14 in 0.404s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:04 db-warehouse retention-scheduler[2841]: scrub pass 15 in 0.416s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:04 db-warehouse retention-scheduler[2841]: scrub pass 16 in 0.399s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:05 db-warehouse retention-scheduler[2841]: scrub pass 17 in 0.405s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:05 db-warehouse retention-scheduler[2841]: scrub pass 18 in 0.418s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:05 db-warehouse retention-scheduler[2841]: scrub pass 19 in 0.402s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:06 db-warehouse retention-scheduler[2841]: scrub pass 20 in 0.411s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:06 db-warehouse retention-scheduler[2841]: scrub pass 21 in 0.397s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:07 db-warehouse retention-scheduler[2841]: scrub pass 22 in 0.414s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:07 db-warehouse retention-scheduler[2841]: scrub pass 23 in 0.406s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 03:12:08 db-warehouse retention-scheduler[2841]: scrub pass 24 in 0.409s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+~~~
+
+Then the state of the journal when the on-call looked at it at nine — the line that had been repeating for five hours and forty-eight minutes, and the revert of the unit file at 09:00:41, after which the passes go back to forty-five seconds apart:
+
+~~~
+Sep 16 09:00:14 db-warehouse retention-scheduler[2841]: scrub pass 49545 in 0.417s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 0.000s
+Sep 16 09:00:41 db-warehouse systemd[1]: Stopped retention-scheduler.service.
+Sep 16 09:00:41 db-warehouse systemd[1]: Started retention-scheduler.service.
+Sep 16 09:00:42 db-warehouse retention-scheduler[3397]: scrub pass 1 in 0.402s: scanned 0 rows past retention 1209600.0s, deleted 0; sleeping 45.000s
+~~~
+
+A REPL session on the warehouse box the morning after, in the directory the package is deployed to — every output below is what the box printed:
+
+~~~
+retention@db-warehouse:/opt/retention$ python3 --version
+Python 3.14.6
+retention@db-warehouse:/opt/retention$ python3 -q
+>>> from retention.duration import parse_duration
+>>> parse_duration("1h30m")
+5400.0
+>>> parse_duration("")
+0.0
+>>> parse_duration("1.2.3s")
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "retention/duration.py", line 32, in parse_duration
+    total += float(num) * units[unit]
+             ~~~~~^^^^^
+ValueError: could not convert string to float: '1.2.3'
+>>> parse_duration("١٢٣s")
+123.0
+>>> parse_duration("٢.٥m")
+150.0
+>>> parse_duration("²s")
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "retention/duration.py", line 32, in parse_duration
+    total += float(num) * units[unit]
+             ~~~~~^^^^^
+ValueError: could not convert string to float: '²'
+>>> parse_duration("1s٢")
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "retention/duration.py", line 36, in parse_duration
+    raise ValueError(f"missing unit in {s!r}")
+ValueError: missing unit in '1s٢'
+>>> parse_duration("1h1h")
+7200.0
+>>> parse_duration(".5s"), parse_duration("1.s")
+(0.5, 1.0)
+>>> parse_duration("٣s"), parse_duration("٥ms")
+(3.0, 0.005)
+>>> parse_duration("0ms")
+0.0
+>>> "١".isdigit(), "²".isdigit(), float("١٢٣"), float("٢.٥")
+(True, True, 123.0, 2.5)
+~~~
+
+The Go file the port will live beside, internal/retention/retention.go — the idioms are the house style the port should keep:
+
+~~~go
+// Package retention is the Go side of the warehouse scrub: the policy
+// a config file resolves to, and the errors a bad one produces. The
+// duration parser joins it from the Python module of the same name.
+package retention
+
+import (
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// ErrPolicy is the sentinel every error in this package wraps, so a
+// caller can tell a bad policy file from a bad database.
+var ErrPolicy = errors.New("retention: bad policy")
+
+// ParseDays parses a plain whole-day count, the one unit the Python
+// parser refused to grow. Negative counts and anything with a unit
+// character in it are policy errors.
+func ParseDays(s string) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("%w: day count %q", ErrPolicy, s)
+	}
+	return n, nil
+}
+~~~
+
+Its test, internal/retention/retention_test.go:
+
+~~~go
+package retention
+
+import (
+	"errors"
+	"testing"
+)
+
+func TestParseDays(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    int
+		wantErr bool
+	}{
+		{in: "0", want: 0},
+		{in: "14", want: 14},
+		{in: " 7 ", want: 7},
+		{in: "-1", wantErr: true},
+		{in: "14d", wantErr: true},
+		{in: "", wantErr: true},
+		{in: "1e3", wantErr: true},
+	}
+	for _, tt := range tests {
+		got, err := ParseDays(tt.in)
+		if tt.wantErr {
+			if !errors.Is(err, ErrPolicy) {
+				t.Errorf("ParseDays(%q) error = %v, want ErrPolicy", tt.in, err)
+			}
+			continue
+		}
+		if err != nil || got != tt.want {
+			t.Errorf("ParseDays(%q) = %d, %v, want %d, nil", tt.in, got, err, tt.want)
+		}
+	}
+}
+~~~
+
+The CLI entry point, retention/__main__.py:
+
+~~~python
+"""`python3 -m retention` runs the scrub loop; given a config path, it
+shows what that policy file resolves to instead."""
+
+import argparse
+import logging
+import sys
+
+from .config import ConfigError, load_config
+from .duration import format_duration, parse_duration
+from .scheduler import run
+
+# Bare messages: journald already stamps every line with a time and a
+# unit, so a level or logger prefix would only double them.
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="retention",
+        description="Print the policy a retention.toml resolves to.",
+    )
+    parser.add_argument("config", help="path to a retention.toml")
+    parser.add_argument(
+        "--interval",
+        help='override the sweep interval, e.g. "45s" or "1h30m"',
+    )
+    args = parser.parse_args(argv)
+    try:
+        policy = load_config(args.config)
+        if args.interval is not None:
+            policy["interval"] = parse_duration(args.interval)
+    except (ConfigError, ValueError) as e:
+        return sys.exit(f"retention: {e}")
+    for key in ("interval", "retention", "grace_period"):
+        print(f"{key:14} {policy[key]:>10.3f}  ({format_duration(policy[key])})")
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) == 1:
+        run()  # the service form: sweep until the unit stops it
+    else:
+        sys.exit(main())
+~~~
+
+And the packaging, pyproject.toml:
+
+~~~toml
+[project]
+name = "retention"
+version = "1.3.0"
+requires-python = ">=3.11"
+dependencies = [
+    "psycopg[binary] >= 3.2",
+]
+
+[project.scripts]
+retention = "retention.__main__:main"
+~~~
+
+The module, its passing tests, the callers, the night's journal and the probes above are everything the port has to stay compatible with.

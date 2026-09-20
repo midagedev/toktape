@@ -1,8 +1,82 @@
-Rustc rejects the function below with E0502, cannot borrow *words as mutable because it is also borrowed as immutable, pointing at the push call.
+Show, in terms of borrows and lifetimes, exactly why the compiler is right to reject the function below — rustc turns it away with E0502, cannot borrow *words as mutable because it is also borrowed as immutable, pointing at the push call — and describe the memory bug it would allow if it were accepted. Then fix it three ways: returning an owned String, working with an index instead of a reference, and splitting it into two functions with a different signature. Say which you would choose and why, make every version handle an empty vector without panicking, and write unit tests for all three.
+
+The function arrived in pull request #77, which adds the shout-longest subcommand to the wordkit CLI: the release-notes checker wants the longest word printed and its upper-cased copy appended to the working set in one pass, which is why the function takes &mut Vec<String> and returns &str at once. CI went red on the lib target the moment the branch landed, and the review thread is one comment long. The whole crate is below, then the compiler's full complaint.
+
+Cargo.toml:
+
+~~~toml
+[package]
+name = "wordkit"
+version = "0.2.0"
+edition = "2021"
+description = "Word-frequency helpers for the release-notes checker."
+license = "MIT"
+
+[dependencies]
+# Nothing outside std: the checker runs on the build host, where a
+# dependency costs a vendored copy and buys nothing.
+~~~
+
+rust-toolchain.toml, pinning the build host's compiler:
+
+~~~toml
+[toolchain]
+channel = "1.96.1"
+~~~
+
+src/lib.rs:
 
 ~~~rust
+//! Wordkit is the text side of the release-notes checker: it turns a
+//! changelog into words, counts them, and picks out the extremes. The
+//! binary in `main.rs` is a thin CLI over the library.
+//!
+//! Everything here is std-only on purpose — the checker runs on the build
+//! host, and a dependency there costs a vendored copy for every target.
+
+pub mod shout;
+pub mod stats;
+pub mod words;
+
+pub use shout::{longest_at, report_line};
+pub use stats::{histogram, stats, top_words, WordStats};
+pub use words::{longest_word, normalize, tokenize};
+~~~
+
+src/words.rs, where the rejected function lives:
+
+~~~rust
+//! Word-level helpers: normalising tokens and finding the longest word.
+
+/// Lowercases a word and strips the punctuation people type around it,
+/// keeping the dots and dashes that belong to part numbers.
+///
+/// ```rust
+/// use wordkit::words::normalize;
+///
+/// assert_eq!(normalize("\"Bearing!\""), "bearing");
+/// assert_eq!(normalize("M8x1.25,"), "m8x1.25");
+/// ```
+pub fn normalize(word: &str) -> String {
+    word.trim()
+        .trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-')
+        .to_lowercase()
+}
+
+/// Splits text into normalised words, keeping the order they appear in.
+/// The notes are plain ASCII prose; no Unicode segmentation yet.
+///
+/// ```rust
+/// use wordkit::words::tokenize;
+///
+/// assert_eq!(tokenize("Fixed the pump!"), vec!["fixed", "the", "pump"]);
+/// ```
+pub fn tokenize(text: &str) -> Vec<String> {
+    text.split_whitespace().map(normalize).collect()
+}
+
 /// Appends an upper-cased copy of the longest word and returns the longest word.
-fn longest_word(words: &mut Vec<String>) -> &str {
+pub fn longest_word(words: &mut Vec<String>) -> &str {
     let mut best = &words[0];
     for w in words.iter() {
         if w.len() > best.len() {
@@ -14,4 +88,493 @@ fn longest_word(words: &mut Vec<String>) -> &str {
 }
 ~~~
 
-Explain, in terms of borrows and lifetimes, exactly why the compiler is right to reject it, and describe the memory bug it would allow if it were accepted. Then fix it three ways: returning an owned String, working with an index instead of a reference, and splitting it into two functions with a different signature. Say which you would choose and why, make every version handle an empty vector without panicking, and write unit tests for all three.
+The review thread on the PR, one comment long, left on the `longest_word` diff:
+
+~~~text
+This is the E0502 that turned CI red — the push and the returned reference cannot both keep the borrow alive. Rework it however you see fit, so long as shout-longest still appends the copy and prints the longest word.
+~~~
+
+src/stats.rs, the counting side:
+
+~~~rust
+//! Counting side: how many words, how many distinct, and which ones lead.
+
+use crate::words::tokenize;
+use std::collections::BTreeMap;
+
+/// One pass over a text, reduced to the numbers the checker prints.
+#[derive(Debug, PartialEq, Eq)]
+pub struct WordStats {
+    pub words: usize,
+    pub distinct: usize,
+    pub letters: usize,
+}
+
+impl WordStats {
+    /// Mean letters per word, `None` for an empty text.
+    ///
+    /// ```rust
+    /// use wordkit::stats;
+    ///
+    /// let s = stats("abcd ab");
+    /// assert_eq!(s.mean_letters(), Some(3.0));
+    /// assert_eq!(stats("").mean_letters(), None);
+    /// ```
+    pub fn mean_letters(&self) -> Option<f64> {
+        if self.words == 0 {
+            return None;
+        }
+        Some(self.letters as f64 / self.words as f64)
+    }
+}
+
+/// Counts words, distinct words and letters in one pass.
+///
+/// ```rust
+/// use wordkit::stats;
+///
+/// let s = stats("Bearings bearings fail");
+/// assert_eq!(s.words, 3);
+/// assert_eq!(s.distinct, 2);
+/// ```
+pub fn stats(text: &str) -> WordStats {
+    let words = tokenize(text);
+    let mut counts: BTreeMap<&str, ()> = BTreeMap::new();
+    let mut letters = 0;
+    for word in &words {
+        counts.insert(word.as_str(), ());
+        letters += word.chars().filter(|c| c.is_alphabetic()).count();
+    }
+    WordStats {
+        words: words.len(),
+        distinct: counts.len(),
+        letters,
+    }
+}
+
+/// The `n` most frequent words, ties broken by first appearance.
+///
+/// ```rust
+/// use wordkit::top_words;
+///
+/// let top = top_words("b a b a c", 2);
+/// assert_eq!(top, vec![("b".to_string(), 2), ("a".to_string(), 2)]);
+/// ```
+pub fn top_words(text: &str, n: usize) -> Vec<(String, usize)> {
+    let words = tokenize(text);
+    let mut counts: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
+    for (i, word) in words.iter().enumerate() {
+        counts.entry(word.as_str()).or_insert((0, i)).0 += 1;
+    }
+    let mut ranked: Vec<(&str, usize, usize)> =
+        counts.iter().map(|(w, (c, i))| (*w, *c, *i)).collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.2.cmp(&b.2)));
+    ranked.truncate(n);
+    ranked
+        .into_iter()
+        .map(|(w, c, _)| (w.to_string(), c))
+        .collect()
+}
+
+/// One line per entry — the word, its count, and a bar of `#` scaled to
+/// the busiest entry — the shape `wordkit top` prints.
+///
+/// ```rust
+/// use wordkit::histogram;
+///
+/// let bars = histogram(&[("aa".to_string(), 8), ("b".to_string(), 2)]);
+/// assert_eq!(bars.lines().count(), 2);
+/// ```
+pub fn histogram(entries: &[(String, usize)]) -> String {
+    let max = entries.iter().map(|(_, n)| *n).max().unwrap_or(1);
+    entries
+        .iter()
+        .map(|(word, n)| {
+            let bars = if max == 0 { 0 } else { (n * 24).div_ceil(max) };
+            format!("{word:<14}{n:>4}  {}", "#".repeat(bars))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+~~~
+
+src/shout.rs, new on the branch — the caller the reworked signature has to satisfy:
+
+~~~rust
+//! The shout pass the release-notes checker runs after counting: grow
+//! the working set with an upper-cased copy of the longest word, then
+//! build the one-line report from what came back. Everything here is
+//! shaped around the borrow `words.rs` is being refused. The `&str`
+//! that `longest_word` hands back carries the lifetime of the `&mut
+//! Vec<String>` it was called with, so for as long as the caller holds
+//! the reference, the set behind it is borrowed mutably and cannot be
+//! read, indexed, or borrowed again.
+
+use crate::words::longest_word;
+
+/// The report line for one pass: the longest word, its length in
+/// letters, and how many entries the working set held before the
+/// upper-cased copy was appended.
+///
+/// Everything still needed from `words` is read before the call,
+/// because nothing may touch the set again while the returned
+/// reference is alive.
+///
+/// ```rust
+/// use wordkit::shout::report_line;
+///
+/// let mut words = vec!["pump".to_string(), "bearings".to_string()];
+/// let line = report_line(&mut words);
+/// assert_eq!(line, "bearings (8 letters, shouted from 2)");
+/// assert_eq!(words, vec!["pump", "bearings", "BEARINGS"]);
+/// ```
+pub fn report_line(words: &mut Vec<String>) -> String {
+    let before = words.len();
+    let longest = longest_word(words);
+    format!("{longest} ({} letters, shouted from {before})", longest.chars().count())
+}
+
+/// The index of the longest entry, the first of equals winning — the
+/// same choice `longest_word` makes. An index is the one fact about
+/// the longest word that does not borrow the set to state it, so it
+/// stays valid after the set has been grown again.
+///
+/// ```rust
+/// use wordkit::shout::longest_at;
+///
+/// let words = vec!["pump".to_string(), "bearings".to_string()];
+/// assert_eq!(longest_at(&words), Some(1));
+/// assert_eq!(longest_at(&[]), None);
+/// ```
+pub fn longest_at(words: &[String]) -> Option<usize> {
+    let mut best: Option<usize> = None;
+    for (i, w) in words.iter().enumerate() {
+        if best.is_none_or(|b| w.len() > words[b].len()) {
+            best = Some(i);
+        }
+    }
+    best
+}
+~~~
+
+src/main.rs, the CLI the subcommand was added to:
+
+~~~rust
+use std::env;
+use std::io::Read;
+
+use wordkit::{histogram, longest_word, stats, tokenize, top_words};
+
+const USAGE: &str = "\
+wordkit 0.2.0 - word counts for release notes
+
+usage:
+  wordkit stats [FILE]           words, distinct words, letters, mean length
+  wordkit top N [FILE]           the N most frequent words with a bar each
+  wordkit shout-longest [FILE]   append an upper-cased copy of the longest
+                                 word to the word list, print the longest
+
+reads stdin when FILE is missing or '-'.\
+";
+
+fn read_input(path: Option<&str>) -> Result<String, String> {
+    match path {
+        None | Some("-") => {
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| format!("reading stdin: {e}"))?;
+            Ok(buf)
+        }
+        Some(p) => std::fs::read_to_string(p).map_err(|e| format!("reading {p}: {e}")),
+    }
+}
+
+fn main() {
+    std::process::exit(run(&env::args().skip(1).collect::<Vec<_>>()));
+}
+
+fn run(args: &[String]) -> i32 {
+    let Some(command) = args.first() else {
+        eprint!("{USAGE}");
+        return 2;
+    };
+    match command.as_str() {
+        "stats" => match read_input(args.get(1).map(String::as_str)) {
+            Ok(text) => {
+                let s = stats(&text);
+                println!("words {}", s.words);
+                println!("distinct {}", s.distinct);
+                println!("letters {}", s.letters);
+                match s.mean_letters() {
+                    Some(m) => println!("mean letters {m:.2}"),
+                    None => println!("mean letters -"),
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("wordkit: {e}");
+                1
+            }
+        },
+        "top" => {
+            let Some(n) = args.get(1).and_then(|a| a.parse::<usize>().ok()) else {
+                eprintln!("wordkit: top needs a number, got {:?}", args.get(1));
+                return 2;
+            };
+            match read_input(args.get(2).map(String::as_str)) {
+                Ok(text) => {
+                    print!("{}", histogram(&top_words(&text, n)));
+                    println!();
+                    0
+                }
+                Err(e) => {
+                    eprintln!("wordkit: {e}");
+                    1
+                }
+            }
+        }
+        "shout-longest" => match read_input(args.get(1).map(String::as_str)) {
+            Ok(text) => {
+                let mut words = tokenize(&text);
+                if words.is_empty() {
+                    eprintln!("wordkit: no words in the input");
+                    return 1;
+                }
+                println!("{}", longest_word(&mut words));
+                0
+            }
+            Err(e) => {
+                eprintln!("wordkit: {e}");
+                1
+            }
+        },
+        "-h" | "--help" => {
+            print!("{USAGE}");
+            0
+        }
+        other => {
+            eprintln!("wordkit: unknown command {other:?}");
+            eprint!("{USAGE}");
+            2
+        }
+    }
+}
+~~~
+
+tests/words.rs, green before the branch:
+
+~~~rust
+use wordkit::words::{normalize, tokenize};
+
+#[test]
+fn normalize_strips_punctuation_but_keeps_part_numbers() {
+    assert_eq!(normalize("\"Bearing!\""), "bearing");
+    assert_eq!(normalize("M8x1.25,"), "m8x1.25");
+    assert_eq!(normalize("  (spaced-out)  "), "spaced-out");
+}
+
+#[test]
+fn tokenize_splits_and_normalises_in_order() {
+    assert_eq!(tokenize("Fixed the pump!"), vec!["fixed", "the", "pump"]);
+    assert_eq!(tokenize("One  two\tthree"), vec!["one", "two", "three"]);
+}
+
+#[test]
+fn tokenize_of_empty_text_is_empty() {
+    assert!(tokenize("").is_empty());
+    assert!(tokenize("   \n\t ").is_empty());
+}
+~~~
+
+tests/stats.rs, also green before the branch:
+
+~~~rust
+use wordkit::{histogram, stats, top_words};
+
+#[test]
+fn counts_words_and_distinct() {
+    let s = stats("Bearings bearings fail");
+    assert_eq!(s.words, 3);
+    assert_eq!(s.distinct, 2);
+    assert_eq!(s.letters, 20); // 8 + 8 + 4, digits excluded
+}
+
+#[test]
+fn empty_text_counts_zeros() {
+    let s = stats("");
+    assert_eq!(s, wordkit::WordStats { words: 0, distinct: 0, letters: 0 });
+    assert!(s.mean_letters().is_none());
+}
+
+#[test]
+fn top_words_breaks_ties_by_first_appearance() {
+    let top = top_words("b a b a c", 3);
+    assert_eq!(top, vec![("b".into(), 2), ("a".into(), 2), ("c".into(), 1)]);
+}
+
+#[test]
+fn top_words_truncates_and_survives_a_bigger_n() {
+    let top = top_words("one two two three three three", 2);
+    assert_eq!(top, vec![("three".into(), 3), ("two".into(), 2)]);
+    assert_eq!(top_words("one two", 10).len(), 2);
+}
+
+#[test]
+fn histogram_scales_bars_to_the_busiest_word() {
+    let bars = histogram(&[("aa".into(), 8), ("b".into(), 2)]);
+    let lines: Vec<&str> = bars.split('\n').collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].matches('#').count(), 24);
+    assert_eq!(lines[1].matches('#').count(), 6);
+}
+
+#[test]
+fn histogram_of_nothing_is_empty() {
+    assert_eq!(histogram(&[]), "");
+}
+
+#[test]
+fn letters_exclude_the_digits_in_part_numbers() {
+    let s = stats("M8x1.25 M8x1.25");
+    assert_eq!(s.words, 2);
+    assert_eq!(s.distinct, 1);
+    assert_eq!(s.letters, 4); // one m and one x per token
+}
+
+#[test]
+fn mean_letters_averages_over_every_occurrence() {
+    let s = stats("abc ab ab");
+    assert_eq!(s.words, 3);
+    assert_eq!(s.letters, 7);
+    assert_eq!(s.mean_letters(), Some(7.0 / 3.0));
+}
+~~~
+
+tests/shout.rs, new on the branch alongside the shout pass:
+
+~~~rust
+use wordkit::shout::{longest_at, report_line};
+
+#[test]
+fn report_line_names_the_longest_and_grows_the_set() {
+    let mut words = vec!["pump".to_string(), "bearings".to_string()];
+    let line = report_line(&mut words);
+    assert_eq!(line, "bearings (8 letters, shouted from 2)");
+    assert_eq!(words.len(), 3);
+    assert_eq!(words[2], "BEARINGS");
+}
+
+#[test]
+fn report_line_picks_the_first_of_equally_long_words() {
+    let mut words = vec!["valve".to_string(), "pumps".to_string()];
+    let line = report_line(&mut words);
+    assert_eq!(line, "valve (5 letters, shouted from 2)");
+    assert_eq!(words[2], "VALVE");
+}
+
+#[test]
+fn longest_at_finds_the_first_longest() {
+    let words = vec!["pump".to_string(), "bearings".to_string(), "gasket".to_string()];
+    assert_eq!(longest_at(&words), Some(1));
+}
+
+#[test]
+fn longest_at_breaks_ties_towards_the_front() {
+    let words = vec!["ab".to_string(), "cd".to_string(), "e".to_string()];
+    assert_eq!(longest_at(&words), Some(0));
+    assert_eq!(longest_at(&[]), None);
+}
+~~~
+
+tests/cli.rs, which drives the built binary:
+
+~~~rust
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+fn run(args: &[&str], input: &str) -> (String, String, Option<i32>) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_wordkit"))
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn wordkit");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin")
+        .write_all(input.as_bytes())
+        .expect("write stdin");
+    let out = child.wait_with_output().expect("wait");
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.code(),
+    )
+}
+
+#[test]
+fn stats_reads_stdin() {
+    let (out, err, code) = run(&["stats"], "two words\n");
+    assert_eq!(code, Some(0));
+    assert!(err.is_empty(), "{err}");
+    assert!(out.contains("words 2"));
+    assert!(out.contains("distinct 2"));
+}
+
+#[test]
+fn top_prints_one_line_per_word() {
+    let (out, _, code) = run(&["top", "2"], "b a b a c\n");
+    assert_eq!(code, Some(0));
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].starts_with('b'));
+}
+
+#[test]
+fn help_flag_prints_usage_and_exits_zero() {
+    let (out, err, code) = run(&["--help"], "");
+    assert_eq!(code, Some(0));
+    assert!(err.is_empty(), "{err}");
+    assert!(out.contains("usage:"));
+}
+
+#[test]
+fn a_missing_file_is_an_error_not_a_panic() {
+    let (_, err, code) = run(&["stats", "/nonexistent/notes.txt"], "");
+    assert_eq!(code, Some(1));
+    assert!(err.contains("reading /nonexistent/notes.txt"), "{err}");
+}
+
+#[test]
+fn no_arguments_prints_usage_and_exits_two() {
+    let (out, err, code) = run(&[], "");
+    assert_eq!(code, Some(2));
+    assert!(out.is_empty());
+    assert!(err.contains("usage:"));
+}
+~~~
+
+And the compiler's full complaint, the entire output of cargo check on this crate as it stands:
+
+~~~
+error[E0502]: cannot borrow `*words` as mutable because it is also borrowed as immutable
+  --> src/words.rs:38:5
+   |
+31 | pub fn longest_word(words: &mut Vec<String>) -> &str {
+   |                            - let's call the lifetime of this reference `'1`
+32 |     let mut best = &words[0];
+   |                     ----- immutable borrow occurs here
+...
+38 |     words.push(best.to_uppercase());
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ mutable borrow occurs here
+39 |     best
+   |     ---- returning this value requires that `*words` is borrowed for `'1`
+
+For more information about this error, try `rustc --explain E0502`.
+error: could not compile `wordkit` (lib) due to 1 previous error
+~~~
+
+The toolchain is rustc 1.96.1 on the stable channel, the crate carries no dependencies, and the block above is the entire output of cargo check — nothing was trimmed. The words, stats and cli tests were green before the branch, the shout tests travel with it, and all of them are written to stay green after the fix.

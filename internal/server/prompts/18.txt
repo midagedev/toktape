@@ -1,6 +1,99 @@
-This Django view renders the order history page. It takes four seconds for customers with many orders, and the database log shows 1,300 queries for a page load.
+This Django view renders the order history page. It takes four seconds for customers with many orders, and the database log shows 1,300 queries for a page load. Explain where each query comes from and how the count grows with the orders and items. Point out the bug in the shipment line when Shipment has a OneToOneField to Order. Rewrite the view with select_related, prefetch_related and pagination, and show a test that fails if the query count regresses. Below are the four model files in full, the view and its URLconf, the template, the settings the capture ran under, the ticket that asked for it, the first twenty-six of the 1,300 queries with their timestamps, the statistics and indexes the page runs against, the pg_stat_statements rows for one reproduction, both migrations that gave every order a shipment, and the test file that passes today.
+
+The catalog app, catalog/models.py, in full:
 
 ~~~python
+from django.db import models
+
+
+class Product(models.Model):
+    sku = models.CharField(max_length=24, unique=True)
+    name = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+~~~
+
+The orders app, orders/models.py, in full:
+
+~~~python
+from django.conf import settings
+from django.db import models
+
+from catalog.models import Product
+
+
+class Customer(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE
+    )
+    kind = models.CharField(
+        max_length=10,
+        choices=[("retail", "retail"), ("trade", "trade")],
+        default="retail",
+    )
+
+    def __str__(self):
+        return self.user.get_username()
+
+
+class Order(models.Model):
+    customer = models.ForeignKey(
+        Customer, on_delete=models.CASCADE, related_name="orders"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
+class OrderItem(models.Model):
+    order = models.ForeignKey(
+        Order, on_delete=models.CASCADE, related_name="items"
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="+"
+    )
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    quantity = models.PositiveIntegerField(default=1)
+~~~
+
+The shipping app, shipping/models.py, in full:
+
+~~~python
+from django.db import models
+
+from orders.models import Order
+
+
+class Shipment(models.Model):
+    order = models.OneToOneField(
+        Order, on_delete=models.CASCADE, related_name="shipment"
+    )
+    carrier = models.CharField(max_length=40)
+    tracking_code = models.CharField(blank=True, max_length=64)
+    status = models.CharField(
+        max_length=12,
+        choices=[
+            ("packed", "packed"),
+            ("in_transit", "in transit"),
+            ("delivered", "delivered"),
+            ("returned", "returned"),
+        ],
+    )
+    shipped_at = models.DateTimeField(blank=True, null=True)
+~~~
+
+The view itself, orders/views.py, and the URLconf that routes it:
+
+~~~python
+from django.shortcuts import render
+
+from .models import Order
+
+
 def order_history(request):
     orders = Order.objects.filter(customer=request.user.customer).order_by("-created_at")
     rows = []
@@ -16,4 +109,332 @@ def order_history(request):
     return render(request, "orders/history.html", {"rows": rows})
 ~~~
 
-Explain where each query comes from and how the count grows with the orders and items. Point out the bug in the shipment line when Shipment has a OneToOneField to Order. Rewrite the view with select_related, prefetch_related and pagination, and show a test that fails if the query count regresses.
+~~~python
+# orders/urls.py
+from django.urls import path
+
+from . import views
+
+app_name = "orders"
+
+urlpatterns = [
+    path("orders/history/", views.order_history, name="history"),
+]
+~~~
+
+The template it renders, templates/orders/history.html:
+
+~~~html
+{% extends "base.html" %}
+
+{% block content %}
+<h1>Order history</h1>
+<table class="order-history">
+  <thead>
+    <tr><th>Order</th><th>Date</th><th>Total</th><th>Status</th><th>Items</th></tr>
+  </thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td>#{{ row.id }}</td>
+      <td>{{ row.date|date:"j M Y" }}</td>
+      <td>&pound;{{ row.total|floatformat:2 }}</td>
+      <td>{{ row.status }}</td>
+      <td>{{ row.products|join:", " }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+~~~
+
+The settings the capture depends on, shop/settings.py — the debug cursor is the reason a count exists at all; it was left on after the August profiling week:
+
+~~~python
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "shop",
+        "USER": "shop_app",
+        "HOST": "db-2.internal",
+        "PORT": "5432",
+        "CONN_MAX_AGE": 60,
+        # Left on after the August profiling week so support can capture
+        # query counts on demand. It costs a few percent of throughput;
+        # the counts are worth more than the percent (incident 2026-08-19).
+        "OPTIONS": {"force_debug_cursor": True},
+    }
+}
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "console": {
+            "format": "{asctime} {levelname} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "console"},
+    },
+    "loggers": {
+        "django.db.backends": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+    },
+}
+~~~
+
+The ticket that started it, from the support queue on Thursday 17 September:
+
+~~~text
+Ticket 4812, opened by support, Thursday 17 September 2026.
+
+  Customer:    Harbour & Dean Ltd, trade account, customer id 41287.
+  Reported:    "the order history page takes four seconds", timed on a
+               stopwatch while on the phone. 180 orders on the account.
+  Reproduced:  yes, by the agent, 14:03 on 18 September. The response
+               took 4.14 s end to end; the console carried 1,300 SQL
+               lines for the one request.
+
+  CC marketing, for the record: pre-orders open in October. A pre-order
+  carries no shipment row until stock lands; the fulfilment spec (F-9)
+  has the order existing first and the shipment following the goods.
+~~~
+
+The first twenty-six of the 1,300, exactly as the debug logger printed them during the agent's reproduction — the customer, the order list, then for each order in turn an item query, a shipment query and one product query per item, interleaved the way the loop issues them. The capture runs on like this for all 180 orders and ends at query 1,300, the product fetch for the last item of the oldest order:
+
+~~~
+2026-09-18 14:03:41,182 DEBUG django.db.backends (0.001) SELECT "orders_customer"."id", "orders_customer"."user_id", "orders_customer"."kind" FROM "orders_customer" WHERE "orders_customer"."user_id" = 9801 LIMIT 21; args=(9801,); alias=default
+2026-09-18 14:03:41,184 DEBUG django.db.backends (0.014) SELECT "orders_order"."id", "orders_order"."customer_id", "orders_order"."created_at", "orders_order"."note" FROM "orders_order" WHERE "orders_order"."customer_id" = 41287 ORDER BY "orders_order"."created_at" DESC; args=(41287,); alias=default
+2026-09-18 14:03:41,199 DEBUG django.db.backends (0.003) SELECT "orders_orderitem"."id", "orders_orderitem"."order_id", "orders_orderitem"."product_id", "orders_orderitem"."price", "orders_orderitem"."quantity" FROM "orders_orderitem" WHERE "orders_orderitem"."order_id" = 871413; args=(871413,); alias=default
+2026-09-18 14:03:41,203 DEBUG django.db.backends (0.002) SELECT "shipping_shipment"."id", "shipping_shipment"."order_id", "shipping_shipment"."carrier", "shipping_shipment"."tracking_code", "shipping_shipment"."status", "shipping_shipment"."shipped_at" FROM "shipping_shipment" WHERE "shipping_shipment"."order_id" = 871413 LIMIT 21; args=(871413,); alias=default
+2026-09-18 14:03:41,206 DEBUG django.db.backends (0.002) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33017 LIMIT 21; args=(33017,); alias=default
+2026-09-18 14:03:41,209 DEBUG django.db.backends (0.003) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33021 LIMIT 21; args=(33021,); alias=default
+2026-09-18 14:03:41,213 DEBUG django.db.backends (0.002) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33214 LIMIT 21; args=(33214,); alias=default
+2026-09-18 14:03:41,216 DEBUG django.db.backends (0.002) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33002 LIMIT 21; args=(33002,); alias=default
+2026-09-18 14:03:41,219 DEBUG django.db.backends (0.003) SELECT "orders_orderitem"."id", "orders_orderitem"."order_id", "orders_orderitem"."product_id", "orders_orderitem"."price", "orders_orderitem"."quantity" FROM "orders_orderitem" WHERE "orders_orderitem"."order_id" = 871412; args=(871412,); alias=default
+2026-09-18 14:03:41,223 DEBUG django.db.backends (0.002) SELECT "shipping_shipment"."id", "shipping_shipment"."order_id", "shipping_shipment"."carrier", "shipping_shipment"."tracking_code", "shipping_shipment"."status", "shipping_shipment"."shipped_at" FROM "shipping_shipment" WHERE "shipping_shipment"."order_id" = 871412 LIMIT 21; args=(871412,); alias=default
+2026-09-18 14:03:41,226 DEBUG django.db.backends (0.002) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33190 LIMIT 21; args=(33190,); alias=default
+2026-09-18 14:03:41,229 DEBUG django.db.backends (0.002) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33017 LIMIT 21; args=(33017,); alias=default
+2026-09-18 14:03:41,232 DEBUG django.db.backends (0.002) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33257 LIMIT 21; args=(33257,); alias=default
+2026-09-18 14:03:41,235 DEBUG django.db.backends (0.002) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33044 LIMIT 21; args=(33044,); alias=default
+2026-09-18 14:03:41,238 DEBUG django.db.backends (0.003) SELECT "orders_orderitem"."id", "orders_orderitem"."order_id", "orders_orderitem"."product_id", "orders_orderitem"."price", "orders_orderitem"."quantity" FROM "orders_orderitem" WHERE "orders_orderitem"."order_id" = 871411; args=(871411,); alias=default
+2026-09-18 14:03:41,242 DEBUG django.db.backends (0.002) SELECT "shipping_shipment"."id", "shipping_shipment"."order_id", "shipping_shipment"."carrier", "shipping_shipment"."tracking_code", "shipping_shipment"."status", "shipping_shipment"."shipped_at" FROM "shipping_shipment" WHERE "shipping_shipment"."order_id" = 871411 LIMIT 21; args=(871411,); alias=default
+2026-09-18 14:03:41,245 DEBUG django.db.backends (0.002) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33002 LIMIT 21; args=(33002,); alias=default
+2026-09-18 14:03:41,248 DEBUG django.db.backends (0.002) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33301 LIMIT 21; args=(33301,); alias=default
+2026-09-18 14:03:41,251 DEBUG django.db.backends (0.003) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33021 LIMIT 21; args=(33021,); alias=default
+2026-09-18 14:03:41,255 DEBUG django.db.backends (0.002) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33190 LIMIT 21; args=(33190,); alias=default
+2026-09-18 14:03:41,258 DEBUG django.db.backends (0.003) SELECT "orders_orderitem"."id", "orders_orderitem"."order_id", "orders_orderitem"."product_id", "orders_orderitem"."price", "orders_orderitem"."quantity" FROM "orders_orderitem" WHERE "orders_orderitem"."order_id" = 871410; args=(871410,); alias=default
+2026-09-18 14:03:41,262 DEBUG django.db.backends (0.002) SELECT "shipping_shipment"."id", "shipping_shipment"."order_id", "shipping_shipment"."carrier", "shipping_shipment"."tracking_code", "shipping_shipment"."status", "shipping_shipment"."shipped_at" FROM "shipping_shipment" WHERE "shipping_shipment"."order_id" = 871410 LIMIT 21; args=(871410,); alias=default
+2026-09-18 14:03:41,265 DEBUG django.db.backends (0.003) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33214 LIMIT 21; args=(33214,); alias=default
+2026-09-18 14:03:41,269 DEBUG django.db.backends (0.003) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33044 LIMIT 21; args=(33044,); alias=default
+2026-09-18 14:03:41,273 DEBUG django.db.backends (0.004) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33017 LIMIT 21; args=(33017,); alias=default
+2026-09-18 14:03:41,278 DEBUG django.db.backends (0.004) SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."name", "catalog_product"."created_at" FROM "catalog_product" WHERE "catalog_product"."id" = 33301 LIMIT 21; args=(33301,); alias=default
+~~~
+
+What the page runs against. Table statistics from the same hour, then the two indexes that matter to the loop and the one that matters to the shipment line:
+
+~~~text
+shop=# SELECT relname, n_live_tup,
+shop-#        pg_size_pretty(pg_total_relation_size(relid)) AS on_disk
+shop-# FROM pg_stat_user_tables ORDER BY n_live_tup DESC;
+      relname      | n_live_tup | on_disk
+-------------------+------------+---------
+ orders_orderitem  |    3466102 | 480 MB
+ orders_order      |    1904417 | 297 MB
+ shipping_shipment |    1904417 | 355 MB
+ orders_customer   |      88410 | 21 MB
+ catalog_product   |      41206 | 12 MB
+(5 rows)
+
+shop=# \d shipping_shipment
+                                   Table "public.shipping_shipment"
+    Column     |            Type            | Nullable |                    Default
+---------------+----------------------------+----------+-----------------------------------------------
+ id            | bigint                     | not null | nextval('shipping_shipment_id_seq'::regclass)
+ order_id      | bigint                     | not null |
+ carrier       | character varying(40)      | not null |
+ tracking_code | character varying(64)      | not null |
+ status        | character varying(12)      | not null |
+ shipped_at    | timestamp with time zone   |          |
+Indexes:
+    "shipping_shipment_pkey" PRIMARY KEY, btree (id)
+    "shipping_shipment_order_id_key" UNIQUE CONSTRAINT, btree (order_id)
+    "shipping_shipment_status_idx" btree (status)
+
+shop=# \d orders_orderitem
+                           Table "public.orders_orderitem"
+   Column   |     Type      | Nullable |                   Default
+------------+---------------+----------+----------------------------------------------
+ id         | bigint        | not null | nextval('orders_orderitem_id_seq'::regclass)
+ order_id   | bigint        | not null |
+ product_id | bigint        | not null |
+ price      | numeric(10,2) | not null |
+ quantity   | integer       | not null |
+Indexes:
+    "orders_orderitem_pkey" PRIMARY KEY, btree (id)
+    "orders_orderitem_order_id_1e6f6def_idx" btree (order_id)
+    "orders_orderitem_product_id_5c7b0fd4_idx" btree (product_id)
+~~~
+
+pg_stat_statements, reset at 14:01 and read after the agent logged in and loaded the page once:
+
+~~~text
+shop=# SELECT calls, round(total_exec_time::numeric) AS ms, left(query, 76) AS q
+shop-# FROM pg_stat_statements
+shop-# WHERE query ~ 'orders_|catalog_|shipping_|django_session'
+shop-# ORDER BY total_exec_time DESC LIMIT 6;
+ calls |  ms  |                                      q
+-------+------+------------------------------------------------------------------------------
+   938 | 2907 | SELECT "catalog_product"."id", "catalog_product"."sku", "catalog_product"."n
+   180 |  549 | SELECT "shipping_shipment"."id", "shipping_shipment"."order_id", "shipping_s
+   180 |  508 | SELECT "orders_orderitem"."id", "orders_orderitem"."order_id", "orders_order
+     1 |   14 | SELECT "orders_order"."id", "orders_order"."customer_id", "orders_order"."cr
+     2 |    2 | SELECT "django_session"."session_key", "django_session"."session_data", "dja
+     1 |    1 | SELECT "orders_customer"."id", "orders_customer"."user_id", "orders_customer
+(6 rows)
+
+-- The 1,300 the view issued are the customer, order, order-item,
+-- shipment and product rows; the two session reads are the auth
+-- middleware's, outside the view.
+~~~
+
+The two migrations that gave every order a shipment — the shipping app arrived in March, and every order that already existed got a row the same night, which is why the page renders today:
+
+~~~python
+# shipping/migrations/0001_initial.py
+import django.db.models.deletion
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    initial = True
+
+    dependencies = [("orders", "0004_alter_order_note")]
+
+    operations = [
+        migrations.CreateModel(
+            name="Shipment",
+            fields=[
+                (
+                    "order",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="shipment",
+                        to="orders.order",
+                    ),
+                ),
+                ("carrier", models.CharField(max_length=40)),
+                ("tracking_code", models.CharField(blank=True, max_length=64)),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("packed", "packed"),
+                            ("in_transit", "in transit"),
+                            ("delivered", "delivered"),
+                            ("returned", "returned"),
+                        ],
+                        max_length=12,
+                    ),
+                ),
+                ("shipped_at", models.DateTimeField(blank=True, null=True)),
+            ],
+        ),
+    ]
+~~~
+
+~~~python
+# shipping/migrations/0002_backfill_orders.py
+from django.db import migrations
+
+
+def backfill(apps, schema_editor):
+    """Every order that predates the shipping app gets a shipment row,
+    so the history page's status column is never empty for old orders."""
+    Order = apps.get_model("orders", "Order")
+    Shipment = apps.get_model("shipping", "Shipment")
+    for order in Order.objects.filter(shipment__isnull=True).iterator():
+        Shipment.objects.create(
+            order=order,
+            carrier="legacy",
+            status="delivered",
+            shipped_at=order.created_at,
+        )
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [("shipping", "0001_initial")]
+
+    operations = [
+        migrations.RunPython(backfill, migrations.RunPython.noop),
+    ]
+~~~
+
+And the test file that passes today, orders/tests.py — every order it creates gets a shipment, because the fixture shape was copied from production after the backfill:
+
+~~~python
+from decimal import Decimal
+
+from django.contrib.auth.models import User
+from django.test import TestCase
+
+from catalog.models import Product
+from shipping.models import Shipment
+
+from .models import Customer, Order, OrderItem
+
+
+def make_order(customer, products, status="in_transit"):
+    order = Order.objects.create(customer=customer)
+    for product, price, qty in products:
+        OrderItem.objects.create(
+            order=order, product=product, price=price, quantity=qty
+        )
+    Shipment.objects.create(order=order, carrier="parcelco", status=status)
+    return order
+
+
+class OrderHistoryViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user("dana")
+        self.customer = Customer.objects.create(user=self.user)
+        self.grip = Product.objects.create(sku="GRIP-2", name="Bar tape")
+        self.tube = Product.objects.create(sku="TUBE-7", name="Inner tube")
+
+    def test_page_lists_orders_with_totals_and_statuses(self):
+        make_order(
+            self.customer,
+            [(self.grip, Decimal("12.50"), 2), (self.tube, Decimal("4.25"), 1)],
+        )
+        self.client.force_login(self.user)
+        response = self.client.get("/orders/history/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Order history")
+        self.assertContains(response, "29.25")
+        self.assertContains(response, "in_transit")
+        self.assertContains(response, "Bar tape")
+        self.assertContains(response, "Inner tube")
+
+    def test_status_column_reads_each_shipment(self):
+        make_order(self.customer, [(self.grip, Decimal("12.50"), 1)], status="delivered")
+        make_order(self.customer, [(self.tube, Decimal("4.25"), 2)], status="packed")
+        self.client.force_login(self.user)
+        response = self.client.get("/orders/history/")
+        self.assertContains(response, "delivered")
+        self.assertContains(response, "packed")
+
+    def test_page_for_a_customer_with_no_orders(self):
+        self.client.force_login(self.user)
+        response = self.client.get("/orders/history/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Order history")
+~~~
+
+Everything above is what the ticket put on record on Thursday and what the agent, the database and the statistics view saw when the reproduction ran on Friday; nothing about the page was changed for the capture.

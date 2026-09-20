@@ -1,6 +1,570 @@
-The search box in our React app sometimes shows results for an earlier query than the one the user typed, and the network tab shows a request for almost every keystroke.
+Explain every bug in the search component below — it sometimes shows results for an earlier query than the one the user typed, and the network tab shows a request for almost every keystroke — and give the sequence of keystrokes and response timings that shows the stale results. Then rewrite it with debounce cleanup, cancellation through AbortController, URL encoding, and loading and error states. Finish with React Testing Library tests on fake timers that reproduce the race.
+
+The component does not live alone. Below is the ticket that was filed, the manifest and configs it builds and tests under, the shared modules of the app it sits in, the page that mounts it, the component itself, and the test file that passes against it today. Everything is as it is on main at commit 9c41d0e.
+
+The ticket, from support, is #4821 (filed 2026-08-27, severity 2): a customer searched the parts directory for a bearing, kept typing past their first word, and the list under the box kept showing matches for the shorter word until they typed again. Support reproduced it twice in Chrome and once in Firefox on the production build; both times the network tab showed a request for nearly every keystroke, fast or slow — a quick burst of typing was paid back in a late run of requests — all of them status 200, and the response that landed last was not the one for the newest query.
+
+index.html, the entry the dev server and the build both start from:
+
+~~~html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Parts directory</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+~~~
+
+package.json in full:
+
+~~~json
+{
+  "name": "parts-frontend",
+  "private": true,
+  "version": "3.7.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "jsdom": "30.1.0",
+    "typescript": "5.9.3",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}
+~~~
+
+tsconfig.json:
+
+~~~json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "useDefineForClassFields": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["src", "vitest.setup.ts"]
+}
+~~~
+
+vitest.config.ts and vitest.setup.ts, the whole test harness:
+
+~~~ts
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./vitest.setup.ts"],
+  },
+});
+~~~
+
+~~~ts
+import { afterEach } from "vitest";
+import { cleanup } from "@testing-library/react";
+
+// vitest does not run the automatic cleanup jest picks up from the
+// testing-library setup file, so the suite does it here, once.
+afterEach(cleanup);
+~~~
+
+src/main.tsx, where the page is mounted:
 
 ~~~tsx
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { PartsDirectory } from "./pages/PartsDirectory";
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <PartsDirectory />
+  </StrictMode>,
+);
+~~~
+
+src/types.ts, the shapes every module shares:
+
+~~~ts
+// Shared shapes for the parts catalogue. The backend owns the canonical
+// definitions; these mirror the JSON its endpoints return.
+
+export type Category = "motor" | "controller" | "sensor" | "cable";
+
+export interface Result {
+  id: string;
+  sku: string;
+  title: string;
+  category: Category;
+  stock: number;
+  unitPriceCents: number;
+  updatedAt: string; // ISO 8601, from the server clock
+}
+
+// /api/parts/filter rows carry two fields the search results do not.
+export interface PartRow extends Result {
+  bin: string;
+  reorderAt: number;
+}
+
+export interface FilterResponse {
+  categories: Category[];
+  inStockOnly: boolean;
+  total: number;
+  rows: PartRow[];
+}
+
+export type RequestState = "idle" | "loading" | "error";
+~~~
+
+src/api/client.ts, the wrapper the rest of the app fetches through:
+
+~~~ts
+// Thin wrapper so every caller gets the same error shape. Nothing here
+// adds a timeout or retries; callers own that decision.
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(`request failed with status ${status}`);
+    this.name = "ApiError";
+  }
+}
+
+export async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, init);
+  if (!res.ok) {
+    throw new ApiError(res.status, await res.text());
+  }
+  return (await res.json()) as T;
+}
+~~~
+
+src/api/client.test.ts, the suite for that wrapper, also green on main today:
+
+~~~ts
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError, getJson } from "./client";
+
+const fetchMock = vi.fn();
+
+describe("getJson", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns the parsed body of a successful response", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: () => Promise.resolve({ total: 3 }) });
+
+    expect(await getJson("/api/parts/filter")).toEqual({ total: 3 });
+    expect(fetchMock).toHaveBeenCalledWith("/api/parts/filter", undefined);
+  });
+
+  it("throws ApiError with the status and body of a failure", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: () => Promise.resolve("try later"),
+    });
+
+    const err: ApiError = await getJson("/api/parts/filter").then(
+      () => {
+        throw new Error("expected a rejection");
+      },
+      e => e,
+    );
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(503);
+    expect(err.body).toBe("try later");
+    expect(err.message).toBe("request failed with status 503");
+  });
+
+  it("passes init through to fetch untouched", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: () => Promise.resolve([]) });
+    const signal = new AbortController().signal;
+
+    await getJson("/api/search?q=m", { signal });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/search?q=m", { signal });
+  });
+});
+~~~
+
+src/hooks/useDebouncedValue.ts, a hook that already exists and is used elsewhere:
+
+~~~ts
+import { useEffect, useState } from "react";
+
+// Returns `value` unchanged until it has been stable for `delayMs`. The
+// timer is cleared on every change and on unmount, so a fast typist pays
+// for one timer, not one per keystroke. FilterPanel is the current user.
+export function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+
+  return debounced;
+}
+~~~
+
+src/components/ErrorBanner.tsx, the shared error surface:
+
+~~~tsx
+interface ErrorBannerProps {
+  message: string;
+  onRetry?: () => void;
+}
+
+export function ErrorBanner({ message, onRetry }: ErrorBannerProps) {
+  return (
+    <div className="error-banner" role="alert">
+      <p className="error-banner__message">{message}</p>
+      {onRetry && (
+        <button type="button" className="error-banner__retry" onClick={onRetry}>
+          Try again
+        </button>
+      )}
+    </div>
+  );
+}
+~~~
+
+src/components/FilterPanel.tsx, the panel next to the search box, which the team treated as the reference implementation:
+
+~~~tsx
+import { useEffect, useRef, useState } from "react";
+import { ApiError, getJson } from "../api/client";
+import type { Category, FilterResponse, PartRow, RequestState } from "../types";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
+
+const CATEGORIES: Category[] = ["motor", "controller", "sensor", "cable"];
+
+export function FilterPanel({ onRows }: { onRows: (rows: PartRow[], total: number) => void }) {
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [inStockOnly, setInStockOnly] = useState(false);
+  const [state, setState] = useState<RequestState>("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const debouncedCategories = useDebouncedValue(categories, 300);
+  const firstRender = useRef(true);
+
+  useEffect(() => {
+    // The page loads the unfiltered table itself; this panel only reacts
+    // to the filters actually changing.
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+
+    const controller = new AbortController();
+
+    async function load() {
+      setState("loading");
+      setError(null);
+      try {
+        const params = new URLSearchParams({ inStock: String(inStockOnly) });
+        for (const c of debouncedCategories) {
+          params.append("category", c);
+        }
+        const res = await getJson<FilterResponse>(`/api/parts/filter?${params}`, {
+          signal: controller.signal,
+        });
+        setState("idle");
+        onRows(res.rows, res.total);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return; // a newer set of filters has taken over
+        }
+        setState("error");
+        setError(
+          err instanceof ApiError ? `filter request failed (${err.status})` : "filter request failed",
+        );
+      }
+    }
+
+    load();
+    return () => controller.abort();
+  }, [debouncedCategories, inStockOnly, onRows]);
+
+  return (
+    <fieldset className="filter">
+      <legend>Filter</legend>
+      {CATEGORIES.map(c => (
+        <label key={c}>
+          <input
+            type="checkbox"
+            checked={categories.includes(c)}
+            onChange={e =>
+              setCategories(prev => (e.target.checked ? [...prev, c] : prev.filter(x => x !== c)))
+            }
+          />
+          {c}
+        </label>
+      ))}
+      <label>
+        <input type="checkbox" checked={inStockOnly} onChange={e => setInStockOnly(e.target.checked)} />
+        in stock only
+      </label>
+      {state === "loading" && <p className="filter__status">filtering…</p>}
+      {state === "error" && <p className="filter__status filter__status--error">{error}</p>}
+    </fieldset>
+  );
+}
+~~~
+
+src/pages/PartsDirectory.tsx, the page that mounts the search box:
+
+~~~tsx
+import { useCallback, useEffect, useState } from "react";
+import { ApiError, getJson } from "../api/client";
+import type { FilterResponse, PartRow, RequestState } from "../types";
+import { SearchBox } from "../components/SearchBox";
+import { FilterPanel } from "../components/FilterPanel";
+import { ErrorBanner } from "../components/ErrorBanner";
+
+export function PartsDirectory() {
+  const [rows, setRows] = useState<PartRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [state, setState] = useState<RequestState>("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const res = await getJson<FilterResponse>("/api/parts/filter");
+        if (cancelled) return;
+        setState("idle");
+        setRows(res.rows);
+        setTotal(res.total);
+      } catch (err) {
+        if (cancelled) return;
+        setState("error");
+        setError(
+          err instanceof ApiError
+            ? `could not load the catalogue (${err.status})`
+            : "could not load the catalogue",
+        );
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleFiltered = useCallback((next: PartRow[], nextTotal: number) => {
+    setRows(next);
+    setTotal(nextTotal);
+  }, []);
+
+  return (
+    <main className="directory">
+      <h1>Parts directory</h1>
+      <SearchBox />
+      <FilterPanel onRows={handleFiltered} />
+      {state === "error" ? (
+        <ErrorBanner message={error ?? "could not load the catalogue"} />
+      ) : (
+        <>
+          <p className="directory__count">
+            {rows.length} of {total} parts
+          </p>
+          <table className="directory__table">
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Title</th>
+                <th>Category</th>
+                <th>Stock</th>
+                <th>Bin</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id}>
+                  <td>{r.sku}</td>
+                  <td>{r.title}</td>
+                  <td>{r.category}</td>
+                  <td className={r.stock <= r.reorderAt ? "directory__low" : undefined}>{r.stock}</td>
+                  <td>{r.bin}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </main>
+  );
+}
+~~~
+
+src/styles.css, the whole stylesheet:
+
+~~~css
+/* One stylesheet for the directory page. BEM-ish names, no framework. */
+
+.directory {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+}
+
+.directory__count {
+  color: #555;
+  font-size: 0.875rem;
+}
+
+.directory__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.directory__table th,
+.directory__table td {
+  text-align: left;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid #e3e6e8;
+}
+
+.directory__table th {
+  font-weight: 600;
+  color: #444;
+  border-bottom-color: #c9ced2;
+}
+
+.directory__low {
+  color: #b3261e;
+  font-weight: 600;
+}
+
+.search-box {
+  margin: 1rem 0;
+}
+
+.search-box input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #c9ced2;
+  border-radius: 6px;
+  font-size: 0.9375rem;
+}
+
+.search-box ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}
+
+.search-box li {
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid #e3e6e8;
+  font-size: 0.9375rem;
+}
+
+.filter {
+  border: 1px solid #e3e6e8;
+  border-radius: 6px;
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+}
+
+.filter legend {
+  font-size: 0.875rem;
+  color: #555;
+  padding: 0 0.25rem;
+}
+
+.filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-right: 1rem;
+  font-size: 0.875rem;
+}
+
+.filter__status {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  color: #555;
+}
+
+.filter__status--error {
+  color: #b3261e;
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid #f2b8b5;
+  background: #fdf0ef;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+
+.error-banner__message {
+  margin: 0;
+  color: #6e241f;
+}
+
+.error-banner__retry {
+  border: 1px solid #d9d9d9;
+  background: #fff;
+  border-radius: 4px;
+  padding: 0.25rem 0.75rem;
+}
+~~~
+
+src/components/SearchBox.tsx, the component the ticket is about, in full:
+
+~~~tsx
+import { useEffect, useState } from "react";
+import type { Result } from "../types";
+
 export function SearchBox() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Result[]>([]);
@@ -13,12 +577,106 @@ export function SearchBox() {
   }, [query]);
 
   return (
-    <>
+    <div className="search-box">
       <input value={query} onChange={e => setQuery(e.target.value)} />
       <ul>{results.map(r => <li>{r.title}</li>)}</ul>
-    </>
+    </div>
   );
 }
 ~~~
 
-Explain every bug in it, and give the sequence of keystrokes and response timings that shows the stale results. Then rewrite it with debounce cleanup, cancellation through AbortController, URL encoding, and loading and error states. Finish with React Testing Library tests on fake timers that reproduce the race.
+src/components/SearchBox.test.tsx, the suite that is green on main today:
+
+~~~tsx
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { SearchBox } from "./SearchBox";
+
+const fetchMock = vi.fn();
+
+function jsonResponse(results: { title: string }[]) {
+  return { ok: true, json: () => Promise.resolve(results) };
+}
+
+function type(value: string) {
+  fireEvent.change(screen.getByRole("textbox"), { target: { value } });
+}
+
+describe("SearchBox", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("waits for a pause in typing before it fetches", async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]));
+    render(<SearchBox />);
+
+    type("m");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(299);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // The effect also runs once for the empty query on mount, so the
+    // pause ends with two calls, the newest query last (ticket #4821).
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/search?q=m");
+  });
+
+  it("renders the titles the API returns", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse([{ title: "Motor mount M8" }, { title: "Motor brush pair" }]),
+    );
+    render(<SearchBox />);
+
+    type("m");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(screen.getByText("Motor mount M8")).toBeTruthy();
+    expect(screen.getByText("Motor brush pair")).toBeTruthy();
+  });
+
+  it("fetches for the empty query on mount", async () => {
+    // Documents today's behaviour, not the desired one.
+    fetchMock.mockResolvedValue(jsonResponse([]));
+    render(<SearchBox />);
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/search?q=");
+  });
+
+  it("fetches again for every keystroke once typing outlasts the debounce", async () => {
+    // Also documents today's behaviour: fast or slow, every keystroke
+    // costs a request, and a burst of typing is paid back in a late
+    // run of them.
+    fetchMock.mockResolvedValue(jsonResponse([]));
+    render(<SearchBox />);
+
+    type("a");
+    await vi.advanceTimersByTimeAsync(350);
+    type("ab");
+    await vi.advanceTimersByTimeAsync(350);
+    type("abc");
+    await vi.advanceTimersByTimeAsync(350);
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/search?q=");
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/search?q=a");
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/search?q=ab");
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/search?q=abc");
+  });
+});
+~~~
+
+The capture support attached to the ticket, from the reproduction on production: two requests about a second apart, both 200, the older query's response landing after the newer one, and the list showing the older query's matches until the customer typed again. The search endpoint takes one parameter, returns a bare JSON array of Result, and nothing else on the page calls it.

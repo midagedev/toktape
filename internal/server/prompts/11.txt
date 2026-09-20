@@ -1,9 +1,108 @@
-Design the PostgreSQL schema for a meeting room booking service.
+Design the PostgreSQL schema for a meeting room booking service. Give the DDL with every constraint, and explain how the schema itself, not application code, makes a double booking impossible under concurrent transactions. Show the SQL for finding free rooms in a slot, listing a person's week, and moving one occurrence, with the indexes each needs. The product brief below is the material to design against; where it deliberately leaves a decision open, it says so.
 
-- An organisation has offices, each in its own time zone, and each office has rooms with a capacity and equipment such as a screen or a phone.
-- A booking reserves one room from a start to an end time for an organiser, with a title and invited people who can accept or decline.
-- Two bookings for the same room must never overlap, even when two people press the button at the same moment on different servers.
-- Bookings repeat weekly or on chosen weekdays until an end date, and one occurrence can be moved or cancelled without touching the rest.
-- Cancelled bookings are kept a year for auditing and must not block the room.
+The service.
 
-Give the DDL with every constraint, and explain how the schema itself, not application code, makes a double booking impossible under concurrent transactions. Show the SQL for finding free rooms in a slot, listing a person's week, and moving one occurrence, with the indexes each needs.
+Room booking today is one spreadsheet per office, maintained by fourteen office managers, and every rule in this brief exists because the spreadsheet broke it first. The replacement is one PostgreSQL database behind a stateless API: a web client people use to find a room, book it, invite colleagues, and see their own week. Nothing else writes to these tables — no batch system, no integration, no analytics feed — so the API is the single writer and the schema is the single guard.
+
+The deployment serves a single company with fourteen offices in nine time zones, 502 rooms and 48,000 staff. Two acquisitions are expected to complete within a year, so organisation is a real entity from day one even though only one row will sit in it. The six largest offices, as they will be seeded:
+
+    Amsterdam   Europe/Amsterdam    96 rooms   bookable 07:00-21:00   capacity 4-24
+    London      Europe/London       71 rooms   bookable 07:30-20:00   capacity 4-18
+    New York    America/New_York    58 rooms   bookable 07:00-21:00   capacity 4-20
+    São Paulo   America/Sao_Paulo   34 rooms   bookable 08:00-20:00   capacity 4-16
+    Singapore   Asia/Singapore      41 rooms   bookable 08:00-20:00   capacity 4-12
+    Tokyo       Asia/Tokyo          28 rooms   bookable 09:00-19:00   capacity 4-10
+
+Bookable hours belong to the office, not to the room: every room in Amsterdam is bookable 07:00 to 21:00 local. No office's bookable window includes 01:00 to 03:00 local, which is where its time zone's daylight-saving transitions fall, so a transition never lands inside bookable time. A recurring 09:00 still has to stay at 09:00 local across a transition — recurrence is a wall-clock rule in the office's zone, not a fixed UTC offset — and whatever the schema stores has to answer overlap and week questions correctly across the shift.
+
+What the data is.
+
+An organisation has offices. An office has a name, an address, an IANA time zone, bookable opening and closing times, and rooms. A room has a floor, a name or number unique within its office, a capacity of 2 to 40 seats, and zero or more items of equipment drawn from a catalogue the facilities team maintains:
+
+    screen-65      wall screen, 65 inch
+    screen-85      wall screen, 85 inch, with room PC and wireless casting
+    phone-pod      acoustic pod seating six, for calls that must not be overheard
+    whiteboard     floor-to-ceiling whiteboard wall, 4 metres
+    video-rig      dual camera, ceiling microphones, hardware encoder
+    hearing-loop   induction loop covering the table
+
+A room holds each catalogue item at most once. Search is by subset: a user asks for a room that has, at least, a screen-85 and a hearing-loop, and may get more. Rooms are renamed occasionally and taken out of service for refurbishment for weeks at a time; a room out of service must not appear in free-room search and must not be bookable, while every booking it ever held stays intact and queryable. Taking a room out of service does not touch its future bookings automatically: the office manager is shown the list — a series counts once per remaining occurrence — and every booking on it is moved to another room or cancelled one by one before the refurbishment starts. There is no bulk move, and the schema's only job in it is to answer the list correctly and then treat each move as an ordinary move under the no-overlap rule.
+
+People do not sign up. They arrive in a nightly sync with the HR system's export: every member of staff is a person with a full name, a unique email, and an active flag. The sync takes one CSV of all 48,000 staff at 02:10 every night and reconciles it: on an ordinary night it inserts around 40 new joiners, updates around 300 rows for name changes and corrections, flags about 120 leavers inactive — and the export's leaver rows are simply absent the next night, which is the hard delete the schema has to survive. The brief requires that a booking made by someone who has since left still names its organiser, and every invitee who declined, in the audit export a year later. How the schema survives a foreign key to a hard-deleted person is part of the design; the requirement is only that the audit export does not break and does not invent names. The email is unique but not permanent — about 30 people a month change theirs when they change their name — so whatever the sync keys on, a rename must not orphan a person's week.
+
+A booking reserves one room from a start time to an end time. It has an organiser, a title of 1 to 200 characters, and zero or more invitees, each a person recorded as accepted, declined or not yet answered; a person appears at most once in a booking's invitee list, and the organiser is not one of those rows. Capacity is advisory: search filters on it and the client warns when an invitee count exceeds it, but the database must not refuse a booking over it — rooms are re-furnished, capacities change, and twelve people in a room whose sign changed from 16 to 10 seats is a facilities problem, not a data-integrity one.
+
+How bookings behave.
+
+Starts and ends align to fifteen minutes of the office's local time — :00, :15, :30, :45 — a booking lasts at least 15 minutes and at most 4 hours, and sits entirely inside the office's bookable hours, which also means it never crosses local midnight. A booking may be made from fifteen minutes ahead up to ninety days ahead, and both of its ends are set at creation; there is no open-ended booking.
+
+A booking is live from creation; there is no draft or pending state. It can be cancelled, by its organiser or by a workplace admin, and cancellation is irrevocable: a cancelled booking frees the room at once, disappears from free-room search and from week views of the future, and is kept for twelve months for audit before being purged. Eleven per cent of occurrences are cancelled at some point in their life, so the cancelled share of the data is large enough that purge time and overlap checks both have to treat it as a first-class state, not an afterthought.
+
+The race the schema must close.
+
+Two API servers behind a load balancer, both using read-committed transactions through PgBouncer in transaction pooling mode. Two people, two browsers, both ask for Amsterdam 4B next Tuesday 10:00 to 11:00 within the same second. Each server runs the same honest sequence: look for an overlapping live booking, see none, insert. Both sees are true when they run. The requirement is that exactly one of the two transactions commits and the other fails at the database, by constraint, at insert time — and that this holds for any overlap, not just identical slots: 10:00-11:00 against 10:30-11:30 must fail the second one just as surely as 10:00-11:00 against 10:00-11:00.
+
+Three things the guard cannot rely on: application-level re-checks (both servers re-checked honestly above, and both were right), SELECT ... FOR UPDATE ladders (a lock taken by a transaction that has not yet inserted holds nothing against a concurrent inserter, and the pattern serialises nothing under read committed), and session-level advisory locks (PgBouncer in transaction mode gives no session continuity; the lock's session and the insert's session are not the same session). Serializable isolation was proposed and declined: the app team will not build retry loops around serialization failures. What the database itself enforces is the deliverable of this brief.
+
+The same guard governs every write path, not just creation. A booking moved to a new slot is an update of its start, end or room, and a move that would collide must fail exactly as a colliding insert would — atomically, with no window in which the booking is in both places or neither.
+
+The client also attaches an idempotency token to each create, and a retried create — double-click, timeout, reconnect after a dropped connection — must return the booking the first create made, not a second one next to it. The schema decides what that token is and what makes it unique.
+
+Recurring bookings.
+
+A series holds the shared facts — organiser, title, invitee list, a room — and the recurrence: which weekdays it runs on (a single weekday is the weekly case), the local start and end time, the first date, and an end date, inclusive, read in the office's time zone and at most eighteen months past the first. A series without an end date is not permitted; the New York incident below is why. The first date must itself fall on one of the chosen weekdays — a Monday-Wednesday-Friday series whose first date is a Thursday is refused at creation rather than silently starting the following Monday — and the end date must not fall before the first. A single series is capped at eighteen months of span no matter how sparse its pattern, and its room must be in service for the whole span at creation time; what happens when the room goes out of service mid-series is the refurbishment rule above, applied per occurrence.
+
+Any single occurrence can be moved to another time or another room, given a new title, or cancelled, without touching the rest of the series; the series continues around it. Editing the series itself — new time, new room, new invitees, new end date — changes the future occurrences that have not been individually overridden and never the past ones. An occurrence that was individually overridden keeps its override through a series edit; that is the precedence, and the schema has to make it hold without a read-modify-write race between the two kinds of edit. Cancelling the series cancels every future occurrence that has not been individually overridden, leaves every past occurrence in place as history, and leaves individually-cancelled past occurrences as they were.
+
+How occurrences are represented — one materialised row per occurrence, a series definition plus per-occurrence exception rows, or another shape — is the central open decision of this brief, not a settled premise. The constraints pull against each other and the design has to say which it took and what it paid: the week view must render every occurrence in a person's next ninety days in one query, forty times a second at the 09:00 rush, while a series of two hundred occurrences being retitled arrives as a single client action and must not take proportionally long. Whatever representation is chosen, the no-overlap constraint has to hold for each occurrence actually sitting in a room, whether the occurrence is a row or a computation.
+
+Reporting and retention.
+
+The quarterly capacity review needs utilisation: booked minutes as a share of bookable minutes, per room, per ISO week, across all 502 rooms and a rolling year. It runs weekly in batch against a read replica and may take minutes; it must not be a per-occurrence query storm against the primary. The monthly audit export lists, as CSV, every occurrence cancelled in the month: who cancelled it and when, the organiser, the invitees with their response states, the original slot, and the room. Cancelled data twelve months old is purged by a nightly job that must not hold locks the live booking path waits behind; how the schema makes that purge cheap is part of the design.
+
+Scale and load.
+
+An ordinary weekday holds 31,000 distinct bookings covering 46,000 occurrences once series repeat; Tuesdays peak at 38,000 and 55,000. Booking creation peaks in the fifteen minutes after each office's local 09:00 as the time zones sweep west, worst at the Amsterdam-London overlap: 1,900 creates a minute, of which up to nine a second land on the twelve most popular rooms in those two offices. Free-room search runs 1,100 times a minute at the same peak. Week views run 40 a second. The platform is a primary and two read replicas; every write path goes to the primary, week views and both reports go to replicas, and free-room search is the one the design has to place deliberately, because it is both the hottest query and the one that must never see a stale answer as authoritative. A stale free-room answer is acceptable to show — the insert is what decides — but the design has to say which copy it reads and why.
+
+Incidents the rules come from.
+
+Amsterdam 4B hosted two twelve-person meetings at 09:00 on the same Tuesday in March. The sheet accepted both rows; neither manager refreshed before saving; the room seats twelve and holds the only video-rig on the floor, and twenty-three people plus a cart of borrowed chairs were involved. This is the no-overlap rule, and the reason it is stated against same-second saves from different servers rather than against clumsy users.
+
+A Monday-Wednesday-Friday series in New York ran six weeks past its end date. The end date sat in a cell of its own that a re-sort had separated from the block of rows it governed, and nobody noticed until the room's calendar filled with meetings for an empty office. This is the reason a series carries its own end date as part of its recurrence.
+
+A London room was unusable for a week because cancelling a meeting meant clearing the title cell, and the formulas that computed availability treated any row that still named a room as live. This is the reason cancellation is a state the data carries, not the absence of a fact.
+
+The 09:00 London series appeared at 10:00 in colleagues' calendars for three weeks after the clocks changed, because the calendar export wrote the UTC offset of the week the series was created. This is the reason recurrence is defined on the wall clock of the office zone and the schema stores whatever it needs to keep it true across the shift.
+
+Environment and constraints.
+
+PostgreSQL 16, managed, automatic minor upgrades. Read committed, PgBouncer transaction pooling in front of primary and replicas, the API the sole writer, stateless, and killable mid-transaction at any moment without leaving the data wrong. Migrations run online in deploy windows, but the constraint that keeps a room single-booked must be right the day it lands rather than bolted on after an incident, because altering a hot table's constraint later is exactly the migration that cannot run online. Every timestamp column is timestamptz; the DBA team will consider an extension that ships in the standard PostgreSQL distribution if the design needs one. Identifiers visible in the public API are opaque; whether that means uuid columns or something else is for the design to justify. The seed data is the six offices above plus eight smaller ones, their rooms, and 48,000 people — the DDL does not have to seed them, but its constraints must hold the day they arrive.
+
+The client's operations.
+
+The web client has exactly these actions, and the schema serves each of them directly: search for free rooms; create a booking (one-off, with invitees and an idempotency token); create a series; open a week view; change a response state; retitle or re-invite on a live booking; move a one-off booking; move, retitle or cancel a single occurrence of a series; edit a series' future; cancel a booking or a series; and the two admin views, a room's refurbishment list and the office manager's room roster. Nothing in the client reads a table the API does not expose through one of these, so the schema's query surface is closed: if a shape serves these twelve actions and the two reports, nothing else will ever be asked of it.
+
+Worked cases the seed data must answer.
+
+The seed includes a deliberately busy Tuesday in Amsterdam so that the overlap logic can be checked against known answers. Room Amsterdam 4B (18 seats, screen-85, video-rig, hearing-loop) already holds: the Tuesday-weekly 09:00-09:45 standup series, a one-off 10:00-11:00, and an 11:15-12:00 whose organiser cancelled it Tuesday morning. Against that, the cases:
+
+    free-room search, 4B, 09:30-10:15   must not return 4B: it overlaps both the standup and the one-off
+    free-room search, 4B, 09:45-10:00   must return 4B: touching ends is not an overlap, and both neighbours are live
+    free-room search, 4B, 11:15-12:00   must return 4B: the booking there is cancelled, and cancelled never blocks
+    create, 4B, 10:30-11:00             must fail on the overlap with the 10:00-11:00 booking, whichever server runs it
+    create, 4B, 12:00-12:10             must fail: the slot is free but the booking is under the 15-minute minimum
+    create, 4B, 12:00-12:15             must succeed: 15 minutes is the minimum and this is exactly it
+
+The cases are part of the brief, not of the answer: the DDL and the three queries have to make each of these come out as stated, on both the primary and a replica.
+
+Queries the product runs.
+
+Free rooms: given an office, a local date, a local start and end on the fifteen-minute grid, a minimum capacity and a required equipment set, return every in-service room that satisfies capacity and equipment and has no overlapping live booking — a concrete instance is Amsterdam, next Tuesday, 10:00 to 11:00, at least 8 seats, with a screen-85 and a hearing-loop. 1,100 a minute at the peak, 50 milliseconds at the 95th percentile.
+
+A person's week: given a person and a week, every live booking from Monday 00:00 to Sunday 24:00 of whichever office time zone the client chose — organised by them or inviting them, with their response state, each booking's room, title and local times, and the exceptions of their series marked as such. 40 a second at the peak, 200 milliseconds at the 95th percentile, served from a replica.
+
+Move one occurrence: given a booking or a series occurrence, a new local slot and possibly a new room, apply the move under exactly the no-overlap rule that governs creation, atomically, leaving the rest of any series untouched.
+
+Create with idempotency: a create carrying a token that already exists returns the booking that token made, whatever else in the request differs.
+
+Utilisation per room per ISO week, and the monthly cancelled-occurrence audit export, exactly as the reporting section describes them, on a replica.

@@ -1,13 +1,337 @@
 Our payments service on Kubernetes restarts roughly every forty minutes under normal load. It is a Spring Boot application on Java 21, and nothing in its own logs mentions an error before the restart.
 
-~~~
-Last State: Terminated  Reason: OOMKilled  Exit Code: 137  Limits: memory 1Gi
+Explain what is killing the container and why the JVM never throws OutOfMemoryError first. Show how the heap percentage, metaspace, thread stacks, code cache and direct buffers add up against the 1 GiB limit, and what the Hikari warning and the GC pause each tell you. Then give a plan to confirm it on a live pod and the changes you would make.
 
+The captures below are the material: the pod as Kubernetes sees it, the manifest that set its limits, one complete cycle of the application log, the node's record of the kill, what the container's own cgroup and process status said seventeen seconds before it died, a staging run of the same revision, on the JDK image, with NativeMemoryTracking on, and the application's configuration.
+
+The pod as Kubernetes sees it.
+
+The service rolls six replicas; the pod below has been cycling since the 2.14.3 rollout on Friday morning, and by the small hours of Sunday it had been restarted 61 times. From kubectl describe pod, captured minutes after the 03:53 kill:
+
+~~~
+Containers:
+  payments:
+    Container ID:   containerd://1f0e8ad9c47a1d7a37b6f09f21c4f5d8a3b21e90c7d3e5f1a2b3c4d5e6f70819
+    Image:          registry.internal/payments:2.14.3
+    Image ID:       registry.internal/payments@sha256:9c4102be1e2c3d4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f
+    Port:           8080/TCP
+    Host Port:      0/TCP
+    State:          Running
+      Started:      Sun, 20 Sep 2026 03:54:03 +0200
+    Last State:     Terminated
+      Reason:       OOMKilled
+      Exit Code:    137
+      Started:      Sun, 20 Sep 2026 03:13:54 +0200
+      Finished:     Sun, 20 Sep 2026 03:53:07 +0200
+    Ready:          True
+    Restart Count:  61
+    Limits:
+      memory:  1Gi
+      cpu:     2
+    Requests:
+      memory:  512Mi
+      cpu:     500m
+    Liveness:  http-get http://:8080/actuator/health/liveness delay=30s timeout=2s period=10s #success=1 #failure=3
+    Readiness: http-get http://:8080/actuator/health/readiness delay=10s timeout=2s period=5s #success=1 #failure=1
+    Environment:
+      JAVA_TOOL_OPTIONS:  -XX:MaxRAMPercentage=90 -XX:+UseG1GC
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-8xk2l (ro)
+Conditions:
+  Type              Status
+  Initialized       True
+  Ready             True
+  ContainersReady   True
+  PodScheduled      True
+QoS Class:                   Burstable
+Node:                        ip-10-0-4-17.ec2.internal/10.0.4.17 (10.0.4.17)
+Events:
+  Type    Reason     Age                  From     Message
+  ----    ------     ----                 ----     -------
+  Normal  Killing    2m (x61 over 41h)    kubelet  Container payments failed to be within memory limit (1048576Ki) due to OOMKilled: killed
+  Normal  Pulled     1m4s (x61 over 41h)  kubelet  Container image "registry.internal/payments:2.14.3" already present on machine
+  Normal  Created    1m4s (x62 over 42h)  kubelet  Created container payments
+  Normal  Started    1m4s (x62 over 42h)  kubelet  Started container payments
+~~~
+
+Forty minutes is the pattern, not a guess: 03:13:54 to 03:53:07 is thirty-nine minutes and thirteen seconds, and the 60 restarts before it land between 38 and 43 minutes apart. There were no OOMKilled events on any payments pod before Friday's rollout; the events for 2.14.2 go back two months and contain none. The fleet, from the same morning:
+
+~~~
+NAME                       READY   STATUS    RESTARTS   AGE
+payments-7d9c6b5f4-2qmn8   1/1     Running   60         1d18h
+payments-7d9c6b5f4-5tlpz   1/1     Running   61         1d18h
+payments-7d9c6b5f4-8vrdk   1/1     Running   59         1d18h
+payments-7d9c6b5f4-xk2q7   1/1     Running   61         1d18h
+payments-7d9c6b5f4-z4kp2   1/1     Running   58         1d18h
+payments-7d9c6b5f4-zh71c   1/1     Running   7          5h
+~~~
+
+Five of the six are cycling; the sixth was rescheduled to a different node five hours ago and has been killed seven times since.
+
+What the Deployment asks for.
+
+The manifest, as deployed (Revision 57, rolled out Fri 18 Sep 2026 09:40):
+
+~~~yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  labels:
+    app: payments
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: payments
+  template:
+    metadata:
+      labels:
+        app: payments
+    spec:
+      containers:
+        - name: payments
+          image: registry.internal/payments:2.14.3
+          ports:
+            - containerPort: 8080
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=90 -XX:+UseG1GC"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 1
+~~~
+
+One full cycle of the application log.
+
+The log of the life that started at 03:13:54, complete from first line to last. Timestamps are the node's local time; the log levels are as the application wrote them, and the last line of a life is followed by the first line of the next:
+
+~~~
+03:13:54 INFO  Starting PaymentsApplication v2.14.3 on payments-7d9c6b5f4-xk2q7 with PID 1 (/app/app.jar started by root in /app)
+03:13:57 INFO  HikariPool-1 - Starting...
+03:13:58 INFO  HikariPool-1 - Start completed in 412 ms
+03:14:01 INFO  Tomcat initialized with port 8080 (http)
+03:14:05 INFO  Initialized JPA EntityManagerFactory for persistence unit 'payments'
 03:14:07 INFO  Started PaymentsApplication in 11.2 seconds
 03:14:07 INFO  JVM flags: -XX:MaxRAMPercentage=90 -XX:+UseG1GC
-03:41:55 WARN  HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=48s)
+03:14:33 INFO  Serving 41 req/s, p99 172 ms
+03:14:41 WARN  GC pause (G1 Evacuation Pause) 24ms, heap 96M->41M
+03:15:04 INFO  Serving 40 req/s, p99 165 ms
+03:16:48 WARN  GC pause (G1 Evacuation Pause) 31ms, heap 112M->52M
+03:19:26 WARN  GC pause (G1 Evacuation Pause) 38ms, heap 128M->49M
+03:20:12 INFO  Serving 40 req/s, p99 168 ms
+03:22:07 INFO  Cached 214 merchant fee schedules
+03:24:51 WARN  GC pause (G1 Evacuation Pause) 55ms, heap 176M->67M
+03:25:14 INFO  Serving 41 req/s, p99 171 ms
+03:27:19 WARN  GC pause (G1 Evacuation Pause) 44ms, heap 191M->71M
+03:29:33 WARN  GC pause (G1 Evacuation Pause) 61ms, heap 214M->89M
+03:30:00 INFO  Settlement export started: 18204 rows pending from the 03:00 checkpoint
+03:30:41 INFO  Serving 39 req/s, p99 188 ms
+03:31:14 INFO  Exported 2000 settlement rows (buffered=true)
+03:32:38 INFO  Exported 4000 settlement rows (buffered=true)
+03:33:05 WARN  GC pause (G1 Evacuation Pause) 210ms, heap 402M->298M
+03:34:21 INFO  Exported 6000 settlement rows (buffered=true)
+03:34:58 WARN  GC pause (G1 Evacuation Pause) 310ms, heap 461M->344M
+03:35:18 INFO  Serving 38 req/s, p99 214 ms
+03:36:33 INFO  Exported 8000 settlement rows (buffered=true)
+03:37:44 WARN  Slow query: 4821 ms — settlement rows for checkpoint 03:00, chunk 4 of 10
+03:38:02 WARN  GC pause (G1 Evacuation Pause) 480ms, heap 530M->471M
+03:39:14 INFO  Exported 10000 settlement rows (buffered=true)
+03:40:26 INFO  Serving 36 req/s, p99 247 ms
+03:41:55 WARN  HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=48123ms)
+03:42:40 INFO  Exported 12000 settlement rows (buffered=true)
+03:43:03 WARN  GC pause (G1 Evacuation Pause) 580ms, heap 585M->544M
+03:44:17 WARN  GC pause (G1 Humongous Allocation) 700ms, heap 612M->560M
+03:45:11 INFO  Serving 31 req/s, p99 310 ms
+03:45:52 INFO  Exported 14000 settlement rows (buffered=true)
+03:46:48 WARN  GC pause (G1 Evacuation Pause) 940ms, heap 651M->601M
+03:47:59 WARN  GC pause (G1 Evacuation Pause) 1.2s, heap 690M->631M
+03:48:26 WARN  GC pause (G1 Evacuation Pause) 1.1s, heap 712M->655M
+03:49:03 INFO  Exported 16000 settlement rows (buffered=true)
+03:49:31 WARN  HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=60871ms)
+03:50:14 INFO  Serving 22 req/s, p99 419 ms
+03:50:44 WARN  GC pause (G1 Humongous Allocation) 1.9s, heap 736M->704M
+03:51:41 INFO  Exported 18000 settlement rows (buffered=true)
+03:52:07 INFO  Serving 14 req/s, p99 655 ms
 03:52:30 INFO  Exported 18204 settlement rows to object storage (buffered=true)
+03:52:41 WARN  GC pause (G1 Evacuation Pause) 2.4s, heap 815M->792M
 03:53:02 WARN  GC pause (G1 Evacuation Pause) 2.9s, heap 880M->871M
+03:54:03 INFO  Starting PaymentsApplication v2.14.3 on payments-7d9c6b5f4-xk2q7 with PID 1 (/app/app.jar started by root in /app)
 ~~~
 
-Explain what is killing the container and why the JVM never throws OutOfMemoryError first. Show how the heap percentage, metaspace, thread stacks, code cache and direct buffers add up against the 1 GiB limit, and what the Hikari warning and the GC pause each tell you. Then give a plan to confirm it on a live pod and the changes you would make.
+The node's account of the kill.
+
+From the node's journal, 03:53:07:
+
+~~~
+Sep 20 03:53:07 ip-10-0-4-17 kernel: memory: usage=1048576kB, limit=1048576kB, failcnt=61210
+Sep 20 03:53:07 ip-10-0-4-17 kernel: memory: max memory: 1048576kB, min memory: 0kB
+Sep 20 03:53:07 ip-10-0-4-17 kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod7a3d1c5f_9b2e_4d6a_8f11_3a5b9c2d7e8f.slice,mems_allowed=0-1,oom_memcg=kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod7a3d1c5f_9b2e_4d6a_8f11_3a5b9c2d7e8f.slice,task_memcg=kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod7a3d1c5f_9b2e_4d6a_8f11_3a5b9c2d7e8f.slice
+Sep 20 03:53:07 ip-10-0-4-17 kernel: Memory cgroup out of memory: Killed process 2621 (java) total-vm:8652840kB, anon-rss:1030784kB, file-rss:21888kB, shmem-rss:0kB, UID:0 pgtables:21504kB oom_score_adj:0
+~~~
+
+Usage was the limit to the byte when the kernel chose the process. The process it chose was the only one in the cgroup. The node itself was nowhere near pressure: 58 of its 64 GiB were free, and no other container on it was OOMKilled that night, so the constraint line above is the whole story of who ran out of what.
+
+Inside the container, seventeen seconds before it died.
+
+The forty-minute cycle was predictable enough that an engineer watched the 03:30 export window live on Sunday morning and captured the container's own accounting at 03:52:50, with the pod still serving:
+
+~~~
+root@payments-7d9c6b5f4-xk2q7:/# cat /sys/fs/cgroup/memory.current
+1055912960
+root@payments-7d9c6b5f4-xk2q7:/# cat /sys/fs/cgroup/memory.peak
+1073741824
+root@payments-7d9c6b5f4-xk2q7:/# cat /sys/fs/cgroup/memory.events
+low 0
+high 0
+max 61209
+oom 0
+oom_kill 0
+root@payments-7d9c6b5f4-xk2q7:/# grep -E '^(anon|file|sock|slab|kernel_stack) ' /sys/fs/cgroup/memory.stat
+anon 996147200
+file 21807104
+sock 12582912
+slab 17825792
+kernel_stack 2097152
+~~~
+
+~~~
+root@payments-7d9c6b5f4-xk2q7:/# grep -E '^(VmSize|VmRSS|Threads)' /proc/1/status
+VmSize:	8652840 kB
+VmRSS:	987136 kB
+Threads:	187
+~~~
+
+And the same moment through the application's own metrics endpoint, curled through kubectl port-forward while the pod was still serving:
+
+~~~
+jvm_memory_max_bytes{area="heap",id="G1 Old Gen",} 9.6636764E8
+jvm_memory_used_bytes{area="heap",id="G1 Old Gen",} 6.4E8
+jvm_memory_used_bytes{area="heap",id="G1 Eden Space",} 1.15E8
+jvm_memory_used_bytes{area="heap",id="G1 Survivor Space",} 4.3E7
+jvm_memory_used_bytes{area="nonheap",id="Metaspace",} 8.9E7
+jvm_memory_used_bytes{area="nonheap",id="Compressed Class Space",} 1.2E7
+jvm_buffer_pool_used_bytes{id="direct",} 4.6E7
+jvm_buffer_pool_used_bytes{id="mapped",} 2.1E7
+jvm_threads_live_threads 187.0
+~~~
+
+The same watch, sampled once a minute with kubectl top pod --containers across the export window. kubectl top reads the container's cgroup accounting rather than anything the JVM reports, so these are the same bytes the limit is charged against:
+
+    03:30    03:31    03:33    03:36    03:40    03:44    03:48    03:51    03:52
+    418Mi    489Mi    571Mi    640Mi    698Mi    782Mi    881Mi    947Mi   1004Mi
+
+The pod was killed at 03:53:07, seventeen seconds after the last sample.
+
+The same revision on staging, with NativeMemoryTracking.
+
+Production runs without it, so the team stood up two staging pods from the same manifest with one field changed — the image, swapped to the JDK build of the same revision (registry.internal/payments-jdk:2.14.3, same code, different digest), which is why jcmd was available there — fed them a replay of Friday's captured traffic at the rate it was captured, and let the settlement export run on its real 30-minute schedule. The staging pod whose captures follow was started with one flag added, -XX:NativeMemoryTracking=summary, and read with jcmd VM.native_memory summary mid-export, at the point where production's log shows the 1.2-second pause:
+
+~~~
+Total: reserved=1761580KB, committed=1271526KB
+-                 Java Heap (reserved=943744KB, committed=943718KB)
+-                     Class (reserved=111276KB, committed=88064KB)
+-                    Thread (reserved=196608KB, committed=67584KB)
+-                      Code (reserved=262144KB, committed=49152KB)
+-                        GC (reserved=143360KB, committed=61440KB)
+-                  Compiler (reserved=32768KB, committed=8192KB)
+-                  Internal (reserved=16384KB, committed=12288KB)
+-                    Symbol (reserved=24576KB, committed=14336KB)
+-    Native Memory Tracking (reserved=5120KB, committed=3200KB)
+-               Arena Chunk (reserved=25600KB, committed=23552KB)
+~~~
+
+The staging pod is killed by the same cgroup OOM at the same point in the cycle, which is why it could be used to read this at all. glibc's malloc arenas, which NativeMemoryTracking does not count, are visible in the reserved gap between this total and the process's 8.25 GiB of virtual memory.
+
+The same staging run also collected the JVM's own GC log, started with -Xlog:gc. Its clock is its own; these are the last seven pauses of a life, ending in the same kill:
+
+~~~
+[2026-09-21T04:27:00.115+0200][0.115s] Heap region size: 1M
+[2026-09-21T04:41:02.517+0200][842.517s] GC(253) Pause Young (Normal) (G1 Evacuation Pause) 688M->631M(922M) 1.183s
+[2026-09-21T04:41:33.204+0200][873.204s] GC(254) Pause Young (Concurrent Start) (G1 Humongous Allocation) 703M->655M(922M) 1.092s
+[2026-09-21T04:41:33.216+0200][873.216s] GC(256) Concurrent Mark Cycle 412.231ms
+[2026-09-21T04:42:11.890+0200][911.890s] GC(257) Pause Young (Prepare Mixed) (G1 Humongous Allocation) 712M->664M(922M) 1.351s
+[2026-09-21T04:43:02.401+0200][962.401s] GC(258) Pause Young (Mixed) (G1 Evacuation Pause) 736M->704M(922M) 1.874s
+[2026-09-21T04:44:47.733+0200][1067.733s] GC(259) Pause Young (Mixed) (G1 Evacuation Pause) (to-space exhausted) 815M->792M(922M) 2.388s
+[2026-09-21T04:45:39.618+0200][1119.618s] GC(260) Pause Full (G1 Compaction Pause) 880M->871M(922M) 2.912s
+~~~
+
+The export on staging was in its last two thousand rows when the full pause ran; the cgroup killed the process nineteen seconds later, and the JVM never printed another line of it.
+
+The application's configuration.
+
+The whole of application.yml in the 2.14.3 image:
+
+~~~yaml
+server:
+  port: 8080
+  tomcat:
+    threads:
+      max: 200
+    max-connections: 8192
+spring:
+  application:
+    name: payments
+  datasource:
+    url: jdbc:postgresql://payments-db.internal:5432/payments
+    hikari:
+      maximum-pool-size: 12
+      minimum-idle: 12
+      connection-timeout: 2000ms
+      max-lifetime: 1500000ms
+  jackson:
+    serialization:
+      indent_output: false
+settlement:
+  export:
+    schedule: "0 0/30 * * * *"
+    chunk-size: 2000
+    buffered: true
+    object-storage-prefix: settlements/v2
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+~~~
+
+The workload around it.
+
+Each replica serves about 40 requests a second of card authorisation posts, with a p99 latency SLO of 300 milliseconds that a healthy pod meets at 165 to 190. Thirty-one of the forty are the authorisation posts themselves; the rest are status polls from the merchant portal. The rate does not drop at night: settlement runs around the clock, so Sunday 03:00 is an ordinary load and the cycle above is the "under normal load" of the opening paragraph, not a quiet-hours anomaly. The settlement exporter is the piece that changed this release; from the 2.14.3 release notes: "settlement: the export now runs every 30 minutes instead of nightly at 02:40, and rows are streamed to object storage as they are produced rather than written at the end (settlement.export.buffered=true)."
+
+For what the same export looked like before the change, the last night of 2.14.2, from the same pod's log, Thursday into Friday:
+
+~~~
+02:40:00 INFO  Settlement export started: 528417 rows pending from the 02:00 checkpoint
+02:41:19 WARN  GC pause (G1 Evacuation Pause) 180ms, heap 388M->302M
+02:43:52 WARN  GC pause (G1 Evacuation Pause) 240ms, heap 501M->411M
+02:44:38 INFO  Exported 528417 settlement rows to object storage (buffered=false)
+~~~
+
+Four minutes thirty-eight seconds for twenty-nine times the rows, and the pod held its heap. The export runs on every pod independently — each pod exports the settlement rows pending since its last checkpoint, its own traffic plus whatever earlier lives of this pod produced and never got out: a life killed mid-export never advances the checkpoint, so its whole pending set carries to the next life, and the backlog a kill leaves behind is itself part of the damage — which is why the whole fleet cycles and not one unlucky lock-holder. The 18204 rows pending at the 03:30 export are about three and a half per cent of the 528,417 the old nightly export moved — fifty minutes of rows at the old rate, set against the sixteen minutes of traffic this life itself had produced — which is the shape of an accumulated backlog, not of one life's own output. No payments pod was ever OOMKilled on 2.14.2; the first OOMKilled restart after the rollout came 42 minutes after it, Friday 10:22.
+
+The first hypothesis in the incident channel was "a memory leak in the new exporter", stated and untested. The captures above are everything the team has gathered so far, and nothing about the deployment has been changed since Friday's rollout. What a live pod offers whoever watches the next one: kubectl exec and port-forward work while it lives, the image is a JRE (no jcmd, no jstack in production; staging runs the JDK image), bash and curl are present, /proc and /sys/fs/cgroup are readable from inside, actuator is up on /actuator/health and /actuator/prometheus, the nodes run cgroup v2, and the forty-minute cycle is reliable enough to watch one happen from the first minute.

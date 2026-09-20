@@ -1,5 +1,13 @@
 Harden this nightly backup script, which runs from cron as root. Last week the NFS mount was missing when it ran, and it deleted files from a directory nobody expected it to touch.
 
+List every way this script can fail or do damage, with the condition that triggers each one, including how many backups it really keeps. Then rewrite it defensively: strict mode, quoting, a check that the mount is really there, a lock so two runs cannot overlap, an exit status cron can act on, and retention that cannot delete anything outside the backup directory.
+
+Everything the postmortem gathered is below: the script as installed, how cron invokes it, how the mount is configured, what the broken night left behind in the journal and the log, and what the directory it deleted from looked like the next morning.
+
+The script.
+
+It lives at /usr/local/sbin/nightly-backup, mode 0755, owner root:root, installed by hand in October 2021 and copied from host to host ever since — it is not in the configuration-management repo, and the ticket to bring it in has been open since 2023. As installed, byte for byte:
+
 ~~~bash
 #!/bin/bash
 SRC=$1
@@ -16,4 +24,301 @@ ls -t | tail -n +$KEEP | xargs rm -rf
 echo "backup of $SRC done"
 ~~~
 
-List every way this script can fail or do damage, with the condition that triggers each one, including how many backups it really keeps. Then rewrite it defensively: strict mode, quoting, a check that the mount is really there, a lock so two runs cannot overlap, an exit status cron can act on, and retention that cannot delete anything outside the backup directory.
+Where and when it runs.
+
+The host in this postmortem is web01, a Debian 13 box (bash 5.2, GNU coreutils 9.7, GNU tar 1.35) that carries the team's shared development homes: 41 developers, 9.2 GB under /home, growing about 40 MB a week. The schedule and the redirect live in /etc/cron.d/nightly-backup:
+
+~~~
+SHELL=/bin/bash
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+30 2 * * * root /usr/local/sbin/nightly-backup /home >> /var/log/nightly-backup.log 2>&1
+~~~
+
+Two sibling hosts, db01 and ci01, run the same script under their own /etc/cron.d entries, backing up /var/lib/postgresql and /srv/workspace into their own directories on the same NFS export. The export's root holds the three script hosts' directories — web01, db01, ci01 — alongside the restic repositories of web02, web03 and web04, which matters for what the retention line is allowed to ever list: a retention that escapes one host's directory does not stop at that host's backups.
+
+For completeness, everything cron runs on this host as root:
+
+~~~
+root@web01:~# ls -1 /etc/cron.d
+apt-compat
+e2scrub_all
+nightly-backup
+php
+~~~
+
+The host's time zone is Europe/Amsterdam. On the last Sunday of October the clocks go back at 03:00 to 02:00, and 02:30 that night occurs twice; vixie cron has no duplicate-suppression for that hour. Nobody has ever checked what the script does when it runs twice in one night.
+
+The log at /var/log/nightly-backup.log is rotated monthly by /etc/logrotate.d/nightly-backup and read by nobody:
+
+~~~
+/var/log/nightly-backup.log {
+    monthly
+    rotate 12
+    compress
+    missingok
+    notifempty
+}
+~~~
+
+There is no MTA on the host, so any cron output that is not redirected would be discarded; with the redirect in place, nothing mails at all, which is why three and a half hours passed between the 02:30 run failing and the 06:00 freshness alert being the first thing to notice.
+
+What cron hands the script.
+
+A /etc/cron.d job runs with no controlling terminal, HOME and LOGNAME set from the passwd entry of the user the line names — root, so /root — the working directory set to that home, a PATH of whatever the crontab file itself sets, and nothing else of the interactive environment: no user profile, no rc file, none of the aliases or functions an interactive root shell would have. Every command the script calls has to resolve inside that PATH, and every path it touches is either absolute or relative to /root.
+
+What /home actually holds.
+
+The backup set, by size, from the morning after the incident:
+
+~~~
+root@web01:~# du -sh /home/* | sort -rh | head -n 8
+3.1G    /home/embedded
+1.9G    /home/anna
+1.2G    /home/finance
+987M    /home/mkwa
+611M    /home/build-shared
+402M    /home/jun
+388M    /home/dvorak
+365M    /home/sylvie
+~~~
+
+The biggest home is the two embedded developers' VM images, which is also why a full backup is 3.8 GB compressed from 9.2 GB. The finance home is small but holds the one file the logs catch tar warning about every few weeks — always the current quarter's ledger, and four warnings on it since the quarter turned in July — because it is the one file someone always has open.
+
+How the mount is configured.
+
+/mnt/backup is not in /etc/fstab. It is an autofs indirect mount, owned by the automounter, which is why the path exists only while the automounter is running and the map parses. /etc/auto.master.d/backup.autofs:
+
+~~~
+/mnt  /etc/auto.mnt  --timeout=600
+~~~
+
+/etc/auto.mnt, as it had been since 2021:
+
+~~~
+backup  -rw,soft,timeo=100,retrans=2  nas-01.lab.example.net:/export/backups
+~~~
+
+On Tuesday 8 September at 14:22 an Ansible push from the storage repo's automount role deployed a new version of the map to the four web-tier hosts. The template had been edited that morning to tune the NFS retry options, and a typo rode along. The map as it landed on web01:
+
+~~~
+backup  -rw,softt,timeo=100,retrans=2  nas-01.lab.example.net:/export/backups
+~~~
+
+The automounter refused it and went down, and with it the /mnt/backup mount point itself. From the journal:
+
+~~~
+Sep 08 14:22:41 web01 systemd[1]: Reloading autofs.service.
+Sep 08 14:22:41 web01 automount[1487]: syntax error while parsing map /etc/auto.mnt at token "softt"
+Sep 08 14:22:41 web01 systemd[1]: autofs.service: Control process exited, code=exited status=1
+Sep 08 14:22:41 web01 systemd[1]: autofs.service: Failed with result 'exit-code'.
+~~~
+
+The other three web-tier hosts failed the same way, but they back up with restic from a systemd timer that checks its own mount before touching anything, and each of them reported a clean failure to the monitoring. The push reached only those four web-tier hosts, and web01 is the only web-tier host that runs this script; its siblings db01 and ci01 run it too, as root out of /root exactly as web01 does, but nobody touched their map, so their mount stayed up, their cd never failed, and nothing of theirs was ever a deletion candidate. web01 was the only one damaged.
+
+The night it happened.
+
+The job fired at 02:30 on Wednesday 9 September. The whole session, from the journal:
+
+~~~
+Sep 09 02:30:01 web01 cron[1781]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+Sep 09 02:30:01 web01 CRON[21433]: (root) CMD (/usr/local/sbin/nightly-backup /home >> /var/log/nightly-backup.log 2>&1)
+Sep 09 02:30:01 web01 CRON[21433]: (cron) session closed for user root
+~~~
+
+Under a second from open to close. The log file carried no timestamps of its own — cron redirected the output, and the script prints none — so the session bracket above is the only clock these lines have. What those less-than-one-second left in /var/log/nightly-backup.log:
+
+~~~
+mkdir: cannot create directory '/mnt/backup/web01/tmp': No such file or directory
+tar (child): /mnt/backup/web01/tmp/backup-2026-09-09.tar.gz: Cannot open: No such file or directory
+tar (child): Error is not recoverable: exiting now
+mv: cannot stat '/mnt/backup/web01/tmp/*': No such file or directory
+/usr/local/sbin/nightly-backup: line 11: cd: /mnt/backup/web01: No such file or directory
+backup of /home done
+~~~
+
+Read the last two lines together. The cd on line 11 failed, the script did not stop, and the very next line — ls -t | tail -n +$KEEP | xargs rm -rf — ran anyway, in whatever directory the shell was already in. It printed nothing and returned success. Then the echo reported the job done, and the script's exit status was the echo's: zero.
+
+What directory the shell was already in.
+
+cron starts a /etc/cron.d job in the invoking user's home directory, and this job runs as root. So the retention pipeline listed, sorted and deleted from /root. The ls in it has no -a, so the dotfiles were never listed and never deleted; everything else in /root was a candidate, sorted by modification time, everything past the six newest included.
+
+What /root looked like the next morning.
+
+The freshness monitor had alerted at 06:00 ("backup freshness: web01 last archive 2026-09-08 (expected 2026-09-09)"), and the on-call captured the state of the host at 06:12 before touching anything:
+
+~~~
+root@web01:~# ls -la /root
+total 80
+drwx------  5 root root 4096 Sep  9 02:30 .
+drwxr-xr-x 20 root root 4096 Sep  9 06:11 ..
+-rw-------  1 root root 3131 Sep  8 22:41 .bash_history
+-rw-r--r--  1 root root 3106 Aug 14  2023 .bashrc
+-rw-r--r--  1 root root 1617 Jul  9  2024 .profile
+drwx------  2 root root 4096 Sep  1 17:44 .ssh
+-rw-------  1 root root 12288 Sep  8 18:26 .viminfo
+-rw-------  1 root root 8740 Sep  8 15:02 id-rsa-rotation-2026-09.txt
+drwxr-xr-x 3 root root 4096 Sep  8 11:41 kernel-6.12-rc3
+drwxr-xr-x 3 root root 4096 Sep  7 10:22 lab-pg16
+-rw-r--r--  1 root root 2048 Sep  5 18:26 mysql-sandbox.dump
+-rw-r--r--  1 root root 9548 Sep  4 16:07 settlement-recon-2026-08.xlsx
+-rw-r--r--  1 root root 4528 Sep  3 09:14 wget2-2.0.2.tar.gz
+~~~
+
+The directory's own mtime is 02:30 on 9 September: that is when its contents last changed. Six non-hidden entries remain. Nobody had a listing from before, but the reconstruction in the postmortem, from the memories of the four people who used /root as a scratch space, is that eleven non-hidden entries existed and the five oldest did not survive the night: docker-cleanup.sh (June), pgdump-lab-2026-06-30.sql.gz (30 June), incident-2026-05-12/ (May), old-id-rsa-rotation.txt (May), and training-videos/ (April). The six that remain are exactly the six newest by mtime. The dates on the survivors run 3 to 8 September; every remembered loss predates 3 September.
+
+The same capture, minutes later:
+
+~~~
+root@web01:~# systemctl status autofs
+× autofs.service - Automounts filesystems on demand
+     Loaded: loaded (/lib/systemd/system/autofs.service; enabled)
+     Active: failed (Result: exit-code) since Tue 2026-09-08 14:22:41 CEST; 15h ago
+    Process: 1487 ExecStart=/usr/sbin/automount $AUTOFS_OPTIONS (code=exited, status=1/FAILURE)
+   Main PID: 1487 (code=exited, status=1/FAILURE)
+
+Sep 08 14:22:41 web01 automount[1487]: syntax error while parsing map /etc/auto.mnt at token "softt"
+~~~
+
+~~~
+root@web01:~# ls -la /mnt
+total 8
+drwxr-xr-x  1 root root 4096 Sep  9 06:14 .
+drwxr-xr-x  1 root root 4096 Sep  9 06:14 ..
+root@web01:~# ls /mnt/backup
+ls: cannot access '/mnt/backup': No such file or directory
+~~~
+
+The revert landed at 08:57:
+
+~~~
+Sep 09 08:57:03 web01 systemd[1]: Reloading autofs.service.
+Sep 09 08:57:03 web01 systemd[1]: autofs.service: Succeeded.
+Sep 09 08:57:04 web01 automount[2881]: mounted /mnt/backup
+~~~
+
+What the loss actually was.
+
+Of the five things deleted from /root on 9 September: docker-cleanup.sh lived verbatim in a gist and was recovered in minutes; old-id-rsa-rotation.txt was superseded and unmourned; incident-2026-05-12/ was reconstructed from the wiki export in an afternoon; pgdump-lab-2026-06-30.sql.gz held lab data regenerable from the seed scripts. training-videos/ held camera originals from two onboarding sessions and is gone; the person who recorded them left in July and the files existed nowhere else.
+
+A good night, for contrast.
+
+The Tuesday session that ran before any of this, from the same journal and the same log:
+
+~~~
+Sep 08 02:30:01 web01 cron[1781]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+Sep 08 02:30:01 web01 CRON[19807]: (root) CMD (/usr/local/sbin/nightly-backup /home >> /var/log/nightly-backup.log 2>&1)
+Sep 08 02:37:44 web01 CRON[19807]: (cron) session closed for user root
+~~~
+
+~~~
+tar: Removing leading `/' from member names
+backup of /home done
+~~~
+
+Seven minutes forty-three seconds, start to finish, for 9.2 GB of homes to a 3.8 GB archive. On a night when nothing goes wrong, the script's only visible output is tar's warning about the leading slash and the final echo.
+
+Two near misses already in the logs.
+
+Thursday 3 September, the archive that was moved into place with a warning inside it. The session ran 02:30:01 to 02:41:33 and the log for that night reads:
+
+~~~
+tar: Removing leading `/' from member names
+tar: /home/finance/Q3-ledger-2026.ods: file changed as we read it
+backup of /home done
+~~~
+
+tar exited 1 that night. The script did not check, moved the archive from tmp into the retention set anyway, and reported done. Nobody has ever restored from a September archive, so whether that tarball is complete is unknown to this day.
+
+Tuesday 25 August, from ticket ops-4417 rather than any log: an engineer ran the script by hand twice in one afternoon while testing a restore. Both runs wrote the same dated filename, and the second run's tar overwrote the first's while the first was still being read from the NFS export for the restore test. The script has no lock, and nothing in it noticed.
+
+What the far end kept.
+
+The NAS export directory for this host, listed on Sunday 13 September after four clean nights had passed since the revert:
+
+~~~
+anna@desk-14:~$ ls -lh /mnt/backup/web01/
+total 22G
+-rw-r--r-- 1 root root 3.7G Sep  7 02:44 backup-2026-09-07.tar.gz
+-rw-r--r-- 1 root root 3.8G Sep  8 02:37 backup-2026-09-08.tar.gz
+-rw-r--r-- 1 root root 3.6G Sep 10 02:39 backup-2026-09-10.tar.gz
+-rw-r--r-- 1 root root 3.6G Sep 11 02:41 backup-2026-09-11.tar.gz
+-rw-r--r-- 1 root root 3.7G Sep 12 02:41 backup-2026-09-12.tar.gz
+-rw-r--r-- 1 root root 3.6G Sep 13 02:38 backup-2026-09-13.tar.gz
+~~~
+
+The 9 September archive does not exist; the night's output never got as far as the export. The mtimes are the moments each night's run finished, which is why they sit between 02:37 and 02:44 on their dates. KEEP is 7.
+
+What the backups are for.
+
+The recovery objective, from the runbook: homes are RPO 24 hours, RTO 4 hours, and the restore procedure is one paragraph — "gunzip the newest tarball from /mnt/backup/web01 on the NAS into a fresh home, chown -R the developer, tell them to check their untracked work". The repositories under /home live in remotes elsewhere and are not the point of these backups; the point is everything that is not in git: scratch branches never pushed, notebook state, VM images for the two embedded developers, GPG keyrings, and .ssh directories. The restore procedure has never been run end to end; the last attempt was the 25 August ticket above, which tested reading an archive while it was being overwritten and proved nothing else.
+
+The postmortem did verify that the archives are real. The 8 September tarball, listed from a workstation with the export mounted:
+
+~~~
+anna@desk-14:~$ tar tzf /mnt/backup/web01/backup-2026-09-08.tar.gz | wc -l
+412331
+anna@desk-14:~$ tar tzf /mnt/backup/web01/backup-2026-09-08.tar.gz | grep -c '^home/[^/]*/\.ssh/$'
+41
+anna@desk-14:~$ du -h /mnt/backup/web01/backup-2026-09-08.tar.gz
+3.8G    /mnt/backup/web01/backup-2026-09-08.tar.gz
+~~~
+
+The export has 2 TB of capacity and no quotas; db01 writes about 40 GB a night and ci01 about 15, and it stood at 1.31 TB used on the morning of the capture.
+
+What the managed fleet does instead.
+
+The three hosts the Ansible push did reach with its restic stack run the same nightly idea under systemd, and their unit is the working contrast the hand-installed script never got. From web02:
+
+~~~
+anna@web02:~$ systemctl cat backup.service
+# /etc/systemd/system/backup.service
+[Unit]
+Description=nightly restic backup of /home
+After=network-online.target mnt-backup.mount
+RequiresMountsFor=/mnt/backup
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/bin/test -d /mnt/backup/web02
+ExecStart=/usr/bin/flock -n /run/lock/backup.lock /usr/sbin/backup-restore-helper backup /home
+Nice=10
+~~~
+
+It is not a proposal to adopt restic here; it is the record of which guards the managed half of the fleet already ships and this script does not.
+
+The older history.
+
+The script's install ticket, ops-0312 from October 2021, specifies the intent in one line: "nightly tar of /home to the NAS, keep a week." Nothing since has restated or revised that intent.
+
+Ticket ops-0971, March 2022, quotes the log as it read the night the NAS export filled up:
+
+~~~
+tar: Removing leading `/' from member names
+tar (child): /mnt/backup/web01/tmp/backup-2022-03-14.tar.gz: Cannot write: No space left on device
+tar (child): Error is not recoverable: exiting now
+backup of /home done
+~~~
+
+The partial archive was moved into the retention set that night and counted as a backup until it aged out six days later. The ticket was closed as "NAS capacity increased, no action on script".
+
+After this month's incident, the postmortem grepped the rotated logs to see how often the script had quietly struggled:
+
+~~~
+root@web01:~# zgrep -h -v '^backup of\|^tar: Removing' /var/log/nightly-backup.log* | sort | uniq -c | sort -rn
+   4 tar: /home/finance/Q3-ledger-2026.ods: file changed as we read it
+   1 /usr/local/sbin/nightly-backup: line 11: cd: /mnt/backup/web01: No such file or directory
+   1 mkdir: cannot create directory '/mnt/backup/web01/tmp': No such file or directory
+   1 mv: cannot stat '/mnt/backup/web01/tmp/*': No such file or directory
+   1 tar (child): /mnt/backup/web01/tmp/backup-2026-09-09.tar.gz: Cannot open: No such file or directory
+   1 tar (child): Error is not recoverable: exiting now
+~~~
+
+The rotated logs go back twelve months. Every line above is either the broken night's five, or the same file-changed warning on four nights of which 3 September is the most recent. The script has run roughly 1,780 times since October 2021, and the log records not one error the script itself noticed.
+
+What the script already gets right.
+
+Two properties are worth keeping in any rewrite. The archive is built in a tmp directory and moved into place, and mv inside one filesystem is a rename, which is atomic: a reader never sees a half-written archive under its final name. And the date-stamped filenames sort lexically in date order, so anything that lists the directory gets chronology for free. Both properties survived five years of nobody looking at them, and the rewrite should not lose either without saying so.
+
+What has already been done.
+
+Two things were fixed in the week after the incident and are not this script's business: the map typo is corrected at the source in the storage repo's template, and the freshness alert now fires at 03:15 rather than 06:00, so a failed 02:30 run is seen within the hour. The script itself is untouched since 2021, and that is the part this task is about.

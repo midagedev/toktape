@@ -1,11 +1,137 @@
-Below is an architecture decision record a team circulated last week. Three reviewers approved it without comment.
+Name the assumptions this architecture decision record leaves unstated. Say which of them the numbers in it actually support and which they do not, and for each unsupported one, describe the smallest measurement that would settle it. The record is below; a team circulated it last week and three reviewers approved it without comment.
 
 Title: move background jobs off the database queue and onto a managed broker.
 
-Context: the job table holds nine million rows. Workers poll it every two hundred milliseconds with SELECT ... FOR UPDATE SKIP LOCKED, and on Monday mornings the queue depth peaks near forty thousand. Two of our four read replicas now spend most of their time on queue traffic, not on customer queries.
+Number: ADR-047
+Date: 2026-09-08, revised 2026-09-10, approved 2026-09-11
+Status: Accepted
+Authors: Priya Raghavan (platform), Tom Lindqvist (orders)
+Supersedes: none. Extends ADR-031 (peek-then-claim polling split, 2026-03).
 
-Decision: publish each job to the broker on commit and let the broker own retries and dead-lettering. Drop the job table once the backlog drains.
+Context.
 
-Consequences: a job stops being visible to the transaction that created it, so it may run before the row it refers to is committed. We accept this and will make every job re-read its inputs.
+The order platform runs its background work off a table in the primary Postgres database. Every unit of deferred work — an invoice to render, a pick list to dispatch, a digest email to assemble, a webhook to retry, a thumbnail to make — is a row in that one table, and about nine million rows are in it as of last count (9,412,006 at the 2026-09-05 census; the table holds three days of history, because a nightly job deletes terminal rows older than 72 hours).
 
-Name the assumptions this record leaves unstated. Say which of them the numbers above actually support and which they do not, and for each unsupported one, describe the smallest measurement that would settle it.
+A row carries the usual queue machinery in columns: the tenant that asked for the work, the job type, a JSON body, a run_at time that retries push forward, an attempt counter, a claimed_by worker identity, and a state of pending, claimed, done or dead. The partial index on run_at WHERE state = 'pending' is the only index the pollers need and was the whole of ADR-031.
+
+The work is claimed by forty worker processes, with twenty more scheduled to run 06:00 to 10:00 on weekdays. A worker that sees no work polls every two hundred milliseconds; while work is visible it claims batches of twenty-five rows without sleeping, taking each batch with SELECT ... FOR UPDATE SKIP LOCKED so two workers never take the same row. A claim writes the worker's identity into claimed_by and stamps a lease; if the worker dies mid-batch the lease expires after 120 seconds and the row returns to pending. A job that fails gets five attempts in all, the retries backing off 30 seconds, then 60, 120 and 240, and then it sits in state dead until the weekly review clears it.
+
+Before a worker touches the primary it peeks: a read-only query, SELECT id FROM jobs WHERE state = 'pending' AND run_at <= now() ORDER BY run_at LIMIT 25, served from a read replica against that partial index. The peek connection pool — four connections per worker, so between 160 and 240 sessions — is routed to replicas 3 and 4 on purpose, so that queue polling never shares a replica with the customer-facing read path on replicas 1 and 2. Those replicas are 8 vCPU, 64 GB instances, the same size as the two serving customers, and last month they spent 71 and 64 percent of their query time respectively on the peek query alone: about twenty million peeks a day, 200 to 300 per second while the fleet idles between claims, each peek 0.4 milliseconds at the 95th percentile. The queries are cheap; there are simply a great many of them, and they arrive all day and all night whether or not any work exists.
+
+The primary carries its own share of the machinery. Every claim is a write (claimed_by, state, lease), every completion another, every retry a third; the nightly prune deletes about three million terminal rows in batches of five thousand; and the lease sweep that re-pends expired claims runs every thirty seconds. In August the primary's write panel attributed 6 percent of its statements to the jobs table and its helpers — not a crisis, but a steady tax that this decision removes rather than grows.
+
+The volume, on an ordinary weekday, is about 2,980,000 jobs a day:
+
+    digest.email        1,410,000   assembled by the 05:40 batch, then paced out 06:00-10:00
+    thumbnail.render      618,000   spread with upload traffic
+    webhook.retry         484,000   concentrated in the hour after each merchant settlement sweep
+    invoice.render        214,000   one per invoice, evening-weighted
+    picklist.dispatch      96,000   warehouse waves at 06:30, 11:00 and 15:30
+    other                 158,000   exports, sweeps, backfills
+
+The digest deserves a word, because it is most of the volume and behaves nothing like the rest: the 05:40 batch assembles Monday's list from the weekend's orders, and a paced publisher then emits the jobs across the 06:00 to 10:00 window at a rate deliberately held under 150 per second, so the downstream mail platform is never handed a wall of sends at once. The settlement sweeps at 09:00 each weekday are the other sharp edge: roughly 180,000 webhook.retry jobs are published in the twenty minutes after 09:00 on a normal day, more on Mondays.
+
+The other line is 158,000 jobs a day of work that belongs to nobody in this room: 61,000 tenant-requested exports, 44,000 per-tenant housekeeping sweeps, 28,000 backfills from the bulk-edit tools, and 25,000 one-off operations jobs that various teams enqueue directly. The last group is the reason the publish API has to be documented and announced rather than handed to the two teams in this record.
+
+What a job costs to run, at the median: digest.email 3 milliseconds, webhook.retry 65, picklist.dispatch 150, thumbnail.render 210, invoice.render 340. The fleet is sized so that an ordinary hour drains faster than it fills and the depth returns to near zero; the scheduled burst workers exist for the mornings, when it does not.
+
+On Monday mornings the queue depth peaks near forty thousand. The five Mondays to date peaked at 39,100 (08-17), 40,900 (08-24, the first to open a ticket), 38,700 (08-31), 41,300 (09-07, INC-4412) and 40,900 (09-14, the Monday after this record was approved). Hour by hour, from the queue dashboard, the worst of them and a quiet midweek day for contrast:
+
+    Monday 2026-09-07           Wednesday 2026-09-09
+    00:00   2,100               00:00   1,420
+    03:00   1,650               03:00     980
+    05:00   6,800               05:00   2,100
+    06:00  18,400               06:00   4,900
+    07:00  29,900               07:00   6,700
+    08:00  30,700               08:00   8,800
+    09:00  31,800               09:00   9,800
+    10:00  33,200               10:00   9,100
+    11:00  19,700               12:00   6,100
+    13:00   8,900               15:00   4,600
+    16:00   5,200               18:00   3,300
+    20:00   3,400               21:00   2,500
+    23:00   2,600               23:00   1,880
+
+The Monday peak, 41,300, landed at 09:32: the settlement sweep arriving on top of the digest shoulder.
+
+What pushed this record from observation to decision was that Monday, INC-4412. The timeline, from the incident channel and the graphs it points at:
+
+    09:00  settlement sweep publishes its Monday batch; depth 31,800 and rising
+    09:07  depth 34,000; claim round trips 90 ms at p95, up from the usual 40
+    09:14  burst workers already up; depth 36,900; peek still 0.4 ms
+    09:21  checkout dashboard: read p95 on replicas 3 and 4 up from 1.2 to 2.4 s
+    09:28  depth 39,900; claim p95 180 ms; batches returning a median of 12 rows of 25
+    09:32  depth 41,300, the morning peak; claim p95 290 ms, median batch 9 rows
+    09:41  on-call adds twenty workers past the schedule; no effect on drain
+    09:55  depth 40,700; the added workers are shut down
+    10:02  depth 31,400; claim p95 210 ms, batches back to 25 of 25; the sweep's publish burst is over
+    10:14  depth 18,900 and falling at the ordinary morning rate
+    10:19  checkout read p95 back under 1.4 s; incident closed as queue-contention
+
+Nothing was down. The queue was doing what it is built to do at that hour, and the replicas shared the work of watching it happen. This is the fourth Monday in a row with a customer-visible degradation window, and the second with a ticket.
+
+Scope. This record covers the asynchronous path only: the jobs table, its pollers and its workers. The synchronous checkout path is out of scope and unchanged by the decision. Change-data-capture streams, analytics replication and the nightly exports that read the same primary are likewise out of scope; the exports are counted in the volume table under other, and nothing in this record changes how they run.
+
+Definitions, because two of these get used loosely in the channel. Depth is the count of rows with state pending and run_at in the past — work that is ready and not being worked. Drain is the rate at which rows leave pending, whether by completion or by death. Backlog, as used in the decision, is the whole of the pending population the moment cutover completes; it is not the Monday peak, and "the backlog drains" is a statement about the last stragglers, not about the graph falling.
+
+Decision.
+
+Publish each job to the broker on commit and let the broker own retries and dead-lettering. Drop the job table once the backlog drains.
+
+Publishing happens inside the transaction that creates the work, as a broker message written when the transaction commits. Retries, exponential backoff, poison-message handling and dead-lettering move to the broker's managed features; the worker fleet becomes a pure consumer group, and the peek pool, the claim query and the nightly prune job are deleted with the table.
+
+The machinery this deletes, in one place, because it is more than it looks like on a diagram: the peek pool and its four connections per worker; the routing pin that holds it to replicas 3 and 4; the partial index on pending rows; the claim query and its SKIP LOCKED discipline; the 120-second lease and the thirty-second sweep that re-pends expired ones; the five-attempt backoff ladder and its four timers; the nightly prune of terminal rows; the depth queries the dashboards run; and the worker-side poll loop itself, two hundred milliseconds of sleep and a query that usually returns nothing. Against it, the move adds one publish call at commit and one subscription per worker.
+
+The broker is shaped to the job types: one queue per type, a dead-letter queue per queue, a single consumer group shared by the fleet with a prefetch of twenty-five to keep batch behaviour, and a visibility timeout of 120 seconds to match the lease the fleet lives with today. Retries are the vendor's exponential policy with the same ceiling of five attempts before the dead letter.
+
+Consequences.
+
+Positive. Queue traffic leaves the replica pair entirely; the routing pin and the peek index go away, and with them the shared-replica failure mode of INC-4412. Claiming stops costing a write-side round trip per batch. Retries stop occupying a worker slot for the duration of their backoff. Queue depth becomes a broker metric with alarms the vendor maintains.
+
+Negative. The consumer that picks a job up may be reading from a replica that has not yet replayed the transaction that committed the publish, so a job can win the race against its own inputs' visibility; we accept this, and every job body opens by re-reading what it was handed. Ordering within an entity is not guaranteed by the broker; today a merchant's invoice.render jobs run in insert order within a claim batch, and after the move they run in delivery order. Postgres stops being the audit record of what work was requested: today the table answers "which jobs existed for tenant X on Monday" with a query, and after the drop it answers nothing.
+
+Neutral. The worker fleet keeps its size and its deployment shape; only the claim loop is replaced by a subscription. The on-call runbooks for stuck queues are rewritten around broker backlog alarms rather than depth queries.
+
+Risks we have written down.
+
+A single tenant's wave can starve the others inside a shared queue; the broker's per-tenant quotas will be configured before the digest cutover and reviewed after it. The managed tier is a vendor dependency for a path that today is only a table; the dead-letter export and a three-day message archive are part of the quote for exactly this reason. Dual-write week doubles the publish path's moving parts; the reconciliation count is the guard, and cutover waits for seven consecutive clean days.
+
+Costs.
+
+The broker quote is the two-node managed tier (4 vCPU, 16 GB per node) at 970 dollars per node per month, 1,940 dollars total, with the dead-letter storage and the 10 GB/month of egress inside the tier. Downsizing replicas 3 and 4 from 8 vCPU/64 GB to 4 vCPU/32 GB releases 2,060 dollars per month. The net is a wash, minus 120 dollars a month; the case for the move is the replicas' attention, not the bill.
+
+Alternatives considered.
+
+Tune the current design. Lower the idle poll rate, raise the batch, move the peek pool to its own pair of smaller replicas. Rejected because it spends more of the same resource: a dedicated peek pair is two more replicas to run, and the Monday depth that caused INC-4412 is not a polling-inefficiency symptom — the fleet was at its scheduled strength until 09:41, the peek stayed at 0.4 milliseconds throughout, and the drain still fell behind because claim round trips, not polling, are what the sweep contends on.
+
+LISTEN/NOTIFY. Notify a channel on commit and let workers wake on notification instead of polling. Rejected because notifications are fire-and-forget: a worker restarting at the wrong moment loses the notification and the job with it, so the table has to stay as the source of truth and the polling has to stay as the fallback. That is the current design plus a second moving part.
+
+Partition or shard the jobs table. Partition by day for the prune job's benefit, or shard by tenant. Rejected as orthogonal: the Monday problem is contention on the replicas that serve the peek and on the rows the claim locks, and a partitioned table on the same replicas peeks the same way.
+
+A second database, dedicated to the queue. Move the table to its own Postgres instance and let the peek pool own it. This was the runner-up. Rejected because it keeps every piece of machinery this record is trying to delete — the claim query, the prune job, the peek index, the depth queries — and adds a primary to fail over and back up. It isolates the customer path from the queue, which is the actual requirement, at a higher running cost than the broker for less operational surface removed.
+
+The question that gets asked first: why not move the nine o'clock sweep? Because the sweep is only the sharpest hour of a shape that is there all week — the depth shoulder begins at 06:00 with the digest, not at 09:00, and the replicas' 71 and 64 percent is a twenty-four-hour number, not a Monday-morning one. Moving the sweep would shave the peak and change none of the rest; it is a good idea anyway, and orders have it queued independently of this record.
+
+Prior art inside the company: the search team has run a broker of this kind since 2024 for their crawl scheduling, a steady 900,000 messages a day, and are satisfied with it. Their load is flat; ours is not, and this record does not rest on their experience, but it is why nobody here thinks of the broker as exotic.
+
+Rollout.
+
+Week one, dual-write: the transaction writes the job row and publishes the broker message, workers keep claiming from the table, and a reconciliation job counts broker publishes against rows created, alerting on any drift. Weeks two through four, cutover by job type in this order: thumbnail.render, digest.email, webhook.retry, invoice.render, picklist.dispatch last, since warehouse waves have the least tolerance for a mid-wave change. Each type cutover waits one full weekday cycle including its peak window. When a type is cut over its workers stop claiming it from the table. Rollback for a misbehaving type is one flag: flip its consumers back to claiming from the table, which still exists and still receives the dual-write copy until the very last type cuts over; a rollback costs nothing but the queue's drain time for that type. The table is dropped thirty days after the last row is written to it, which is when the reconciliation window and the retention window have both closed, and neither the dead-letter archive nor the dashboards depends on it after that.
+
+Observability after the move: per-queue depth, oldest-message age, dead-letter arrivals and publish-to-deliver latency on the vendor's dashboards, mirrored into our own; the checkout read path keeps the p95 panel that caught INC-4412, because that panel is the reason this record exists.
+
+The measurements this record rests on.
+
+The 9,412,006 row count and the 72-hour retention: a census query run 2026-09-05, before the nightly prune. The per-type daily volumes: the jobs table grouped by type over the four weeks to 2026-09-06, weekday medians. The Monday and Wednesday depth curves: the queue dashboard's hour buckets, unsmoothed. The five Monday peaks: the same dashboard's peak gauge, 2026-08-17 to 2026-09-14. The 71 and 64 percent of replica query time: the replicas' per-user query-time panels, August 2026, monthly average. The peek's 0.4 ms at p95: pg_stat_statements on replica 3 for the peek query, same month. The 40 and 290 ms claim round trips: pg_stat_statements on the primary for the claim query, Monday 2026-09-07 09:00 to 10:20 against the prior Monday. The checkout p95 of 1.2 to 2.4 seconds: the checkout dashboard for the same window. The broker price and the replica prices: the vendor quote of 2026-09-09 and the infrastructure team's rate card. The search team's 900,000 a day: their ops review, 2026-05.
+
+References.
+
+INC-4412, Monday 2026-09-07 queue depth and checkout latency incident, timeline and graphs.
+ADR-031, peek-then-claim polling split and the partial peek index, 2026-03.
+Queue depth dashboard, replicas 3 and 4 query-time panels, broker vendor quote, 2026-09-09.
+
+Revision history.
+
+2026-09-08, draft by Raghavan and Lindqvist. 2026-09-10, cost section added after the vendor quote arrived. 2026-09-11, accepted. 2026-09-14, post-acceptance addendum: the 09-14 Monday peak, the first Monday after approval, appended to the context list and the measurements while rollout scheduling was under way.
+
+Reviewed and approved without comment: R. Väisälä (staff engineer), M. Okoye (SRE lead), D. Fischer (payments lead), 2026-09-11.
