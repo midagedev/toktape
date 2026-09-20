@@ -17,7 +17,7 @@ import (
 // every fenced code block must be byte-identical across languages, so a flag
 // renamed in one file cannot go stale in the other two.
 
-var readmes = []string{"README.md", "README.ko.md", "README.ja.md"}
+var readmes = []string{"README.md", "README.ko.md", "README.ja.md", "README.zh-CN.md", "README.zh-TW.md"}
 
 func repoFile(t *testing.T, rel string) string {
 	t.Helper()

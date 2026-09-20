@@ -2,7 +2,7 @@
 
 **ローカル LLM サービングのためのブラックボックステープ.**
 
-[English](README.md) · [한국어](README.ko.md) · 日本語
+[English](README.md) · [한국어](README.ko.md) · 日本語 · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
 
 [![check](https://github.com/midagedev/toktape/actions/workflows/ci.yml/badge.svg)](https://github.com/midagedev/toktape/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/midagedev/toktape)](https://github.com/midagedev/toktape/releases/latest)

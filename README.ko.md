@@ -2,7 +2,7 @@
 
 **로컬 LLM 서빙을 위한 블랙박스 테이프.**
 
-[English](README.md) · 한국어 · [日本語](README.ja.md)
+[English](README.md) · 한국어 · [日本語](README.ja.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md)
 
 [![check](https://github.com/midagedev/toktape/actions/workflows/ci.yml/badge.svg)](https://github.com/midagedev/toktape/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/midagedev/toktape)](https://github.com/midagedev/toktape/releases/latest)
