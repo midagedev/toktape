@@ -56,6 +56,12 @@ const (
 	// the budget is not sent at all — a bad fit is worse than no fit, and
 	// fitPrefill already refuses one point.
 	probeLongFloorMultiple = 3
+	// probeMinSpanTokens is that same Δn, named so the fit can check it on
+	// the way back as well: probeLongLength enforces the floor on the length
+	// the probe asks for, and fitPrefill enforces it on the span the server
+	// actually reported, which a lopsided prefix-cache hit can be narrower
+	// than (lead, 2026-09-20). One number, one derivation, two ends.
+	probeMinSpanTokens = (probeLongFloorMultiple - 1) * probeShortTokens
 )
 
 // probeCharsPerToken converts those token budgets into byte budgets for the
@@ -153,9 +159,12 @@ func (r *run) prefillProbe(ctx context.Context) {
 	st, ttft, ok := r.probeSend(ctx, probePrompt(probeLeadShort, probeCycleShort, probeShortTokens))
 	if ok && st.PromptN > 0 {
 		// A point with no evaluated tokens is not a cost measurement
-		// (a cache-served prompt), so it is not recorded as one. A partial
-		// hit is recorded — with its CacheN, so the fit can refuse on it
-		// rather than read the cache's discount as the machine's speed.
+		// (a fully cache-served prompt), so it is not recorded as one.
+		// A partial hit is recorded — with its CacheN, for the reader
+		// taking the probe apart, not for the fit to refuse on: the
+		// point is the honest cost of the tokens it did evaluate, and
+		// what a hit can break is the span, which fitPrefill checks on
+		// the pair (its doc, 2026-09-20).
 		p.Prefill = append(p.Prefill, tape.PrefillPoint{
 			PromptN:  st.PromptN,
 			PromptMs: st.PromptMs,
@@ -267,18 +276,39 @@ func (r *run) probeSend(ctx context.Context, prompt string) (st server.ServerTim
 // server spends per request before it reads the first one.
 //
 // A fit it cannot trust is refused, never clamped into a plausible number:
-// a longer prompt that answered faster is a cache hit or a broken
-// measurement, not a rate; two prompts of one length have no slope; a
-// negative intercept is a fixed cost the points do not support; and a point
-// the prefix cache served — CacheN > 0, a partial hit included — is not a
-// cold prefill, which is what both points here are supposed to be. A cached
-// point reports the cost of only the tokens it evaluated, so a pair through
-// one measures the cache's discount as if it were the machine's speed, and
-// the intercept that comes out is not the server's fixed cost (lead,
-// 2026-09-19). Every refusal leaves both figures 0 — the schema's "not
-// observed" — while the points stay recorded, so a suspicious probe can be
-// taken apart without re-running it; tapefigures prints each point's cache_n
-// for exactly that question.
+// a longer prompt that answered faster is a broken measurement, not a rate;
+// two prompts too close in length have no slope worth reporting; and a
+// negative intercept is a fixed cost the points do not support. Every
+// refusal leaves both figures 0 — the schema's "not observed" — while the
+// points stay recorded, so a suspicious probe can be taken apart without
+// re-running it; tapefigures prints each point's cache_n for exactly that
+// question.
+//
+// A cache hit is not on that list any more (lead, 2026-09-20, correcting
+// 2026-09-19). The refusal used to fire on CacheN > 0, on the premise that
+// a served point "measures the cache's discount as if it were the machine's
+// speed". That premise was wrong about the wire: timings.prompt_n is
+// n_prompt_processed and timings.cache_n is n_prompt_cached — disjoint
+// counts, summing to the prompt — so a partially served point is the honest
+// cost of the tokens it did evaluate, plotted at the x it did evaluate. The
+// pair through it recovers the same slope and the same intercept.
+//
+// Refusing on it was also refusing every warm server. Both prompts go to
+// /completion, which tokenizes with add_special, so BOS alone is a shared
+// first token; a slot keeps its tokens between requests and the common
+// prefix is assigned to n_prompt_cached with no floor. On a slot that had
+// served anything at all, CacheN was 1 or more and there was no fit.
+//
+// What a hit can genuinely ruin is the span. The slope is a difference
+// quotient, and a hit that lands on the long point alone drags it toward
+// the short one until the denominator is small enough for noise in
+// PromptMs to dominate. A prefix both prompts share shaves the same count
+// off both and cancels; only the lopsided hit collapses the span. So the
+// span is what is checked, and it is checked against the floor the probe
+// already imposes on the length it asks for: probeLongLength refuses to
+// send a long point under probeLongFloorMultiple short points, which is an
+// intended span of probeMinSpanTokens. A pair that comes back spanning
+// less than that did not measure what it set out to measure.
 func fitPrefill(points []tape.PrefillPoint) (perSecond, fixedMs float64) {
 	if len(points) != 2 {
 		return 0, 0
@@ -287,11 +317,8 @@ func fitPrefill(points []tape.PrefillPoint) (perSecond, fixedMs float64) {
 	if hi.PromptN < lo.PromptN {
 		lo, hi = hi, lo
 	}
-	if lo.CacheN > 0 || hi.CacheN > 0 {
-		return 0, 0 // a cache-served point: not a cold cost curve
-	}
-	if lo.PromptN == hi.PromptN {
-		return 0, 0 // one length: the slope is undefined
+	if hi.PromptN-lo.PromptN < probeMinSpanTokens {
+		return 0, 0 // too close together for a slope: see the span paragraph
 	}
 	if hi.PromptMs <= lo.PromptMs {
 		return 0, 0 // the longer prompt did not cost more: not a cost curve

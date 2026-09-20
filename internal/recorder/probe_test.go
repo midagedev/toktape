@@ -254,14 +254,35 @@ func TestProbeRefusesAFitItCannotTrust(t *testing.T) {
 	}
 }
 
-// Gate 2b (lead, 2026-09-19): a probe point the prefix cache served must not
-// be fitted. A partial hit has prompt_n > 0 with cache_n > 0 together — the
-// st.PromptN > 0 guard only catches the total hit — and fitted as if cold it
-// reports the cache's discount as the machine's prefill rate. The fit refuses
-// on the flag; the points stay recorded with their CacheN so a reader can see
-// why, and the same cost model with no hit still fits, which is the clause
-// that makes this a refusal and not a regression.
-func TestProbeRefusesAFitThroughACacheHit(t *testing.T) {
+// Gate 2b, re-authored (lead, 2026-09-20). The 2026-09-19 version of this
+// gate asserted that any cache_n > 0 must refuse the fit, on the premise
+// that "the point costs only the tokens it evaluated, so through the pair
+// the cache's discount masquerades as the machine's speed". That premise is
+// false, and upstream says so: timings.prompt_n is n_prompt_processed and
+// timings.cache_n is n_prompt_cached (llama.cpp tools/server/
+// server-common.cpp, the timings object), two disjoint counts whose sum is
+// the prompt. A partially served point therefore reports the honest cost of
+// the tokens it did evaluate, at the x it did evaluate — which is why the
+// fixture above computes its ms from the reduced n, and why a pair through
+// it recovers the planted machine exactly. The old gate was refusing a
+// correct measurement.
+//
+// It was also refusing every warm server. Both probe prompts render through
+// the same opening — /completion tokenizes with add_special (server-context
+// .cpp, the handler's tokenize_input_prompts call), so BOS alone is a shared
+// first token — and the slot keeps its tokens between requests, so on any
+// slot that has served anything the common prefix is at least 1 and
+// n_prompt_cached is assigned from it with no floor. A second run against a
+// warm server got no prefill fit at all.
+//
+// What a hit can actually break is the span: a pair needs two lengths far
+// enough apart for a slope, and a hit that lands on the long point drags it
+// toward the short one until the slope is noise over a small denominator. A
+// shared prefix shaves the same k off both points and cancels; only a
+// lopsided hit collapses the span. So the gate now pins the three cases
+// separately — cold fits, partial-but-spanning fits, collapsed refuses —
+// and the middle one is the clause the old code fails.
+func TestProbeFitsThroughAPartialHitAndRefusesACollapsedSpan(t *testing.T) {
 	record := func(longPartialCache int) *tape.ProbeSummary {
 		mux, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5, longPartialCache: longPartialCache})
 		srv := httptest.NewServer(mux)
@@ -292,7 +313,10 @@ func TestProbeRefusesAFitThroughACacheHit(t *testing.T) {
 			cold.PrefillPerSecond, cold.FixedMs)
 	}
 
-	// Partial hit on the long point: the fit refuses, the points stay.
+	// Partial hit on the long point, span intact: the point is an honest
+	// measurement of the tokens it evaluated, so the pair recovers the same
+	// planted machine as the cold run. This is the clause the 2026-09-19
+	// code fails — it returned the refusal's 0/0 here.
 	cached := record(300)
 	if len(cached.Prefill) != 2 {
 		t.Fatalf("cache-hit probe: %d points, want the pair kept: %+v", len(cached.Prefill), cached.Prefill)
@@ -303,9 +327,27 @@ func TestProbeRefusesAFitThroughACacheHit(t *testing.T) {
 	if cached.Prefill[0].CacheN != 0 {
 		t.Errorf("short point CacheN = %d, want 0: only the long point was served from cache", cached.Prefill[0].CacheN)
 	}
-	if cached.PrefillPerSecond != 0 || cached.FixedMs != 0 {
-		t.Errorf("a fit through a cache-served point produced figures: %v tok/s, fixed %v ms; want the refusal's 0/0",
+	if !near(cached.PrefillPerSecond, 2000, 0.01) || !near(cached.FixedMs, 30, 0.01) {
+		t.Errorf("partial hit with the span intact fitted %v tok/s, fixed %v ms; want the planted 2000 and 30 — the point's ms is the cost of the tokens it evaluated, at the x it evaluated",
 			cached.PrefillPerSecond, cached.FixedMs)
+	}
+
+	// The hit large enough to collapse the long point onto the short one:
+	// the intended long is probeLongTokens, and reusing all but ~150 of it
+	// leaves the two points closer together than the floor probeLongLength
+	// makes the intended pair clear. No slope worth reporting, so refuse.
+	collapsed := record(1900)
+	if len(collapsed.Prefill) != 2 {
+		t.Fatalf("collapsed probe: %d points, want the pair kept: %+v", len(collapsed.Prefill), collapsed.Prefill)
+	}
+	lo, hi := collapsed.Prefill[0], collapsed.Prefill[1]
+	if span := hi.PromptN - lo.PromptN; span >= 256 {
+		t.Fatalf("the collapse fixture left a span of %d tokens (%d and %d); it is meant to fall under the floor, so this gate is not testing what it says",
+			span, lo.PromptN, hi.PromptN)
+	}
+	if collapsed.PrefillPerSecond != 0 || collapsed.FixedMs != 0 {
+		t.Errorf("a fit through a collapsed span produced figures: %v tok/s, fixed %v ms; want the refusal's 0/0",
+			collapsed.PrefillPerSecond, collapsed.FixedMs)
 	}
 }
 
