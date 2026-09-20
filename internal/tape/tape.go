@@ -1100,6 +1100,28 @@ type PrefillPoint struct {
 	// correctly cold probe looks like. A fit refused on this ground names
 	// the point.
 	CacheN int `json:"cache_n,omitempty"`
+	// PromptBytes is how many bytes of prompt this point sent, beside the
+	// PromptN tokens the server made of them (TTP-144, lead, 2026-09-20).
+	//
+	// The pair is a measurement of this model's tokenizer on this kind of
+	// text, and it is the conversion the run needs: the length at which
+	// prefill stops being mostly fixed cost is argued in tokens, and the
+	// prefix a run actually sends has to be counted in bytes, because a
+	// verifier re-derives it without the model (RunSummary.PromptTrimChars
+	// says why). Nothing else in the tape carries both ends of that
+	// conversion.
+	//
+	// It is bytes and not characters because Go's len is bytes and these are
+	// byte-level BPE tokenizers: bytes per token moves from about 3.3 for
+	// dense code to 5.2 for English prose, while characters per token moves
+	// from 1.4 for Korean to 5.1 for English, which is three different
+	// conversions instead of one. The prompt set measures itself the same
+	// way and says so at length.
+	//
+	// 0 on a tape written before the field, and on a point whose prompt the
+	// recorder did not keep. A reader with only PromptN has the token count
+	// and no way to price it in bytes, which is the state this field ends.
+	PromptBytes int `json:"prompt_bytes,omitempty"`
 }
 
 // ReplayProbe is the longer probe prompt sent a second time, to see what this
