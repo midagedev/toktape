@@ -1071,6 +1071,23 @@ type LimitSummary struct {
 	// until the slowest live stream had MinTokens, so on that box the run is
 	// longer than was asked for and the card should say so.
 	CutAt time.Duration `json:"cut_at,omitempty"`
+	// Grace is how long past For the cut was deliberately held back for a
+	// reason other than MinTokens, so a reader can tell a run that went long
+	// on purpose from one whose slowest stream was still under the floor
+	// (lead, TTP-170, 2026-09-21).
+	//
+	// It exists because on a server that counts tokens only in a closing
+	// `usage` message — Ollama, LM Studio, anything OpenAI-compatible that
+	// reports no timings — a stream cut by the clock sends no count at all,
+	// so the cut does not shorten the measurement, it destroys it: the card
+	// prints `Sample ?` and the run is worthless. On llama.cpp the same cut
+	// costs nothing, because a cut stream still reports its timings. Where
+	// the cut is that expensive the clock waits, bounded, for the stream to
+	// end on its own.
+	//
+	// 0 is both "no grace was allowed" and "none was needed"; CutAt against
+	// For says which. Grace is the allowance, not the spend.
+	Grace time.Duration `json:"grace,omitempty"`
 	// CappedStreams is how many answered streams stopped because they reached
 	// MaxTokens rather than because the model had finished (TTP-135, lead,
 	// 2026-09-19).
