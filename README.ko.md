@@ -303,8 +303,17 @@ toktape publish ~/.toktape/runs/<id>.toktape
 `--private`는 검색에서 빼고 `--no-text`는 텍스트를 집에 두며, 둘 다
 `~/.toktape/config.toml`에서 기본으로 정할 수 있습니다. `toktape profile`은
 작성자를 기계마다 한 번 정하고, `--title`/`--note`는 실행 하나에 실험 노트를
-붙이고, `publish --edit <id>`는 페이지를 다시 씁니다. 익명 올림에는 **삭제
-토큰**을 한 번만 보여 줍니다 — 그 올림의 유일한 열쇠입니다.
+붙이고, `publish --edit <id>`는 페이지를 다시 씁니다.
+
+올린 실행은 명령 하나로 내립니다: `toktape publish --delete <id>`. 저널
+토큰이 있으면 그 토큰이 열쇠입니다. 익명으로 올렸다면 **삭제 토큰**이 한 번
+출력되면서 `~/.toktape/published.json`에도 남으니 같은 명령이 그대로 통하고,
+실행이 내려가면 그 항목도 같이 지워집니다.
+
+허브 주소는 고정이 아니라 설정입니다. `~/.toktape/config.toml`에
+`service = "https://tapes.example.com"`을 적으면(또는 `TOKTAPE_SERVICE`,
+`--url`) 모든 명령이 직접 띄운 허브를 봅니다. 그 파일의 토큰은 옆에 적힌
+서비스로만 나갑니다. 띄우는 법은 [`web/README.md`](web/README.md)에 있습니다.
 
 사이트는 리더보드가 아니라 검색입니다. 최신순, 모든 행에 카드가 달 주의사항,
 모델·양자화·엔진·GPU·호스트·VRAM 필터. 전부 터미널에서도 읽힙니다:

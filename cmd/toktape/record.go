@@ -531,6 +531,13 @@ func saveRun(outDir string, tp *tape.Tape, wantCard bool) (artifacts, error) {
 func shareHint(outDir string, tp *tape.Tape, a artifacts) string {
 	var b strings.Builder
 	b.WriteString(streamFailureBlock(tp))
+	// What the run decided before its first request, in one line (TTP-150):
+	// two cards with different prompt lengths are two plans, and the line is
+	// where a reader sees which limit chose this one. Not on the card — the
+	// card's Prefill row already carries the length; this is the why.
+	if line := recorder.PlanLine(&tp.Summary, tp.Summary.Concurrency); line != "" {
+		fmt.Fprintf(&b, "· %s\n", line)
+	}
 	if a.tape != "" {
 		fmt.Fprintf(&b, "✓ Tape   %s\n", tildePath(a.tape))
 	}

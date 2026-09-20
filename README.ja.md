@@ -309,8 +309,18 @@ toktape publish ~/.toktape/runs/<id>.toktape
 `--private` は検索から外し、`--no-text` はテキストを家に置き、どちらも
 `~/.toktape/config.toml` で既定にできます。`toktape profile` は作者名を
 マシンごとに一度決め、`--title`/`--note` は実行 1 件に実験メモを付け、
-`publish --edit <id>` はページを書き直します。匿名アップロードには**削除
-トークン**を一度だけ表示します — そのアップロードの唯一の鍵です。
+`publish --edit <id>` はページを書き直します。
+
+公開した実行はコマンド一つで取り下げられます: `toktape publish --delete <id>`。
+ジャーナルトークンがあればそれが鍵です。匿名で上げた場合は**削除トークン**が
+一度表示され、`~/.toktape/published.json` にも保存されるので同じコマンドが
+そのまま使えます。実行を取り下げると、その項目も一緒に消えます。
+
+ハブのアドレスは固定ではなく設定です。`~/.toktape/config.toml` に
+`service = "https://tapes.example.com"` と書けば（`TOKTAPE_SERVICE` や
+`--url` でも）、すべてのコマンドが自分で立てたハブを向きます。そのファイルの
+トークンは、隣に書かれたサービスにしか送られません。立て方は
+[`web/README.md`](web/README.md) にあります。
 
 サイトはリーダーボードではなく検索です。新しい順、すべての行にカードが付ける
 但し書き、モデル・量子化・エンジン・GPU・ホスト・VRAM のフィルタ。すべては

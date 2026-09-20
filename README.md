@@ -317,8 +317,17 @@ half a claim. `--private` keeps a run out of the search, `--no-text` leaves
 the text home, and both can be defaulted in `~/.toktape/config.toml`.
 `toktape profile` names the author once per machine; `--title`/`--note`
 attach a lab-note to one run; `publish --edit <id>` rewrites what the page
-shows. Every anonymous upload prints a **delete token** once — the only key
-to that upload.
+shows.
+
+Taking a run down is one command, `toktape publish --delete <id>`. With a
+journal token it is your token that opens it; an anonymous upload's **delete
+token** is printed once and kept in `~/.toktape/published.json`, so the
+command works there too, and the entry goes when the run does.
+
+The hub is a setting, not a fixture. `service = "https://tapes.example.com"`
+in `~/.toktape/config.toml` (or `TOKTAPE_SERVICE`, or `--url`) points every
+command at your own, and the token in that file is only ever sent to the
+service named beside it. [`web/README.md`](web/README.md) is how to host one.
 
 The site is a search, not a leaderboard: newest first, every row with the
 caveats its card would print, filters for model, quantisation, engine, GPU,
