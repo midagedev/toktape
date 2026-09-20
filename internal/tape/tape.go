@@ -1161,6 +1161,18 @@ type ProbeSummary struct {
 	FixedMs float64 `json:"fixed_ms,omitempty"`
 	// Replay is the second send of the longer prompt, when it was made.
 	Replay *ReplayProbe `json:"replay,omitempty"`
+	// Concurrent is what the server did with several prefills at once, when
+	// the run was going to send several (lead, 2026-09-20). nil on a
+	// one-stream run, on a tape from before the field, and when the point
+	// was not observed.
+	//
+	// The plan first assumed it: half the one-stream rate, from one 6k-token
+	// take. The next take on the same box, at 1.6k tokens, ran at a fifth —
+	// 574 tok/s aggregate against a probed 2963 — and the prefill the plan
+	// promised in 4.3 s took 10. How an engine shares a batch between slots
+	// is the engine's business and changes with the prompt length; it is
+	// measured here, once, the way the run will actually load the server.
+	Concurrent *ConcurrentPrefill `json:"concurrent,omitempty"`
 	// Salt is the nonce the short fit prompt opened with (lead, 2026-09-20):
 	// base36 of twice the unix second the pass started. The long prompt's
 	// salt is its base36 successor, which keeps the two from sharing a first
@@ -1192,6 +1204,23 @@ type ProbeSummary struct {
 	// that does not report faults.
 	MajFaults         uint64  `json:"maj_faults,omitempty"`
 	MajFaultsPerToken float64 `json:"maj_faults_per_token,omitempty"`
+}
+
+// ConcurrentPrefill is one burst of probe prompts sent together.
+type ConcurrentPrefill struct {
+	// Streams is how many went out at once — the run's own concurrency.
+	Streams int `json:"streams"`
+	// PromptN is the prompt tokens the server evaluated, summed over them.
+	PromptN int `json:"prompt_n"`
+	// WallMs is from the first request leaving to the last first token
+	// arriving: the client's clock, because no single server figure spans
+	// requests. It is the one client-timed figure in the probe, and it is
+	// the quantity the plan needs — how long until every stream is decoding.
+	WallMs float64 `json:"wall_ms"`
+	// PerSecond is PromptN over WallMs: the aggregate prefill rate under
+	// this load, fixed costs and queueing included, deliberately — the plan
+	// budgets wall time, not marginal cost.
+	PerSecond float64 `json:"per_second"`
 }
 
 // PrefillPoint is one probe request: how many prompt tokens went out and what
