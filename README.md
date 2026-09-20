@@ -241,7 +241,8 @@ whether N × per-stream really is the aggregate.
 A recording ends on the clock — twenty seconds by default, `--for 30s` to aim
 it — because the same 256 tokens is two seconds on one machine and two
 minutes on another; nothing is cut under 64 tokens, and `--n-predict` is the
-cap that also applies (naming it turns the clock off). `--prompt` (repeatable)
+cap that also applies (naming it turns the clock off). `--sessions` past
+eight needs `--max-sessions` naming the same number; `--prompt` (repeatable)
 or `--prompts` (a JSONL file, one round per line) replace the built-in set;
 `--spec-n-max 3,5` runs the set once per speculative `n_max` into one tape.
 
@@ -258,7 +259,8 @@ the card.
 is `?` on the terminal, empty in exports, `NULL` in sql.
 
 Runs append to `runs.tsv` beside the tapes, so a sweep is one table; label
-runs with `--tag` and `--note` and rebuild the ledger any time:
+runs with `--tag` and `--note`, and `log` takes `--sort`, `--model`, `--tag`
+and `--limit N` to read it back:
 
 ```sh
 toktape --tag ngl=40 --note "fa on"     # record, labelled
