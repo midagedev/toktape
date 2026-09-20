@@ -102,6 +102,11 @@ func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 	r.resolvePromptTrim(setTexts(rounds[0]))
 	for k := range rounds {
 		r.trimSetPrompts(rounds[k])
+		// Each round's prompts are their own size, so the slot's context is
+		// asked once per round, after that round's trim (TTP-148).
+		if err := r.capTokensToSlotCtx(ctx, rounds[k]); err != nil {
+			return nil, err
+		}
 		if shaped, err := r.shapeOpenAIRequests(rounds[k]); err != nil {
 			return nil, err
 		} else {

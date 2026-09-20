@@ -128,6 +128,12 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	reqs := buildRequests(opts, r.model.ActiveBytesPerToken)
 	r.resolvePromptTrim(setTexts(reqs))
 	r.trimSetPrompts(reqs)
+	// The trim settled what the prompts will weigh; the slot's context gets
+	// the next word, because it is the number the server will refuse on
+	// (TTP-148).
+	if err := r.capTokensToSlotCtx(ctx, reqs); err != nil {
+		return nil, err
+	}
 	if shaped, err := r.shapeOpenAIRequests(reqs); err != nil {
 		return nil, err
 	} else {

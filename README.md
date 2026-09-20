@@ -162,7 +162,10 @@ toktape play ~/.toktape/runs/<id>.toktape --speed 2
   on purpose. A run sends a prefix of each, sized from the probe's fit so the
   fixed cost stays under a twentieth of the prefill it measures, and records
   how many characters it sent; the published record is verified against the
-  set, prefix and all.
+  set, prefix and all. The slot's context has the next word: the run's answer
+  budget is lowered into what the slot holding that prompt can actually hold,
+  and a prompt no slot can hold is refused before the first request, with
+  both numbers.
 - **The server's figures are the record, the client's are the check.** Every
   chunk brings the server's own rates and token counts; toktape recomputes
   them from its own clock and records whether the two agreed within 2

@@ -85,7 +85,10 @@ func exl3Server(t *testing.T, props string) *httptest.Server {
 		_, _ = w.Write([]byte(props))
 	})
 	mux.HandleFunc("/slots", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`[{"id":0,"is_processing":false,"n_ctx":2048,"n_past":0}]`))
+		// 32768, the hero rig's room: a tighter slot would end these runs at
+		// the answer cap the slot forces (TTP-148), and the exl3 surface is
+		// the story here, not the slot.
+		_, _ = w.Write([]byte(`[{"id":0,"is_processing":false,"n_ctx":32768,"n_past":0}]`))
 	})
 	mux.HandleFunc("/apply-template", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

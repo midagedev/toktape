@@ -62,7 +62,10 @@ func pacedServer(t *testing.T, interval time.Duration, maxTokens int) *paced {
 		_, _ = w.Write([]byte(propsJSON))
 	})
 	mux.HandleFunc("/slots", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`[{"id":0,"is_processing":true,"n_ctx":2048,"n_past":12}]`))
+		// 32768, the hero rig's room: a tighter slot would end these runs at
+		// the answer cap the slot forces (TTP-148), and the clock is the story
+		// here, not the slot.
+		_, _ = w.Write([]byte(`[{"id":0,"is_processing":true,"n_ctx":32768,"n_past":12}]`))
 	})
 	mux.HandleFunc("/apply-template", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"prompt": "<|user|>hi<|assistant|>"})

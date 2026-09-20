@@ -63,7 +63,11 @@ func cliServer(t *testing.T) *httptest.Server {
 		_, _ = w.Write([]byte(cliProps))
 	})
 	mux.HandleFunc("/slots", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`[{"id":0,"is_processing":true,"n_ctx":2048,"n_past":12}]`))
+		// 32768, the hero rig's room: the slot's context caps the answer a
+		// run asks for (TTP-148, 2026-09-20), and a tight fixture would make
+		// that cap every CLI test's story instead of the flag each one is
+		// about.
+		_, _ = w.Write([]byte(`[{"id":0,"is_processing":true,"n_ctx":32768,"n_past":12}]`))
 	})
 	mux.HandleFunc("/apply-template", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"prompt": "<|user|>hi<|assistant|>"})

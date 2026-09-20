@@ -70,10 +70,15 @@ func fakeMux(t *testing.T) *http.ServeMux {
 		_, _ = w.Write([]byte(propsJSON))
 	})
 	mux.HandleFunc("/slots", func(w http.ResponseWriter, r *http.Request) {
+		// 32768 a slot, the hero rig's own room: the slot's context caps the
+		// answer cap a run asks for (TTP-148, 2026-09-20), and a fixture this
+		// tight would make that cap the story of every test here instead of
+		// the thing each one is about. A run against the tight world has its
+		// own file.
 		_, _ = w.Write([]byte(`[
-		  {"id":0,"is_processing":true,"n_ctx":2048,"n_past":312},
-		  {"id":1,"is_processing":true,"n_ctx":2048,"n_past":40},
-		  {"id":2,"is_processing":false,"n_ctx":2048,"n_past":0}
+		  {"id":0,"is_processing":true,"n_ctx":32768,"n_past":312},
+		  {"id":1,"is_processing":true,"n_ctx":32768,"n_past":40},
+		  {"id":2,"is_processing":false,"n_ctx":32768,"n_past":0}
 		]`))
 	})
 	mux.HandleFunc("/apply-template", func(w http.ResponseWriter, r *http.Request) {
