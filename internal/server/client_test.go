@@ -495,3 +495,66 @@ func TestDiscoverPrefersBusyOverRefused(t *testing.T) {
 		t.Fatalf("Discover error = %v, want ErrBusy", err)
 	}
 }
+
+// Tokenize is the server's own count, asked for without the special tokens
+// so the number is the content's, and any failure is an error the caller
+// prices around: a non-200, a body that is not the token array, and a route
+// that is not there at all (2026-09-20, run plan).
+func TestTokenizeCountsTheServersOwnTokens(t *testing.T) {
+	var gotAddSpecial *bool
+	var gotContent string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/tokenize", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Content     string `json:"content"`
+			AddSpecial  *bool  `json:"add_special"`
+			NotAContent string `json:"prompt"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		gotContent, gotAddSpecial = in.Content, in.AddSpecial
+		tokens := make([]int, 0, len(in.Content)/4)
+		for i := 0; i < len(in.Content)/4; i++ {
+			tokens = append(tokens, i)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"tokens": tokens})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	n, err := New(srv.URL).Tokenize(context.Background(), "sixteen chars here!")
+	if err != nil {
+		t.Fatalf("Tokenize: %v", err)
+	}
+	if want := len("sixteen chars here!") / 4; n != want {
+		t.Errorf("Tokenize = %d tokens, want %d (the route's own arithmetic)", n, want)
+	}
+	if gotContent != "sixteen chars here!" {
+		t.Errorf("content = %q, want the string asked for", gotContent)
+	}
+	if gotAddSpecial == nil || *gotAddSpecial {
+		t.Error("add_special not sent as false; the count must be the content's own")
+	}
+
+	// A body that is not a token array is an error, never a count.
+	mux2 := http.NewServeMux()
+	mux2.HandleFunc("/tokenize", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"error":"nope"}`))
+	})
+	srv2 := httptest.NewServer(mux2)
+	t.Cleanup(srv2.Close)
+	if _, err := New(srv2.URL).Tokenize(context.Background(), "x"); err == nil {
+		t.Error("Tokenize on a body with no tokens array returned nil error")
+	}
+
+	// A server without the route (every OpenAI-compatible one) is an error
+	// too: the caller prices, it does not guess a zero.
+	mux3 := http.NewServeMux()
+	srv3 := httptest.NewServer(mux3)
+	t.Cleanup(srv3.Close)
+	if _, err := New(srv3.URL).Tokenize(context.Background(), "x"); err == nil {
+		t.Error("Tokenize on a server with no /tokenize returned nil error")
+	}
+}

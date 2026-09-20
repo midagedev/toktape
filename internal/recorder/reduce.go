@@ -81,20 +81,28 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 			NSlots:  r.props.TotalSlots,
 			CtxSize: r.props.CtxSize(),
 		},
-		Model:           r.model,
-		Host:            r.host,
-		Placement:       r.place,
-		Memory:          mem,
-		Concurrency:     concurrency,
-		PromptSet:       r.promptSet,
-		PromptTrimChars: r.promptTrim,
-		Timings:         timings,
-		Aggregate:       agg,
-		Rounds:          rounds,
-		PerRound:        perRound,
-		Spread:          spread,
-		Cache:           cache,
-		Contention:      contention,
+		Model:       r.model,
+		Host:        r.host,
+		Placement:   r.place,
+		Memory:      mem,
+		Concurrency: concurrency,
+		PromptSet:   r.promptSet,
+		// What the plan did to the set before the first request went out
+		// (lead, 2026-09-20): the salt line, whole, exactly as sent, and
+		// the token length every set prompt was cut to — 0 when whole.
+		// PromptTrimChars stays 0 on a planned run: a token-sized trim
+		// gives each prompt its own character length, and the character
+		// count would claim a uniformity the tokenizer never had.
+		PromptSalt:       r.planSalt,
+		PromptTrimTokens: r.planTrimTokens,
+		Plan:             r.runPlan,
+		Timings:          timings,
+		Aggregate:        agg,
+		Rounds:           rounds,
+		PerRound:         perRound,
+		Spread:           spread,
+		Cache:            cache,
+		Contention:       contention,
 		// What was allowed to end this generation and what did (TTP-76). CutAt
 		// is 0 unless the clock actually ended something, so a reader tells a
 		// cut run from a completed one by that field alone, and CutAt > For

@@ -573,3 +573,67 @@ func TestPublicViewAcceptsATrimmedRunWithItsCountAndNothingElse(t *testing.T) {
 		t.Errorf("PromptSet = %q on a run off by one character, want blank", got)
 	}
 }
+
+// A run the plan salted and trimmed to tokens (2026-09-20, run plan): the
+// verifier strips the recorded salt from the front, and what is left must be
+// a non-empty rune-prefix of this binary's copy of the set prompt at that
+// index — how long a prefix is the run's business, measured on the model's
+// own tokenizer, and that it is a prefix of the published text is the claim.
+// Four shapes fail: a text that does not start with the recorded salt, one
+// that is not a prefix of the set's own text, an empty one, and a run whose
+// summary names a salt it did not carry. A prompt the target already covered
+// goes whole behind the salt, and the whole prompt is a prefix of itself.
+func TestPublicViewAcceptsASaltedTokenTrimmedRunAndNothingElse(t *testing.T) {
+	const n, trim = 2, 800
+	salt := "[run dlk4h11s9o5c]\n\n"
+	build := func(summarySalt string, content func(string) string) *tape.Tape {
+		tp := &tape.Tape{}
+		tp.Summary.Concurrency = n
+		tp.Summary.PromptSet = server.PromptSetID
+		tp.Summary.PromptSalt = summarySalt
+		tp.Summary.PromptTrimTokens = trim
+		for i, req := range server.DefaultPrompts(n) {
+			tp.Requests = append(tp.Requests, tape.RequestRecord{
+				Index:  i,
+				Prompt: tape.PromptRecord{Messages: []tape.Message{{Role: "user", Content: content(req.Messages[0].Content)}}},
+			})
+		}
+		return tp
+	}
+	prefix := func(s string, runes int) string { return string([]rune(s)[:runes]) }
+
+	// The honest run: salt in front, a prefix behind it.
+	honest := build(salt, func(s string) string { return salt + prefix(s, 4000) })
+	if got := PublicView(honest, WithText).Summary.PromptSet; got != server.PromptSetID {
+		t.Errorf("PromptSet = %q on a run that sent the salted prefix and said so, want %q", got, server.PromptSetID)
+	}
+	// A prompt the target covered goes whole behind the salt, and the whole
+	// text is a prefix of itself.
+	whole := build(salt, func(s string) string { return salt + s })
+	if got := PublicView(whole, WithText).Summary.PromptSet; got != server.PromptSetID {
+		t.Errorf("PromptSet = %q on a run whose prompts the target already covered, want %q", got, server.PromptSetID)
+	}
+
+	// Not the recorded salt on the front.
+	noSalt := build(salt, func(s string) string { return prefix(s, 4000) })
+	if got := PublicView(noSalt, WithText).Summary.PromptSet; got != "" {
+		t.Errorf("PromptSet = %q on a run whose text does not start with the recorded salt, want blank", got)
+	}
+	// Not a prefix of the set's own text behind the salt.
+	notPrefix := build(salt, func(s string) string { return salt + "x" + prefix(s, 100) })
+	if got := PublicView(notPrefix, WithText).Summary.PromptSet; got != "" {
+		t.Errorf("PromptSet = %q on a run that sent something other than the set's text behind the salt, want blank", got)
+	}
+	// Empty behind the salt: a stream that sent none of the set did not send
+	// the set.
+	empty := build(salt, func(string) string { return salt })
+	if got := PublicView(empty, WithText).Summary.PromptSet; got != "" {
+		t.Errorf("PromptSet = %q on a run that sent only the salt, want blank", got)
+	}
+	// A summary that names no salt while the texts carry one: the comparison
+	// is then whole-prompt equality, and the salt breaks it.
+	unrecorded := build("", func(s string) string { return salt + prefix(s, 4000) })
+	if got := PublicView(unrecorded, WithText).Summary.PromptSet; got != "" {
+		t.Errorf("PromptSet = %q on a run whose summary records no salt, want blank: the count is the only way the verifier knows what to strip", got)
+	}
+}

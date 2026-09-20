@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
@@ -20,35 +19,30 @@ import (
 // the request. The refusal names none of that usefully. The recorder already
 // reads the slot count to refuse more sessions than slots, and /slots carries
 // each slot's n_ctx; the missing act was to let the answer cap meet that
-// number too. Two rules, in the order they bite:
+// number too.
+//
+// Since the run plan (2026-09-20, plan.go) this is step (e) of one decision:
+// the plan trimmed the prompts, and the room they left is what the cap is
+// lowered into. Two rules, in the order they bite:
 //
 //   - a prompt the slot cannot hold at all is refused here, with both numbers
 //     and the lever that moves them, before a stream is wasted on the
 //     server's generic 500;
 //   - a cap the slot cannot hold is lowered to one it can, on every request
 //     of the run (one run sends one shape), with a warning that names the
-//     asked number, the cap sent, the slot and the priced prompt.
+//     asked number, the cap sent, the slot and the longest prompt.
 //
 // Unknown is not a limit, in this repo's first rule: an OpenAI-compatible
 // server numbers no slots (TTP-99), and a llama-server started with
 // --no-slots answers 501 — both leave the cap as it was.
 
-const (
-	// slotCtxBytesPerToken prices a prompt in tokens before the server has
-	// counted it. 3.5 is the floor of the published set's own measured band
-	// (3.0 bytes/token dense code to 5.2 English prose, internal/server/
-	// prompts.go, 2026-09-20), so the estimate errs toward more tokens and a
-	// tighter cap: a tokenizer that prices this prompt denser still gets a
-	// shorter answer, never a refused one.
-	slotCtxBytesPerToken = 3.5
-	// slotCtxTemplateTokens covers what the chat template adds around the
-	// messages — the server counts the templated text, and the recorder
-	// prices only the content it sends. 192 is generous against the GLM and
-	// Qwen templates this tool has recorded (~80–150 tokens with their system
-	// lines and generation prompts), because the margin's only job is to keep
-	// the capped request inside the slot.
-	slotCtxTemplateTokens = 192
-)
+// slotCtxTemplateTokens covers what the chat template adds around the
+// messages — the server counts the templated text, and the recorder
+// prices or counts only the content it sends. 192 is generous against the GLM
+// and Qwen templates this tool has recorded (~80–150 tokens with their system
+// lines and generation prompts), because the margin's only job is to keep
+// the capped request inside the slot.
+const slotCtxTemplateTokens = 192
 
 // ErrPromptOverflowsSlot is returned when the longest prompt cannot fit a
 // slot's context even with no answer at all. The CLI maps it to exit code 1.
@@ -56,11 +50,15 @@ var ErrPromptOverflowsSlot = errors.New("recorder: a prompt will not fit its slo
 
 // SlotCtxError is ErrPromptOverflowsSlot with the numbers that name the fix.
 type SlotCtxError struct {
-	// PromptTokens is the estimate the refusal is based on, priced from
-	// PromptBytes at slotCtxBytesPerToken plus the template margin.
+	// PromptTokens is the figure the refusal is based on: counted by the
+	// server's own tokenizer when Counted, priced from PromptBytes at
+	// planFallbackBytesPerToken otherwise. The template's own margin is
+	// named beside it, not folded in.
 	PromptTokens int
 	// PromptBytes is the content the run would have sent.
 	PromptBytes int
+	// Counted says PromptTokens came from /tokenize rather than the price.
+	Counted bool
 	// SlotCtx is the smallest n_ctx the server's own /slots reported.
 	SlotCtx int
 	// URL is the server that reported it.
@@ -68,24 +66,27 @@ type SlotCtxError struct {
 }
 
 func (e *SlotCtxError) Error() string {
-	return fmt.Sprintf("the prompt is ~%d tokens (%d bytes at %.1f bytes/token plus the template) and the slot's context is %d; send a shorter prompt, or raise the slot's context (llama-server's -c, which -np divides) — %s",
-		e.PromptTokens, e.PromptBytes, slotCtxBytesPerToken, e.SlotCtx, e.URL)
+	if e.Counted {
+		return fmt.Sprintf("the prompt is ~%d tokens (counted by the server's own tokenizer) and with the template's %d the slot's context is %d; send a shorter prompt, or raise the slot's context (llama-server's -c, which -np divides) — %s",
+			e.PromptTokens, slotCtxTemplateTokens, e.SlotCtx, e.URL)
+	}
+	return fmt.Sprintf("the prompt is ~%d tokens (%d bytes priced at %.1f bytes/token) and with the template's %d the slot's context is %d; send a shorter prompt, or raise the slot's context (llama-server's -c, which -np divides) — %s",
+		e.PromptTokens, e.PromptBytes, planFallbackBytesPerToken, slotCtxTemplateTokens, e.SlotCtx, e.URL)
 }
 
 // Is makes errors.Is(err, ErrPromptOverflowsSlot) true for a *SlotCtxError.
 func (e *SlotCtxError) Is(target error) bool { return target == ErrPromptOverflowsSlot }
 
-// capTokensToSlotCtx lowers the answer cap into the slot the requests will
-// land in, or refuses a run whose prompt cannot land at all. It runs after
-// the trim has settled the prompt sizes and before the requests are shaped,
-// so the cap meets the bytes as they will be sent.
-func (r *run) capTokensToSlotCtx(ctx context.Context, reqs []server.StreamRequest) error {
-	if r.kind == tape.ServerOpenAI || len(reqs) == 0 {
-		return nil
+// smallestSlotCtx is the smallest n_ctx the server's /slots reported, 0 when
+// it reported none or was never asked: an OpenAI-compatible server has no
+// /slots (TTP-99), and unknown is not a limit.
+func (r *run) smallestSlotCtx(ctx context.Context) int {
+	if r.kind == tape.ServerOpenAI {
+		return 0
 	}
 	slots, err := r.client.Slots(ctx)
-	if err != nil || len(slots) == 0 {
-		return nil // unknown is not a limit: --no-slots answers 501
+	if err != nil {
+		return 0
 	}
 	slotCtx := 0
 	for _, s := range slots {
@@ -93,22 +94,36 @@ func (r *run) capTokensToSlotCtx(ctx context.Context, reqs []server.StreamReques
 			slotCtx = s.NCtx
 		}
 	}
-	if slotCtx <= 0 {
-		return nil // no slot named a context; nothing observed to act on
+	return slotCtx
+}
+
+// capAnswersToSlot lowers the answer cap into the slot the requests will
+// land in, or refuses a run whose prompt cannot land at all (TTP-148, now
+// step (e) of the plan). It runs after the trim has settled the prompt
+// sizes, so the cap meets the prompts as they will be sent — counted by the
+// server when the plan counted, priced when it priced.
+func (r *run) capAnswersToSlot(ctx context.Context, reqs []server.StreamRequest, slotCtx int) error {
+	if slotCtx <= 0 || len(reqs) == 0 {
+		return nil // unknown is not a limit: --no-slots answers 501
 	}
 	// One run sends one shape, so the longest prompt decides for all of them:
 	// a per-request cap would give the streams different budgets and the
 	// tape one recorded number.
-	longest, longestBytes := 0, 0
+	longest, longestBytes, counted := 0, 0, false
 	for i := range reqs {
-		if est, b := pricedPrompt(reqs[i]); est > longest {
-			longest, longestBytes = est, b
+		if est, b, c := r.requestTokens(ctx, &reqs[i]); est > longest {
+			longest, longestBytes, counted = est, b, c
 		}
 	}
-	allowed := slotCtx - longest
+	if r.runPlan != nil && longest > r.runPlan.LongestPromptTokens {
+		// A multi-round run caps per round and records the longest prompt
+		// any round sent — the number the run's cap was set against.
+		r.runPlan.LongestPromptTokens = longest
+	}
+	allowed := slotCtx - longest - slotCtxTemplateTokens
 	if allowed < tape.MinCutTokens {
 		return &SlotCtxError{
-			PromptTokens: longest, PromptBytes: longestBytes,
+			PromptTokens: longest, PromptBytes: longestBytes, Counted: counted,
 			SlotCtx: slotCtx, URL: r.client.BaseURL(),
 		}
 	}
@@ -128,15 +143,16 @@ func (r *run) capTokensToSlotCtx(ctx context.Context, reqs []server.StreamReques
 	return nil
 }
 
-// pricedPrompt estimates the tokens a request's prompt will occupy in the
-// slot: its content bytes at the measured floor, plus the template's own.
-func pricedPrompt(q server.StreamRequest) (tokens, bytes int) {
-	b := len(q.Prompt)
-	if !q.IsCompletion() {
-		b = 0
-		for _, m := range q.Messages {
-			b += len(m.Content)
+// requestTokens is one request's prompt as the slot will hold it: counted by
+// the server's tokenizer when the plan counted the set, priced otherwise —
+// the user's own prompts are never sent to /tokenize, so they are priced
+// exactly as they always were. counted reports which ruler measured.
+func (r *run) requestTokens(ctx context.Context, q *server.StreamRequest) (tokens, bytes int, counted bool) {
+	b := len(*promptTextOf(q))
+	if q.Set == server.PromptSetID && r.planTokenized {
+		if n, err := r.client.Tokenize(ctx, *promptTextOf(q)); err == nil {
+			return n, b, true
 		}
 	}
-	return int(math.Ceil(float64(b)/slotCtxBytesPerToken)) + slotCtxTemplateTokens, b
+	return pricedTokens(b), b, false
 }

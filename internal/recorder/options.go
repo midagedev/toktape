@@ -379,20 +379,6 @@ func (o Options) Sessions() int {
 	return o.normalize().Concurrency
 }
 
-// setTexts is the prompt texts of the set's own requests in reqs, in order,
-// and nil when there are none. The trim is sized against the texts the run
-// is actually sending, so a concurrency-N run's budget is bounded by the N
-// prompts it sends rather than the whole 21.
-func setTexts(reqs []server.StreamRequest) []string {
-	var out []string
-	for i := range reqs {
-		if reqs[i].Set == server.PromptSetID && len(reqs[i].Messages) > 0 {
-			out = append(out, reqs[i].Messages[0].Content)
-		}
-	}
-	return out
-}
-
 // promptSetOf is the set every one of these requests came from, or "" when
 // they did not all come from one. A mixed batch has no comparison set, and
 // the honest answer for it is the same as for a user's own prompts (TTP-112).
@@ -409,76 +395,15 @@ func promptSetOf(reqs []server.StreamRequest) string {
 	return set
 }
 
-// trimFixedShare is how many times over the prefill must outweigh the
-// per-request fixed cost before the card's "prefill" is a throughput: the
-// trim targets prompt lengths where fixed/prefill ≤ 1/20, five percent
-// (TTP-144, lead, 2026-09-20). The delegate spec that grew the set measured
-// 12% at the old 283 tokens and called that the defect this exists to fix;
-// a twentieth is where the share stops being a correction worth carrying.
-const trimFixedShare = 20
-
-// setTrimChars returns how many characters of each set prompt this run
-// should send, from the fit the probe measured (TTP-144, lead, 2026-09-20).
-//
-// The target is argued in tokens — the unit the fixed-cost ratio lives in —
-// and converted with the probe's own measured bytes-per-token, the larger of
-// the two points so the trim errs short: T ≥ trimFixedShare × FixedMs ×
-// rate, floored at probeLongTokens, the length the probe already treats as
-// one honest long point; a machine whose fit says even that is more prefill
-// than the share demands gets the whole question at probe scale, not a
-// sliver. The byte budget becomes characters by walking each set prompt's
-// own runes, so a CJK prompt's three-byte characters bind the count and the
-// Latin ones send less than the budget — erring short again, the safe
-// direction on both ends.
-//
-// 0 means no trim: no probe, a refused fit, no measured conversion to
-// convert with (PromptBytes unpopulated — a tape from before the field), or
-// a budget the whole set already fits inside. A run that did not measure
-// the machine does not get to act on the measurement.
-func setTrimChars(p *tape.ProbeSummary, prompts []string) int {
-	if p == nil || p.PrefillPerSecond <= 0 {
-		return 0
-	}
-	bytesPerToken := 0.0
-	for _, pt := range p.Prefill {
-		if pt.PromptN > 0 && pt.PromptBytes > 0 {
-			if v := float64(pt.PromptBytes) / float64(pt.PromptN); v > bytesPerToken {
-				bytesPerToken = v
-			}
-		}
-	}
-	if bytesPerToken == 0 {
-		return 0
-	}
-	tokens := int(float64(trimFixedShare) * p.FixedMs / 1000 * p.PrefillPerSecond)
-	if tokens < probeLongTokens {
-		tokens = probeLongTokens
-	}
-	budget := float64(tokens) * bytesPerToken
-
-	n := -1
-	allWhole := true
-	for _, text := range prompts {
-		runes, size := 0, 0
-		for _, r := range text {
-			if float64(size+len(string(r))) > budget {
-				break
-			}
-			size += len(string(r))
-			runes++
-		}
-		if runes < len([]rune(text)) {
-			allWhole = false
-		}
-		if n < 0 || runes < n {
-			n = runes
-		}
-	}
-	if n < 0 || allWhole {
-		return 0
-	}
-	return n
-}
+// setTrimChars, trimFixedShare and setTexts lived here until 2026-09-20,
+// when the run plan (plan.go) became the single owner of prompt length.
+// The fixed-share rule sized prompts by characters from the probe's own
+// conversion; on the day's real server it trimmed nothing (the probe rate
+// was high, so the share's floor was past the set's whole length) while
+// four same-length prompts tokenized to 4901..7458 and the densest overran
+// its slot. The share's surviving reasoning — prefill dominates its fixed
+// cost only past a certain length — is the justification carried by
+// planPrefillShare's budget now.
 
 // buildRequests returns exactly Concurrency requests. Supplied prompts are
 // cycled to fill the count and copied so that per-stream fields (the

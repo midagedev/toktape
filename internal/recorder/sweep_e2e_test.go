@@ -267,6 +267,13 @@ func TestRecordSpecNMaxRemoteRunsEveryValue(t *testing.T) {
 	for _, p := range server.DefaultPrompts(2) {
 		defaults[p.Messages[0].Content] = true
 	}
+	// 2026-09-20, run plan: the plan puts a per-run salt line in front of
+	// every set prompt (RunSummary.PromptSalt), so what goes over the wire
+	// is the salt plus the default text. The comparison strips the recorded
+	// salt first — the question this clause asks is whether the body carried
+	// the set's own material, and under the plan that is a salted whole
+	// prompt (this server has no /tokenize, /slots or /completion, so
+	// nothing binds and nothing is trimmed).
 	for i, b := range bodies {
 		if want := []string{"3", "5"}[i/2]; nmaxOf(b) != want {
 			t.Errorf("body %d n_max %s, want %s", i, nmaxOf(b), want)
@@ -276,8 +283,16 @@ func TestRecordSpecNMaxRemoteRunsEveryValue(t *testing.T) {
 		}
 		msgs, _ := b["messages"].([]any)
 		m, _ := msgs[0].(map[string]any)
-		if !defaults[fmt.Sprint(m["content"])] {
-			t.Errorf("body %d prompt %q is not a default prompt", i, m["content"])
+		sent := fmt.Sprint(m["content"])
+		if tp.Summary.PromptSalt != "" {
+			if !strings.HasPrefix(sent, tp.Summary.PromptSalt) {
+				t.Errorf("body %d prompt does not start with the recorded salt %q", i, tp.Summary.PromptSalt)
+				continue
+			}
+			sent = sent[len(tp.Summary.PromptSalt):]
+		}
+		if !defaults[sent] {
+			t.Errorf("body %d prompt (salt stripped) is not a default prompt", i)
 		}
 	}
 	s := tp.Summary

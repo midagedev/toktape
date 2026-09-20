@@ -59,12 +59,23 @@ type run struct {
 	// did not all come from one (TTP-112). Read where the requests are built
 	// because that is the only place that knows.
 	promptSet string
-	// promptTrim is how many characters of each set prompt this run sends,
-	// 0 when whole (TTP-144). Resolved once, after the probe measured the
-	// machine; the trim itself is applied to the requests where they are
-	// built, before the template renders them, so the tape records what was
-	// sent.
-	promptTrim int
+	// planSalt is the line this run put in front of every set prompt
+	// (lead, 2026-09-20), "" when none was put; recorded as
+	// RunSummary.PromptSalt so a verifier strips exactly the bytes sent.
+	planSalt string
+	// planTrimTokens is the token length every set prompt was cut to, 0
+	// when they went whole; recorded as RunSummary.PromptTrimTokens.
+	planTrimTokens int
+	// planTokenized says the set's lengths were counted by the server's
+	// /tokenize rather than priced from bytes.
+	planTokenized bool
+	// runPlan is the shape the run decided before its first request — the
+	// target, which limit set it, and the figures it was set against
+	// (lead, 2026-09-20). nil on a run that planned nothing (a user's own
+	// prompts); LongestPromptTokens is filled by the slot-cap step, which
+	// is where the answer cap meets the prompts as sent. Named runPlan,
+	// not plan, because plan is the method that decides it.
+	runPlan *tape.RunPlan
 	// prefill is the prefill measurement pass's own figures (TTP-137), nil
 	// when the run did not make one. Named for the pass, not the schema
 	// type, because run already has a probe method — the attach gate.
@@ -120,18 +131,16 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	// The prefill probe pass (TTP-137): two prompts the set never used,
 	// before the first run request, so the run's own timeline and the
 	// sampler's fault baseline start clean after it. It runs before the
-	// requests are built because its fit is what sizes the prefix of each
-	// set prompt this run sends (TTP-144) — the measurement has to exist
+	// requests are built because its fit is one of the ceilings the run
+	// plan takes (2026-09-20, plan.go) — the measurement has to exist
 	// before the thing it measures for.
 	r.prefillProbe(ctx)
 
 	reqs := buildRequests(opts, r.model.ActiveBytesPerToken)
-	r.resolvePromptTrim(setTexts(reqs))
-	r.trimSetPrompts(reqs)
-	// The trim settled what the prompts will weigh; the slot's context gets
-	// the next word, because it is the number the server will refuse on
-	// (TTP-148).
-	if err := r.capTokensToSlotCtx(ctx, reqs); err != nil {
+	// The run plan: one owner for the salt, the prompt length and the
+	// answer cap, decided together against the probe's fit and the slot's
+	// context before the first request goes out (lead, 2026-09-20).
+	if err := r.plan(ctx, reqs); err != nil {
 		return nil, err
 	}
 	if shaped, err := r.shapeOpenAIRequests(reqs); err != nil {

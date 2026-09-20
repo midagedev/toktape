@@ -91,22 +91,26 @@ func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 	// The prefill probe pass (TTP-137), once per tape and first of all —
 	// before round one's first request, so no round's cache picture or
 	// fault baseline sees it, and before the rounds are built because its
-	// fit sizes the prefix of each set prompt every round sends (TTP-144).
+	// fit is one of the ceilings the run plan takes (2026-09-20, plan.go).
 	r.prefillProbe(ctx)
 
 	rounds := roundRequests(r.opts, r.model.ActiveBytesPerToken)
-	// The trim is one number for the whole tape, sized from the first
-	// round's set texts — a rounds run sends the same set every round, and
-	// where it does not, the set's rounds are still cut to one length so
-	// the recorded number stays the truth for every one of them.
-	r.resolvePromptTrim(setTexts(rounds[0]))
-	for k := range rounds {
-		r.trimSetPrompts(rounds[k])
-		// Each round's prompts are their own size, so the slot's context is
-		// asked once per round, after that round's trim (TTP-148).
-		if err := r.capTokensToSlotCtx(ctx, rounds[k]); err != nil {
+	// The plan is one decision for the whole tape, made from the first
+	// round and applied to every round (lead, 2026-09-20): a rounds run
+	// sends the same set every round, and where it does not, the set's
+	// rounds are still cut to one target so the recorded number stays the
+	// truth for every one of them. Each round's prompts are their own size,
+	// so the slot's room is asked once per round, after that round's trim
+	// (TTP-148).
+	if err := r.plan(ctx, rounds[0]); err != nil {
+		return nil, err
+	}
+	for k := 1; k < len(rounds); k++ {
+		if err := r.applyPlan(ctx, rounds[k]); err != nil {
 			return nil, err
 		}
+	}
+	for k := range rounds {
 		if shaped, err := r.shapeOpenAIRequests(rounds[k]); err != nil {
 			return nil, err
 		} else {

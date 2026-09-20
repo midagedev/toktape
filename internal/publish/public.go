@@ -83,7 +83,7 @@ func PublicView(t *tape.Tape, policy TextPolicy) *tape.Tape {
 	// same rule as everywhere else in this package: the server never
 	// verifies, so the client does, and a claim it cannot confirm is blanked
 	// rather than forwarded.
-	if s.PromptSet != "" && !sentTheSet(out.Requests, s.Concurrency, s.PromptSet, s.PromptTrimChars) {
+	if s.PromptSet != "" && !sentTheSet(out.Requests, s) {
 		s.PromptSet = ""
 	}
 
@@ -197,14 +197,20 @@ func rewritePublicID(out *tape.Tape) {
 // sentTheSet reports whether these requests are the published prompt set,
 // checked against the set this binary carries.
 //
-// A run may have sent a prefix of each set prompt rather than the whole
-// thing (RunSummary.PromptTrimChars, TTP-144): the machine's prefill
-// measured, the length chosen from the measurement. So the comparison is
-// against this binary's own copy trimmed the same way — the recorded count
-// says how much of its own copy the verifier cuts, and what was sent must
-// be exactly that, byte for byte, still. A count that overruns this
-// binary's copy is the same answer as a mismatch: a claim the verifier
-// cannot reproduce.
+// What the comparison allows is what the recorder records, in three layers:
+//
+//   - a salt (RunSummary.PromptSalt, 2026-09-20) is stripped from the front
+//     of the sent text first — the run put it there to defeat the server's
+//     prefix cache, and a text that does not start with the recorded salt is
+//     a claim the tape cannot back;
+//   - PromptTrimTokens > 0 says each prompt was cut to a token length, so
+//     what was sent (after the salt) must be a non-empty rune-prefix of this
+//     binary's own copy at that index — how long a prefix is the run's
+//     business, measured on the model's tokenizer, and the verifier never
+//     needed it: that it is a prefix of the published text is the claim;
+//   - else PromptTrimChars > 0 (the pre-plan trim, TTP-144) still names one
+//     character count, and the sent text must be exactly that prefix;
+//   - else the whole prompt, byte for byte.
 //
 // An id this binary does not know fails: a future prompts@v3 is a set whose
 // contents are not here to compare, and forwarding an unverifiable claim is
@@ -214,31 +220,49 @@ func rewritePublicID(out *tape.Tape) {
 //
 // A multi-round run sends the same Concurrency prompts every round, so each
 // record is compared against the prompt at its own index within its round.
-func sentTheSet(recs []tape.RequestRecord, concurrency int, id string, trimChars int) bool {
-	if id != server.PromptSetID || concurrency <= 0 || len(recs) == 0 {
+func sentTheSet(recs []tape.RequestRecord, s *tape.RunSummary) bool {
+	if s.PromptSet != server.PromptSetID || s.Concurrency <= 0 || len(recs) == 0 {
 		return false
 	}
-	want := server.DefaultPrompts(concurrency)
-	if len(want) != concurrency {
+	want := server.DefaultPrompts(s.Concurrency)
+	if len(want) != s.Concurrency {
 		return false
 	}
 	for _, r := range recs {
-		if r.Index < 0 || r.Index >= concurrency {
+		if r.Index < 0 || r.Index >= s.Concurrency {
 			return false
 		}
 		if len(r.Prompt.Messages) != 1 || len(want[r.Index].Messages) != 1 {
 			return false
 		}
-		wantText := want[r.Index].Messages[0].Content
-		if trimChars > 0 {
-			runes := []rune(wantText)
-			if trimChars > len(runes) {
+		sent := r.Prompt.Messages[0].Content
+		if s.PromptSalt != "" {
+			if !strings.HasPrefix(sent, s.PromptSalt) {
 				return false
 			}
-			wantText = string(runes[:trimChars])
+			sent = sent[len(s.PromptSalt):]
 		}
-		if r.Prompt.Messages[0].Content != wantText {
-			return false
+		wantText := want[r.Index].Messages[0].Content
+		switch {
+		case s.PromptTrimTokens > 0:
+			// A token-sized trim: any non-empty rune-prefix of the set's
+			// own text. The empty prefix fails — a stream that sent none
+			// of the set did not send the set.
+			if len(sent) == 0 || len([]rune(sent)) > len([]rune(wantText)) || !strings.HasPrefix(wantText, sent) {
+				return false
+			}
+		case s.PromptTrimChars > 0:
+			runes := []rune(wantText)
+			if s.PromptTrimChars > len(runes) {
+				return false
+			}
+			if sent != string(runes[:s.PromptTrimChars]) {
+				return false
+			}
+		default:
+			if sent != wantText {
+				return false
+			}
 		}
 	}
 	return true

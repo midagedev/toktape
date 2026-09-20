@@ -634,6 +634,37 @@ func BusyCount(slots []Slot) int {
 	return n
 }
 
+// Tokenize counts content's tokens with the server's own tokenizer: POST
+// /tokenize, add_special off, the length of the returned token array. The
+// count is the server's, never a client-side price, which is the whole
+// reason to ask: the published set's four same-length prompts tokenized to
+// 4901..7458 on one tokenizer (lead, 2026-09-20), and no byte-per-token
+// constant can see that spread.
+//
+// Any failure is an error and the caller falls back to pricing: a non-200,
+// a body that is not JSON, and a body with no tokens array — an error
+// envelope that 200s would otherwise read as a count of zero. An empty
+// array for empty content is a real answer, not a miss. Never called on a
+// tape.ServerOpenAI server: the route is llama-server's own and an
+// OpenAI-compatible server answering it with anything is not a promise this
+// side can lean on.
+func (c *Client) Tokenize(ctx context.Context, content string) (int, error) {
+	body, err := c.post(ctx, "/tokenize", map[string]any{"content": content, "add_special": false})
+	if err != nil {
+		return 0, err
+	}
+	var out struct {
+		Tokens *[]int `json:"tokens"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return 0, fmt.Errorf("server: decode /tokenize: %w", err)
+	}
+	if out.Tokens == nil {
+		return 0, fmt.Errorf("server: decode /tokenize: no tokens array in the answer")
+	}
+	return len(*out.Tokens), nil
+}
+
 // ApplyTemplate renders messages through the server's chat template and
 // returns the prompt as the model will actually see it (lesson 4: the template
 // decides what is being measured).

@@ -738,18 +738,20 @@ func TestASecondRunAgainstTheSameWarmServerStillFits(t *testing.T) {
 	}
 }
 
-// Gate 6 (lead, 2026-09-20): a run that measured its machine sends a
-// prefix the machine can pay for, and says how much. The planted machine is
-// 0.5 ms/token (2000 tok/s) with a 30 ms fixed cost, so the twentieth-share
-// target is 20 x 30 ms x 2000 tok/s = 1200 tokens, under the 2048-token
-// floor the probe already treats as one honest long point — the floor binds,
-// and at the fixture's planted 5 bytes a token that is a 10,240-byte budget.
-// The gate's oracle walks the set's own prompt text for the rune count that
-// fits the budget, independently of the implementation, and the run must
-// send exactly that many characters of each set prompt and record the same
-// number. A refused fit (the inverted cost shape) trims nothing: a run that
-// could not measure the machine does not act on the measurement.
-func TestARunThatMeasuredItsMachineTrimsTheSetAndSaysHowMuch(t *testing.T) {
+// Gate 6, re-authored (2026-09-20, run plan). Until today this gate
+// asserted the fixed-share character trim: a probe fit of 0.5 ms/token and
+// 30 ms fixed put the twentieth-share floor at 1200 tokens, under the
+// 2048-token floor the old rule also applied, and the oracle above walked
+// the set's own text for the rune count that fitted the resulting byte
+// budget. The run plan replaced that rule: prompt length is now decided
+// with the answer cap and the clock together (plan.go), and on this
+// fixture — one stream, a 20 s default clock, a 2000 tok/s fit, a 32768
+// slot — no ceiling binds (the clock alone allows 9940 tokens, well past
+// the ~7937 the whole first prompt prices to), so the run sends the set
+// whole, salted, and says that. The binding-budget halves of the old gate
+// moved to firsttry_test.go, where the fixture's clock and slot actually
+// bind.
+func TestARunThatMeasuredItsMachineSendsTheSetWholeWhenEveryBudgetFits(t *testing.T) {
 	mux, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -758,47 +760,54 @@ func TestARunThatMeasuredItsMachineTrimsTheSetAndSaysHowMuch(t *testing.T) {
 		t.Fatalf("Record: %v", err)
 	}
 	if tp.Summary.Probe == nil || !near(tp.Summary.Probe.PrefillPerSecond, 2000, 0.01) {
-		t.Fatalf("the probe did not produce the planted fit, so the trim below has no measurement to come from: %+v", tp.Summary.Probe)
+		t.Fatalf("the probe did not produce the planted fit, so the plan below has no measurement to come from: %+v", tp.Summary.Probe)
 	}
 
-	// The oracle: the floor of 2048 tokens (20 x 30 ms x 2000 tok/s = 1200
-	// is under it) at the bytes-per-token the probe actually recorded — the
-	// fixture's n = len/5 floors, so the measured ratio sits a hair above 5
-	// and the budget with it — and the rune count of the first set prompt
-	// whose UTF-8 bytes fit that budget, computed here from the text itself.
-	bpt := 0.0
-	for _, pt := range tp.Summary.Probe.Prefill {
-		if v := float64(pt.PromptBytes) / float64(pt.PromptN); v > bpt {
-			bpt = v
-		}
-	}
-	budgetBytes := 2048 * bpt
-	want := 0
-	runes, size := 0, 0
-	for _, r := range server.DefaultPrompts(1)[0].Messages[0].Content {
-		if float64(size+len(string(r))) > budgetBytes {
-			break
-		}
-		size += len(string(r))
-		runes++
-	}
-	want = runes
-
-	if tp.Summary.PromptTrimChars != want {
-		t.Errorf("PromptTrimChars = %d, want %d (the rune count of the first set prompt that fits the %.0f-byte budget)", tp.Summary.PromptTrimChars, want, budgetBytes)
-	}
 	if tp.Summary.PromptSet != server.PromptSetID {
 		t.Fatalf("PromptSet = %q, want %q: this gate is about the set's own prompts", tp.Summary.PromptSet, server.PromptSetID)
 	}
+	// Nothing trimmed, and both trim fields say so — the character count
+	// the old gate asserted is 0 under the plan, and so is the token
+	// target.
+	if tp.Summary.PromptTrimChars != 0 || tp.Summary.PromptTrimTokens != 0 {
+		t.Errorf("PromptTrimChars = %d, PromptTrimTokens = %d; no ceiling binds on this fixture, the set goes whole",
+			tp.Summary.PromptTrimChars, tp.Summary.PromptTrimTokens)
+	}
+	// The salt is recorded, and what was sent is the salt plus the set's
+	// own whole text, byte for byte.
+	if tp.Summary.PromptSalt == "" {
+		t.Fatal("PromptSalt empty, the set went out unsalted")
+	}
 	for i, rec := range tp.Requests {
-		if got := len([]rune(rec.Prompt.Messages[0].Content)); got != want {
-			t.Errorf("request %d sent %d characters, want the recorded %d", i, got, want)
+		sent := rec.Prompt.Messages[0].Content
+		if !strings.HasPrefix(sent, tp.Summary.PromptSalt) {
+			t.Errorf("request %d does not start with the recorded salt", i)
+			continue
 		}
+		if want := server.DefaultPrompts(len(tp.Requests))[i].Messages[0].Content; sent[len(tp.Summary.PromptSalt):] != want {
+			t.Errorf("request %d sent something other than the whole set prompt behind the salt", i)
+		}
+	}
+	// The plan is on the tape, says whole, and says it priced (this
+	// fixture answers no /tokenize).
+	p := tp.Summary.Plan
+	if p == nil {
+		t.Fatal("Summary.Plan = nil, the run decided nothing")
+	}
+	if p.Binding != tape.PlanBoundWhole || p.TargetTokens != 0 {
+		t.Errorf("Plan = %+v; no ceiling binds, want binding whole and target 0", *p)
+	}
+	if p.Tokenized {
+		t.Error("Plan.Tokenized = true; this fixture answers no /tokenize, the lengths were priced")
+	}
+	if p.LongestPromptTokens == 0 {
+		t.Error("Plan.LongestPromptTokens = 0; the answer cap was set against a figure that should be there")
 	}
 }
 
 // Gate 7 (lead, 2026-09-20): a refused fit trims nothing — no measurement,
-// no action on it.
+// no action on it. 2026-09-20, run plan: the token target is asserted too,
+// because the plan is what trims now.
 func TestARefusedFitTrimsNothing(t *testing.T) {
 	mux, _ := probeMux(t, probeCosts{fixedMs: 30, perTokMs: 0.5, inverted: true})
 	srv := httptest.NewServer(mux)
@@ -810,7 +819,11 @@ func TestARefusedFitTrimsNothing(t *testing.T) {
 	if tp.Summary.Probe != nil && tp.Summary.Probe.PrefillPerSecond != 0 {
 		t.Fatalf("the inverted fixture produced a fit (%v tok/s); this gate is not testing a refusal", tp.Summary.Probe.PrefillPerSecond)
 	}
-	if tp.Summary.PromptTrimChars != 0 {
-		t.Errorf("PromptTrimChars = %d on a refused fit, want 0: a run that could not measure the machine does not get to act on the measurement", tp.Summary.PromptTrimChars)
+	if tp.Summary.PromptTrimChars != 0 || tp.Summary.PromptTrimTokens != 0 {
+		t.Errorf("PromptTrimChars = %d, PromptTrimTokens = %d on a refused fit, want 0 and 0: a run that could not measure the machine does not get to act on the measurement",
+			tp.Summary.PromptTrimChars, tp.Summary.PromptTrimTokens)
+	}
+	if p := tp.Summary.Plan; p == nil || p.Binding != tape.PlanBoundWhole {
+		t.Errorf("Plan = %+v; a run with no fit has only the slot to bind it, and this fixture's slot binds nothing", tp.Summary.Plan)
 	}
 }

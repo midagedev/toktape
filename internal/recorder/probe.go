@@ -365,30 +365,10 @@ func fitPrefill(points []tape.PrefillPoint) (perSecond, fixedMs float64) {
 	return 1000 / msPerTok, fixed
 }
 
-// resolvePromptTrim sizes the prefix of each set prompt this run sends,
-// from the fit the pass just measured, against the set's own texts. Called
-// once per run, after the probe and before the requests go out; a refused
-// or absent fit leaves it 0 and the prompts go whole.
-func (r *run) resolvePromptTrim(setTexts []string) {
-	r.promptTrim = setTrimChars(r.prefill, setTexts)
-}
-
-// trimSetPrompts applies the resolved trim to the set's requests in place:
-// each one whose Set is the published id is cut to its first promptTrim
-// characters, on rune boundaries. A request shorter than the trim, or not
-// the set's own, is left alone — the user's prompts are never cut, and a
-// prompt the budget already fits is already the right length.
-func (r *run) trimSetPrompts(reqs []server.StreamRequest) {
-	if r.promptTrim <= 0 {
-		return
-	}
-	for i := range reqs {
-		if reqs[i].Set != server.PromptSetID {
-			continue
-		}
-		runes := []rune(reqs[i].Messages[0].Content)
-		if len(runes) > r.promptTrim {
-			reqs[i].Messages[0].Content = string(runes[:r.promptTrim])
-		}
-	}
-}
+// resolvePromptTrim and trimSetPrompts lived here until 2026-09-20, when
+// the run plan (plan.go) became the single owner of prompt length: the
+// fixed-share character trim they implemented kept every same-length prompt
+// whole on a fast box and cut four different tokenizers' worth of work to
+// one character count on the rest. The reasoning that outlived them — that
+// a prefill figure is a throughput only when the per-request fixed cost is
+// a small share of it — is what planPrefillShare's budget carries now.
