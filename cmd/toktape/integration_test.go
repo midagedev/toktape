@@ -574,7 +574,7 @@ func TestRecordTUIToQuit(t *testing.T) {
 	if !strings.Contains(stdout.String(), "toktape") {
 		t.Errorf("no card on stdout after the screen closed:\n%s", stdout.String())
 	}
-	for _, want := range []string{"✓ Tape   ", "✓ Card   ", "→ Post it:  "} {
+	for _, want := range []string{"✓ Tape   ", "✓ Card   ", "→ Markdown: "} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("stderr is missing %q:\n%s", want, stderr.String())
 		}
@@ -612,11 +612,18 @@ func TestShareHintNamesTheTape(t *testing.T) {
 	arts := artifacts{tape: filepath.Join(dir, tp.Summary.ID+tape.Ext)}
 
 	got := shareHint(dir, tp, arts)
-	if !strings.Contains(got, "toktape play "+tp.Summary.ID+tape.Ext) {
-		t.Errorf("hint does not say how a reviewer replays the tape:\n%s", got)
+	// 2026-09-21: the line was "Attach the .tape when you post — reviewers can
+	// replay it with: toktape play <basename>". The user asked for the sales
+	// tone to go, so it is a plain command now, and it names the path the
+	// other lines name, so it runs as pasted (a basename only ran from the
+	// runs directory).
+	if !strings.Contains(got, "→ Replay:   toktape play "+tildePath(arts.tape)) {
+		t.Errorf("hint does not give the replay command for the tape it saved:\n%s", got)
 	}
-	if !strings.Contains(got, "Attach the .tape when you post") {
-		t.Errorf("hint does not ask for the tape to be attached:\n%s", got)
+	for _, loud := range []string{"Reddit", "Post it", "when you post"} {
+		if strings.Contains(got, loud) {
+			t.Errorf("the hint advertises (%q); it names commands and nothing else:\n%s", loud, got)
+		}
 	}
 
 	// No tape on disk: there is nothing to attach and nothing to replay.
@@ -663,10 +670,10 @@ func TestShareHintFailedStreams(t *testing.T) {
 	if !strings.Contains(got, "--n-predict") || !strings.Contains(got, "-c") {
 		t.Errorf("the lever for a context error does not name the flags to move:\n%s", got)
 	}
-	if strings.Contains(got, "→ Post it:") {
+	if strings.Contains(got, "→ Markdown:") {
 		t.Errorf("a run with failed streams was invited to be posted:\n%s", got)
 	}
-	for _, want := range []string{"✓ Tape   ", "→ Attach the .tape"} {
+	for _, want := range []string{"✓ Tape   ", "→ Replay:   "} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the block is missing %q, which a failed run keeps:\n%s", want, got)
 		}
@@ -677,7 +684,7 @@ func TestShareHintFailedStreams(t *testing.T) {
 	tp.Summary.Aggregate.StreamsFailed = 0
 	tp.Requests = tp.Requests[:2]
 	clean := shareHint(dir, tp, arts)
-	if !strings.Contains(clean, "→ Post it:") {
+	if !strings.Contains(clean, "→ Markdown:") {
 		t.Errorf("a clean run lost its post line:\n%s", clean)
 	}
 	if strings.Contains(clean, "streams failed") {

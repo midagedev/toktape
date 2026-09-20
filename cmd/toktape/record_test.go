@@ -120,7 +120,7 @@ func TestRecordVerbEndToEnd(t *testing.T) {
 		t.Errorf("no attach line on stderr:\n%s", stderr)
 	}
 	// The run ends with the share block: what exists, and what to do with it.
-	for _, want := range []string{"✓ Tape   ", "✓ Card   ", ".card.png", "→ Post it:  toktape card ", "-o md --copy"} {
+	for _, want := range []string{"✓ Tape   ", "✓ Card   ", ".card.png", "→ Markdown: toktape card ", "-o md --copy"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr is missing %q:\n%s", want, stderr)
 		}

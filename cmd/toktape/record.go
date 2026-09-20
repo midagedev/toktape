@@ -525,7 +525,7 @@ func saveRun(outDir string, tp *tape.Tape, wantCard bool) (artifacts, error) {
 // against: an instruction that cannot be followed is worse than no line.
 //
 // A run with failed streams is not a run to post, so it opens with the
-// server's own words instead (streamFailureBlock) and the Post it line is
+// server's own words instead (streamFailureBlock) and the Markdown line is
 // held back; the tape and card lines stay, because the run did happen and its
 // files are on disk.
 func shareHint(outDir string, tp *tape.Tape, a artifacts) string {
@@ -555,14 +555,17 @@ func shareHint(outDir string, tp *tape.Tape, a artifacts) string {
 	// tape itself says are partial. The failure block above says what happened
 	// instead, and the tape/card lines stay because the files do exist.
 	if tp.Summary.Aggregate.StreamsFailed == 0 {
-		fmt.Fprintf(&b, "→ Post it:  toktape card %s -o md --copy    (Reddit-ready, copied to clipboard)\n",
+		// 2026-09-21: this read "Post it: … (Reddit-ready, copied to clipboard)".
+		// The user called that over the top, and it was: a tool does not
+		// advertise its own output. The line names the command and what it
+		// does, like the two beside it.
+		fmt.Fprintf(&b, "→ Markdown: toktape card %s -o md --copy\n",
 			tildePath(a.tape))
 	}
-	// The tape is what separates a posted card from a screenshot: a reader who
-	// has the file can replay the run instead of taking the numbers on trust.
-	// The hint names the basename, which is what an upload is called.
-	fmt.Fprintf(&b, "→ Attach the .tape when you post — reviewers can replay it with: toktape play %s\n",
-		filepath.Base(a.tape))
+	// The tape is what separates a card from a screenshot: whoever has the file
+	// can replay the run instead of taking the numbers on trust.
+	fmt.Fprintf(&b, "→ Replay:   toktape play %s\n",
+		tildePath(a.tape))
 	if prev := previousTape(outDir, tp); prev != "" {
 		fmt.Fprintf(&b, "→ Compare:  toktape compare %s %s\n", tildePath(prev), tildePath(a.tape))
 	}
