@@ -330,14 +330,26 @@ func saltSetPrompts(reqs []server.StreamRequest, salt string) {
 // planFallbackBytesPerToken. One owner for one conversion: countSet and
 // requestTokens both read it here, so a plan can never trim on one ruler and
 // cap on another.
+//
+// Lead, 2026-09-21: the measured price may only make the estimate denser,
+// never sparser than planFallbackBytesPerToken. The calibration text is one
+// sample and a set prompt is another: the first-run matrix's vLLM row priced
+// a prompt at 2822 tokens from a calibration that ran 4.0 bytes/token, the
+// server counted 3815 (its tail ran 2.2), and prompt plus cap overran a
+// 4096 context — every stream refused. On the real set the spread is just as
+// wide (2.43–3.70 bytes/token measured 2026-09-20). Pricing too dense trims a
+// little more than it had to; pricing too sparse loses the run.
 func (r *run) openAIPrice() float64 {
+	measured := 0.0
 	if pf := r.calibrationPrefill(); pf != nil && pf.PromptN > 0 {
-		return float64(pf.PromptBytes) / float64(pf.PromptN)
+		measured = float64(pf.PromptBytes) / float64(pf.PromptN)
+	} else if cal := r.calibration(); cal != nil && cal.PromptN >= calibrationPriceFloorPromptN {
+		measured = float64(cal.PromptBytes) / float64(cal.PromptN)
 	}
-	if cal := r.calibration(); cal != nil && cal.PromptN >= calibrationPriceFloorPromptN {
-		return float64(cal.PromptBytes) / float64(cal.PromptN)
+	if measured <= 0 {
+		return 0
 	}
-	return 0
+	return math.Min(measured, planFallbackBytesPerToken)
 }
 
 // openAIPricedTokens prices content bytes at the run's own measured

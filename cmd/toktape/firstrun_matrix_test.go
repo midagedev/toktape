@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -312,6 +313,9 @@ type matOpenAICfg struct {
 	truncateTo int
 	chatTokens int
 	apiTags    bool
+	// advertiseMaxLen puts ctxLimit in /v1/models as max_model_len, which
+	// is what a real vLLM does (measured 2026-09-21, vLLM 0.29.0).
+	advertiseMaxLen bool
 }
 
 func matOpenAIServer(t *testing.T, cfg matOpenAICfg) (*httptest.Server, *matOpenAI) {
@@ -324,6 +328,10 @@ func matOpenAIServer(t *testing.T, cfg matOpenAICfg) (*httptest.Server, *matOpen
 		})
 	}
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		if cfg.advertiseMaxLen {
+			_, _ = fmt.Fprintf(w, `{"object":"list","data":[{"id":"mat-model","object":"model","owned_by":"vllm","max_model_len":%d}]}`, cfg.ctxLimit)
+			return
+		}
 		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"mat-model","object":"model"}]}`))
 	})
 	if cfg.apiTags {
@@ -890,10 +898,12 @@ func TestFirstRunMatrix(t *testing.T) {
 			},
 		},
 		{
-			name:          "llama-no-slots-endpoint",
-			wantExplained: "yes", // pinned 2026-09-21: the exit-3 door names the context lever
-			gapWhy:        "usable stays no: a --no-slots server hides the context that would cap answers, so every stream dies on context_length_exceeded before a tape exists — the pre-flight cap that reads /props n_ctx is the recorder's to write (owner: recorder track)",
-			causeMarkers:  []string{"context_length_exceeded"},
+			name: "llama-no-slots-endpoint",
+			// Re-pinned 2026-09-21: the recorder reads n_ctx from /props when
+			// /slots is refused, so the run finishes (was exit 3, every
+			// stream lost on context_length_exceeded).
+			wantUsable:   "yes",
+			causeMarkers: []string{"context_length_exceeded"},
 			run: func(t *testing.T) *matOutcome {
 				cfg := fast
 				cfg.noSlots501 = true
@@ -964,8 +974,11 @@ func TestFirstRunMatrix(t *testing.T) {
 			},
 		},
 		{
-			name:   "openai-only-32k",
-			gapWhy: "the fake's prompt figures still never reach the tape: the usage prompt count is taken (internal/server/sse.go:447-449) but only for the decode calibration's return value — the record's own PromptN stays 0, the card prints ? for the prompt size, and this row's prompt_n clause cannot pass (owner: recorder track)",
+			name: "openai-only-32k",
+			// Re-pinned 2026-09-21: usage.prompt_tokens is recorded
+			// (PromptNSource "usage") and the calibrated cap lets the stream
+			// end before the clock, so the run has a count and a rate.
+			wantUsable: "yes",
 			run: func(t *testing.T) *matOutcome {
 				srv, _ := matOpenAIServer(t, matOpenAICfg{chatTokens: 80})
 				return matRecord(t, srv.URL, t.TempDir())
@@ -984,8 +997,20 @@ func TestFirstRunMatrix(t *testing.T) {
 			},
 		},
 		{
+			// Added 2026-09-21: the shape a real vLLM has — the listing
+			// states the context, so the plan trims and caps inside it and
+			// the default command finishes. openai-only-4k above stays the
+			// server that says nothing until it refuses.
+			name:       "vllm-4k-advertised",
+			wantUsable: "yes",
+			run: func(t *testing.T) *matOutcome {
+				srv, _ := matOpenAIServer(t, matOpenAICfg{ctxLimit: 4096, chatTokens: 80, advertiseMaxLen: true})
+				return matRecord(t, srv.URL, t.TempDir())
+			},
+		},
+		{
 			name:   "ollama-shape",
-			gapWhy: "the tape lies silently: Ollama truncated the ~7.4k-token prompt to 2048, and the one figure that would have exposed it — the server's usage.prompt_tokens, 2048 against the ~7.4k sent — still never reaches the record (sse.go:447-449 hands it only to the calibration), so nothing on the run contradicts the truncation (owner: recorder track)",
+			gapWhy: "2026-09-21: the server's 2048 now reaches the tape, but nothing compares it with the ~7.4k tokens sent, so a truncating server still reads as a short prompt rather than as truncation — a caveat for count-vs-sent is the open half (a live Ollama 0.34.2 did not truncate: it sized its context to the prompt)",
 			run: func(t *testing.T) *matOutcome {
 				srv, _ := matOpenAIServer(t, matOpenAICfg{truncateTo: 2048, chatTokens: 80, apiTags: true})
 				return matRecord(t, srv.URL, t.TempDir())
@@ -1031,10 +1056,13 @@ func TestFirstRunMatrix(t *testing.T) {
 			},
 		},
 		{
-			name:          "auth-required",
-			gapWhy:        "401 on every route: the server's sentence is quoted, but the only lever offered (--wait 30s) answers a starting server, not authentication — classifying 401/403 in classifyProps and giving the attach door an auth hint is the recorder's to write (owner: recorder track)",
-			causeMarkers:  []string{"Invalid API key"},
-			leverMismatch: "the only lever printed (--wait 30s) answers a server that is still starting, not one refusing authentication; no flag, command or setting for auth is offered",
+			name: "auth-required",
+			// Re-pinned 2026-09-21: 401/403 is server.ErrUnauthorized, and the
+			// hint says the server wants a key and that toktape has no flag
+			// for one yet — true, and the flag itself is the open half.
+			wantUsable:   "refused-cleanly",
+			gapWhy:       "explained honestly, but the lever is an absence: toktape has no --api-key/--header flag yet",
+			causeMarkers: []string{"Invalid API key"},
 			run: func(t *testing.T) *matOutcome {
 				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					matWriteStatus(w, http.StatusUnauthorized, `{"error":{"message":"Invalid API key"}}`)
@@ -1123,6 +1151,9 @@ func TestFirstRunMatrix(t *testing.T) {
 			}
 
 			t.Logf("EXIT %d · USABLE %s · EXPLAINED %s %s", o.exit, usable, explained, reasonClause(whyE))
+			if os.Getenv("MAT_RAW") != "" {
+				t.Logf("RAW:\n%s", o.stderr)
+			}
 			t.Logf("  %s", matRowSummary(o))
 			for _, l := range matSight(o) {
 				t.Logf("  | %s", l)

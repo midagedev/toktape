@@ -161,6 +161,10 @@ func (c *cli) reportRecordError(err error, urlGiven bool) int {
 		hint := fmt.Sprintf("no server on the ports toktape probes (%s); start a llama-server, or name yours with --url http://host:port",
 			server.DefaultPorts())
 		switch {
+		case errors.Is(err, server.ErrUnauthorized):
+			// Lead, 2026-09-21 (matrix row auth-required): a 401 was answered
+			// with "--wait 30s", advice for a server that is still starting.
+			hint = nextStep("401", nil)
 		case errors.Is(err, server.ErrLoading), errors.Is(err, server.ErrBusy):
 			hint = "the server is there and was not ready in time; give it longer with --wait 30m"
 		case urlGiven:

@@ -40,6 +40,9 @@ type run struct {
 	// 2026-09-21): what --model is validated against and what the
 	// several-models note names. nil on any other kind of server.
 	openaiModels []string
+	// openaiVLLM marks the listed ids a vLLM server owns (owned_by "vllm"):
+	// their requests ask for usage on every chunk (StreamRequest.ContinuousUsage).
+	openaiVLLM map[string]bool
 	// openaiLen is each listed model's max_model_len, when the listing
 	// carried one (TTP-165, 2026-09-21): vLLM reports it per model and it is
 	// the context a request may use whole. nil entries are unknown, which is
@@ -405,6 +408,7 @@ func (r *run) shapeOpenAIRequests(reqs []server.StreamRequest) ([]server.StreamR
 		if reqs[i].Model == "" {
 			reqs[i].Model = r.openaiModel
 		}
+		reqs[i].ContinuousUsage = r.openaiVLLM[requestModelOf(&reqs[i])]
 	}
 	// The tape's model stamp is the model the requests actually carried
 	// (TTP-157, 2026-09-21): --model, a --param model=, or the first listing
@@ -469,6 +473,12 @@ func (r *run) probeOpenAI(ctx context.Context, c *server.Client) (*server.Client
 	r.openaiModel = models.FirstID()
 	for _, m := range models.Data {
 		r.openaiModels = append(r.openaiModels, m.ID)
+		if strings.EqualFold(m.OwnedBy, "vllm") {
+			if r.openaiVLLM == nil {
+				r.openaiVLLM = map[string]bool{}
+			}
+			r.openaiVLLM[m.ID] = true
+		}
 		if m.MaxModelLen > 0 {
 			if r.openaiLen == nil {
 				r.openaiLen = map[string]int{}

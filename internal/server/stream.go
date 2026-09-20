@@ -27,6 +27,14 @@ type StreamRequest struct {
 	Model string
 	// MaxTokens caps the answer (max_tokens). 0 leaves it to the server.
 	MaxTokens int
+	// ContinuousUsage asks a vLLM server for its usage object on every
+	// chunk (stream_options.continuous_usage_stats). Lead, 2026-09-21: a
+	// stream the clock cancels never sends its closing usage chunk, so the
+	// count was lost exactly when the clock mattered — on a slow box. With
+	// this the last chunk seen already carries the server's count. It is a
+	// vLLM extension, so the recorder sets it only for a model whose listing
+	// says owned_by "vllm"; a strict server may refuse an unknown option.
+	ContinuousUsage bool
 	// Params are merged into the request body verbatim: temperature, seed,
 	// reasoning_effort, chat_template_kwargs, and anything else the build
 	// honours. They are recorded in tape.PromptRecord.Params, which is what
@@ -191,9 +199,11 @@ func (r StreamRequest) Body() map[string]any {
 // servers; the recorder defaults it to the first /v1/models id when the user
 // gave none, so an empty Model here means a server that listed nothing.
 func (r StreamRequest) openaiBody() map[string]any {
-	body := map[string]any{
-		"stream_options": map[string]any{"include_usage": true},
+	opts := map[string]any{"include_usage": true}
+	if r.ContinuousUsage {
+		opts["continuous_usage_stats"] = true
 	}
+	body := map[string]any{"stream_options": opts}
 	if r.Model != "" {
 		body["model"] = r.Model
 	}
