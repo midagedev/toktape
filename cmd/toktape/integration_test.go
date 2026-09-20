@@ -625,6 +625,87 @@ func TestShareHintNamesTheTape(t *testing.T) {
 	}
 }
 
+// TestShareHintFailedStreams: a run where streams died is not a run to post.
+// The block a finished run ends with must say so before the ✓ lines — the
+// server's own words, deduplicated, and the one lever that fits them — and
+// must not invite the user to post a broken tape. The tape and card lines
+// stay: the run did happen and its files are on disk.
+func TestShareHintFailedStreams(t *testing.T) {
+	dir := t.TempDir()
+	const serverErr = "context_length_exceeded: the request exceeds the available context size; context shift is disabled"
+	tp := &tape.Tape{Schema: tape.SchemaVersion, Summary: tape.RunSummary{
+		ID:          "20260913-120000-qwen3.5-35b-a3b",
+		Model:       tape.ModelInfo{FileName: "Qwen3.5-35B-A3B-UD-Q4_K_M.gguf"},
+		Concurrency: 4,
+		Aggregate:   tape.AggregateTimings{Streams: 4, StreamsFailed: 2},
+	}, Requests: []tape.RequestRecord{
+		{Index: 0}, {Index: 1},
+		{Index: 2, Error: serverErr},
+		{Index: 3, Error: serverErr},
+	}}
+	arts := artifacts{tape: filepath.Join(dir, tp.Summary.ID+tape.Ext)}
+
+	got := shareHint(dir, tp, arts)
+	if !strings.Contains(got, "✗ 2 of 4 streams failed") {
+		t.Errorf("the failure count is not said out loud:\n%s", got)
+	}
+	if !strings.Contains(got, serverErr) {
+		t.Errorf("the server's own words are not quoted:\n%s", got)
+	}
+	// Two streams, one sentence: the second copy folds into a ×2, so the
+	// error text appears once and the count rides beside it.
+	if n := strings.Count(got, "context_length_exceeded"); n != 1 {
+		t.Errorf("the error text appears %d times, want 1 (deduplicated with ×N):\n%s", n, got)
+	}
+	if !strings.Contains(got, "×2") {
+		t.Errorf("the deduplicated count is not shown:\n%s", got)
+	}
+	if !strings.Contains(got, "--n-predict") || !strings.Contains(got, "-c") {
+		t.Errorf("the lever for a context error does not name the flags to move:\n%s", got)
+	}
+	if strings.Contains(got, "→ Post it:") {
+		t.Errorf("a run with failed streams was invited to be posted:\n%s", got)
+	}
+	for _, want := range []string{"✓ Tape   ", "→ Attach the .tape"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the block is missing %q, which a failed run keeps:\n%s", want, got)
+		}
+	}
+
+	// A clean run keeps the invitation: the block is an addition for failed
+	// runs, not a change to the good ones.
+	tp.Summary.Aggregate.StreamsFailed = 0
+	tp.Requests = tp.Requests[:2]
+	clean := shareHint(dir, tp, arts)
+	if !strings.Contains(clean, "→ Post it:") {
+		t.Errorf("a clean run lost its post line:\n%s", clean)
+	}
+	if strings.Contains(clean, "streams failed") {
+		t.Errorf("a clean run talks about failures:\n%s", clean)
+	}
+}
+
+// TestFailureLever: the one line of advice under a failed-streams block is
+// matched from the server's own words, and an error this table does not know
+// gets no invented advice.
+func TestFailureLever(t *testing.T) {
+	for _, tc := range []struct {
+		name, errText, want string
+	}{
+		{"the measured context error", "context_length_exceeded: the request exceeds the available context size", "--n-predict"},
+		{"a context error in other words", "Requested tokens exceed context limit", "-c"},
+		{"a rate limit", "429 Too Many Requests", "--sessions"},
+		{"a rate limit in other words", "rate limit exceeded, retry later", "--sessions"},
+		{"an unknown error", "connection reset by peer", "the server's words are above"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := failureLever(tc.errText); !strings.Contains(got, tc.want) {
+				t.Errorf("failureLever(%q) = %q, want it to name %q", tc.errText, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestCardMarkdownCarriesReproduce walks the real path a poster takes: a tape
 // written to disk, read back, and rendered with -o md. The Reproduce block is
 // built from fields that survive the gzip'd JSON round trip, so the argv a

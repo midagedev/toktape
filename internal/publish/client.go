@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -87,7 +88,8 @@ const UploadPath = "/api/v1/runs"
 //
 // delete_token comes back only for an upload with no Authorization: a
 // token-owned upload is already deletable by its owner (§9.2), and an
-// anonymous one needs a key that is printed once and never stored.
+// anonymous one needs a key that is printed once and filed under
+// <config dir>/published.json (receipts.go) for `--delete`.
 //
 // Anything but 201 is a failure the client reports verbatim. The server's
 // body is shown when it is short and looks like text, because the first
@@ -113,8 +115,10 @@ type Receipt struct {
 	ID  string `json:"id"`
 	URL string `json:"url"`
 	// DeleteToken is the only key to an anonymous upload. It is printed once
-	// and never written to the config file: storing it would make the config
-	// a list of everything this machine ever posted.
+	// and, since 2026-09-20, filed under <config dir>/published.json
+	// (receipts.go) so `--delete` can find it — never in the config file,
+	// which would turn that file into a list of everything this machine ever
+	// posted.
 	DeleteToken string `json:"delete_token,omitempty"`
 }
 
@@ -323,6 +327,52 @@ func (c *Client) ReplaceCard(ctx context.Context, id string, view *tape.Tape) (*
 		return nil, err
 	}
 	return &Receipt{ID: runID, URL: base + "/r/" + runID}, nil
+}
+
+// ErrGone is Delete's answer for a run that is not there. The server's own
+// rule (web/src/del.js) is that already-deleted reads as gone — a delete
+// retried after a dropped connection must not report a failure the second
+// time — so the caller treats this as success for everything but the network
+// call itself.
+var ErrGone = errors.New("publish: no run with that id; if you just deleted it, it is gone")
+
+// Delete takes a published run down: DELETE {base}/api/v1/runs/<id> with the
+// key presented as a bearer token. The key is whichever of the two the server
+// accepts (§9.2): the run's own delete token, for an anonymous upload, or the
+// journal token that owns the run. It is an argument rather than c.Token
+// because the caller's resolution order is a CLI concern — flag, saved
+// receipt, config — and this function should not know where keys are kept.
+//
+// 204 is nil; 404 is ErrGone; anything else is a failure reported verbatim
+// like Upload's, so the server's own refusal sentence reaches the user.
+func (c *Client) Delete(ctx context.Context, id, token string) error {
+	base := strings.TrimRight(c.baseURL(), "/")
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, base+"/api/v1/runs/"+id, nil)
+	if err != nil {
+		return fmt.Errorf("publish: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if c.UserAgent != "" {
+		req.Header.Set("User-Agent", c.UserAgent)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := c.http().Do(req)
+	if err != nil {
+		return fmt.Errorf("publish: %s: %w", base, err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return nil
+	case http.StatusNotFound:
+		return ErrGone
+	default:
+		return refusalError(base, "delete", resp)
+	}
 }
 
 // runIDOf reads the run an owner request's 200 answer names. Every owner

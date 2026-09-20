@@ -113,6 +113,7 @@ Publish flags:
                         over publish_text in ~/.toktape/config.toml
   --yes                 take the first-publish warning as read
   --url URL             the service to publish to
+  --delete <id|url>     take a published run down (saved token, --token, config)
 
   Hostnames and absolute paths are removed whatever the visibility is.
 

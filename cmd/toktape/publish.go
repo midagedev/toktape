@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -29,6 +30,8 @@ type publishFlags struct {
 	note      *string
 	noteFile  *string
 	edit      *string
+	del       *string
+	token     *string
 }
 
 // declarePublishFlags registers the publish verb's flags on fs.
@@ -52,6 +55,8 @@ func declarePublishFlags(fs *flag.FlagSet) *publishFlags {
 		noteFile:  fs.String("note-file", "", "read the lab-note's body from this file"),
 		public:    fs.Bool("public", false, "with --edit: list the run in the search again"),
 		edit:      fs.String("edit", "", "change a run you own instead of uploading: the run id or its /r/<id> link"),
+		del:       fs.String("delete", "", "take a published run down: the run id or its /r/<id> link"),
+		token:     fs.String("token", "", "with --delete: the delete token (or journal token) to present"),
 	}
 }
 
@@ -84,6 +89,18 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 		// The config holds the opt-out. Publishing past a file we could not
 		// read would be publishing past a decision somebody made.
 		return c.usagef("toktape: %v", err)
+	}
+
+	// --delete is the third operation on the same verb: nothing is uploaded
+	// and no tape is read; one published run is taken down.
+	if *f.del != "" {
+		if *f.edit != "" {
+			return c.usagef("toktape publish: --delete and --edit are different operations on a run; name one")
+		}
+		if len(files) != 0 {
+			return c.usagef("toktape publish: --delete takes the run id itself, not a tape file")
+		}
+		return runPublishDelete(ctx, c, f, cfg)
 	}
 
 	// --edit is a different operation on the same verb: no tape is read and
@@ -179,7 +196,93 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 			hint: "toktape publish " + files[0] + " --dry-run prints what would be sent, and touches no network",
 		})
 	}
-	return c.publishReceipt(receipt)
+	// An anonymous upload's key is the only one there will ever be, and the
+	// upload has already succeeded — so remembering it can only warn, never
+	// unwind the publish.
+	var tokenErr error
+	if receipt.DeleteToken != "" {
+		tokenErr = rememberDeleteToken(receipt)
+	}
+	return c.publishReceipt(receipt, tokenErr)
+}
+
+// rememberDeleteToken files an anonymous upload's delete token under
+// ~/.toktape/published.json (publish.Remember).
+func rememberDeleteToken(r *publish.Receipt) error {
+	dir, err := config.Dir()
+	if err != nil {
+		return err
+	}
+	return publish.Remember(dir, *r)
+}
+
+// runPublishDelete takes one published run down. The key is whichever of the
+// two the server accepts, resolved in a fixed order: a --token given on the
+// command line, the delete token this machine saved when it uploaded
+// anonymously, or the journal token in the config. Already-gone is a success
+// shape, because the server reads it that way (web/src/del.js): a delete
+// retried after a dropped connection must not report a failure the second
+// time. Either way the saved entry is dropped, so the file never holds a key
+// to a run that is no longer up.
+func runPublishDelete(ctx context.Context, c *cli, f *publishFlags, cfg *config.Config) int {
+	id := editTargetID(*f.del)
+	if id == "" {
+		return c.usagef("toktape publish: --delete wants a run id or its /r/<id> link")
+	}
+
+	receiptsDir, err := config.Dir()
+	if err != nil {
+		return c.usagef("toktape: %v", err)
+	}
+	srcFlag := "the --token flag"
+	srcSaved := "the saved delete token in " + tildePath(publish.ReceiptsPath(receiptsDir))
+	srcJournal := "the journal token in config.toml"
+	var token, source string
+	switch {
+	case *f.token != "":
+		token, source = *f.token, srcFlag
+	default:
+		if saved, ok := publish.TokenFor(receiptsDir, id); ok {
+			token, source = saved, srcSaved
+		} else if cfg.Token != "" {
+			token, source = cfg.Token, srcJournal
+		} else {
+			return c.usagef("toktape publish --delete %s: no key to present; it would come from %s, %s or %s",
+				id, srcFlag, srcSaved, srcJournal)
+		}
+	}
+
+	if *f.dryRun {
+		// The source, never the token: a dry run's whole job is to show what
+		// would happen without doing it, and the token is the one secret in
+		// this verb.
+		fmt.Fprintf(c.stdout, "would delete %s with %s\n", id, source)
+		return exitOK
+	}
+
+	client := &publish.Client{
+		BaseURL:   *f.url,
+		UserAgent: "toktape/" + version,
+	}
+	err = client.Delete(ctx, id, token)
+	switch {
+	case err == nil:
+		fmt.Fprintf(c.stdout, "deleted %s\n", id)
+	case errors.Is(err, publish.ErrGone):
+		fmt.Fprintf(c.stdout, "%s\n", err)
+	default:
+		return c.fail(failure{
+			code: exitPublish,
+			msg:  fmt.Sprintf("toktape: %v", err),
+			hint: "the key has to be the run's own delete token or the journal token that owns it",
+		})
+	}
+	// The run is down (or was never there to begin with); a key to it is now
+	// a key to nothing, and a warning about the cleanup is not a failure.
+	if forgetErr := publish.Forget(receiptsDir, id); forgetErr != nil {
+		fmt.Fprintf(c.stderr, "toktape: could not remove the saved entry for %s: %v\n", id, forgetErr)
+	}
+	return exitOK
 }
 
 // runPublishEdit changes one owned run instead of uploading (TTP-127).
@@ -238,7 +341,8 @@ func runPublishEdit(ctx context.Context, c *cli, f *publishFlags, cfg *config.Co
 			hint: "only the journal token that owns the run can change it",
 		})
 	}
-	return c.publishReceipt(receipt)
+	// An edit is token-owned, so there is no delete token to remember.
+	return c.publishReceipt(receipt, nil)
 }
 
 // editTargetID takes the id or the link: a bare id travels as-is, and a
@@ -326,7 +430,12 @@ func textPolicy(f *publishFlags, cfg *config.Config) publish.TextPolicy {
 
 // publishReceipt prints the link. It is the product, so it goes to stdout on
 // one line and `url=$(toktape publish run.tape)` works.
-func (c *cli) publishReceipt(r *publish.Receipt) int {
+//
+// tokenErr is the outcome of remembering an anonymous upload's delete token:
+// nil when it was saved (or there was none to save), an error when the store
+// could not be written — which downgrades the message to a warning, because
+// the upload has already succeeded and unwinding it is not an option.
+func (c *cli) publishReceipt(r *publish.Receipt, tokenErr error) int {
 	if c.json {
 		b, err := json.Marshal(r)
 		if err != nil {
@@ -336,13 +445,35 @@ func (c *cli) publishReceipt(r *publish.Receipt) int {
 		return exitOK
 	}
 	fmt.Fprintln(c.stdout, r.URL)
-	if r.DeleteToken != "" {
-		// Printed once and stored nowhere. Keeping it in the config would
-		// turn that file into a list of everything this machine ever posted,
-		// which is a record nobody asked for.
-		fmt.Fprintf(c.stderr, "\nDelete token: %s\nThis is the only key to that upload and it is not saved anywhere. Keep it or lose the ability to take the run down.\n", r.DeleteToken)
+	if r.DeleteToken == "" {
+		return exitOK
 	}
+	// Printed once, and now also saved (2026-09-20). The old comment here
+	// argued against storing: keeping the token would be "a record nobody
+	// asked for". The user asked — take-down had to be one command, and a key
+	// that exists only in terminal scrollback is a key people lose. The file
+	// holds only the anonymous uploads from this machine, it is 0600 next to
+	// config.toml, and `--delete` removes the entry once the run is down.
+	if tokenErr == nil {
+		fmt.Fprintf(c.stderr, "\nDelete token: %s\nSaved to %s; `toktape publish --delete %s` takes the run down.\n",
+			r.DeleteToken, tildePath(publish.ReceiptsPath(mustConfigDir())), r.ID)
+		return exitOK
+	}
+	fmt.Fprintf(c.stderr, "\nDelete token: %s\nWarning: could not save it for `toktape publish --delete`: %v.\nThis is the only key to that upload — keep it or lose the ability to take the run down.\n",
+		r.DeleteToken, tokenErr)
 	return exitOK
+}
+
+// mustConfigDir is the config directory for display. The publish that got
+// this far already read a config, so a home directory that answers now would
+// be a surprise; the empty string keeps the message truthful rather than
+// failing the run over where to print a path.
+func mustConfigDir() string {
+	dir, err := config.Dir()
+	if err != nil {
+		return ""
+	}
+	return dir
 }
 
 // firstPublishWarning shows what is about to leave the machine, once per

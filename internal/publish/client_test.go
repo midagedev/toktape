@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	_ "image/png"
 	"io"
@@ -565,4 +566,64 @@ func TestClientDefaultBaseURL(t *testing.T) {
 	if !strings.HasPrefix(DefaultBaseURL, "https://") {
 		t.Errorf("DefaultBaseURL = %q: a tape is uploaded over TLS or not at all", DefaultBaseURL)
 	}
+}
+
+// Delete is a DELETE with the presented key as the bearer token (whichever of
+// the two the server accepts): 204 is nil, 404 is ErrGone — already-deleted
+// reads as gone, so a retried delete is not a failure — and any other status
+// is quoted verbatim like an upload refusal.
+func TestClientDelete(t *testing.T) {
+	t.Run("204 with the delete token", func(t *testing.T) {
+		var method, auth, path string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			method, auth, path = r.Method, r.Header.Get("Authorization"), r.URL.Path
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		defer srv.Close()
+
+		if err := (&Client{BaseURL: srv.URL}).Delete(context.Background(), "abc123", "dt_once"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if method != http.MethodDelete || path != "/api/v1/runs/abc123" {
+			t.Errorf("the delete was %s %s, want DELETE /api/v1/runs/abc123", method, path)
+		}
+		if auth != "Bearer dt_once" {
+			t.Errorf("Authorization = %q, want the presented key as the bearer token", auth)
+		}
+	})
+
+	t.Run("404 is ErrGone, whose message says the run is not there", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"error":"no run with that id; if you just deleted it, it is gone"}`)
+		}))
+		defer srv.Close()
+
+		err := (&Client{BaseURL: srv.URL}).Delete(context.Background(), "abc123", "dt_once")
+		if err == nil {
+			t.Fatal("a 404 was accepted as deleted")
+		}
+		if !errors.Is(err, ErrGone) {
+			t.Errorf("error = %v, want ErrGone", err)
+		}
+		if !strings.Contains(err.Error(), "no run with that id") {
+			t.Errorf("ErrGone's message does not say the run is not there: %q", err)
+		}
+	})
+
+	t.Run("a 403 is quoted verbatim", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, `{"error":"that token does not open this run"}`)
+		}))
+		defer srv.Close()
+
+		err := (&Client{BaseURL: srv.URL}).Delete(context.Background(), "abc123", "dt_wrong")
+		if err == nil {
+			t.Fatal("a 403 was accepted")
+		}
+		if !strings.Contains(err.Error(), "that token does not open this run") || !strings.Contains(err.Error(), "403") {
+			t.Errorf("error = %q, want the status and the server's own words", err)
+		}
+	})
 }

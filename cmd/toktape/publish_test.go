@@ -170,7 +170,9 @@ func TestPublishPrintsTheLink(t *testing.T) {
 }
 
 // A delete token is the only key to an anonymous upload, so it is said out
-// loud — on stderr, because stdout is the link a script captures.
+// loud — on stderr, because stdout is the link a script captures — and since
+// 2026-09-20 it is also filed under ~/.toktape/published.json, 0600, so
+// `toktape publish --delete` can find it after the scrollback is gone.
 func TestPublishSaysWhatTheDeleteTokenIs(t *testing.T) {
 	publishHome(t, "first_publish_warning_seen = true\n")
 	srv, _ := acceptingServer(t, "dt_once_only")
@@ -182,14 +184,30 @@ func TestPublishSaysWhatTheDeleteTokenIs(t *testing.T) {
 	if strings.Contains(stdout, "dt_once_only") {
 		t.Errorf("the delete token is on stdout, where a script capturing the link would swallow it:\n%s", stdout)
 	}
-	if !strings.Contains(stderr, "dt_once_only") || !strings.Contains(stderr, "not saved anywhere") {
-		t.Errorf("stderr does not say what the delete token is:\n%s", stderr)
+	for _, want := range []string{"dt_once_only", "published.json", "--delete"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr does not say %q:\n%s", want, stderr)
+		}
 	}
-	// Storing it would turn the config into a list of everything this machine
-	// ever posted.
-	body, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".toktape", "config.toml"))
-	if err == nil && strings.Contains(string(body), "dt_once_only") {
-		t.Errorf("the delete token was written to the config:\n%s", body)
+	// The key lands in the receipts file, mode 0600 — never in the config,
+	// which is not a list of everything this machine ever posted.
+	receipts := filepath.Join(os.Getenv("HOME"), ".toktape", "published.json")
+	body, err := os.ReadFile(receipts)
+	if err != nil {
+		t.Fatalf("the delete token was not saved: %v", err)
+	}
+	for _, want := range []string{"abc123", "dt_once_only", "delete_token"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("published.json is missing %q:\n%s", want, body)
+		}
+	}
+	fi, err := os.Stat(receipts)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("published.json mode = %v (%v), want 0600", fi, err)
+	}
+	cfg, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".toktape", "config.toml"))
+	if err == nil && strings.Contains(string(cfg), "dt_once_only") {
+		t.Errorf("the delete token was written to the config:\n%s", cfg)
 	}
 }
 
@@ -422,5 +440,199 @@ func TestPublishIsInTheUsageText(t *testing.T) {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("--help does not mention %q", want)
 		}
+	}
+}
+
+// deletingServer answers DELETE /api/v1/runs/<id> the way the Worker does and
+// records the Authorization it saw.
+func deletingServer(t *testing.T, status int, reply string) (*httptest.Server, *string) {
+	t.Helper()
+	auth := ""
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		auth = r.Header.Get("Authorization")
+		if r.Method != http.MethodDelete {
+			t.Errorf("method = %s, want DELETE", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		io.WriteString(w, reply)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &auth
+}
+
+// publishAnonymously uploads once against acceptingServer and returns the id
+// it got, leaving the delete token filed in HOME's published.json.
+func publishAnonymously(t *testing.T, srv *httptest.Server) string {
+	t.Helper()
+	code, _, stderr := exec(t, "publish", publishTape(t), "--url", srv.URL)
+	if code != exitOK {
+		t.Fatalf("the setup publish failed: %d: %s", code, stderr)
+	}
+	return "abc123"
+}
+
+// Taking a run down is one command: the anonymous upload from this machine
+// left its key in published.json, --delete finds it, presents it, and removes
+// the entry once the run is down. The token itself never reaches stdout.
+func TestPublishDeleteWithSavedToken(t *testing.T) {
+	publishHome(t, "first_publish_warning_seen = true\n")
+	upload, _ := acceptingServer(t, "dt_saved_key")
+	id := publishAnonymously(t, upload)
+
+	srv, auth := deletingServer(t, http.StatusNoContent, "")
+	code, stdout, stderr := exec(t, "publish", "--delete", id, "--url", srv.URL)
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if *auth != "Bearer dt_saved_key" {
+		t.Errorf("Authorization = %q, want the saved delete token", *auth)
+	}
+	if strings.TrimSpace(stdout) != "deleted "+id {
+		t.Errorf("stdout = %q, want %q", stdout, "deleted "+id)
+	}
+	if strings.Contains(stdout, "dt_saved_key") {
+		t.Errorf("the delete token is on stdout:\n%s", stdout)
+	}
+	body, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".toktape", "published.json"))
+	if err != nil {
+		t.Fatalf("published.json: %v", err)
+	}
+	if strings.Contains(string(body), id) {
+		t.Errorf("the deleted run's entry survived:\n%s", body)
+	}
+}
+
+// A run this machine never uploaded anonymously is still deletable with the
+// journal token from the config.
+func TestPublishDeleteWithJournalToken(t *testing.T) {
+	publishHome(t, "token = \"tk_journal\"\nfirst_publish_warning_seen = true\n")
+	srv, auth := deletingServer(t, http.StatusNoContent, "")
+
+	code, stdout, stderr := exec(t, "publish", "--delete", "abc123", "--url", srv.URL)
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if *auth != "Bearer tk_journal" {
+		t.Errorf("Authorization = %q, want the journal token", *auth)
+	}
+	if !strings.Contains(stdout, "deleted abc123") {
+		t.Errorf("stdout = %q", stdout)
+	}
+}
+
+// A full URL names the run the same way an id does.
+func TestPublishDeleteTakesAURL(t *testing.T) {
+	publishHome(t, "token = \"tk_journal\"\nfirst_publish_warning_seen = true\n")
+	srv, _ := deletingServer(t, http.StatusNoContent, "")
+
+	code, stdout, stderr := exec(t, "publish", "--delete", srv.URL+"/r/abc123", "--url", srv.URL)
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "deleted abc123") {
+		t.Errorf("stdout = %q, want the id", stdout)
+	}
+}
+
+// A wrong key is the server's refusal, quoted verbatim, and a failure — the
+// run is still up.
+func TestPublishDeleteRefusalIsQuoted(t *testing.T) {
+	publishHome(t, "first_publish_warning_seen = true\n")
+	srv, _ := deletingServer(t, http.StatusForbidden, `{"error":"that token does not open this run"}`)
+
+	code, stdout, stderr := exec(t, "publish", "--delete", "abc123", "--token", "dt_wrong", "--url", srv.URL)
+	if code != exitPublish {
+		t.Fatalf("exit %d, want %d: a run that is still up is not a success", code, exitPublish)
+	}
+	if !strings.Contains(stderr, "that token does not open this run") {
+		t.Errorf("the service's own words are not in:\n%s", stderr)
+	}
+	if strings.Contains(stdout, "deleted") {
+		t.Errorf("stdout says deleted:\n%s", stdout)
+	}
+}
+
+// Already-gone is a success shape (the server reads it that way, web/src/del.js)
+// and still cleans the saved entry up.
+func TestPublishDeleteAlreadyGone(t *testing.T) {
+	publishHome(t, "first_publish_warning_seen = true\n")
+	upload, _ := acceptingServer(t, "dt_saved_key")
+	id := publishAnonymously(t, upload)
+
+	srv, _ := deletingServer(t, http.StatusNotFound, `{"error":"no run with that id; if you just deleted it, it is gone"}`)
+	code, stdout, stderr := exec(t, "publish", "--delete", id, "--url", srv.URL)
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "no run with that id") || strings.Contains(stdout, "deleted "+id) {
+		t.Errorf("stdout = %q, want it to say the run is already gone", stdout)
+	}
+	body, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".toktape", "published.json"))
+	if err != nil {
+		t.Fatalf("published.json: %v", err)
+	}
+	if strings.Contains(string(body), id) {
+		t.Errorf("the gone run's entry survived:\n%s", body)
+	}
+}
+
+// The usage errors: --delete is its own operation, and a delete without any
+// of the three keys is refused with the three sources named.
+func TestPublishDeleteUsageErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config string
+		args   []string
+		want   string
+	}{
+		{"with a tape file", "first_publish_warning_seen = true\n",
+			[]string{"publish", "run.toktape", "--delete", "abc123"}, "not a tape file"},
+		{"with --edit", "token = \"tk\"\nfirst_publish_warning_seen = true\n",
+			[]string{"publish", "--delete", "abc123", "--edit", "abc123", "--title", "x"}, "name one"},
+		{"no key anywhere", "first_publish_warning_seen = true\n",
+			[]string{"publish", "--delete", "abc123"}, "--token"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			publishHome(t, tc.config)
+			code, _, stderr := exec(t, tc.args...)
+			if code != exitUsage {
+				t.Fatalf("exit %d, want %d: %s", code, exitUsage, stderr)
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr = %q, want it to name %q", stderr, tc.want)
+			}
+		})
+	}
+
+	// The no-key refusal names all three sources.
+	publishHome(t, "first_publish_warning_seen = true\n")
+	_, _, stderr := exec(t, "publish", "--delete", "abc123")
+	for _, want := range []string{"--token", "published.json", "config.toml"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("the no-key refusal does not name %q:\n%s", want, stderr)
+		}
+	}
+}
+
+// --dry-run --delete shows which key source would be used — never the key
+// itself — and sends nothing.
+func TestPublishDeleteDryRun(t *testing.T) {
+	publishHome(t, "first_publish_warning_seen = true\n")
+	upload, _ := acceptingServer(t, "dt_saved_key")
+	publishAnonymously(t, upload)
+
+	srv, auth := deletingServer(t, http.StatusNoContent, "")
+	code, stdout, stderr := exec(t, "publish", "--delete", "abc123", "--dry-run", "--url", srv.URL)
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if *auth != "" {
+		t.Errorf("a dry run reached the server with Authorization %q", *auth)
+	}
+	if !strings.Contains(stdout, "saved delete token") || strings.Contains(stdout, "dt_saved_key") {
+		t.Errorf("stdout = %q, want the source and not the token", stdout)
 	}
 }

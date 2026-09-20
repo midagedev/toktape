@@ -523,8 +523,14 @@ func saveRun(outDir string, tp *tape.Tape, wantCard bool) (artifacts, error) {
 // the two commands that do something with it, and nothing else. The compare
 // line appears only when there is an earlier run of the same model to compare
 // against: an instruction that cannot be followed is worse than no line.
+//
+// A run with failed streams is not a run to post, so it opens with the
+// server's own words instead (streamFailureBlock) and the Post it line is
+// held back; the tape and card lines stay, because the run did happen and its
+// files are on disk.
 func shareHint(outDir string, tp *tape.Tape, a artifacts) string {
 	var b strings.Builder
+	b.WriteString(streamFailureBlock(tp))
 	if a.tape != "" {
 		fmt.Fprintf(&b, "✓ Tape   %s\n", tildePath(a.tape))
 	}
@@ -537,8 +543,14 @@ func shareHint(outDir string, tp *tape.Tape, a artifacts) string {
 	if a.tape == "" {
 		return b.String()
 	}
-	fmt.Fprintf(&b, "→ Post it:  toktape card %s -o md --copy    (Reddit-ready, copied to clipboard)\n",
-		tildePath(a.tape))
+	// A run with failed streams is not a run to post: the card reports the
+	// streams that finished, and a Reddit post of it would quote figures the
+	// tape itself says are partial. The failure block above says what happened
+	// instead, and the tape/card lines stay because the files do exist.
+	if tp.Summary.Aggregate.StreamsFailed == 0 {
+		fmt.Fprintf(&b, "→ Post it:  toktape card %s -o md --copy    (Reddit-ready, copied to clipboard)\n",
+			tildePath(a.tape))
+	}
 	// The tape is what separates a posted card from a screenshot: a reader who
 	// has the file can replay the run instead of taking the numbers on trust.
 	// The hint names the basename, which is what an upload is called.
@@ -915,4 +927,97 @@ func hostRAMOverride(fs *flag.FlagSet, f ramFlags) (recorder.HostRAM, error) {
 		out.Source = tape.RAMSourceStated
 	}
 	return out, nil
+}
+
+// streamFailureBlock is what a run with dead streams opens the share block
+// with, or "" for a run without any.
+//
+// A run where streams died used to end with the card, the ✓ lines and an
+// invitation to post it, with "2 of 4 failed" buried inside the card — a
+// first-time user got a broken tape and a nudge to share it (measured
+// 2026-09-20: a context_length_exceeded run exited 0 looking like a success).
+// The server's own error words are the thing to show, because they are more
+// specific than anything that could be written here, so they are quoted (each
+// distinct sentence once, first 160 runes, with ×N when more than one stream
+// said it) under the count, followed by the one lever that fits them.
+func streamFailureBlock(tp *tape.Tape) string {
+	n := tp.Summary.Aggregate.StreamsFailed
+	if n == 0 {
+		return ""
+	}
+	sent := tp.Summary.Aggregate.Streams
+	if sent == 0 {
+		sent = tp.Summary.Concurrency
+	}
+	var errs []string
+	for _, r := range tp.Requests {
+		if r.Error != "" {
+			errs = append(errs, r.Error)
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "✗ %d of %d streams failed", n, sent)
+	if texts, counts := dedupeErrors(errs); len(texts) > 0 {
+		for i, text := range texts {
+			if i == 0 {
+				b.WriteString(": ")
+			} else {
+				b.WriteString("; ")
+			}
+			b.WriteString(truncateError(text))
+			if counts[i] > 1 {
+				fmt.Fprintf(&b, " ×%d", counts[i])
+			}
+		}
+	} else {
+		// The summary counted failures the requests no longer name — a tape
+		// from an older build, or a stream that produced nothing without
+		// erroring. The count is still the fact; an invented sentence is not.
+		b.WriteString(" (no error text on the tape)")
+	}
+	fmt.Fprintf(&b, "\n→ %s\n", failureLever(strings.Join(errs, "; ")))
+	return b.String()
+}
+
+// truncateError keeps a server's error to its first 160 runes. The whole
+// sentence is on the server's own log; the share block needs enough of it to
+// be recognised, not all of it.
+func truncateError(s string) string {
+	runes := []rune(s)
+	if len(runes) <= 160 {
+		return s
+	}
+	return string(runes[:160]) + "…"
+}
+
+// dedupeErrors folds identical error sentences into one text each, in first
+// appearance order, and returns the per-text counts beside them.
+func dedupeErrors(errs []string) (texts []string, counts []int) {
+	for _, e := range errs {
+		for i, t := range texts {
+			if t == e {
+				counts[i]++
+				goto next
+			}
+		}
+		texts = append(texts, e)
+		counts = append(counts, 1)
+	next:
+	}
+	return texts, counts
+}
+
+// failureLever is the one line of advice under a failed-streams block,
+// matched from the server's own words. An error this table does not recognise
+// gets no invented advice — the server's sentence is printed above it, and a
+// guess dressed as a fix is how a first-time user learns to distrust the tool.
+func failureLever(errText string) string {
+	s := strings.ToLower(errText)
+	if strings.Contains(s, "context") && (strings.Contains(s, "exceed") || strings.Contains(s, "length")) {
+		return "the prompt plus the answer did not fit the slot: lower --n-predict, or raise the server's -c (which -np divides)"
+	}
+	if strings.Contains(s, "429") || strings.Contains(s, "rate") {
+		return "the server refused the load: fewer --sessions"
+	}
+	return "the server's words are above; the streams that finished are what the card reports"
 }
