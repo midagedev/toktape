@@ -519,15 +519,28 @@ func samplingOf(recs []tape.RequestRecord) tape.SamplingSummary {
 }
 
 // thoughtAnyway counts the answered streams whose output opens a thinking
-// block.
+// block, or that produced reasoning tokens at all.
 //
-// Only the opening counts. A reasoning model emits its tag as the very first
-// thing it writes, whereas a "<think>" further into an answer is the model
-// quoting one — and a run is not evidence that a switch was ignored because
-// the model mentioned thinking.
+// The tag is one witness, the count is the other. Only the opening counts for
+// the tag: a reasoning model emits its tag as the very first thing it writes,
+// whereas a "<think>" further into an answer is the model quoting one — and a
+// run is not evidence that a switch was ignored because the model mentioned
+// thinking. But a server that splits reasoning into its own field (the
+// OpenAI-compatible reasoning_content of exl3-serve and vLLM) never puts a
+// tag in the content, so the tag alone called those runs obedient while their
+// every token was reasoning (TTP-149, 2026-09-20: GLM tapes with 783 of 783
+// predicted tokens reasoning and ThoughtAnyway 0). PromptRecord.ReasoningN is
+// the server's own count of reasoning among the predicted tokens, recorded
+// per stream: a positive count is the same contradiction with no tag to
+// quote, and zero is no witness — the direction this field must err in, since
+// it only ever speaks to contradict.
 func thoughtAnyway(recs []tape.RequestRecord) int {
 	n := 0
 	for _, r := range recs {
+		if r.Prompt.ReasoningN > 0 {
+			n++
+			continue
+		}
 		var b strings.Builder
 		for _, tk := range r.Tokens {
 			b.WriteString(tk.Text)

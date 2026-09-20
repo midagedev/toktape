@@ -30,6 +30,21 @@ func TestSamplingThoughtAnyway(t *testing.T) {
 		}
 		return out
 	}
+	// reasoning streams like an OpenAI-compatible server: no tag in the
+	// content, the thinking carried in a field of its own and already counted
+	// into the record (TTP-149, 2026-09-20).
+	reason := func(thinking string, tokens ...int) []tape.RequestRecord {
+		var out []tape.RequestRecord
+		for i, n := range tokens {
+			r := tape.RequestRecord{Index: i}
+			r.Prompt.Thinking = thinking
+			r.Prompt.Endpoint = tape.EndpointChat
+			r.Prompt.ReasoningN = n
+			r.Tokens = []tape.TokenEvent{{Text: "an answer from the start"}}
+			out = append(out, r)
+		}
+		return out
+	}
 
 	for _, c := range []struct {
 		name string
@@ -41,6 +56,17 @@ func TestSamplingThoughtAnyway(t *testing.T) {
 		{"none thought", rec("off", "an answer", "an answer"), 0},
 		{"whitespace before the tag", rec("off", "\n  <think>"), 1},
 		{"the other spelling", rec("off", "<thinking>"), 1},
+		// The tag is not the only witness. A server that splits reasoning into
+		// its own field (exl3-serve and vLLM's reasoning_content) never puts a
+		// tag in the content, and every thinking token is already counted in
+		// ReasoningN. The 2026-09-20 GLM tapes are this shape: sampling
+		// "thinking off", 783 of 783 predicted tokens reasoning, and the count
+		// here read 0 — so the card said "thinking off" over its own Context
+		// row. FAIL-first: before ReasoningN counted here, both cases below
+		// returned 0.
+		{"reasoning in a field, not a tag", reason("off", 783, 0), 1},
+		{"all four reasoned in a field", reason("off", 12, 12, 12, 12), 4},
+		{"a field count of zero is no witness", reason("off", 0, 0), 0},
 		// Not asked for: the field says nothing about a run that left the
 		// decision with the server, because there is no request to contradict.
 		{"thinking not requested off", rec("", "<think>", "<think>"), 0},
