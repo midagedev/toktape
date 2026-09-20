@@ -702,6 +702,14 @@ type TimingsSummary struct {
 	// usage.completion_tokens) or "chunks" (SSE deltas were counted — not a
 	// token count, so no rate is derived from it; lesson 1).
 	PredictedNSource string `json:"predicted_n_source,omitempty"`
+	// PromptNSource is how PromptN was counted on a client-timed stream: ""
+	// (a timings object said) or "usage" (the final chunk's
+	// usage.prompt_tokens). Lead, 2026-09-21, TTP-167: the count was parsed
+	// and dropped, so every OpenAI-kind card printed "? in" for a figure the
+	// server had stated. It is the server's count, which is the record; only
+	// the prefill RATE stays unknown on these streams, because no server
+	// figure times the prompt.
+	PromptNSource string `json:"prompt_n_source,omitempty"`
 }
 
 // AggregateTimings is the server-wide view of a concurrent run. With
@@ -1232,6 +1240,27 @@ type DecodeCalibration struct {
 	// PerSecond is (PredictedN-1) over DecodeMs — server-counted tokens over
 	// a client-timed span, which is what every client-timed rate on the tape
 	// is. One stream, nothing else running.
+	PerSecond float64 `json:"per_second"`
+	// Prefill is a second request with a long salted prompt and a one-token
+	// answer, when it was made (lead, 2026-09-21, TTP-168). The decode cap
+	// alone budgeted no prefill: on Ollama a 7.9k-token prompt cost 4.1 s the
+	// cap had not reserved, and on CPU vLLM TTFT was 74 s under a 20 s clock.
+	Prefill *CalibrationPrefill `json:"prefill,omitempty"`
+}
+
+// CalibrationPrefill prices prefill on a server that times nothing itself.
+type CalibrationPrefill struct {
+	// PromptN is usage.prompt_tokens; CachedN is
+	// usage.prompt_tokens_details.cached_tokens when the server sent it.
+	PromptN     int `json:"prompt_n"`
+	CachedN     int `json:"cached_n,omitempty"`
+	PromptBytes int `json:"prompt_bytes"`
+	// TTFTMs is client-timed, request out to first content chunk.
+	TTFTMs float64 `json:"ttft_ms"`
+	// PerSecond is (PromptN-CachedN) over TTFTMs less the short
+	// calibration's TTFT (the fixed cost): one stream, client-timed, and an
+	// estimate the plan budgets with — never a figure the card prints as the
+	// machine's prefill rate.
 	PerSecond float64 `json:"per_second"`
 }
 
