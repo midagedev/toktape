@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -27,36 +28,119 @@ import (
 // that said 0% hit). The fake below models exactly that server; the gates
 // assert the run that meets it is planned, not improvised.
 //
-// The cost model is planted so the whole gate stays under two seconds of
-// wall clock: a 2 s clock with a 16 000 tok/s probe fit (0.0625 ms/token,
-// binary-exact so the plan's arithmetic is too) stands in for the day's
-// 20 s clock at 3 023 tok/s. The ratios the plan must survive are the same.
+// The cost model is planted so the whole gate stays around three seconds of
+// wall clock: a 3.5 s clock with a 64 000 tok/s probe fit (1/64 ms/token,
+// binary-exact, so the fit recovers the plant without rounding) stands in
+// for the day's 20 s clock at 3 023 tok/s. The ratios the plan must survive
+// are the same.
 
 // firstTryCosts is the planted machine: the per-token and fixed prefill
-// costs the fit recovers. 0.0625 ms/token is 16 000 tok/s at the margin.
+// costs the fit recovers. 1/64 ms/token is 64 000 tok/s at the margin.
 const (
-	firstTryPerTokMs = 0.0625
+	firstTryPerTokMs = 0.015625
 	firstTryFixedMs  = 25.0
 	// firstTryNCtx is the slot context, -c 32768 divided by -np 4.
 	firstTryNCtx = 8192
 	// firstTryTemplate is what the fake counts the chat template as adding.
 	firstTryTemplate = 100
+	// firstTryConcurrentShare is the planted contention: when more than one
+	// /completion request is in prefill at once, the aggregate rate the
+	// burst of them delivers is this fraction of the single-stream rate.
+	// 0.2 is the day's own measurement at ~1.6k-token prompts (574–716 tok/s
+	// aggregate against 2963–3083 probed, 2026-09-20) — the number the
+	// plan's first draft assumed was 0.5 and spent half the clock on.
+	firstTryConcurrentShare = 0.2
 )
 
-// firstTryTokens is the fake tokenizer: ceil(bytes / 2.5). 2.5 bytes/token
-// sits inside the published set's measured band (2.43 to 3.70 on the day's
-// real tokenizer), dense enough that whole prompts overrun the slot.
-func firstTryTokens(s string) int { return (2*len(s) + 4) / 5 }
+// firstTryTokens is the fake tokenizer, non-uniform the way the day's real
+// one proved to be (2026-09-20): the first firstTryHeadBytes of any text
+// price at 4.0 bytes/token — task prose, the sparse thing the set opens
+// with — and everything after at 2.2, the code and logs the material
+// continues into. A pure function of byte position, so a prefix re-counts
+// consistently: /tokenize, /completion and the chat route all report the
+// same number for the same bytes, and the count is monotone in the length.
+// Against the uniform ceil(bytes/2.5) this gate used before, the
+// proportional trim looked exact (any linear tokenizer is); against this
+// one it undershoots by double-digit percents, which is the defect the
+// day's takes exposed (target 1800, landed 1339–1700).
+const (
+	firstTryHeadBytes = 6000
+	firstTryHeadBPT   = 4.0
+	firstTryTailBPT   = 2.2
+)
+
+func firstTryTokens(s string) int {
+	head := min(len(s), firstTryHeadBytes)
+	return ceilDiv(head, firstTryHeadBPT) + ceilDiv(len(s)-head, firstTryTailBPT)
+}
+
+// ceilDiv is bytes divided by a bytes-per-token price, rounded up: the
+// tokenizer never undercounts, which is the safe direction for every
+// ceiling that reads it.
+func ceilDiv(bytes int, bytesPerToken float64) int {
+	return int(math.Ceil(float64(bytes) / bytesPerToken))
+}
 
 // firstTry is the stateful half of the fake: a prefix cache keyed on the
-// exact prompt text, and a mutex that serialises concurrent prefills the
-// way the day's four streams queued behind each other. The cost is
-// computed, never slept: prompt_ms is the server's own figure and the gate
-// asserts on it, not on wall time.
+// exact prompt text, and the contention model the day's four streams
+// queued behind each other through. The single-stream cost is computed,
+// never slept — prompt_ms is the server's own figure and the gate asserts
+// on it — but the concurrent burst is a wall-clock measurement in the code
+// under test, so its cost has to be real time: under contention each
+// prefill sleeps the marginal cost of its tokens at the contended
+// aggregate rate, serialized behind prefillMu, and the sum of those sleeps
+// is exactly what an aggregate of firstTryConcurrentShare x single implies.
+// The chat route keeps the instant answer: no gate here asserts on the
+// run's own chat wall time, and a serialized chat queue would price
+// seconds of sleep for nothing these gates read.
 type firstTry struct {
 	mu         sync.Mutex
 	served     map[string]bool
 	enforceCtx bool
+	prefillMu  sync.Mutex
+	inflight   int
+	maxIn      int
+}
+
+// enterPrefill is the contention model's accounting: a request entering
+// /completion's prefill raises the in-flight count, and the peak is kept
+// for the gate's overlap assertion on the burst.
+func (ft *firstTry) enterPrefill() {
+	ft.mu.Lock()
+	ft.inflight++
+	if ft.inflight > ft.maxIn {
+		ft.maxIn = ft.inflight
+	}
+	ft.mu.Unlock()
+}
+
+func (ft *firstTry) leavePrefill() {
+	ft.mu.Lock()
+	ft.inflight--
+	ft.mu.Unlock()
+}
+
+// inflightPrefill is how many prefills are in the route right now.
+func (ft *firstTry) inflightPrefill() int {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	return ft.inflight
+}
+
+// peakPrefill is the most prefills the server saw at once.
+func (ft *firstTry) peakPrefill() int {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	return ft.maxIn
+}
+
+// contendedPrefillMs is the wall time one contended prefill of n prompt
+// tokens costs: the marginal single-stream cost divided by the planted
+// share. Alone it would be prompt_ms's own per-token term; under the
+// serialized queue the aggregate over the burst works out to the planted
+// fraction, which is the figure the recorder's burst is built to measure.
+func contendedPrefillMs(n int) float64 {
+	return firstTryPerTokMs * float64(n) / firstTryConcurrentShare
 }
 
 // firstTryMux is the whole server the default run meets: /props with eight
@@ -120,7 +204,9 @@ func firstTryMux(t *testing.T, enforceCtx bool) (*http.ServeMux, *firstTry) {
 	})
 	// The probe pass's route, in its raw /completion shape. A repeated
 	// prompt is served whole and says so the way ik does: prompt_n 5,
-	// cache_n 0.
+	// cache_n 0. Contended prefills — the probe's burst — pay the planted
+	// aggregate in real wall time, serialized; a lone prefill pays nothing
+	// real, because every figure the fit reads is the server's own ms.
 	mux.HandleFunc("/completion", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Prompt   string `json:"prompt"`
@@ -147,6 +233,21 @@ func firstTryMux(t *testing.T, enforceCtx bool) (*http.ServeMux, *firstTry) {
 			n, ms = 5, 2.0
 		}
 		ft.mu.Unlock()
+		ft.enterPrefill()
+		// The entry settle: a burst arrives together, so every request of
+		// it waits long enough for the whole batch to land before deciding
+		// whether it shares the prefill slot — the first of the batch is
+		// as contended as the rest, it just cannot know yet.
+		time.Sleep(10 * time.Millisecond)
+		if ft.inflightPrefill() > 1 {
+			// The serialized queue: hold the prefill slot for this
+			// request's share of the contended aggregate, so the last of
+			// the burst's first tokens arrives at the sum of them all.
+			ft.prefillMu.Lock()
+			time.Sleep(time.Duration(contendedPrefillMs(n) * float64(time.Millisecond)))
+			ft.prefillMu.Unlock()
+		}
+		ft.leavePrefill()
 		writeCompletion(w, n, 0, ms)
 	})
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
@@ -222,14 +323,14 @@ func writeFirstTryChat(w http.ResponseWriter, promptN int, promptMs float64) {
 }
 
 // firstTryOpts is the day's command — the default prompt set, a clock, no
-// cap named — with the clock shortened to 2 s and the clock pinned so the
+// cap named — with the clock shortened to 3.5 s and the clock pinned so the
 // two takes against one server get different salts.
 func firstTryOpts(t *testing.T, srv *httptest.Server, streams int, hour int) recorder.Options {
 	t.Helper()
 	return recorder.Options{
 		BaseURL:        srv.URL,
 		Concurrency:    streams,
-		For:            2 * time.Second,
+		For:            3500 * time.Millisecond,
 		FSRoot:         t.TempDir(),
 		GPU:            gpu.Null{},
 		SampleInterval: 50 * time.Millisecond,
@@ -240,19 +341,24 @@ func firstTryOpts(t *testing.T, srv *httptest.Server, streams int, hour int) rec
 // TestTheFirstTryRunIsPlannedNotImprovised is the gate. For one, four and
 // eight streams against the server above, twice against the same server:
 // every stream answers, no prompt is served from the cache, the prefill the
-// plan chose fits inside its share of the clock, the streams do equal work,
-// and the tape names the limit that decided it.
+// plan chose fits inside its share of the clock at the rate the box really
+// delivers under load, the streams do equal work — equal tokens, inside the
+// trim's convergence band — and the tape names the limit that decided it.
 //
 // With this fixture the plan's arithmetic is exact (the planted costs are
-// binary-exact), so the targets are too: the slot ceiling is
+// binary-exact), so the targets follow from it: the slot ceiling is
 // 8192 - 192 - 1024 = 6976 and binds one stream (the whole first prompt is
-// ~7619 tokens at this tokenizer, over the slot less its answer), and the
-// clock ceiling is (500 ms x 8000 tok/s - N x 25 ms x 8000 tok/s) / N =
-// 800 tokens at four streams and 300 at eight.
+// ~7431 tokens at this tokenizer, over the slot less its answer), and at
+// four and eight streams the clock binds at floor(0.25 x For x the measured
+// aggregate / N) — about 2800 and 1400 at the planted 0.2-share aggregate
+// of 12 800 tok/s, with the few per cent of real wall the burst's client
+// clock honestly carries. The plan assumed that aggregate was half the
+// one-stream rate before the concurrent point existed (2026-09-20), and
+// these targets are what assuming it bought instead.
 func TestTheFirstTryRunIsPlannedNotImprovised(t *testing.T) {
 	for _, n := range []int{1, 4, 8} {
 		t.Run(fmt.Sprintf("streams%d", n), func(t *testing.T) {
-			mux, _ := firstTryMux(t, true)
+			mux, ft := firstTryMux(t, true)
 			srv := httptest.NewServer(mux)
 			t.Cleanup(srv.Close)
 
@@ -268,6 +374,33 @@ func TestTheFirstTryRunIsPlannedNotImprovised(t *testing.T) {
 				}
 				if len(tp.Requests) != n {
 					t.Fatalf("take %d: %d requests, want %d", take+1, len(tp.Requests), n)
+				}
+
+				// The concurrent point: measured, not assumed. The burst
+				// really ran concurrently (the fake saw the streams share
+				// its prefill route), it recorded the planted aggregate,
+				// and the plan's target came from that number.
+				if n > 1 {
+					if s.Probe == nil || s.Probe.Concurrent == nil {
+						t.Errorf("take %d: Probe.Concurrent = nil at %d streams; the run that will load the server with %d prefills at once measured what that costs", take+1, n, n)
+					} else {
+						c := s.Probe.Concurrent
+						if c.Streams != n {
+							t.Errorf("take %d: Concurrent.Streams = %d, want %d", take+1, c.Streams, n)
+						}
+						if c.PromptN <= 0 || c.WallMs <= 0 {
+							t.Errorf("take %d: Concurrent = %+v, want observed figures, not zeros", take+1, *c)
+						}
+						want := s.Probe.PrefillPerSecond * firstTryConcurrentShare
+						if !near(c.PerSecond, want, 0.10) {
+							t.Errorf("take %d: Concurrent.PerSecond = %v, want the planted %.0f (a 0.2-share aggregate of the single-stream rate) within 10%%", take+1, c.PerSecond, want)
+						}
+					}
+				} else if s.Probe != nil && s.Probe.Concurrent != nil {
+					t.Errorf("take %d: Concurrent = %+v on a one-stream run, want nil: nothing was concurrent", take+1, *s.Probe.Concurrent)
+				}
+				if peak := ft.peakPrefill(); n > 1 && peak < 2 {
+					t.Errorf("take %d: the fake never saw two prefills at once (peak %d); the concurrent point measured a queue that did not exist", take+1, peak)
 				}
 
 				// No prompt was served from the prefix cache: the run salted
@@ -304,31 +437,55 @@ func TestTheFirstTryRunIsPlannedNotImprovised(t *testing.T) {
 				if p.SlotCtx != firstTryNCtx {
 					t.Errorf("take %d: Plan.SlotCtx = %d, want %d", take+1, p.SlotCtx, firstTryNCtx)
 				}
+				var wantTarget int
 				switch {
 				case n >= 4:
 					if p.Binding != tape.PlanBoundClock {
 						t.Errorf("take %d: Plan.Binding = %q, want %q (the prefill share of the clock is the tightest ceiling at %d streams)", take+1, p.Binding, tape.PlanBoundClock, n)
 					}
-					wantTarget := 800
-					if n == 8 {
-						wantTarget = 300
-					}
-					if p.TargetTokens != wantTarget {
-						t.Errorf("take %d: Plan.TargetTokens = %d, want %d", take+1, p.TargetTokens, wantTarget)
-					}
-					if s.PromptTrimTokens != wantTarget {
-						t.Errorf("take %d: PromptTrimTokens = %d, want %d", take+1, s.PromptTrimTokens, wantTarget)
+					// The ceiling comes from the rate the probe measured, so
+					// the expectation does too — the measured aggregate
+					// carries a few per cent of real wall around the plant,
+					// and the plant itself is pinned by the PerSecond
+					// assertion above. A target that is not
+					// floor(share x For x Concurrent.PerSecond / N) would be
+					// the plan acting on a number it was not given.
+					if c := s.Probe.Concurrent; c != nil && c.PerSecond > 0 {
+						wantTarget = int(firstTryOpts(t, srv, n, hour).For.Seconds() * 0.25 * c.PerSecond / float64(n))
+						if p.TargetTokens != wantTarget {
+							t.Errorf("take %d: Plan.TargetTokens = %d, want %d (the clock share over the measured %v tok/s)", take+1, p.TargetTokens, wantTarget, c.PerSecond)
+						}
+						if s.PromptTrimTokens != wantTarget {
+							t.Errorf("take %d: PromptTrimTokens = %d, want %d", take+1, s.PromptTrimTokens, wantTarget)
+						}
+						// The trim converged: every stream carries the target's
+						// work inside the band the trim converges into, never
+						// over it. The day's proportional cut landed 25% under
+						// (target 1800, landed 1339..1700) — the defect this
+						// band exists to make impossible.
+						for i, rec := range tp.Requests {
+							if got := rec.Timings.PromptN; got > wantTarget || float64(got) < 0.97*float64(wantTarget) {
+								t.Errorf("take %d stream %d: prompt_n %d, want within [0.97 x %d, %d]: the trim did not converge onto its target", take+1, i, got, wantTarget, wantTarget)
+							}
+						}
 					}
 				case n == 1:
 					// Slot-bound, and the tape says so: the whole first
-					// prompt is ~7619 tokens at this tokenizer, over the
+					// prompt is ~7431 tokens at this tokenizer, over the
 					// 6976 the slot leaves once its answer is reserved,
-					// while the clock alone would have allowed 7600.
+					// while the clock alone would have allowed 54 400.
 					if p.Binding != tape.PlanBoundSlot {
 						t.Errorf("take %d: Plan.Binding = %q, want %q", take+1, p.Binding, tape.PlanBoundSlot)
 					}
-					if p.TargetTokens != 6976 {
-						t.Errorf("take %d: Plan.TargetTokens = %d, want 6976 (8192 less the 192 template margin less the 1024 answer floor)", take+1, p.TargetTokens)
+					wantTarget = 6976
+					if p.TargetTokens != wantTarget {
+						t.Errorf("take %d: Plan.TargetTokens = %d, want %d (8192 less the 192 template margin less the 1024 answer floor)", take+1, p.TargetTokens, wantTarget)
+					}
+					// One stream converges too.
+					for i, rec := range tp.Requests {
+						if got := rec.Timings.PromptN; got > wantTarget || float64(got) < 0.97*float64(wantTarget) {
+							t.Errorf("take %d stream %d: prompt_n %d, want within [0.97 x %d, %d]: the trim did not converge onto its target", take+1, i, got, wantTarget, wantTarget)
+						}
 					}
 				}
 				if p.LongestPromptTokens <= 0 || p.LongestPromptTokens > firstTryNCtx-firstTryTemplate {
@@ -338,14 +495,16 @@ func TestTheFirstTryRunIsPlannedNotImprovised(t *testing.T) {
 					t.Errorf("take %d: PromptSalt empty, the set went out unsalted", take+1)
 				}
 
-				// The prefill the plan chose fits its share of the clock:
-				// at the concurrent rate the probe measured halved, N
-				// prompts of the trimmed length cost at most 30% of For.
+				// The prefill the plan chose fits its share of the clock at
+				// the rate the box really delivers under this load — the
+				// planted 0.2 aggregate, not the 0.5 the plan used to
+				// assume. Assuming half was the error that spent half the
+				// day's 20 s clock on prefill promised in 4.3 s.
 				if n >= 4 {
 					if s.Probe == nil || s.Probe.PrefillPerSecond <= 0 {
 						t.Fatalf("take %d: no probe fit to check the plan against", take+1)
 					}
-					rate := s.Probe.PrefillPerSecond * 0.5
+					rate := s.Probe.PrefillPerSecond * firstTryConcurrentShare
 					plannedSec := float64(n) * float64(hi) / rate
 					if limit := 0.30 * firstTryOpts(t, srv, n, hour).For.Seconds(); plannedSec > limit {
 						t.Errorf("take %d: planned prefill %v s exceeds the 30%% share (%v s) of the clock", take+1, plannedSec, limit)
@@ -360,7 +519,9 @@ func TestTheFirstTryRunIsPlannedNotImprovised(t *testing.T) {
 // on the lenient variant of the same server (no context refusal): both
 // takes must prefill real tokens. On the unplanned run the set is fixed
 // text, the second take is byte-identical to the first, and the fake answers
-// it the way the day's warm server did — prompt_n 5.
+// it the way the day's warm server did — prompt_n 5. Two streams carry the
+// clause (each take still pays its concurrent burst in real wall time, and
+// this test reads none of it).
 func TestTheFirstTrySaltDefeatsTheServersPrefixCache(t *testing.T) {
 	mux, _ := firstTryMux(t, false)
 	srv := httptest.NewServer(mux)
@@ -368,7 +529,7 @@ func TestTheFirstTrySaltDefeatsTheServersPrefixCache(t *testing.T) {
 
 	sent := [][]string{}
 	for take, hour := range []int{10, 11} {
-		tp, err := recorder.Record(context.Background(), firstTryOpts(t, srv, 4, hour))
+		tp, err := recorder.Record(context.Background(), firstTryOpts(t, srv, 2, hour))
 		if err != nil {
 			t.Fatalf("take %d: Record: %v", take+1, err)
 		}
@@ -390,10 +551,13 @@ func TestTheFirstTrySaltDefeatsTheServersPrefixCache(t *testing.T) {
 
 // PlanLine renders the summary's own figures, nothing invented: the target
 // (or the longest prompt when the prompts went whole), the prefill the plan
-// costs at the probe's rate halved for concurrency, the resolved cap, the
+// costs at the rate it used — the measured concurrent rate when the probe
+// made one, the probe's rate halved when it did not — the resolved cap, the
 // slot. The first case is the lead's worked example, and its figures are
 // the day's real ones (4 streams, 1,880-token clock-bound prompts, a 3,023
-// tok/s probe, a 1,024 cap, an 8,192 slot).
+// tok/s probe, a 1,024 cap, an 8,192 slot); the second is the same run with
+// the concurrent point the day's takes measured (574 tok/s aggregate,
+// 2026-09-20), whose honest prefill line is the 13 s that took the clock.
 func TestPlanLineRendersTheSummarysOwnFigures(t *testing.T) {
 	clock := &tape.Tape{Summary: tape.RunSummary{
 		Concurrency: 4,
@@ -409,6 +573,17 @@ func TestPlanLineRendersTheSummarysOwnFigures(t *testing.T) {
 	if got := recorder.PlanLine(&clock.Summary, 4); got != want {
 		t.Errorf("PlanLine =\n  %q\nwant\n  %q", got, want)
 	}
+
+	// The measured concurrent rate replaces the halved one: ~4 x 1,891 at
+	// 574 tok/s is 13.2 s, the figure the day's plan owed its reader and
+	// printed as 5 s while the takes waited 6.5-10.4 s for their first
+	// tokens.
+	clock.Summary.Probe.Concurrent = &tape.ConcurrentPrefill{Streams: 4, PromptN: 6544, WallMs: 11400, PerSecond: 574}
+	want = "plan: 4 × 1,880-token prompts (clock-bound) · ~13.2 s prefill · cap 1,024 · slot 8,192"
+	if got := recorder.PlanLine(&clock.Summary, 4); got != want {
+		t.Errorf("PlanLine with a concurrent point =\n  %q\nwant\n  %q", got, want)
+	}
+	clock.Summary.Probe.Concurrent = nil
 
 	// A whole run with no probe and no slot prints the prompt, the binding
 	// and the cap only: every other figure is the schema's "not observed"

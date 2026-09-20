@@ -44,12 +44,20 @@ const (
 	// the shape this constant exists to make impossible.
 	planPrefillShare = 0.25
 	// planConcurrentPrefillFactor is how much of the probe's one-stream
-	// prefill rate N concurrent streams get together. Measured 2026-09-20
-	// on the day's server: 1425-1595 tok/s aggregate against 3023 probed
-	// with four streams — about half, so half is what the plan assumes. The
-	// probe cannot measure this itself (it runs on one stream by design),
-	// and assuming the full rate is the error that filled the clock with
-	// queue wait.
+	// prefill rate N concurrent streams are ASSUMED to get together, when
+	// the run has no concurrent point to measure it. Two measurements on
+	// the same box (ik_llama.cpp, Qwen3.6-35B, 2026-09-20) put the truth
+	// far apart: 0.47 at ~6k-token prompts (1425-1595 tok/s aggregate
+	// against 3023 probed) and about 0.2 at ~1.6k (574-716 aggregate
+	// against 2963-3083 probed, TTFT 6.5-10.4 s of a 20 s clock). How an
+	// engine shares one batch between slots is the engine's business and
+	// moves with the prompt length, so 0.5 is a placeholder of the right
+	// order, not a calibration: whenever the probe could measure the run's
+	// own N-stream rate (tape.ProbeSummary.Concurrent) the plan uses the
+	// measurement, and this factor is what is left for the runs where it
+	// could not — a burst that did not fit its budget on a slow box, or one
+	// whose measurement came back with a hole in it. Assuming the full rate
+	// is the error that filled the clock with queue wait.
 	planConcurrentPrefillFactor = 0.5
 	// planFallbackBytesPerToken prices prompt bytes in tokens when the
 	// server's /tokenize did not answer. 2.4 is the floor of the published
@@ -185,16 +193,23 @@ func (r *run) planSet(ctx context.Context, reqs []server.StreamRequest, slotCtx 
 	// A run that measured no rate does not get to act on one.
 	if r.limit.For > 0 && r.prefill != nil && r.prefill.PrefillPerSecond > 0 {
 		n := len(counts) // streams per round: reqs is one round's requests
-		rate := r.prefill.PrefillPerSecond
-		if n > 1 {
-			rate *= planConcurrentPrefillFactor
-		}
 		budgetMs = float64(r.limit.For.Milliseconds()) * planPrefillShare
-		// The budget buys tokens for every stream's prompt and pays every
-		// stream's fixed cost; what is left over, divided by N, is the
-		// longest prompt one stream may carry.
-		tClock := int((budgetMs/1000*rate - float64(n)*(r.prefill.FixedMs/1000)*rate) / float64(n))
-		ceilings = append(ceilings, planCeiling{tClock, tape.PlanBoundClock})
+		rate, measured := planConcurrentRate(r.prefill, n)
+		if measured {
+			// The measured aggregate rate is the plan's own subject: it
+			// already contains the fixed costs and the queueing of N
+			// streams asking at once — that is what WallMs spans — so
+			// subtracting FixedMs again would pay the queue twice and buy
+			// prompts the clock cannot afford.
+			ceilings = append(ceilings, planCeiling{
+				int(budgetMs / 1000 * rate / float64(n)), tape.PlanBoundClock})
+		} else {
+			// The budget buys tokens for every stream's prompt and pays every
+			// stream's fixed cost; what is left over, divided by N, is the
+			// longest prompt one stream may carry.
+			tClock := int((budgetMs/1000*rate - float64(n)*(r.prefill.FixedMs/1000)*rate) / float64(n))
+			ceilings = append(ceilings, planCeiling{tClock, tape.PlanBoundClock})
+		}
 	}
 	// The slot: the context the request will land in, less the template's
 	// markup, less the answer the run exists to measure.
@@ -239,6 +254,27 @@ func tightestCeiling(ceilings []planCeiling) *planCeiling {
 		}
 	}
 	return best
+}
+
+// planConcurrentRate is the aggregate prefill rate streams streams are
+// planned against, and whether it was measured: the probe's own concurrent
+// point when it made one for exactly this stream count, the fitted
+// one-stream rate with planConcurrentPrefillFactor applied when it did not
+// (and un-factored at one stream, where there is no concurrency to assume).
+// planSet's ceiling and PlanLine's "~X s prefill" both read it here so the
+// number the plan used and the number the run prints are the same number by
+// construction, not by coincidence.
+func planConcurrentRate(p *tape.ProbeSummary, streams int) (rate float64, measured bool) {
+	if p == nil || p.PrefillPerSecond <= 0 {
+		return 0, false
+	}
+	if c := p.Concurrent; streams > 1 && c != nil && c.Streams == streams && c.PerSecond > 0 {
+		return c.PerSecond, true
+	}
+	if streams > 1 {
+		return p.PrefillPerSecond * planConcurrentPrefillFactor, false
+	}
+	return p.PrefillPerSecond, false
 }
 
 // saltSetPrompts puts salt in front of every set prompt's content, the one
@@ -293,14 +329,37 @@ func (r *run) countSet(ctx context.Context, reqs []server.StreamRequest) ([]int,
 	return out, counted
 }
 
-// trimSetTo cuts every set prompt whose count exceeds target to target
-// tokens, on rune boundaries, from the front. The cut is sized at 98% of
-// the proportional share so a tokenizer whose boundaries land denser than
-// its average still comes in under; when the counts came from the server,
-// the cut is re-counted once and shrunk proportionally once more if it is
-// still over — one correction, not a loop, is the budget here, and the slot
-// cap behind this step is the backstop that makes a single correction
-// enough.
+// The converging trim's two knobs.
+const (
+	// planTrimBand is how far under the target a converged trim may land:
+	// 3% buys convergence in a handful of corrections while keeping the
+	// streams' work equal to within what a card reader can see.
+	planTrimBand = 0.97
+	// planTrimTokenizations caps the re-counts one prompt may spend. Each
+	// one is a round trip, and five covers a density that changes twice
+	// between the guess and the answer.
+	planTrimTokenizations = 5
+)
+
+// trimSetTo cuts every set prompt whose count exceeds target down towards
+// target tokens, on rune boundaries, from the front.
+//
+// When the counts came from the server's own tokenizer the cut converges
+// (2026-09-20): the proportional guess assumes the front of a prompt is as
+// dense as its whole, and it is not — the set opens with task prose and
+// continues with code and logs, so the first takes' cuts landed 25% under
+// their target (target 1800, landed 1339–1700) while every stream reported
+// a different miss. The cut is re-counted and corrected proportionally —
+// shrunk when over, grown while under planTrimBand and runes remain — until
+// it lands in [planTrimBand × target, target] or planTrimTokenizations
+// re-counts have been spent, after which the largest candidate that fit
+// under the target is sent: never over, because the slot behind this step
+// refuses over, and as close to it as the ruler could get.
+//
+// When the lengths were priced there is no ruler to converge against, and
+// the cut stays the single proportional one at 98% — a shrink-only era's
+// safety, kept because a priced cut cannot be corrected, only guessed
+// better.
 func (r *run) trimSetTo(ctx context.Context, reqs []server.StreamRequest, counts []int, target int) {
 	if target <= 0 {
 		return
@@ -311,27 +370,62 @@ func (r *run) trimSetTo(ctx context.Context, reqs []server.StreamRequest, counts
 		}
 		p := promptTextOf(&reqs[i])
 		runes := []rune(*p)
-		chars := int(float64(len(runes)) * float64(target) / float64(counts[i]) * 0.98)
-		if chars < 1 {
-			chars = 1
-		}
-		if chars > len(runes) {
-			chars = len(runes)
-		}
-		cut := []rune(*p)[:chars]
-		if r.planTokenized {
-			if n, err := r.client.Tokenize(ctx, string(cut)); err == nil && n > target {
-				shrink := int(float64(len(cut)) * float64(target) / float64(n))
-				if shrink < 1 {
-					shrink = 1
-				}
-				if shrink < len(cut) {
-					cut = cut[:shrink]
-				}
+		if !r.planTokenized {
+			// The priced single cut, unchanged: no tokenizer, no iteration.
+			chars := int(float64(len(runes)) * float64(target) / float64(counts[i]) * 0.98)
+			if chars < 1 {
+				chars = 1
 			}
+			if chars > len(runes) {
+				chars = len(runes)
+			}
+			*p = string(runes[:chars])
+			continue
 		}
-		*p = string(cut)
+		*p = string(r.trimConverge(ctx, runes, counts[i], target))
 	}
+}
+
+// trimConverge walks one prompt's cut onto the target: proportional guess,
+// re-count, proportional correction, and the largest under-target candidate
+// seen if the budget of re-counts runs out mid-walk. A tokenizer that stops
+// answering ends the walk early the same way — the best candidate so far,
+// or the guess itself when nothing better was counted, which is the priced
+// cut's answer wearing the ruler it had.
+func (r *run) trimConverge(ctx context.Context, runes []rune, count, target int) []rune {
+	chars := int(float64(len(runes)) * float64(target) / float64(count))
+	if chars < 1 {
+		chars = 1
+	}
+	if chars > len(runes) {
+		chars = len(runes)
+	}
+	cut := runes[:chars]
+	bestLen, bestN := 0, 0
+	for range planTrimTokenizations {
+		n, err := r.client.Tokenize(ctx, string(cut))
+		if err != nil {
+			break // no ruler: keep the best candidate, or the guess
+		}
+		if n <= target && (n > bestN || (n == bestN && len(cut) > bestLen)) {
+			bestLen, bestN = len(cut), n
+		}
+		switch {
+		case n > target, float64(n) < planTrimBand*float64(target) && len(cut) < len(runes):
+			next := int(float64(len(cut)) * float64(target) / float64(n))
+			next = min(max(next, 1), len(runes))
+			if next == len(cut) {
+				return cut // the ruler cannot resolve a finer step
+			}
+			cut = runes[:next]
+		default:
+			return cut // in the band: [planTrimBand x target, target]
+		}
+	}
+	if bestLen > 0 {
+		return runes[:bestLen]
+	}
+	return cut
 }
 
 // pricedTokens prices content bytes in tokens at the fallback price. It is
@@ -361,9 +455,10 @@ func promptTextOf(q *server.StreamRequest) *string {
 //
 // Every figure is the summary's own — the target (or the longest prompt,
 // when the prompts went whole), the prefill the plan's lengths cost at the
-// probe's measured rate halved for concurrency, the cap as resolved, the
-// slot as reported. "" when the run planned nothing, which is the caller's
-// cue to print nothing.
+// same rate the plan used (the measured concurrent rate when the probe made
+// one, the fitted rate with the fallback concurrency factor when it did
+// not), the cap as resolved, the slot as reported. "" when the run planned
+// nothing, which is the caller's cue to print nothing.
 func PlanLine(s *tape.RunSummary, streams int) string {
 	if s == nil || s.Plan == nil {
 		return ""
@@ -376,10 +471,7 @@ func PlanLine(s *tape.RunSummary, streams int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "plan: %d × %s-token prompts (%s)", streams, commaInt(n), planBindingWord(p.Binding))
 	if s.Probe != nil && s.Probe.PrefillPerSecond > 0 && p.LongestPromptTokens > 0 && streams > 0 {
-		rate := s.Probe.PrefillPerSecond
-		if streams > 1 {
-			rate *= planConcurrentPrefillFactor
-		}
+		rate, _ := planConcurrentRate(s.Probe, streams)
 		sec := strconv.FormatFloat(float64(streams)*float64(p.LongestPromptTokens)/rate, 'f', 1, 64)
 		fmt.Fprintf(&b, " · ~%s s prefill", strings.TrimSuffix(sec, ".0"))
 	}

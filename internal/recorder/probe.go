@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/midagedev/toktape/internal/server"
@@ -72,6 +73,35 @@ const (
 // to report, so the budget only has to land near the constant.
 const probeCharsPerToken = 4.9
 
+// The concurrent point (lead, 2026-09-20). The run plan's first draft
+// assumed N concurrent streams prefill at half the one-stream rate; the
+// first real takes measured a fifth — 574–716 tok/s aggregate against
+// 2963–3083 probed, TTFT 6.5–10.4 s of a 20 s clock — and a run with no
+// measurement has to assume. How an engine shares one batch between slots
+// is the engine's business and moves with the prompt length (the same box
+// ran at 0.47 of its one-stream rate with ~6k-token prompts and ~0.2 with
+// ~1.6k ones), so when the run itself will send several streams at once the
+// pass asks the server what several prefills at once actually cost, the way
+// the run will load it.
+const (
+	// probeConcurrentTokensMax caps each burst prompt's nominal length. A
+	// burst of N x 1024 is enough tokens for the rate to be a rate on any
+	// box that can afford the burst at all, and the cap keeps a fast box
+	// from buying a longer one for nothing.
+	probeConcurrentTokensMax = 1024
+	// probeConcurrentTokensMin is the burst's floor. A burst too short to
+	// contend meaningfully measures the fixed cost N times, not the shared
+	// batch, and 256 is the same floor the plan's own trim holds.
+	probeConcurrentTokensMin = 256
+	// probeConcurrentSlowdown is how much slower N prefills at once are
+	// ASSUMED to be, for budgeting the burst only — never for a figure. The
+	// day's box measured 5x at 1.6k tokens and about 2x at 6k, so 4x is a
+	// pessimistic middle: a burst that costs more than this against its
+	// budget is not sent, which is the honest outcome on a box whose
+	// contention is worse than the assumption — no figure beats a wrong one.
+	probeConcurrentSlowdown = 4.0
+)
+
 // The leads and cycle offsets of the two prompts. With the per-run salts in
 // front, the salts make the first token differ and the leads and offsets
 // keep every position after it differing too, so the two prompts share no
@@ -125,6 +155,35 @@ func probeSalts(now time.Time) (short, long string) {
 	return strconv.FormatInt(twice, 36), strconv.FormatInt(twice+1, 36)
 }
 
+// probeBurstSalts are the per-run nonces the concurrent burst's n prompts
+// open with: the fit points take twice and twice+1, and burst i takes
+// twice+2+i, so no two prompts of one run share a first token with each
+// other or with the fit points — a burst prompt served from another burst
+// prompt's prefix would measure the cache, not the batch.
+//
+// The even split the fit salts keep does not extend here: a later run's
+// short salt (even) can equal an earlier run's burst salt (twice+2+i is
+// even for even i). What that shares is the salt and the lead — a prefix of
+// about two tokens — which is the same size of hit every warm server
+// already gives both fit prompts through BOS alone, and the fit is built to
+// tolerate it (the span is what it checks, lead, 2026-09-20).
+func probeBurstSalts(now time.Time, n int) []string {
+	twice := now.Unix() * 2
+	out := make([]string, n)
+	for i := range out {
+		out[i] = strconv.FormatInt(twice+2+int64(i), 36)
+	}
+	return out
+}
+
+// probeBurstCycle is burst i's offset into probeWords: the two fit points
+// cycle from 0 and 33, and the burst cycles from just past the long point's
+// offset, each prompt one word further, so the material after the salt is
+// its own too.
+func probeBurstCycle(i int) int {
+	return (probeCycleLong + 1 + i) % len(probeWords)
+}
+
 // probePrompt builds one probe prompt: the salt, the lead word, then the
 // word list cycled from offset, up to a byte budget of about tokens prompt
 // tokens.
@@ -144,8 +203,12 @@ func probePrompt(salt, lead string, offset, tokens int) string {
 // prefillProbe measures the machine's own prefill rate before the run: two
 // raw /completion requests of different prompt lengths, one token of
 // generation each, then the longer prompt a second time to see what the
-// server's prefix cache does with a prompt it has already read. It runs
-// after the run's requests are built and before the first one is sent, so
+// server's prefix cache does with a prompt it has already read — and, when
+// the run will send several streams at once, a burst of n probe prompts
+// together (2026-09-20), because the rate the plan budgets against is the
+// one under that load, not the one-stream slope. It runs
+// before the run's requests are built — its fit is one of the ceilings the
+// run plan takes (plan.go) — and before the first one is sent, so
 // the run's own timeline — startedAt, the sampler's fault baseline, the
 // clock's budget — starts clean after it.
 //
@@ -180,7 +243,8 @@ func (r *run) prefillProbe(ctx context.Context) {
 		return
 	}
 	p := &tape.ProbeSummary{}
-	saltShort, saltLong := probeSalts(r.opts.Clock.Now())
+	now := r.opts.Clock.Now()
+	saltShort, saltLong := probeSalts(now)
 	p.Salt = saltShort
 	sampler, _ := r.newFaultSampler()
 	if sampler != nil {
@@ -228,12 +292,21 @@ func (r *run) prefillProbe(ctx context.Context) {
 	if len(p.Prefill) == 2 {
 		p.PrefillPerSecond, p.FixedMs = fitPrefill(p.Prefill)
 	}
+	// The concurrent point, after the fit and the replay: the burst's length
+	// is budgeted from the fit, so it needs one, and it goes out under the
+	// same sampler bracket as the rest of the pass — its faults are the
+	// pass's own, and its tokens join the per-token denominator below.
+	if n := r.opts.Concurrency; n > 1 && len(p.Prefill) > 0 {
+		if tokens := probeConcurrentTokens(n, p.PrefillPerSecond); tokens > 0 {
+			p.Concurrent = r.probeConcurrent(ctx, n, tokens, now)
+		}
+	}
 	if sampler != nil {
 		// The denominator is the tokens the pass evaluated — both fit
-		// points and the replay's own count. A cache-served replay reports
-		// PromptN 0 in the server's own words, so it contributes nothing
-		// and the sum needs no special case: faults of a hit are page-table
-		// walks, not prefills.
+		// points, the replay's own count and the burst's. A cache-served
+		// replay reports PromptN 0 in the server's own words, so it
+		// contributes nothing and the sum needs no special case: faults of a
+		// hit are page-table walks, not prefills.
 		if maj, _, err := sampler.FaultDelta(); err == nil {
 			tokens := 0
 			for _, pt := range p.Prefill {
@@ -241,6 +314,9 @@ func (r *run) prefillProbe(ctx context.Context) {
 			}
 			if p.Replay != nil {
 				tokens += p.Replay.PromptN
+			}
+			if p.Concurrent != nil {
+				tokens += p.Concurrent.PromptN
 			}
 			p.MajFaults = maj
 			if tokens > 0 {
@@ -280,6 +356,94 @@ func probeLongLength(short server.ServerTimings) int {
 		return 0
 	}
 	return fits
+}
+
+// probeConcurrentTokens is the nominal length of each prompt in the
+// concurrent burst: the largest up to probeConcurrentTokensMax whose
+// predicted cost — n x L at the fitted rate, slowed probeConcurrentSlowdown
+// times for budgeting — still fits probeBudgetMs. Like probeLongLength, the
+// prediction errs on the conservative side and a length that cannot fit is
+// not sent; unlike it, the floor here refuses rather than shrinks, because
+// a burst under probeConcurrentTokensMin measures fixed cost N times over
+// and calls it a batch.
+//
+// 0 means no burst: fewer than two streams (nothing concurrent to measure),
+// no fit to predict from (the same honesty as a refused fit — no
+// measurement, no action), or a box whose contention is worse than the
+// assumption even at the floor.
+func probeConcurrentTokens(n int, prefillPerSecond float64) int {
+	if n <= 1 || prefillPerSecond <= 0 {
+		return 0
+	}
+	fits := int(probeBudgetMs / 1000 * prefillPerSecond / (float64(n) * probeConcurrentSlowdown))
+	if fits > probeConcurrentTokensMax {
+		fits = probeConcurrentTokensMax
+	}
+	if fits < probeConcurrentTokensMin {
+		return 0
+	}
+	return fits
+}
+
+// probeConcurrent sends n probe prompts at once and records what the server
+// did with them: the aggregate prefill rate under the load the run itself
+// will apply, fixed costs and queueing inside it, deliberately — the plan
+// budgets wall time, not marginal cost. WallMs is the client's clock, from
+// the instant before the first send to the last of the first tokens, each
+// request's TTFT taken against that common start the way probeSend takes it
+// against its own; it is the one client-timed figure in the probe because
+// no single server figure spans requests.
+//
+// nil is "not observed", silently like every miss in the pass: one request
+// that failed, one that the cache served whole (prompt_n 0), or a wall the
+// clock could not measure — the burst is one measurement, and a measurement
+// with a hole in it is not a smaller measurement.
+func (r *run) probeConcurrent(ctx context.Context, n, tokens int, now time.Time) *tape.ConcurrentPrefill {
+	prompts := make([]string, n)
+	for i, salt := range probeBurstSalts(now, n) {
+		prompts[i] = probePrompt(salt, probeLeadShort, probeBurstCycle(i), tokens)
+	}
+	type burst struct {
+		ttftMs float64
+		n      int
+		ok     bool
+	}
+	out := make([]burst, n)
+	start := time.Now()
+	var wg sync.WaitGroup
+	for i := range prompts {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			// The send happens a moment after this reading; that moment is
+			// the request's own launch overhead and belongs to the wall.
+			fromStart := time.Since(start)
+			st, ttft, ok := r.probeSend(ctx, prompts[i])
+			out[i] = burst{fromStart.Seconds()*1000 + ttft, st.PromptN, ok && st.PromptN > 0}
+		}(i)
+	}
+	wg.Wait()
+
+	var sum int
+	var wallMs float64
+	for _, b := range out {
+		if !b.ok {
+			return nil
+		}
+		sum += b.n
+		if b.ttftMs > wallMs {
+			wallMs = b.ttftMs
+		}
+	}
+	if wallMs <= 0 {
+		return nil
+	}
+	return &tape.ConcurrentPrefill{
+		Streams:   n,
+		PromptN:   sum,
+		WallMs:    wallMs,
+		PerSecond: float64(sum) / (wallMs / 1000),
+	}
 }
 
 // probeSend sends one probe request — the prompt verbatim to /completion,

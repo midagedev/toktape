@@ -805,6 +805,248 @@ func TestARunThatMeasuredItsMachineSendsTheSetWholeWhenEveryBudgetFits(t *testin
 	}
 }
 
+// The concurrent-burst gates (lead, 2026-09-20). The run plan's first draft
+// assumed N streams prefill at half the one-stream rate and the first real
+// takes measured a fifth; the probe now measures it. The fake below holds
+// each burst request in the handler until the whole burst has arrived (or a
+// short deadline passes), so "the N requests were really in flight
+// together" is a counted fact and not a hope about scheduling.
+
+// burstSeen watches the fake /completion the burst gates run against: every
+// prompt and cap it was asked for, the in-flight count, and its peak.
+type burstSeen struct {
+	mu      sync.Mutex
+	prompts []string
+	caps    []int
+	in      int
+	maxIn   int
+	// hold is the burst size to hold a request for until the rest arrive
+	// (0: no barrier). It only ever applies to the burst itself — the fit
+	// points and the replay are three requests that strictly precede it.
+	hold int
+	// failOne plants one failure in the burst: the first burst request to
+	// register gets a 500, which is one way "not observed" happens.
+	failOne bool
+	failed  bool
+}
+
+// burstMux is fakeMux plus the watched /completion.
+func burstMux(t *testing.T, seen *burstSeen) *http.ServeMux {
+	t.Helper()
+	mux := fakeMux(t)
+	var servedMu sync.Mutex
+	served := map[string]bool{}
+	mux.HandleFunc("/completion", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Prompt   string `json:"prompt"`
+			NPredict *int   `json:"n_predict"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		cap := 0
+		if in.NPredict != nil {
+			cap = *in.NPredict
+		}
+		seen.mu.Lock()
+		seen.prompts = append(seen.prompts, in.Prompt)
+		seen.caps = append(seen.caps, cap)
+		burst := len(seen.prompts) > 3 // short, long, replay come first
+		seen.in++
+		if seen.in > seen.maxIn {
+			seen.maxIn = seen.in
+		}
+		fail := burst && seen.failOne && !seen.failed
+		if fail {
+			seen.failed = true
+		}
+		seen.mu.Unlock()
+		if burst && seen.hold > 0 {
+			// The barrier: stay in flight until the whole burst has landed,
+			// so the peak the gate asserts on is the burst's own size.
+			deadline := time.Now().Add(200 * time.Millisecond)
+			for seen.inflight() < seen.hold && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+		}
+		if fail {
+			http.Error(w, "planted failure in the burst", http.StatusInternalServerError)
+			return
+		}
+		n := len(in.Prompt) / 5
+		servedMu.Lock()
+		_, hit := served[in.Prompt]
+		served[in.Prompt] = true
+		servedMu.Unlock()
+		cacheN := 0
+		if hit {
+			cacheN, n = n, 0
+		}
+		ms := 30 + 0.5*float64(n)
+		if cacheN > 0 {
+			ms = 2.0
+		}
+		writeCompletion(w, n, cacheN, ms)
+	})
+	return mux
+}
+
+func (s *burstSeen) inflight() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.in
+}
+
+func (s *burstSeen) peak() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.maxIn
+}
+
+func (s *burstSeen) snapshot() ([]string, []int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.prompts...), append([]int(nil), s.caps...)
+}
+
+// firstWord is the prompt's salt: everything before the first space.
+func firstWord(s string) string {
+	if i := strings.IndexByte(s, ' '); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+// TestTheProbeBurstsNRequestsTogetherAndRecordsThem: on a run that will
+// send N streams at once, the pass sends N probe prompts at the same
+// instant (the fake sees them all in flight together), every one asks for a
+// single token, no two of the pass's seven prompts share a first token, and
+// Concurrent carries the figures the server's own counts add up to.
+func TestTheProbeBurstsNRequestsTogetherAndRecordsThem(t *testing.T) {
+	seen := &burstSeen{hold: 4}
+	srv := httptest.NewServer(burstMux(t, seen))
+	t.Cleanup(srv.Close)
+
+	opts := probeOpts(t, srv)
+	opts.Concurrency = 4
+	tp, err := recorder.Record(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	p := tp.Summary.Probe
+	if p == nil {
+		t.Fatal("Summary.Probe = nil, the pass did not record anything")
+	}
+	// The one-stream fit is untouched by the burst: still the planted 2000.
+	if !near(p.PrefillPerSecond, 2000, 0.01) || !near(p.FixedMs, 30, 0.01) {
+		t.Fatalf("the burst disturbed the fit: %v tok/s, fixed %v; want the planted 2000 and 30", p.PrefillPerSecond, p.FixedMs)
+	}
+
+	prompts, caps := seen.snapshot()
+	if len(prompts) != 7 {
+		t.Fatalf("probe sent %d requests, want 7 (short, long, replay, then the burst of 4)", len(prompts))
+	}
+	for i, c := range caps {
+		if c != 1 {
+			t.Errorf("probe request %d asked for n_predict %d, want 1", i, c)
+		}
+	}
+	// No two prompts of the pass share a first token — the burst's salts
+	// are their own, as distinct from each other as from the fit points.
+	// The replay is excepted: it is the long point's own prompt resent, by
+	// design, and its prefix hit is the thing it exists to measure.
+	words := map[string]int{}
+	for _, i := range append([]int{0, 1}, 3, 4, 5, 6) {
+		w := firstWord(prompts[i])
+		if _, dup := words[w]; dup {
+			t.Errorf("probe prompts %d and %d share their first token %q; a burst served from another burst prompt's prefix measures the cache, not the batch", words[w], i, w)
+		}
+		words[w] = i
+	}
+	// The burst really was N requests in flight at once.
+	if peak := seen.peak(); peak < 2 {
+		t.Errorf("peak in-flight /completion = %d, want >= 2: the burst measured a queue that did not exist", peak)
+	}
+
+	// Concurrent carries what the server's own counts add up to: PromptN is
+	// the fake's conversion of exactly the four burst prompts, WallMs the
+	// client's span to the last first token, PerSecond the quotient.
+	c := p.Concurrent
+	if c == nil {
+		t.Fatal("Concurrent = nil on a 4-stream run against a healthy server")
+	}
+	if c.Streams != 4 {
+		t.Errorf("Concurrent.Streams = %d, want 4", c.Streams)
+	}
+	want := 0
+	for _, pp := range prompts[3:] {
+		want += len(pp) / 5
+	}
+	if c.PromptN != want {
+		t.Errorf("Concurrent.PromptN = %d, want %d (the server's own prompt_n summed over the burst)", c.PromptN, want)
+	}
+	if c.WallMs <= 0 {
+		t.Errorf("Concurrent.WallMs = %v, want the client's span to the last first token", c.WallMs)
+	}
+	if !near(c.PerSecond, float64(want)/(c.WallMs/1000), 1e-9) {
+		t.Errorf("Concurrent.PerSecond = %v, want PromptN over WallMs (%v)", c.PerSecond, float64(want)/(c.WallMs/1000))
+	}
+}
+
+// A one-stream run sends no burst: there is nothing concurrent to measure,
+// and nil is the schema's "not observed", not a miss.
+func TestAOneStreamRunSendsNoBurst(t *testing.T) {
+	seen := &burstSeen{}
+	srv := httptest.NewServer(burstMux(t, seen))
+	t.Cleanup(srv.Close)
+
+	tp, err := recorder.Record(context.Background(), probeOpts(t, srv))
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if p := tp.Summary.Probe; p == nil {
+		t.Fatal("Summary.Probe = nil, the pass did not record anything")
+	} else if p.Concurrent != nil {
+		t.Errorf("Concurrent = %+v on a one-stream run, want nil", *p.Concurrent)
+	}
+	if prompts, _ := seen.snapshot(); len(prompts) != 3 {
+		t.Errorf("probe sent %d requests, want the 3 of the one-stream pass (short, long, replay)", len(prompts))
+	}
+}
+
+// One failed request in the burst records nothing: a measurement with a
+// hole in it is not a smaller measurement, and the plan falls back to the
+// assumed concurrency factor rather than act on half a burst.
+func TestABurstWithOneFailedRequestRecordsNothing(t *testing.T) {
+	seen := &burstSeen{failOne: true}
+	srv := httptest.NewServer(burstMux(t, seen))
+	t.Cleanup(srv.Close)
+
+	opts := probeOpts(t, srv)
+	opts.Concurrency = 4
+	tp, err := recorder.Record(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	p := tp.Summary.Probe
+	if p == nil {
+		t.Fatal("Summary.Probe = nil, the pass did not record anything")
+	}
+	if p.Concurrent != nil {
+		t.Errorf("Concurrent = %+v despite a failed request in the burst, want nil", *p.Concurrent)
+	}
+	// The fit the burst failed on is not collateral: its points preceded it.
+	if !near(p.PrefillPerSecond, 2000, 0.01) {
+		t.Errorf("PrefillPerSecond = %v, want the planted 2000: the fit must survive a burst that did not", p.PrefillPerSecond)
+	}
+	for _, w := range tp.Summary.Warnings {
+		if strings.Contains(strings.ToLower(w), "probe") {
+			t.Errorf("warning about the probe on a pass whose contract is silence: %q", w)
+		}
+	}
+}
+
 // Gate 7 (lead, 2026-09-20): a refused fit trims nothing — no measurement,
 // no action on it. 2026-09-20, run plan: the token target is asserted too,
 // because the plan is what trims now.
