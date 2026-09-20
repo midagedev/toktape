@@ -368,7 +368,7 @@ writes files under `~/.toktape`. There is no telemetry and no account.
 | Servers | llama-server (upstream llama.cpp), ik_llama.cpp, any server that answers `/props` with an `engine` object |
 | Linux | primary target, x86_64 and arm64, full `/proc` view |
 | macOS | builds and runs; attach with `--url`; no `/proc` view, so memory and fault rows are `?` |
-| Windows | own binary, `--url` attach, no `/proc` view; WSL2 runs the Linux binary for the full view |
+| Windows | own binary; discovery and the `nvidia-smi` GPU view work as they do elsewhere, so `--url` is only for a server discovery does not probe; no `/proc` view, so memory and fault rows are `?`; WSL2 runs the Linux binary for the full view |
 | GPU | NVIDIA through `nvidia-smi` |
 
 Any other OpenAI-compatible server — vLLM, SGLang, TabbyAPI, LM Studio —

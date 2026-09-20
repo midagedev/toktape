@@ -352,7 +352,7 @@ WebAssembly로 컴파일해 브라우저에서 돌린 것입니다.
 | 서버 | llama-server(상류 llama.cpp), ik_llama.cpp, `/props`에 `engine` 객체로 답하는 서버 |
 | Linux | 기본 대상, x86_64·arm64, 전체 `/proc` 뷰 |
 | macOS | 빌드·실행, `--url` 부착, `/proc` 뷰 없음 — 메모리·폴트 행은 `?` |
-| Windows | 자체 바이너리, `--url` 부착, `/proc` 뷰 없음. WSL2는 Linux 바이너리로 전체 뷰 |
+| Windows | 자체 바이너리. 서버 탐색과 `nvidia-smi` GPU 뷰는 다른 곳과 똑같이 동작하므로 `--url`은 탐색이 훑지 않는 포트에만 필요합니다. `/proc` 뷰는 없어서 메모리·폴트 행은 `?`. WSL2는 Linux 바이너리로 전체 뷰 |
 | GPU | `nvidia-smi`를 통한 NVIDIA |
 
 그 밖의 OpenAI 호환 서버 — vLLM, SGLang, TabbyAPI, LM Studio — 는 일반

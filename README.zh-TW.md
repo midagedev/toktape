@@ -341,7 +341,7 @@ toktape card run.toktape                           # the card, drawn locally fro
 | 伺服器 | llama-server（上游 llama.cpp）、ik_llama.cpp，以及任何在 `/props` 裡回傳 `engine` 物件的伺服器 |
 | Linux | 首要目標，x86_64 和 arm64，完整的 `/proc` 檢視 |
 | macOS | 可建置、可執行；用 `--url` 接入；沒有 `/proc` 檢視，所以記憶體和分頁錯誤那幾列是 `?` |
-| Windows | 獨立的二進位檔，用 `--url` 接入，沒有 `/proc` 檢視；WSL2 可以跑 Linux 二進位檔取得完整檢視 |
+| Windows | 獨立的二進位檔。伺服器探索和 `nvidia-smi` 的 GPU 檢視與別處一樣可用，所以 `--url` 只用於探索不會探測的連接埠；沒有 `/proc` 檢視，記憶體和缺頁那幾列是 `?`；WSL2 可以跑 Linux 二進位檔取得完整檢視 |
 | GPU | 透過 `nvidia-smi` 支援 NVIDIA |
 
 其他相容 OpenAI 介面的伺服器——vLLM、SGLang、TabbyAPI、LM Studio——以通用模式

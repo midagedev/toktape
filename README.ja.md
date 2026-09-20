@@ -360,7 +360,7 @@ WebAssembly にコンパイルしてブラウザで動かしたものです。
 | サーバー | llama-server（本流 llama.cpp）、ik_llama.cpp、`/props` に `engine` オブジェクトで答えるサーバー |
 | Linux | 基本対象、x86_64・arm64、フル `/proc` ビュー |
 | macOS | ビルド・実行、`--url` 接続、`/proc` ビューなし — メモリ・フォールト行は `?` |
-| Windows | 専用バイナリ、`--url` 接続、`/proc` ビューなし。WSL2 は Linux バイナリでフルビュー |
+| Windows | 専用バイナリ。サーバー探索と `nvidia-smi` の GPU ビューは他と同じように動くので、`--url` は探索が当たらないポートにだけ必要です。`/proc` ビューはないのでメモリ・フォールト行は `?`。WSL2 は Linux バイナリでフルビュー |
 | GPU | `nvidia-smi` 経由の NVIDIA |
 
 その他の OpenAI 互換サーバー — vLLM、SGLang、TabbyAPI、LM Studio — は
