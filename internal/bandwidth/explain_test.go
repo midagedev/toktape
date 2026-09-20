@@ -112,11 +112,25 @@ func TestExplainHeroTape(t *testing.T) {
 	if !e.WithinTolerance {
 		t.Error("a zero gap is inside SplitTolerance by construction")
 	}
-	if !e.HostKnown {
-		t.Error("the hero is recorded with --ram-gbs-measured, so the host bus is known")
+	// 2026-09-21: hero re-recorded on prompts@v2 under the run plan, without
+	// --ram-gbs-measured. The host bus is an absence and must print as "?"
+	// with its reason (CLAUDE.md), never as a defaulted figure. The
+	// measured-host-bus path keeps its gates on the fixtures:
+	// TestExplainSaysWhyTheRatioAppears and TestExplainSaysWhichFigureItRefused
+	// set the measured STREAM figure on heroSummary()/wsSummary() and assert
+	// the known-bus output, so no coverage travelled with the asset.
+	if e.HostKnown {
+		t.Error("the hero was recorded without --ram-gbs-measured, so the host bus cannot be known")
 	}
+	if out := e.String(); !strings.Contains(out, "host    ? — no RAMBytesPerSec and no RAMSpeed x RAMChannels") {
+		t.Errorf("an unmeasured host bus does not print as ? with its reason:\n%s", out)
+	}
+	// The ceiling and the ratio still derive without one: the only device
+	// this placement streams from is the GPU, whose peak the tape carries
+	// (the CPU holds only lookup tables, which read by row and count for
+	// nothing per token), and the gap is inside tolerance.
 	if !e.CeilingKnown || !e.OfPeakKnown {
-		t.Error("a known host bus and a gap inside tolerance are exactly the two conditions for a ceiling and a ratio (TTP-45)")
+		t.Error("a streamed-from-GPU-only split and a gap inside tolerance are exactly the two conditions for a ceiling and a ratio (TTP-45)")
 	}
 	if strings.Contains(e.String(), "of peak ?") {
 		t.Errorf("String() still reports the ratio as unknown:\n%s", e)

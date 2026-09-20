@@ -177,9 +177,10 @@ func TestRecordCommandNamesWhatEndedTheRun(t *testing.T) {
 		},
 		{
 			// A tape recorded before the Limit field, when the stream count
-			// was spelled -n (assets/hero.tape is one). The block is pasted
-			// into today's binary, where -n 2 asks for two TOKENS per stream,
-			// so the old spelling would reproduce a different run
+			// was spelled -n (the hero was one until it was re-recorded with
+			// Limit, most recently 2026-09-21 on prompts@v2). The block is
+			// pasted into today's binary, where -n 2 asks for two TOKENS per
+			// stream, so the old spelling would reproduce a different run
 			// (lead, 2026-09-14).
 			name: "an old two-stream tape is re-asked with today's spelling",
 			s: &tape.RunSummary{

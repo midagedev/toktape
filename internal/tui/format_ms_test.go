@@ -12,7 +12,7 @@ func TestFmtMsParts(t *testing.T) {
 		v         float64
 		num, unit string
 	}{
-		{10753.7, "10.8", "s"}, // the hero's p50: seconds at one decimal past 10 s
+		{10753.7, "10.8", "s"}, // a former hero's p50 (2026-09-17 take), kept as a fixture: seconds at one decimal past 10 s. The 2026-09-21 hero's p50 (8246.875 ms) renders as "8.25 s" and never reaches this branch.
 		{1050, "1.05", "s"},    // seconds at two decimals under 10 s
 		{630, "630", "ms"},     // milliseconds as an integer
 		{0, "?", ""},           // never measured: no figure and no unit

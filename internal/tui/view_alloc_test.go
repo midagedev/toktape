@@ -111,6 +111,13 @@ func sampleKey(s viewSample) string {
 // TestViewFramesPinned pins every byte of 40 frames. Generate with
 // VIEW_GOLDEN_UPDATE=1 from the UNCHANGED source; afterwards every run must
 // match.
+//
+// 2026-09-21: hero re-recorded on prompts@v2 under the run plan — the 20
+// hero lines were regenerated that way (the sweep fixture's 20 are byte-
+// identical to before; only the hero's end-derived sample keys and frames
+// moved). The regenerated hero frames were eyeballed through tuidump before
+// being accepted: four streams on the new 20-second clock, ttft 8.25 s /
+// 8.45 s, no place names.
 func TestViewFramesPinned(t *testing.T) {
 	sweep, hero := loadViewTapes(t)
 	samples := viewSamples(sweep, hero)

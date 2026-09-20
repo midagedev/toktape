@@ -220,8 +220,11 @@ func TestPublicViewVerifiesThePromptSet(t *testing.T) {
 
 // TestPublicViewOnTheHeroTape is the fixture check: the repo's own published
 // tape, through the function that decides what a published tape looks like.
-// It was recorded before prompts@v1 existed, so it is also the real case the
-// verification above exists for.
+// It was recorded before prompts@v1 existed, so it was the first real case
+// the verification above exists for. Since 2026-09-21 it is the other real
+// case: a run that claims prompts@v2 with a salt and a token trim under the
+// run plan, whose claim is kept because — and only because — the
+// verification can check it against this binary's own set.
 func TestPublicViewOnTheHeroTape(t *testing.T) {
 	path := filepath.Join("..", "..", "assets", "hero.tape")
 	if _, err := os.Stat(path); err != nil {
@@ -233,8 +236,28 @@ func TestPublicViewOnTheHeroTape(t *testing.T) {
 	}
 	out := PublicView(tp, WithText)
 
-	if out.Summary.PromptSet != "" {
-		t.Errorf("PromptSet = %q: the hero predates the published set and belongs to no comparison set", out.Summary.PromptSet)
+	// 2026-09-21: hero re-recorded on prompts@v2 under the run plan (salted,
+	// prompts trimmed to ~800 tokens by the clock ceiling). The id is a
+	// claim, and this one is kept because the verifier confirms it against
+	// the set this binary carries. The negative case below keeps proving the
+	// other half on the same tape: a claim that does not check out is
+	// dropped, not forwarded to the index.
+	if out.Summary.PromptSet != "prompts@v2" {
+		t.Errorf("PromptSet = %q: the hero sent the salted, trimmed prompts@v2 and the verification must confirm it", out.Summary.PromptSet)
+	}
+	nudged := *tp
+	nudged.Requests = append([]tape.RequestRecord(nil), tp.Requests...)
+	first := nudged.Requests[0]
+	first.Prompt.Messages = append([]tape.Message(nil), first.Prompt.Messages...)
+	salt := tp.Summary.PromptSalt
+	body := first.Prompt.Messages[0].Content
+	if !strings.HasPrefix(body, salt) {
+		t.Fatalf("the hero's first prompt does not start with its recorded salt %q", salt)
+	}
+	first.Prompt.Messages[0].Content = salt + "x" + strings.TrimPrefix(body, salt)
+	nudged.Requests[0] = first
+	if got := PublicView(&nudged, WithText).Summary.PromptSet; got != "" {
+		t.Errorf("PromptSet = %q on a hero whose first prompt was nudged off the set's text behind the salt, want blank: a false claim must not travel", got)
 	}
 	if out.Summary.Model.Path != "" {
 		t.Errorf("Model.Path = %q", out.Summary.Model.Path)

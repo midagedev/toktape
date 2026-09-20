@@ -19,6 +19,12 @@ import (
 // the part that rots: re-record the hero and the numbers quoted in the help
 // become a lie a reader cannot check. So they are checked here, against the
 // tape itself and against the schedule the renderer really builds.
+//
+// 2026-09-21: hero re-recorded on prompts@v2 under the run plan — every
+// figure re-quoted below from the new tape's own output (the note's prose
+// alongside), and the average-claim branch re-authored for the new shape: a
+// --for 20s run the clock ended, on which the average predicts the run rather
+// than coming in short.
 
 // heroTape is the recording the README's clip plays and the help quotes.
 const heroTape = "../../assets/hero.tape"
@@ -99,46 +105,68 @@ func TestClipLengthNoteMatchesTheHero(t *testing.T) {
 	//   cap-bound — every stream reached the cap, so the longest run is the
 	//   run and the answer is held to a token's worth of time.
 	//
+	//   clock-cut — the run ended at --for, so the budget is the run. Nothing
+	//   stopped early, so the average is held to the run too, at the same
+	//   tolerance the cap-bound branch holds the formula to.
+	//
 	//   ragged — streams stopped at EOS first, so the answer is an upper
 	//   bound, and an upper bound is the only correct thing for it to be: a
-	//   formula that predicted this hero's 11.6s from --n-predict 512 would be
-	//   telling a reader to size a budget that cuts the next run, whose
-	//   streams may well use the cap. The bound is checked, and under it the
-	//   lesson the note draws from the gap — that the tokens a run averaged
-	//   predict *less* than the run — is checked as its own inequality, so the
-	//   ragged branch asserts the note's claim and not merely that some number
-	//   is large.
+	//   formula that predicted only what a run averaged would be telling a
+	//   reader to size a budget that cuts the next run, whose streams may
+	//   well use the cap. The bound is checked, and under it the lesson the
+	//   note draws from the gap — that the tokens a run averaged predict
+	//   *less* than the run — is checked as its own inequality, so the ragged
+	//   branch asserts the note's claim and not merely that some number is
+	//   large.
 	//
 	// 2026-09-17, lead. This replaced a "twentieth of the run" tolerance
 	// written for the previous ragged hero (one stream stopped at 137 of 512,
-	// a 12% shortfall). The current one is ragged all the way through — 152 to
-	// 279 tokens against a 512 cap — and predicts 17.9s for an 11.6s run, 54%
-	// over. A tolerance wide enough for that would check nothing, which is the
-	// signal that the tolerance was never the right instrument here: what
-	// changes with the shape is the claim, not its precision.
+	// a 12% shortfall). The 2026-09-17 recording was ragged all the way
+	// through — 152 to 279 tokens against a 512 cap — and predicted 17.9s for
+	// an 11.6s run, 54% over. A tolerance wide enough for that would check
+	// nothing, which is the signal that the tolerance was never the right
+	// instrument here: what changes with the shape is the claim, not its
+	// precision.
 	//
-	// FAIL-first, both branches, on this recording: with the inequality
-	// reversed (predicted < runEnd) the bound fails by 6.24s, and with the
-	// average's inequality reversed it fails by 799ms.
+	// 2026-09-21: hero re-recorded on prompts@v2 under the run plan — a
+	// --for 20s run the clock ended (Limit.CutAt set, no stream reporting an
+	// ending of its own, 432 to 433 tokens per stream), which is why the
+	// clock-cut branch above exists. FAIL-first for the re-authored claim:
+	// with the previous assertion ("the average comes in short") this tape
+	// fails by 12.5ms — 433 tokens predicted 20.004862164s for a
+	// 19.992349834s run — and the note's sentence was rewritten to what the
+	// tape shows instead of the test being bent.
 	if s.Limit.MaxTokens == 0 {
 		t.Fatal("the hero was recorded without --n-predict, so the note's formula has no input to check against")
 	}
+	const tol = 200 * time.Millisecond
 	estimate := func(tokens int) time.Duration {
 		return time.Duration(s.Timings.TTFTMs*float64(time.Millisecond)) +
 			time.Duration(float64(tokens)/s.Timings.PredictedPerSecond*float64(time.Second))
 	}
 	predicted := estimate(s.Limit.MaxTokens)
-	if s.Aggregate.MinPredictedN >= s.Limit.MaxTokens {
-		const tol = 200 * time.Millisecond
+	// The bound every shape shares: the formula aimed at the cap answers at
+	// least the run, or "the longest run those settings can produce" in the
+	// note would be a claim the tape contradicts.
+	if predicted < runEnd {
+		t.Errorf("TTFT + n-predict ÷ tok/s predicts %v, under the %v run; the note calls it the longest run those settings can produce",
+			predicted, runEnd)
+	}
+	switch {
+	case s.Limit.CutAt != 0 && s.Limit.EndingsObserved == 0:
+		// The clock ended it and nothing finished on its own, so no stream
+		// stopped early: the note says the average answers the run, and it is
+		// held to that at the tolerance above.
+		if avg := estimate(s.Timings.PredictedN); avg-runEnd > tol || runEnd-avg > tol {
+			t.Errorf("TTFT + the averaged %d tokens predicts %v for a clock-cut run of %v (off by %v, over the %v allowed); the note says the average answers the run",
+				s.Timings.PredictedN, avg, runEnd, avg-runEnd, tol)
+		}
+	case s.Aggregate.MinPredictedN >= s.Limit.MaxTokens:
 		if predicted-runEnd > tol || runEnd-predicted > tol {
 			t.Errorf("TTFT + n-predict ÷ tok/s predicts %v, the cap-bound run is %v (off by %v, over the %v allowed); the formula in the note is wrong",
 				predicted, runEnd, predicted-runEnd, tol)
 		}
-	} else {
-		if predicted < runEnd {
-			t.Errorf("TTFT + n-predict ÷ tok/s predicts %v for a ragged run of %v; the note calls it the length to size a budget by, and it came in under the run",
-				predicted, runEnd)
-		}
+	default:
 		if avg := estimate(s.Timings.PredictedN); avg >= runEnd {
 			t.Errorf("the tokens the run averaged predict %v for a %v run; the note says the average comes in short, and here it does not",
 				avg, runEnd)
@@ -177,8 +205,10 @@ func TestClipLengthLineAgreesWithTheRenderer(t *testing.T) {
 	}
 
 	// A window prints the shorter clip it really renders, and says what is not
-	// in it. A reader who is told "27.1s" and nothing else would read the run
-	// as eight seconds shorter than it was.
+	// in it. A reader who is told "19.8s" and nothing else would read the run
+	// as five seconds shorter than it was (2026-09-21: hero re-recorded on
+	// prompts@v2 under the run plan; the figure is the one the render verb
+	// itself prints for the windowed hero).
 	windowed := clipLengthLine(tp, render.Options{FPS: render.DefaultFPS, PrefillLead: heroPrefillLead})
 	want := render.NewSchedule(render.RunFrom(tp, heroPrefillLead), runEnd, render.DefaultFPS, 0, false).WithPoster()
 	if !strings.Contains(windowed, fmt.Sprintf("%.1fs", want.Duration.Seconds())) {

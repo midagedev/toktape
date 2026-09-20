@@ -272,7 +272,10 @@ func TestGIFOfTheWholeClipStaysPostable(t *testing.T) {
 	// The budget stayed at 1.5 MB when the cold open nearly doubled the
 	// clip's length, 11.5 s to 20 s (2026-09-13). It could have been raised
 	// and was not: measured on this fixture the clip went 1.09 MB → 1.22 MB,
-	// and the hero's own four-stream shape is 0.87 MB. A static opening is
+	// and the hero's own four-stream shape was 0.87 MB on the recording of
+	// that day (the 2026-09-21 hero, re-recorded on prompts@v2 under the run
+	// plan, is 3.8 MB for a 20-second run — a clip's bytes follow its tape,
+	// and that one is gated in cmd/toktape at 6.0 MB). A static opening is
 	// almost free here — every frame of it is one dirty rectangle of a few
 	// cells — so a looser gate would have bought headroom nobody needs and
 	// given up the one that caught a 7× regression before.

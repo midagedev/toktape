@@ -20,6 +20,14 @@ import (
 // renderUsage is what a mistyped render invocation prints. The verb has more
 // flags than fit the one line the main usage text gives it, and a person who
 // got the arguments wrong is exactly the person who needs to see them.
+//
+// 2026-09-21: hero re-recorded on prompts@v2 under the run plan — the
+// clip-length note's worked figures were re-quoted from the new tape (4
+// streams at 37.1 tok/s, an 8.3s TTFT, a --for 20s run of 20.0s the clock
+// ended), and its average-claim sentence rewritten for a clock-cut run: no
+// stream stops early, so the average predicts the run (433 tokens → 20.0s)
+// instead of coming in short. TestClipLengthNoteMatchesTheHero holds the note
+// to the tape.
 const renderUsage = `toktape render — render a recorded run as a clip
 
 Usage:
@@ -56,28 +64,29 @@ Clip length
       run seconds ≈ TTFT + --n-predict ÷ per-stream tok/s
 
   -n does not lengthen it: the streams run at once, and the run ends when the
-  last of them does. This repo's own hero is 4 streams at 42.1 tok/s with a
-  5.7s TTFT, recorded with --n-predict 512 and --for 90s. Put those in and the
-  formula answers 17.9s. The run was 11.6s — so a 17.7s clip, or 23.7s with
-  --open — because neither the cap nor the clock ended it: every stream
-  stopped when the model had finished, between 152 and 279 tokens.
+  last of them does. This repo's own hero is 4 streams at 37.1 tok/s with an
+  8.3s TTFT, recorded with --for 20s. The run was 20.0s — so a 26.0s clip, or
+  32.0s with --open — because the clock ended it: every stream was still
+  generating at the cut, between 432 and 433 tokens.
 
-  That gap is the formula working, not failing. Aimed with --n-predict it
-  answers the longest run those settings can produce, which is the length the
-  budget has to cover, and a run that stops early comes in under it. Aim it
-  instead with the tokens a run averaged and it answers less than the run: the
-  average falls with every stream that stops early while the run still ends
-  with the longest one. Here the average is 214 tokens, which predicts 10.8s
-  for an 11.6s run.
+  What the formula answers depends on what ends the run. Aimed with
+  --n-predict it answers the longest run those settings can produce, which is
+  the length the budget has to cover, and a run that stops early comes in
+  under it. Aimed with the tokens a run averaged, it depends on the ending:
+  streams that stop on their own drag the average down while the run still
+  ends with the longest one, so it answers less than the run, while a clock
+  that cuts every stream at the same moment leaves no early stopper and the
+  average answers the run itself. This recording is the clock case: the
+  average is 433 tokens, which predicts 20.0s for a 20.0s run.
 
   Either flag is set when you record. --prefill-lead is the one that is not:
   it opens the clip that long before the first token rather than at the run's
   start, so the wait for prefill is left out while every frame that is in the
   clip is still 1:1. Nothing has to say so — the tile's clock is measured from
-  the run's start, so the windowed hero opens on 2/90s instead of 0/90s. It
+  the run's start, so the windowed hero opens on 5/20s instead of 0/20s. It
   replaces the intro, which is a screen for a run that has not started yet.
-  The hero is rendered with --prefill-lead 3s: its first token is 5.7s in, so
-  2.7s of waiting is cut and the clip is 20.0s rather than 23.7s. The flag is
+  The hero is rendered with --prefill-lead 3s: its first token is 8.2s in, so
+  5.2s of waiting is cut and the clip is 25.8s rather than 32.0s. The flag is
   worth reaching for on the runs where the first token is tens of seconds out,
   which is where a clip stops being one anybody watches to the end.
 
