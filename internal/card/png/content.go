@@ -1389,6 +1389,18 @@ func ramString(h tape.HostInfo) string {
 }
 
 func engineString(srv tape.ServerInfo) string {
+	// A generic OpenAI-compatible server names its protocol, not its engine
+	// (TTP-99): the kind is what was observed, and the claim — the user's
+	// --engine or, since TTP-169 (2026-09-21), the server's own
+	// system_fingerprint when no claim was given — is printed with that
+	// word. The text card's engineString carries the same rule character
+	// for character; the two renderings of one summary must never disagree.
+	if srv.Kind == tape.ServerOpenAI {
+		if claim := strings.TrimSpace(srv.EngineClaim); claim != "" {
+			return "openai · claim: " + claim
+		}
+		return "openai · " + unknown
+	}
 	kind := string(srv.Kind)
 	if kind == "" || srv.Kind == tape.ServerUnknown {
 		kind = unknown

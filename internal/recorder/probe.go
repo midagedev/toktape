@@ -242,6 +242,13 @@ func (r *run) prefillProbe(ctx context.Context) {
 	if !r.kind.SpeaksLlamaProtocol() {
 		return
 	}
+	// The pass is silent startup time — up to ~7.5 s measured on the
+	// reference box (TTP-163, 2026-09-21): two fit points, a replay and a
+	// concurrent burst, all before the first run request. One note before
+	// it starts says what the wait is; a note qualifies no figure, so it
+	// reaches the CLI's stderr and the TUI ignores it.
+	r.emit(Event{Kind: EventNote, Stream: -1,
+		Message: "measuring this server's prefill (a few short requests)…"})
 	p := &tape.ProbeSummary{}
 	now := r.opts.Clock.Now()
 	saltShort, saltLong := probeSalts(now)
@@ -567,16 +574,51 @@ const (
 	calibrationPriceFloorPromptN = 16
 )
 
+// The prefill half of the calibration (TTP-168, 2026-09-21). The decode cap
+// alone budgeted no prefill: on Ollama a 7.9k-token prompt cost 4.1 s the cap
+// had not reserved (the default 20 s clock then cut the stream and the usage
+// chunk never arrived), and on CPU vLLM TTFT ran to 74 s under the same
+// clock. A second short request — a long salted prompt, a one-token answer,
+// left to end on its own — prices prefill on a server that times nothing
+// itself, and the plan spends that price before it spends the decode budget.
+const (
+	// calibrationPrefillBytes is the byte length of that prompt: long enough
+	// that its prefill is a rate and not the fixed cost (the same order as
+	// the 4096-token prompts the fixtures measure), short enough to cost
+	// about a second at 4k tok/s and under the 60 s timeout at 70 tok/s —
+	// a box slower than that refuses the point, which is the honest outcome.
+	calibrationPrefillBytes = 4096
+	// calibrationPrefillTimeout is the point's own budget, twice the decode
+	// request's: prefill is the thing being measured, and a box that cannot
+	// read 4 kB of prompt in a minute has no prefill rate to budget with.
+	calibrationPrefillTimeout = 60 * time.Second
+	// calibrationPrefillMinPromptN is the least server-counted prompt the
+	// point may be used from. A 4096-byte prompt counts ~800–1700 tokens on
+	// the tokenizers this tool has met; a count far under that says the
+	// server truncated the prompt (Ollama shapes do) or answered it from a
+	// cache, and either way the rate is not this box's prefill.
+	calibrationPrefillMinPromptN = 256
+	// calibrationPrefillMinMs is the least prefill span the point may be
+	// used from. The rate divides by (this prompt's TTFT less the short
+	// request's), and when that difference is a timer tick or two the
+	// quotient is noise wearing four significant digits — a server whose
+	// 4 kB prefill really is that cheap needs no prefill budget, and the
+	// decode-only cap is already the right plan for it.
+	calibrationPrefillMinMs = 20.0
+)
+
 // calibrationAsk is the fixed question the calibration sends. It asks for a
 // long mechanical answer, so the 48-token cap is what ends the stream and
 // not the model finishing: a stream ended by EOS measures how long the model
 // felt like answering, not how fast the box decodes.
 const calibrationAsk = "Count upward from one, digits only, one number per line, and do not stop until you are told to."
 
-// calibrateOpenAI sends the one calibration request and lowers the run's
-// answer cap onto what it measured (TTP-156). rounds is every slice of
-// requests the run will send — one slice for a plain run — and the cap is
-// applied to all of them: one run sends one shape.
+// calibrateOpenAI sends the two calibration requests and records what they
+// measured (TTP-156, and TTP-168 for the second one). rounds is every slice
+// of requests the run will send — one slice for a plain run — but only to
+// read the first request's model: the cap the measurements buy is applied
+// after the plan sizes the prompts it must fit beside, by
+// applyCalibratedCap.
 //
 // It runs only on a ServerOpenAI server, only when the run has a clock, and
 // only when the user named no cap of their own (--n-predict is an answer on
@@ -598,6 +640,12 @@ func (r *run) calibrateOpenAI(ctx context.Context, rounds ...[]server.StreamRequ
 	if first == nil {
 		return
 	}
+	// Both requests are silent startup time the user watches a still screen
+	// through (TTP-163's sibling): one note before them says what is
+	// happening. A note qualifies no figure, so it reaches the CLI's stderr
+	// and the TUI ignores it.
+	r.emit(Event{Kind: EventNote, Stream: -1,
+		Message: "measuring this server's speed (2 short requests)…"})
 	// The salt is derived from the run's own clock the way the plan's and
 	// the probe's salts are (planSet, probeSalts), with a word of its own so
 	// no run's prompt, probe or calibration ever shares a first token with
@@ -607,20 +655,19 @@ func (r *run) calibrateOpenAI(ctx context.Context, rounds ...[]server.StreamRequ
 
 	cctx, cancel := context.WithTimeout(ctx, calibrationTimeout)
 	defer cancel()
-	rec, st, err := r.client.Stream(cctx, server.StreamRequest{
+	rec, _, err := r.client.Stream(cctx, server.StreamRequest{
 		Protocol:  tape.ServerOpenAI,
 		Model:     requestModelOf(&first[0]),
 		MaxTokens: calibrationTokens,
 		Messages:  []tape.Message{{Role: "user", Content: prompt}},
-	}, server.StreamHooks{})
+	}, server.StreamHooks{OnFingerprint: r.noteFingerprint})
 	// The conditions of a usable calibration, all of them: the stream ended
 	// on its own (no error), the server counted the answer (usage, never
 	// chunks), the count is more than jitter, and the client saw a window to
-	// time. st.PromptN is the usage chunk's prompt_tokens — the one figure
-	// sse.go surfaces on the returned ServerTimings of a client-timed
-	// stream, deliberately kept out of the record itself.
+	// time. rec.Timings.PromptN is the usage chunk's prompt_tokens — the
+	// server's own count, on the record since TTP-167.
 	if err != nil || rec == nil || rec.Timings.PredictedNSource != "usage" ||
-		rec.Timings.PredictedN < calibrationMinPredicted || st.PromptN <= 0 ||
+		rec.Timings.PredictedN < calibrationMinPredicted || rec.Timings.PromptN <= 0 ||
 		len(rec.Tokens) < 2 {
 		return
 	}
@@ -629,7 +676,7 @@ func (r *run) calibrateOpenAI(ctx context.Context, rounds ...[]server.StreamRequ
 		return
 	}
 	cal := &tape.DecodeCalibration{
-		PromptN:     st.PromptN,
+		PromptN:     rec.Timings.PromptN,
 		PredictedN:  rec.Timings.PredictedN,
 		PromptBytes: len(prompt),
 		TTFTMs:      rec.Timings.TTFTMs,
@@ -642,39 +689,164 @@ func (r *run) calibrateOpenAI(ctx context.Context, rounds ...[]server.StreamRequ
 	if cal.PerSecond <= 0 {
 		return
 	}
+	cal.Prefill = r.calibratePrefill(ctx, first, cal)
 	if r.prefill == nil {
 		r.prefill = &tape.ProbeSummary{}
 	}
 	r.prefill.Calibration = cal
+}
 
-	// The cap: 0.8 x the measured rate x the clock, divided over the
-	// streams. A server that batches gives each of N streams at least
-	// rate/N; one that serialises (Ollama with OLLAMA_NUM_PARALLEL=1)
-	// finishes them one after another in N x cap/rate — both are 0.8 x For,
-	// so every stream ends on its own before the clock and its usage chunk
-	// arrives. The floor is tape.MinCutTokens, the same minimum the clock's
-	// own cut respects: below tape.MinDecodeTokens a rate is not a rate at
-	// all, and MinCutTokens is twice that with room to spare. Only a
-	// lowering — a cap some other rule already chose smaller keeps its own.
-	streams := max(r.opts.Concurrency, 1)
-	cap := int(0.8 * cal.PerSecond * r.limit.For.Seconds() / float64(streams))
-	cap = max(cap, tape.MinCutTokens)
-	if cap >= r.limit.MaxTokens {
-		return
-	}
-	for _, rd := range rounds {
-		for i := range rd {
-			if rd[i].MaxTokens > cap {
-				rd[i].MaxTokens = cap
-			}
+// calibratePrefill is the second calibration request: a long salted prompt,
+// one generated token, its own timeout, left to end on its own so the usage
+// chunk arrives. nil is "not observed", silently like every miss in the
+// pass — the run then plans with the decode-only cap exactly as it did
+// before the prefill had a price.
+//
+// The prompt is built from the probe's own deterministic word list under a
+// per-run salt (probePrompt), so it is not the published set's text and
+// cannot warm the set's prefix: the salt moves the first token, and the
+// words are no prompt's opening. Its length is calibrationPrefillBytes,
+// shrunk to fit the model's context when the server reported one — a probe
+// the server would refuse measures a refusal.
+func (r *run) calibratePrefill(ctx context.Context, first []server.StreamRequest, cal *tape.DecodeCalibration) *tape.CalibrationPrefill {
+	bytes := calibrationPrefillBytes
+	if mml := r.openaiModelCtx(requestModelOf(&first[0])); mml > 0 {
+		// Price the probe at the calibration's own bytes-per-token: the
+		// honest ruler this tokenizer has been measured with so far.
+		room := int(float64(mml-slotCtxTemplateTokens-1) * float64(cal.PromptBytes) / float64(cal.PromptN))
+		if room < bytes {
+			bytes = max(room, 0)
 		}
 	}
-	// Recorded where an unnamed cap is recorded today — LimitSummary, with
-	// MaxTokensNamed left false — so the tape reproduces the run's shape
-	// without crediting the user with a number they did not type.
-	r.limit.MaxTokens = cap
-	r.opts.MaxTokens = cap
-	r.calibCapped = true
+	// A context so small the probe would count under the floor prompt
+	// length sends nothing: there is no prefill rate to measure in it.
+	if bytes*cal.PromptN < calibrationPrefillMinPromptN*cal.PromptBytes {
+		return nil
+	}
+	// probePrompt takes a nominal token budget and converts at
+	// probeCharsPerToken; the byte target converts back, and PromptBytes
+	// records whatever length it actually built.
+	prompt := probePrompt(strconv.FormatInt(r.opts.Clock.Now().UnixNano(), 36),
+		probeLeadShort, probeCycleShort, int(float64(bytes)/probeCharsPerToken))
+
+	pctx, cancel := context.WithTimeout(ctx, calibrationPrefillTimeout)
+	defer cancel()
+	rec, _, err := r.client.Stream(pctx, server.StreamRequest{
+		Protocol:  tape.ServerOpenAI,
+		Model:     requestModelOf(&first[0]),
+		MaxTokens: 1,
+		Messages:  []tape.Message{{Role: "user", Content: prompt}},
+	}, server.StreamHooks{OnFingerprint: r.noteFingerprint})
+	if err != nil || rec == nil || rec.Timings.PredictedNSource != "usage" ||
+		rec.Timings.PromptNSource != "usage" {
+		return nil
+	}
+	span := rec.Timings.TTFTMs - cal.TTFTMs
+	if rec.Timings.PromptN < calibrationPrefillMinPromptN || span < calibrationPrefillMinMs {
+		return nil
+	}
+	if rec.Timings.PromptN <= rec.Timings.CacheN {
+		return nil // served whole from the prefix cache: a cache lookup, not a prefill
+	}
+	perSecond := 1000 * float64(rec.Timings.PromptN-rec.Timings.CacheN) / span
+	if perSecond <= 0 {
+		return nil
+	}
+	return &tape.CalibrationPrefill{
+		PromptN:     rec.Timings.PromptN,
+		CachedN:     rec.Timings.CacheN,
+		PromptBytes: len(prompt),
+		TTFTMs:      rec.Timings.TTFTMs,
+		PerSecond:   perSecond,
+	}
+}
+
+// applyCalibratedCap lowers the run's answer cap onto what the calibration
+// measured, once the plan has sized the prompts (TTP-156's cap with
+// TTP-168's prefill subtracted; it absorbs markCalibrationPlan, whose
+// binding half it ends with). rounds is every slice the run will send; one
+// run sends one shape, so the cap lands on all of them.
+//
+// The cap: 0.8 x the measured decode rate x whatever clock is left after
+// the prefill the plan chose is predicted to take, divided over the
+// streams. A server that batches gives each of N streams at least rate/N;
+// one that serialises (Ollama with OLLAMA_NUM_PARALLEL=1) finishes them one
+// after another in N x cap/rate — both land inside the clock, so every
+// stream ends on its own and its usage chunk arrives. The prefill is
+// predicted SERIALLY (N x tokens / rate): nothing measured this server's
+// concurrent prefill, and Ollama at parallel 1 is literally serial, so the
+// serial prediction is the one that cannot promise time the box has not
+// been heard to deliver (a batching server then finishes early, which costs
+// nothing).
+//
+// The 0.8 is what absorbs the two honest unknowns left: decode at the run's
+// prompt length runs slower than the calibration measured at its short one
+// (86 tok/s at a ~6k-token context against 104-110 at 58 tokens, Ollama
+// 0.34.2, 2026-09-21 — the KV cache the prompt leaves behind is paid on
+// every token), and a prefill price measured on 4 kB extrapolated to the
+// run's own prompts carries a few per cent of its own. Both push the same
+// direction; when they bite anyway the clock stays armed behind the cap and
+// the run is cut, cut and caveat included, exactly as it was before the cap
+// existed.
+//
+// The floor is tape.MinCutTokens, the same minimum the clock's own cut
+// respects: below tape.MinDecodeTokens a rate is not a rate at all, and
+// MinCutTokens is twice that with room to spare. Only a lowering — a cap
+// some other rule already chose smaller keeps its own.
+func (r *run) applyCalibratedCap(rounds ...[]server.StreamRequest) {
+	cal := r.calibration()
+	if cal == nil || cal.PerSecond <= 0 || r.limit.For <= 0 {
+		return
+	}
+	var first []server.StreamRequest
+	for _, rd := range rounds {
+		if len(rd) > 0 {
+			first = rd
+			break
+		}
+	}
+	if first == nil {
+		return
+	}
+	// The prefill the plan's own lengths are predicted to cost, serial over
+	// the streams: the longest prompt as sent, priced on the same ruler the
+	// plan priced it with.
+	budget := r.limit.For.Seconds()
+	if pf := r.calibrationPrefill(); pf != nil && pf.PerSecond > 0 {
+		longest := 0
+		for i := range first {
+			if est, _, _ := r.requestTokens(context.Background(), &first[i]); est > longest {
+				longest = est
+			}
+		}
+		budget -= float64(max(r.opts.Concurrency, 1)) * float64(longest) / pf.PerSecond
+		if budget < 0 {
+			budget = 0
+		}
+	}
+	streams := max(r.opts.Concurrency, 1)
+	cap := int(0.8 * cal.PerSecond * budget / float64(streams))
+	cap = max(cap, tape.MinCutTokens)
+	if cap < r.limit.MaxTokens {
+		for _, rd := range rounds {
+			for i := range rd {
+				if rd[i].MaxTokens > cap {
+					rd[i].MaxTokens = cap
+				}
+			}
+		}
+		// Recorded where an unnamed cap is recorded today — LimitSummary,
+		// with MaxTokensNamed left false — so the tape reproduces the run's
+		// shape without crediting the user with a number they did not type.
+		r.limit.MaxTokens = cap
+		r.opts.MaxTokens = cap
+		r.calibCapped = true
+	}
+	// The plan names its limit when the cap landed: markCalibrationPlan
+	// guards on calibCapped, exactly as it did when the cap was applied
+	// inside the calibration — a cap some other rule already chose smaller
+	// keeps that rule's binding.
+	r.markCalibrationPlan()
 }
 
 // calibration is this run's decode calibration, nil when none was recorded.
@@ -683,6 +855,17 @@ func (r *run) calibration() *tape.DecodeCalibration {
 		return nil
 	}
 	return r.prefill.Calibration
+}
+
+// calibrationPrefill is the calibration's prefill point, nil when the second
+// request was not made or was refused. planSet's clock ceiling and the price
+// countSet prices with both read it here, so the guards have one reader's
+// worth of surface.
+func (r *run) calibrationPrefill() *tape.CalibrationPrefill {
+	if cal := r.calibration(); cal != nil {
+		return cal.Prefill
+	}
+	return nil
 }
 
 // markCalibrationPlan puts the calibrated cap on the run plan: the plan is

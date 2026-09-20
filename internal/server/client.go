@@ -55,6 +55,14 @@ var (
 	// until a completion finishes (measured 2026-09-13: over two minutes), so
 	// without this a busy ik server reads as one still loading its model.
 	ErrBusy = errors.New("server: busy")
+	// ErrUnauthorized means the server answered 401 or 403: it is running,
+	// reachable and simply wants credentials (TTP-169's client half, matrix
+	// gap 6, 2026-09-21). It wraps ErrUnreachable so every existing
+	// errors.Is keeps holding, while a caller that wants to say something
+	// better than "check the host and port" branches on this and finds the
+	// run was never a network problem. --api-key llama-servers and
+	// auth-fronted proxies are the shapes.
+	ErrUnauthorized = fmt.Errorf("server: unauthorized: %w", ErrUnreachable)
 )
 
 // DefaultCandidates are the base URLs Discover probes when given none, in the
@@ -369,6 +377,14 @@ func classifyProps(baseURL string, status int, body []byte, transportErr, parent
 	}
 	if status >= 200 && status < 300 {
 		return nil
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		// A refusal with a reason, not a server that is not there: the
+		// sentence says what to bring, and the server's own body (usually the
+		// key's error message) rides along clipped, as every other refusal's
+		// does.
+		return fmt.Errorf("%w: the server at %s wants credentials (HTTP %d): %s",
+			ErrUnauthorized, baseURL, status, clip(strings.TrimSpace(string(body)), 200))
 	}
 	detail := loadingDetail(body)
 	if status == http.StatusServiceUnavailable || detail != "" {

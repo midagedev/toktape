@@ -93,6 +93,16 @@ func ceilDiv(bytes int, bytesPerToken float64) int {
 // The chat route keeps the instant answer: no gate here asserts on the
 // run's own chat wall time, and a serialized chat queue would price
 // seconds of sleep for nothing these gates read.
+//
+// burstN/burstMs are the fake's own account of the contended burst it
+// delivered — the tokens those requests carried and the serialized wall
+// its holds actually took, measured, not planted (the streams4 flake,
+// 2026-09-21: under `go test ./...` parallel load the sleeps stretch, and
+// the gate's rate assertion — measured against the planted ideal — missed
+// its 10% band by 0.7%, Concurrent.PerSecond 11512 against the band's
+// floor 11520). The gate now asserts the recorder's figures against THIS
+// account: load stretches the client's clock and the fake's holds
+// together, and the ratio is the load-independent fact.
 type firstTry struct {
 	mu         sync.Mutex
 	served     map[string]bool
@@ -100,6 +110,25 @@ type firstTry struct {
 	prefillMu  sync.Mutex
 	inflight   int
 	maxIn      int
+	burstN     int
+	burstMs    float64
+}
+
+// addBurst folds one contended prefill into the burst account. The caller
+// has already measured the hold; n is the token count that request reported.
+func (ft *firstTry) addBurst(n int, ms float64) {
+	ft.mu.Lock()
+	ft.burstN += n
+	ft.burstMs += ms
+	ft.mu.Unlock()
+}
+
+// burstFigures is the delivered burst: its tokens and its real serialized
+// wall in milliseconds.
+func (ft *firstTry) burstFigures() (int, float64) {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	return ft.burstN, ft.burstMs
 }
 
 // enterPrefill is the contention model's accounting: a request entering
@@ -242,9 +271,14 @@ func firstTryMux(t *testing.T, enforceCtx bool) (*http.ServeMux, *firstTry) {
 		if ft.inflightPrefill() > 1 {
 			// The serialized queue: hold the prefill slot for this
 			// request's share of the contended aggregate, so the last of
-			// the burst's first tokens arrives at the sum of them all.
+			// the burst's first tokens arrives at the sum of them all. The
+			// hold is measured as well as slept: the burst account above is
+			// what the gate asserts against, and it must carry the wall
+			// this box actually delivered, not the wall the plant asked for.
 			ft.prefillMu.Lock()
+			held := time.Now()
 			time.Sleep(time.Duration(contendedPrefillMs(n) * float64(time.Millisecond)))
+			ft.addBurst(n, time.Since(held).Seconds()*1000)
 			ft.prefillMu.Unlock()
 		}
 		ft.leavePrefill()
@@ -391,9 +425,27 @@ func TestTheFirstTryRunIsPlannedNotImprovised(t *testing.T) {
 						if c.PromptN <= 0 || c.WallMs <= 0 {
 							t.Errorf("take %d: Concurrent = %+v, want observed figures, not zeros", take+1, *c)
 						}
-						want := s.Probe.PrefillPerSecond * firstTryConcurrentShare
+						// Against the fake's OWN delivered burst, not the
+						// plant (2026-09-21): the flake measured
+						// Concurrent.PerSecond 11512 against the planted
+						// band's floor 11520 — 0.7% outside 10% — under
+						// `go test ./...` parallel load, because the
+						// burst's wall is timed on the real clock and
+						// sleeps stretch. Both figures below measure the
+						// same delivered wall (the client's send-to-last-
+						// first-token, the fake's measured holds), so
+						// load moves them together. The plant itself is
+						// still pinned by the planned-prefill check at
+						// the bottom of this gate, which reads the
+						// planted rate directly.
+						bn, bms := ft.burstFigures()
+						if bn <= 0 || bms <= 0 {
+							t.Fatalf("take %d: the fake recorded no burst (%d tokens, %.0f ms); the concurrent point measured a queue that did not run", take+1, bn, bms)
+						}
+						want := float64(bn) / (bms / 1000)
 						if !near(c.PerSecond, want, 0.10) {
-							t.Errorf("take %d: Concurrent.PerSecond = %v, want the planted %.0f (a 0.2-share aggregate of the single-stream rate) within 10%%", take+1, c.PerSecond, want)
+							t.Errorf("take %d: Concurrent.PerSecond = %v, want the fake's own delivered %.0f (its %d tokens over its %.0f ms serialized wall) within 10%%",
+								take+1, c.PerSecond, want, bn, bms)
 						}
 					}
 				} else if s.Probe != nil && s.Probe.Concurrent != nil {

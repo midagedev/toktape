@@ -109,9 +109,11 @@ func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 			rounds[k] = shaped
 		}
 	}
-	// One calibration request for the whole tape, capping every round's
+	// One calibration pass for the whole tape, capping every round's
 	// requests (TTP-156): the answer cap is a property of the clock and the
-	// rate, neither of which changes between rounds.
+	// rate, neither of which changes between rounds. The cap itself lands
+	// after the plan, as it does in Record, so the prefill the plan sizes
+	// and the cap share one clock.
 	r.calibrateOpenAI(ctx, rounds...)
 	// The plan is one decision for the whole tape, made from the first
 	// round and applied to every round (lead, 2026-09-20): a rounds run
@@ -128,7 +130,7 @@ func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 			return nil, err
 		}
 	}
-	r.markCalibrationPlan()
+	r.applyCalibratedCap(rounds...)
 	if len(rounds) > 0 {
 		r.promptSet = promptSetOf(rounds[0])
 	}

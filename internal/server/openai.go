@@ -43,6 +43,28 @@ type ModelsResponse struct {
 type ModelEntry struct {
 	ID      string `json:"id"`
 	OwnedBy string `json:"owned_by"`
+	// MaxModelLen is the entry's "max_model_len" when the server sent one
+	// (TTP-165, 2026-09-21): vLLM carries it per model, and it is the context
+	// one request may use whole — vLLM does NOT divide it between concurrent
+	// sequences the way llama-server divides -c by -np, so it is already the
+	// per-request figure the recorder's slot logic wants. 0 when the listing
+	// did not say (Ollama and LM Studio do not), which is unknown and never
+	// a limit.
+	MaxModelLen int `json:"max_model_len,omitempty"`
+}
+
+// MaxLenOf is the max_model_len the listing carried for this model id, 0 when
+// it carried none or the model is not listed.
+func (m *ModelsResponse) MaxLenOf(id string) int {
+	if m == nil {
+		return 0
+	}
+	for _, e := range m.Data {
+		if e.ID == id {
+			return e.MaxModelLen
+		}
+	}
+	return 0
 }
 
 // FirstID is the model name the server itself gave: the first listing id.
@@ -68,6 +90,14 @@ func (c *Client) Models(ctx context.Context) (*ModelsResponse, error) {
 		return nil, fmt.Errorf("%w: %s: %v", ErrUnreachable, c.baseURL, rootCause(err))
 	}
 	if status < 200 || status >= 300 {
+		// 401/403 gets its own sentence for the same reason /props does: an
+		// auth-fronted vLLM answering "Invalid API key" is a server that is
+		// running, and the starting-server advice this would otherwise earn
+		// answers a different problem (TTP-169, 2026-09-21).
+		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			return nil, fmt.Errorf("%w: the server at %s wants credentials (HTTP %d): %s",
+				ErrUnauthorized, c.baseURL, status, clip(strings.TrimSpace(string(body)), 200))
+		}
 		return nil, fmt.Errorf("%w: %s: GET /v1/models: HTTP %d: %s",
 			ErrUnreachable, c.baseURL, status, clip(strings.TrimSpace(string(body)), 200))
 	}

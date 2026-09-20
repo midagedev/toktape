@@ -63,9 +63,21 @@ type SlotCtxError struct {
 	SlotCtx int
 	// URL is the server that reported it.
 	URL string
+	// openai says the limit is an OpenAI-kind server's max_model_len rather
+	// than a llama-server slot, and picks the lever sentence: a vLLM user
+	// has no -c to raise and no slots to speak of (TTP-165, 2026-09-21).
+	openai bool
 }
 
 func (e *SlotCtxError) Error() string {
+	if e.openai {
+		if e.Counted {
+			return fmt.Sprintf("the prompt is ~%d tokens (counted by the server's own tokenizer) and with the template's %d the model's context limit is %d; send a shorter prompt, or raise the server's context limit (vLLM's --max-model-len) — %s",
+				e.PromptTokens, slotCtxTemplateTokens, e.SlotCtx, e.URL)
+		}
+		return fmt.Sprintf("the prompt is ~%d tokens (%d bytes priced at %.1f bytes/token) and with the template's %d the model's context limit is %d; send a shorter prompt, or raise the server's context limit (vLLM's --max-model-len) — %s",
+			e.PromptTokens, e.PromptBytes, planFallbackBytesPerToken, slotCtxTemplateTokens, e.SlotCtx, e.URL)
+	}
 	if e.Counted {
 		return fmt.Sprintf("the prompt is ~%d tokens (counted by the server's own tokenizer) and with the template's %d the slot's context is %d; send a shorter prompt, or raise the slot's context (llama-server's -c, which -np divides) — %s",
 			e.PromptTokens, slotCtxTemplateTokens, e.SlotCtx, e.URL)
@@ -77,16 +89,36 @@ func (e *SlotCtxError) Error() string {
 // Is makes errors.Is(err, ErrPromptOverflowsSlot) true for a *SlotCtxError.
 func (e *SlotCtxError) Is(target error) bool { return target == ErrPromptOverflowsSlot }
 
-// smallestSlotCtx is the smallest n_ctx the server's /slots reported, 0 when
-// it reported none or was never asked: an OpenAI-compatible server has no
-// /slots (TTP-99), and unknown is not a limit.
+// smallestSlotCtx is the per-request context the slot logic plans against:
+//
+//   - an OpenAI-kind server: the chosen model's max_model_len, when the
+//     listing carried one (TTP-165, 2026-09-21). vLLM reports it per model
+//     and it is the whole context one request may use — vLLM does NOT
+//     divide it between concurrent sequences the way llama-server divides
+//     -c by -np, so no division happens here either. 0 (Ollama, LM Studio:
+//     listings that say nothing) is unknown, never a limit.
+//
+//   - a llama-kind server: the smallest n_ctx /slots reported, as always.
+//     When /slots refuses — a server started with --no-slots answers 501,
+//     and every stream used to be lost to a context the run never read
+//     (matrix gap 3, row 5) — the figure falls back to /props'
+//     default_generation_settings.n_ctx, undivided: verified against a live
+//     mainline llama-server on 2026-09-21 (-np 4), /props carried 4096 and
+//     every /slots entry carried 4096 — the field is the per-slot context,
+//     not the server total, so dividing it by total_slots would understate
+//     a mainline server fourfold and refuse runs that fit. The task brief's
+//     "÷ total_slots" phrasing assumed the ik_llama.cpp spelling (whose
+//     /props has been observed carrying the undivided -c); on that fork a
+//     --no-slots server would read a context 4x too generous, the run loses
+//     its streams exactly as it did before the fallback existed, and nothing
+//     is worse than unknown — the safe direction on both forks.
 func (r *run) smallestSlotCtx(ctx context.Context) int {
 	if r.kind == tape.ServerOpenAI {
-		return 0
+		return r.openaiModelCtx(r.model.FileName)
 	}
 	slots, err := r.client.Slots(ctx)
 	if err != nil {
-		return 0
+		return r.props.CtxSize()
 	}
 	slotCtx := 0
 	for _, s := range slots {
@@ -125,6 +157,7 @@ func (r *run) capAnswersToSlot(ctx context.Context, reqs []server.StreamRequest,
 		return &SlotCtxError{
 			PromptTokens: longest, PromptBytes: longestBytes, Counted: counted,
 			SlotCtx: slotCtx, URL: r.client.BaseURL(),
+			openai: r.kind == tape.ServerOpenAI,
 		}
 	}
 	if r.limit.MaxTokens > 0 && r.limit.MaxTokens <= allowed {
@@ -138,6 +171,13 @@ func (r *run) capAnswersToSlot(ctx context.Context, reqs []server.StreamRequest,
 	}
 	r.limit.MaxTokens = allowed
 	r.opts.MaxTokens = allowed
+	if r.kind == tape.ServerOpenAI {
+		// The same numbers, the vocabulary the server's user has: a vLLM's
+		// context limit is a model property, not a slot (TTP-165).
+		r.warn("n-predict %d capped to %d: the model's context limit is %d and the longest prompt is ~%d tokens",
+			asked, allowed, slotCtx, longest)
+		return nil
+	}
 	r.warn("n-predict %d capped to %d: the slot's context is %d and the longest prompt is ~%d tokens",
 		asked, allowed, slotCtx, longest)
 	return nil
@@ -146,9 +186,15 @@ func (r *run) capAnswersToSlot(ctx context.Context, reqs []server.StreamRequest,
 // requestTokens is one request's prompt as the slot will hold it: counted by
 // the server's tokenizer when the plan counted the set, priced otherwise —
 // the user's own prompts are never sent to /tokenize, so they are priced
-// exactly as they always were. counted reports which ruler measured.
+// exactly as they always were. counted reports which ruler measured. On an
+// OpenAI-kind server the price is the run's own calibrated bytes-per-token
+// (openAIPrice), the same ruler countSet trims with — one conversion, both
+// ends.
 func (r *run) requestTokens(ctx context.Context, q *server.StreamRequest) (tokens, bytes int, counted bool) {
 	b := len(*promptTextOf(q))
+	if r.kind == tape.ServerOpenAI {
+		return r.openAIPricedTokens(b), b, false
+	}
 	if q.Set == server.PromptSetID && r.planTokenized {
 		if n, err := r.client.Tokenize(ctx, *promptTextOf(q)); err == nil {
 			return n, b, true

@@ -79,7 +79,7 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 			Args:    r.args,
 			Flags:   r.flags,
 			NSlots:  r.props.TotalSlots,
-			CtxSize: r.props.CtxSize(),
+			CtxSize: r.serverCtxSize(),
 		},
 		Model:       r.model,
 		Host:        r.host,
@@ -121,9 +121,12 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 	summary.Server.Build, summary.Server.Commit = r.build, r.commit
 	// The user's word about the engine, kept only where the server did not
 	// name one itself (TTP-99): on a ServerOpenAI run it is the claim every
-	// surface prints as one, everywhere else it is ignored.
+	// surface prints as one, everywhere else it is ignored. Since TTP-169
+	// (2026-09-21) the server's own system_fingerprint fills the field when
+	// the user claimed nothing — still a claim by the card's wording, but
+	// one the server stated rather than the operator.
 	if r.kind == tape.ServerOpenAI {
-		summary.Server.EngineClaim = r.opts.EngineClaim
+		summary.Server.EngineClaim = r.claimedEngine()
 	}
 	if st.perRound > 0 {
 		// A --spec-n-max sweep groups its rounds by the value each was sent
@@ -269,6 +272,13 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 			out.EffectiveBandwidthBytesPerSec = 0
 		} else {
 			out.PredictedNSource = "usage"
+			// The prompt count is the usage figure too (TTP-167, 2026-09-21):
+			// the mean above already averaged it — the per-stream records
+			// only ever hold a server-counted PromptN — so the source names
+			// what the mean is a mean of.
+			if out.PromptN > 0 {
+				out.PromptNSource = "usage"
+			}
 		}
 	}
 	return out
@@ -288,9 +298,14 @@ func representativeTimings(recs []tape.RequestRecord) tape.TimingsSummary {
 //     falls with it — its N counts token events, which on a chunks stream
 //     are chunks — while the window and the count stay recorded, the same
 //     keep-the-total-refuse-the-rate split TotalPredictedN gets.
+//   - AggregatePromptPerSecond is zeroed on any client-timed run (TTP-167,
+//     2026-09-21): the usage chunk now fills TotalPromptN, but no server
+//     figure times the prompt on these streams, and the aggregate's window
+//     is the client's clock — the same rule PromptPerSecond obeys per
+//     stream. The count stays; the rate stays "?".
 func fixClientAggregate(recs []tape.RequestRecord, agg *tape.AggregateTimings) {
 	d := 0
-	poisoned := false
+	poisoned, anyClient := false, false
 	for i := range recs {
 		r := &recs[i]
 		if r.Error != "" || len(r.Tokens) == 0 {
@@ -298,6 +313,7 @@ func fixClientAggregate(recs []tape.RequestRecord, agg *tape.AggregateTimings) {
 		}
 		t := r.Timings
 		if t.Source == "client" {
+			anyClient = true
 			if t.PredictedNSource == "chunks" {
 				poisoned = true
 			}
@@ -308,6 +324,9 @@ func fixClientAggregate(recs []tape.RequestRecord, agg *tape.AggregateTimings) {
 		}
 	}
 	agg.DisagreeingStreams = d
+	if anyClient {
+		agg.AggregatePromptPerSecond = 0
+	}
 	if poisoned {
 		agg.AggregatePredictedPerSecond = 0
 		agg.ConcurrentPredictedPerSecond = 0

@@ -190,8 +190,8 @@ func (r *run) planSet(ctx context.Context, reqs []server.StreamRequest, slotCtx 
 	target, binding := 0, tape.PlanBoundWhole
 	var budgetMs float64
 	var ceilings []planCeiling
-	// The clock: only when the run has one and the probe fitted the box.
-	// A run that measured no rate does not get to act on one.
+	// The clock: only when the run has one and something measured the box's
+	// prefill. A run that measured no rate does not get to act on one.
 	if r.limit.For > 0 && r.prefill != nil && r.prefill.PrefillPerSecond > 0 {
 		n := len(counts) // streams per round: reqs is one round's requests
 		budgetMs = float64(r.limit.For.Milliseconds()) * planPrefillShare
@@ -210,6 +210,23 @@ func (r *run) planSet(ctx context.Context, reqs []server.StreamRequest, slotCtx 
 			// longest prompt one stream may carry.
 			tClock := int((budgetMs/1000*rate - float64(n)*(r.prefill.FixedMs/1000)*rate) / float64(n))
 			ceilings = append(ceilings, planCeiling{tClock, tape.PlanBoundClock})
+		}
+	} else if r.limit.For > 0 && r.kind == tape.ServerOpenAI {
+		// The OpenAI-kind clock ceiling (TTP-168, 2026-09-21): the prefill
+		// calibration prices what a prompt costs, and the ceiling is the
+		// SERIAL prediction — N prompts of t tokens each take N x t /
+		// PerSecond on a box that prefills one request at a time (Ollama at
+		// parallel 1, measured; nothing measured this server's concurrent
+		// prefill, so the serial figure is the one that cannot promise time
+		// the box has not been heard to deliver — a batching server then
+		// finishes early, which costs nothing). PerSecond is already
+		// marginal: the fixed cost was subtracted when it was derived, so
+		// there is no intercept to pay here.
+		if pf := r.calibrationPrefill(); pf != nil && pf.PerSecond > 0 {
+			n := len(counts)
+			budgetMs = float64(r.limit.For.Milliseconds()) * planPrefillShare
+			ceilings = append(ceilings, planCeiling{
+				int(budgetMs / 1000 * pf.PerSecond / float64(n)), tape.PlanBoundClock})
 		}
 	}
 	// The slot: the context the request will land in, less the template's
@@ -233,13 +250,26 @@ func (r *run) planSet(ctx context.Context, reqs []server.StreamRequest, slotCtx 
 	r.planTrimTokens = target
 	r.trimSetTo(ctx, reqs, counts, target)
 
+	// The longest length the plan will send: the trim caps every count at
+	// the target, so the longest planned is the longest count unless the
+	// target was under it. Recorded here because the plan knows it even when
+	// no slot asks for the as-sent figure (capAnswersToSlot fills its own
+	// only under a slot context — TTP-165 leaves the OpenAI-kind path
+	// without one whenever the listing said nothing — and the plan line's
+	// prefill figure reads this field on every kind).
+	longestPlanned := longest
+	if target > 0 && longestPlanned > target {
+		longestPlanned = target
+	}
 	r.runPlan = &tape.RunPlan{
 		TargetTokens: target,
 		Binding:      binding,
 		SlotCtx:      slotCtx,
 		Tokenized:    counted,
-		// LongestPromptTokens is filled by capAnswersToSlot, which counts
-		// the prompts as they were actually sent.
+		// LongestPromptTokens: the planned figure; capAnswersToSlot raises
+		// it to the as-sent longest under a slot, and multi-round runs to
+		// the longest any round sent.
+		LongestPromptTokens: longestPlanned,
 	}
 	if binding == tape.PlanBoundClock {
 		r.runPlan.PrefillBudgetMs = budgetMs
@@ -291,6 +321,37 @@ func saltSetPrompts(reqs []server.StreamRequest, salt string) {
 	}
 }
 
+// openAIPrice is the bytes-per-token this run prices an OpenAI-kind server's
+// prompts at: the prefill calibration's own measurement first (TTP-168,
+// 2026-09-21 — 4096 bytes of word-list text is a real sample of a tokenizer,
+// where the decode calibration's 119-byte ask is mostly chat template), the
+// decode calibration's short count when that is all the run made (TTP-156),
+// and 0 when neither measured — the caller then prices at
+// planFallbackBytesPerToken. One owner for one conversion: countSet and
+// requestTokens both read it here, so a plan can never trim on one ruler and
+// cap on another.
+func (r *run) openAIPrice() float64 {
+	if pf := r.calibrationPrefill(); pf != nil && pf.PromptN > 0 {
+		return float64(pf.PromptBytes) / float64(pf.PromptN)
+	}
+	if cal := r.calibration(); cal != nil && cal.PromptN >= calibrationPriceFloorPromptN {
+		return float64(cal.PromptBytes) / float64(cal.PromptN)
+	}
+	return 0
+}
+
+// openAIPricedTokens prices content bytes at the run's own measured
+// bytes-per-token, falling back to the band constant when nothing was
+// measured. ceil, like pricedTokens: the tokenizer never undercounts, which
+// is the safe direction for every ceiling that reads it.
+func (r *run) openAIPricedTokens(bytes int) int {
+	bpt := r.openAIPrice()
+	if bpt <= 0 {
+		return pricedTokens(bytes)
+	}
+	return int(math.Ceil(float64(bytes) / bpt))
+}
+
 // countSet returns the token count of every set prompt in reqs, aligned to
 // reqs (0 for the user's own), counted by the server's tokenizer when the
 // route answered and priced from bytes for all of them when it did not:
@@ -300,23 +361,12 @@ func (r *run) countSet(ctx context.Context, reqs []server.StreamRequest) ([]int,
 	out := make([]int, len(reqs))
 	if r.kind == tape.ServerOpenAI {
 		// /tokenize is llama-server's route (Client.Tokenize doc); an
-		// OpenAI-compatible server is priced, never asked — at the fallback
-		// price, unless the decode calibration counted a real prompt of its
-		// own (TTP-156): its PromptN is the server's own count of bytes this
-		// run actually sent, which is a measurement of this tokenizer where
-		// planFallbackBytesPerToken is a band measured on another one.
-		if cal := r.calibration(); cal != nil && cal.PromptN >= calibrationPriceFloorPromptN {
-			bpt := float64(cal.PromptBytes) / float64(cal.PromptN)
-			for i := range reqs {
-				if reqs[i].Set == server.PromptSetID {
-					out[i] = int(math.Ceil(float64(len(*promptTextOf(&reqs[i]))) / bpt))
-				}
-			}
-			return out, false
-		}
+		// OpenAI-compatible server is priced, never asked — at the
+		// calibration's own measurement of this tokenizer when the run made
+		// one (openAIPrice), else at the fallback band.
 		for i := range reqs {
 			if reqs[i].Set == server.PromptSetID {
-				out[i] = pricedTokens(len(*promptTextOf(&reqs[i])))
+				out[i] = r.openAIPricedTokens(len(*promptTextOf(&reqs[i])))
 			}
 		}
 		return out, false
@@ -478,6 +528,23 @@ func promptTextOf(q *server.StreamRequest) *string {
 // the cap is what it is — answers end before the clock, so the server's own
 // count arrives — is the one question that cap begs (TTP-156). "" when the
 // run planned nothing, which is the caller's cue to print nothing.
+//
+// On the OpenAI-kind prefill-calibrated path (TTP-168, 2026-09-21) the
+// target is PRICED, not counted, and the line says so — "~800-token" with
+// "priced" beside the binding — because a reader deciding whether to trust
+// the length needs to know it came from a bytes-per-token measurement of
+// this tokenizer rather than the tokenizer itself; the prefill clause on
+// that path is the serial prediction the plan budgeted with (N x the
+// longest prompt at the calibrated rate), for the same reason the llama
+// path prints its own. The context figure is "ctx" there, not "slot":
+// vLLM's max_model_len is per request, and a vLLM user has no slots to
+// raise.
+//
+// The calibrated cap's explaining tail is dropped when it would push the
+// line past 110 columns: the priced path has the prefill clause to carry,
+// and a wrapped plan line serves nobody. The tail is the least dense clause
+// — the binding word already says the clock decided — and the drop is
+// deterministic in the figures, not a rendering guess.
 func PlanLine(s *tape.RunSummary, streams int) string {
 	if s == nil || s.Plan == nil {
 		return ""
@@ -487,9 +554,21 @@ func PlanLine(s *tape.RunSummary, streams int) string {
 	if n == 0 {
 		n = p.LongestPromptTokens
 	}
+	// priced says the lengths were measured in bytes at a calibrated
+	// bytes-per-token, not counted by a tokenizer: the prefill calibration
+	// is the only thing on an OpenAI-kind run that sizes prompts.
+	priced := s.Probe != nil && s.Probe.Calibration != nil && s.Probe.Calibration.Prefill != nil
 	var b strings.Builder
 	if n > 0 {
-		fmt.Fprintf(&b, "plan: %d × %s-token prompts (%s)", streams, commaInt(n), planBindingWord(p.Binding))
+		num := commaInt(n)
+		if priced {
+			num = "~" + num
+		}
+		binding := planBindingWord(p.Binding)
+		if priced {
+			binding += ", priced"
+		}
+		fmt.Fprintf(&b, "plan: %d × %s-token prompts (%s)", streams, num, binding)
 	} else {
 		// Unknown is no figure, never zero: the token count was not counted
 		// on this run, and the count it never had must not be printed.
@@ -499,22 +578,47 @@ func PlanLine(s *tape.RunSummary, streams int) string {
 		}
 		fmt.Fprintf(&b, "plan: %d %s (%s)", streams, word, planBindingWord(p.Binding))
 	}
-	if s.Probe != nil && s.Probe.PrefillPerSecond > 0 && p.LongestPromptTokens > 0 && streams > 0 {
-		rate, _ := planConcurrentRate(s.Probe, streams)
-		sec := strconv.FormatFloat(float64(streams)*float64(p.LongestPromptTokens)/rate, 'f', 1, 64)
-		fmt.Fprintf(&b, " · ~%s s prefill", strings.TrimSuffix(sec, ".0"))
+	if s.Probe != nil && p.LongestPromptTokens > 0 && streams > 0 {
+		if s.Probe.PrefillPerSecond > 0 {
+			rate, _ := planConcurrentRate(s.Probe, streams)
+			sec := strconv.FormatFloat(float64(streams)*float64(p.LongestPromptTokens)/rate, 'f', 1, 64)
+			fmt.Fprintf(&b, " · ~%s s prefill", strings.TrimSuffix(sec, ".0"))
+		} else if pf := calibrationPrefillOf(s.Probe); pf != nil && pf.PerSecond > 0 {
+			// The serial prediction the plan budgeted with: N prompts at the
+			// calibrated rate, the honest figure on a box that prefills one
+			// request at a time and a conservative one on a box that batches.
+			sec := strconv.FormatFloat(float64(streams)*float64(p.LongestPromptTokens)/pf.PerSecond, 'f', 1, 64)
+			fmt.Fprintf(&b, " · ~%s s prefill", strings.TrimSuffix(sec, ".0"))
+		}
 	}
 	if s.Limit.MaxTokens > 0 {
 		fmt.Fprintf(&b, " · cap %s", commaInt(s.Limit.MaxTokens))
 		if capCameFromCalibration(s) {
-			fmt.Fprintf(&b, " (so answers end before the %s clock and the server counts the tokens)",
+			tail := fmt.Sprintf(" (so answers end before the %s clock and the server counts the tokens)",
 				s.Limit.For.Round(time.Second))
+			if b.Len()+len(tail) <= 110 {
+				b.WriteString(tail)
+			}
 		}
 	}
 	if p.SlotCtx > 0 {
-		fmt.Fprintf(&b, " · slot %s", commaInt(p.SlotCtx))
+		word := "slot"
+		if s.Server.Kind == tape.ServerOpenAI {
+			word = "ctx"
+		}
+		fmt.Fprintf(&b, " · %s %s", word, commaInt(p.SlotCtx))
 	}
 	return b.String()
+}
+
+// calibrationPrefillOf is the prefill calibration a summary carries, nil
+// when the run made none. PlanLine's reader-side twin of the recorder's
+// calibrationPrefill.
+func calibrationPrefillOf(p *tape.ProbeSummary) *tape.CalibrationPrefill {
+	if p == nil || p.Calibration == nil {
+		return nil
+	}
+	return p.Calibration.Prefill
 }
 
 // capCameFromCalibration reports whether the resolved answer cap was computed

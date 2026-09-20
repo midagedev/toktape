@@ -4,12 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -227,5 +232,91 @@ func TestStreamContextCancel(t *testing.T) {
 	// that the run was cancelled rather than mis-served.
 	if !strings.Contains(rec.Error, "context") {
 		t.Errorf("rec.Error = %q, want the read failure that caused it", rec.Error)
+	}
+}
+
+// TestStreamMidAnswerCloseNamesTheEvent is the TTP-169 gate for a stream cut
+// mid-answer (matrix gap 4, 2026-09-21): the read failure used to surface as
+// Go's own "server: stream: read: unexpected EOF" — transport jargon where a
+// sentence should be. The OOM-killed llama-server mid-generation is the
+// classic big-model low-RAM story, and the reader needs the event, the
+// likely cause and where the answer is, with the underlying error still
+// wrapped so errors.Is keeps working.
+//
+// FAIL-first (2026-09-21, pre-change source): the sentence assertion failed
+// with err = "server: stream: read: unexpected EOF".
+func TestStreamMidAnswerCloseNamesTheEvent(t *testing.T) {
+	var tokens atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher := w.(http.Flusher)
+		for i := 0; i < 6; i++ {
+			fmt.Fprintf(w, "data: %s\n\n",
+				`{"id":"c","choices":[{"index":0,"delta":{"content":"w"}}]}`)
+			flusher.Flush()
+			tokens.Add(1)
+			time.Sleep(5 * time.Millisecond)
+		}
+		// Cut the connection with no finish chunk and no [DONE]: what a
+		// server that dies mid-generation leaves behind.
+		panic(http.ErrAbortHandler)
+	}))
+	defer srv.Close()
+
+	rec, _, err := New(srv.URL).Stream(context.Background(), StreamRequest{}, StreamHooks{})
+	if err == nil {
+		t.Fatal("Stream returned no error for a connection cut mid-answer")
+	}
+	if rec == nil {
+		t.Fatal("Stream discarded the partial record")
+	}
+	if got := tokens.Load(); got < 2 {
+		t.Fatalf("the fake emitted %d tokens; the test needs a stream that was under way", got)
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"the connection closed mid-answer",
+		"after " + strconv.Itoa(int(tokens.Load())) + " tokens",
+		"crashed or been killed",
+		"its log says which",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("err = %q, want it to contain %q", msg, want)
+		}
+	}
+	// The cause survives the translation: errors.Is on the wrapped read
+	// failure is what tells a transport drop from anything else.
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("errors.Is(err, io.ErrUnexpectedEOF) = false; the underlying error was lost in the wrap: %v", err)
+	}
+	if !strings.Contains(rec.Error, "mid-answer") {
+		t.Errorf("rec.Error = %q, want the same sentence the error carries", rec.Error)
+	}
+}
+
+// TestStreamCancelSentenceBlamesTheClientHalf: a cancelled stream is the
+// client's act (this run's clock, or the caller giving up), and the sentence
+// must not tell the user their server crashed. FAIL-first (2026-09-21,
+// pre-change source): the cancelled read surfaced as bare Go jargon
+// ("read: context canceled") — same wrap site, no sentence at all.
+func TestStreamCancelSentenceBlamesTheClientHalf(t *testing.T) {
+	srv := replayServer(t, "stream_basic.sse", 20*time.Millisecond, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+	_, _, err := New(srv.URL).Stream(ctx, StreamRequest{}, StreamHooks{})
+	if err == nil {
+		t.Fatal("Stream ignored the cancelled context")
+	}
+	if !strings.Contains(err.Error(), "cancelled") {
+		t.Errorf("err = %q, want the plain cancellation sentence", err)
+	}
+	if strings.Contains(err.Error(), "crashed") {
+		t.Errorf("err = %q blames the server for a client-side cancellation", err)
+	}
+	// The cause survives: this fixture ends by deadline, a cancellation by
+	// cancel() carries context.Canceled — both are the client's own act.
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		t.Errorf("errors.Is on the context cause = false; the cause was lost: %v", err)
 	}
 }

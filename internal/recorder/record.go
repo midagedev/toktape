@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/midagedev/toktape/internal/gpu"
@@ -39,9 +40,22 @@ type run struct {
 	// 2026-09-21): what --model is validated against and what the
 	// several-models note names. nil on any other kind of server.
 	openaiModels []string
-	// calibCapped says the decode calibration lowered this run's answer cap
-	// (TTP-156, 2026-09-21), which is what Plan.Binding names once the plan
-	// has been made.
+	// openaiLen is each listed model's max_model_len, when the listing
+	// carried one (TTP-165, 2026-09-21): vLLM reports it per model and it is
+	// the context a request may use whole. nil entries are unknown, which is
+	// never a limit. nil on any other kind of server.
+	openaiLen map[string]int
+	// engineFingerprint is the system_fingerprint the server's own chunks
+	// carried (TTP-169, 2026-09-21), latched from whichever stream spoke
+	// first — the calibration request usually, a run stream otherwise. It
+	// fills ServerInfo.EngineClaim only when the user made no claim, and it
+	// is guarded by fpMu because stream hooks fire on the stream goroutines.
+	fpMu              sync.Mutex
+	engineFingerprint string
+	// calibCapped says the calibrated cap lowered this run's answer cap
+	// (TTP-156/TTP-168, 2026-09-21 — set by applyCalibratedCap, after the
+	// plan sizes the prompts), which is what Plan.Binding names once the
+	// plan has been made.
 	calibCapped bool
 	model       tape.ModelInfo
 	tensors     []placement.Tensor
@@ -164,13 +178,15 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	// The run plan: one owner for the salt, the prompt length and the
 	// answer cap, decided together against the probe's fit and the slot's
 	// context before the first request goes out (lead, 2026-09-20). On an
-	// OpenAI-kind run the calibrated cap has already been lowered into the
-	// requests, and markCalibrationPlan below names the limit that decided
-	// it.
+	// OpenAI-kind run the plan also prices the prefill the calibration
+	// measured (TTP-168) and trims the set to its share of the clock, and
+	// the calibrated cap is applied after it — against the clock the
+	// predicted prefill leaves — so the two budgets are one decision
+	// instead of each spending the whole clock.
 	if err := r.plan(ctx, reqs); err != nil {
 		return nil, err
 	}
-	r.markCalibrationPlan()
+	r.applyCalibratedCap(reqs)
 	r.promptSet = promptSetOf(reqs)
 	r.collectTemplate(ctx, reqs)
 	r.emitAttached()
@@ -217,7 +233,7 @@ func (r *run) emitAttached() {
 			Args:    r.args,
 			Flags:   r.flags,
 			NSlots:  r.props.TotalSlots,
-			CtxSize: r.props.CtxSize(),
+			CtxSize: r.serverCtxSize(),
 		},
 		Model:       r.model,
 		Host:        r.host,
@@ -234,7 +250,13 @@ func (r *run) emitAttached() {
 	}
 	s.Server.Build, s.Server.Commit = r.build, r.commit
 	if r.kind == tape.ServerOpenAI {
-		s.Server.EngineClaim = r.opts.EngineClaim
+		// The user's word first (TTP-99), then the server's own
+		// system_fingerprint when no claim was given (TTP-169, 2026-09-21):
+		// a claim, printed with that word, never copied into Kind or Build.
+		// The fingerprint needs a stream, and at this point only the
+		// calibration has run — which is exactly the early answer a first
+		// run gets to draw its chrome with.
+		s.Server.EngineClaim = r.claimedEngine()
 	}
 	r.emit(Event{Kind: EventAttached, Stream: -1, Summary: s})
 }
@@ -447,8 +469,71 @@ func (r *run) probeOpenAI(ctx context.Context, c *server.Client) (*server.Client
 	r.openaiModel = models.FirstID()
 	for _, m := range models.Data {
 		r.openaiModels = append(r.openaiModels, m.ID)
+		if m.MaxModelLen > 0 {
+			if r.openaiLen == nil {
+				r.openaiLen = map[string]int{}
+			}
+			r.openaiLen[m.ID] = m.MaxModelLen
+		}
 	}
 	return c, &server.Props{}, nil
+}
+
+// openaiModelCtx is the context the listing said this model runs with, 0
+// when the listing said nothing (TTP-165, 2026-09-21). It is the figure the
+// OpenAI-kind run feeds into the slot logic: max_model_len is per request,
+// not divided between concurrent sequences the way llama-server divides -c
+// by -np, so it is already the per-request room the cap wants.
+func (r *run) openaiModelCtx(model string) int {
+	if r.openaiLen == nil || model == "" {
+		return 0
+	}
+	return r.openaiLen[model]
+}
+
+// noteFingerprint latches the engine's own statement of what it is
+// (system_fingerprint, TTP-169): the first stream to carry one wins, and a
+// later stream restating it — or a run with no calibration, whose streams
+// are the only ones asked — changes nothing.
+func (r *run) noteFingerprint(claim string) {
+	if claim == "" {
+		return
+	}
+	r.fpMu.Lock()
+	defer r.fpMu.Unlock()
+	if r.engineFingerprint == "" {
+		r.engineFingerprint = claim
+	}
+}
+
+// fingerprint is the latched claim, "" when no chunk carried one.
+func (r *run) fingerprint() string {
+	r.fpMu.Lock()
+	defer r.fpMu.Unlock()
+	return r.engineFingerprint
+}
+
+// claimedEngine is the EngineClaim a ServerOpenAI summary carries: the
+// user's --engine verbatim, else the server's own system_fingerprint
+// (TTP-169, 2026-09-21), else "" — unknown, never a guess. The user's claim
+// wins because it is the more specific statement about the same question,
+// and a server's fingerprint naming a build the user has overridden by a
+// proxy in front of it is exactly the case the override exists for.
+func (r *run) claimedEngine() string {
+	if claim := strings.TrimSpace(r.opts.EngineClaim); claim != "" {
+		return claim
+	}
+	return r.fingerprint()
+}
+
+// serverCtxSize is the context figure the summary's Server block carries:
+// /props n_ctx on a llama-kind server, the chosen model's max_model_len on
+// an OpenAI-kind one, 0 when neither was observed (TTP-165, 2026-09-21).
+func (r *run) serverCtxSize() int {
+	if r.kind == tape.ServerOpenAI {
+		return r.openaiModelCtx(r.model.FileName)
+	}
+	return r.props.CtxSize()
 }
 
 // chooseOpenAIModel settles the model an OpenAI-kind run requests, before any
@@ -1087,7 +1172,14 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 	r.observe(0, 0, witnessStart)
 	origin := time.Now() // the origin RunConcurrent stamps StartedAt against
 	runCtx, clk := r.startClock(ctx, st, origin)
-	recs, err := server.RunConcurrent(runCtx, r.client, reqs, st.hooks)
+	recs, err := server.RunConcurrent(runCtx, r.client, reqs, func(i int) server.StreamHooks {
+		// The state's own hooks, plus the engine-fingerprint latch
+		// (TTP-169): a run that calibrated nothing — a named cap, no clock —
+		// still learns what served it from its own streams.
+		h := st.hooks(i)
+		h.OnFingerprint = r.noteFingerprint
+		return h
+	})
 	clk.stop()
 	r.observe(time.Since(origin), 0, witnessEnd)
 	stopSampling()

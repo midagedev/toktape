@@ -25,6 +25,13 @@ type ServerTimings struct {
 	// Speculative decoding. nil when the build does not report it.
 	DraftN         *int `json:"draft_n,omitempty"`
 	DraftNAccepted *int `json:"draft_n_accepted,omitempty"`
+	// Fingerprint is the stream's system_fingerprint, when any chunk carried
+	// one (TTP-169, 2026-09-21): the engine's own statement of what it is,
+	// which the recorder lifts onto ServerInfo.EngineClaim when the user made
+	// no claim of their own. It is not a wire field of the timings object, so
+	// it never round-trips through JSON — the record's home for it is the
+	// summary, not the timings.
+	Fingerprint string `json:"-"`
 }
 
 // Summary copies the server figures into a tape.TimingsSummary. The
@@ -62,6 +69,12 @@ type streamChunk struct {
 	PromptProgress *chunkProgress `json:"prompt_progress"`
 	Usage          *chunkUsage    `json:"usage"`
 	Error          *chunkError    `json:"error"`
+	// SystemFingerprint is the OpenAI-compatible chunk field an engine uses
+	// to name its build ("vllm-0.29.0-b6a310fe", "fp_ollama"). The first
+	// chunk that carries one wins, verbatim, and lands on the returned
+	// ServerTimings (TTP-169, 2026-09-21) — never parsed, because a version
+	// string this tool guessed the shape of is a default wearing a citation.
+	SystemFingerprint string `json:"system_fingerprint,omitempty"`
 
 	// stop is not a wire field of the chat stream: it is how the /completion
 	// translator reports that chunk's `"stop": true`, which is where that
@@ -236,6 +249,12 @@ type recorder struct {
 	timings    ServerTimings
 	sawTimings bool
 	completion strings.Builder
+	// fingerprint is the first system_fingerprint a chunk carried, latched
+	// here so the last one cannot overwrite the first and a hook fires once.
+	fingerprint string
+	// fingerprintTold says the hook has fired; a fingerprint is a statement
+	// about the engine, not a per-chunk fact.
+	fingerprintTold bool
 	// reasoning is the thinking text, kept apart from the answer even though
 	// its tokens are in rec.Tokens alongside the answer's.
 	reasoning  strings.Builder
@@ -311,6 +330,21 @@ func (r *recorder) apply(c *streamChunk, t time.Duration) {
 		// also carries the final timings, so it is applied like any other and
 		// only the loop is told to stop.
 		r.done = true
+	}
+	if fp := c.SystemFingerprint; fp != "" {
+		// The engine's own name for itself, first chunk wins: a later chunk
+		// restating it is the same statement, and one that changed mid-stream
+		// would be a fact no surface here can adjudicate. The hook fires once,
+		// on the latch.
+		if r.fingerprint == "" {
+			r.fingerprint = fp
+		}
+		if !r.fingerprintTold {
+			r.fingerprintTold = true
+			if r.hooks.OnFingerprint != nil {
+				r.hooks.OnFingerprint(r.fingerprint)
+			}
+		}
 	}
 	if c.IDSlot != nil && *c.IDSlot >= 0 {
 		r.rec.Slot = *c.IDSlot
@@ -434,19 +468,25 @@ func (r *recorder) finish(sentAt time.Time, activeBytesPerToken int64) (*tape.Re
 			rec.Timings.PredictedN = len(rec.Tokens)
 			rec.Timings.PredictedNSource = "chunks"
 		}
+		// The prompt count is the usage chunk's too (lead, 2026-09-21,
+		// TTP-167 — reversing the note that used to live here, which kept the
+		// count off the record so no reader saw a figure the recorder could
+		// not check): the count is the server's statement of how many prompt
+		// tokens it took, which is exactly what a count is on the timings
+		// side — the record. The prefill RATE stays unknown on these streams
+		// (no server figure times the prompt; Reduce's client branch keeps
+		// PromptPerSecond 0), so the count lands without buying a rate.
+		if r.usage != nil && r.usage.PromptTokens > 0 {
+			rec.Timings.PromptN = r.usage.PromptTokens
+			rec.Timings.PromptNSource = "usage"
+		}
 	}
 	rec.Timings = Reduce(rec, sentAt, activeBytesPerToken)
 	rec.Cache = CacheVerdict(rec.Timings, 0, rec.Timings.PredictedN)
-	// The usage chunk's prompt count rides the RETURNED ServerTimings only,
-	// filled in after every read of r.timings the record was built from, so
-	// the record's own PromptN stays exactly what it was: on a client-timed
-	// stream that is 0 — unknown — and no reader of the tape sees a new
-	// figure. The decode calibration is the one caller that reads this
-	// (recorder, TTP-156, 2026-09-21): it needs the server's own count of the
-	// prompt it sent, and no other surface of this package carries it.
-	if !r.sawTimings && r.usage != nil {
-		r.timings.PromptN = r.usage.PromptTokens
-	}
+	// The fingerprint rides the returned timings for the same callers: the
+	// recorder lifts it onto ServerInfo.EngineClaim, and nothing in the tape
+	// schema carries it per stream.
+	r.timings.Fingerprint = r.fingerprint
 	if r.errMsg != "" {
 		rec.Error = r.errMsg
 		return rec, r.timings, fmt.Errorf("server: stream error: %s", r.errMsg)

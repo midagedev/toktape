@@ -584,3 +584,51 @@ func TestTokenizeCountsTheServersOwnTokens(t *testing.T) {
 		t.Error("Tokenize on a server with no /tokenize returned nil error")
 	}
 }
+
+// TestPropsUnauthorizedIsNotUnreachableAlone is the TTP-169 client-half gate
+// (matrix gap 6, 2026-09-21): a 401 on /props used to classify as plain
+// ErrUnreachable, which the CLI answers with starting-server advice — a
+// lever that answers a server that is not there, printed at one that is
+// running and wants a key. The sentinel must be distinguishable and its
+// sentence plain, with the server's own body still quoted.
+//
+// FAIL-first (2026-09-21, pre-change source): errors.Is(err, ErrUnauthorized)
+// did not compile (no sentinel existed) and the message read
+// "server: unreachable: http://…: HTTP 401: {…}" — no credentials sentence.
+func TestPropsUnauthorizedIsNotUnreachableAlone(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"Invalid API key"}}`, http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL).Props(context.Background())
+	if err == nil {
+		t.Fatal("Props accepted a 401")
+	}
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("errors.Is(err, ErrUnauthorized) = false: %v", err)
+	}
+	if !errors.Is(err, ErrUnreachable) {
+		t.Errorf("errors.Is(err, ErrUnreachable) = false; the sentinel must keep wrapping it: %v", err)
+	}
+	for _, want := range []string{"wants credentials", "(HTTP 401)", "Invalid API key"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to contain %q", err, want)
+		}
+	}
+}
+
+// TestPropsForbiddenIsUnauthorizedToo: 403 is the same fact about the same
+// lever with a different status word.
+func TestPropsForbiddenIsUnauthorizedToo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL).Props(context.Background())
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("errors.Is(err, ErrUnauthorized) = false: %v", err)
+	}
+	if !strings.Contains(err.Error(), "(HTTP 403)") {
+		t.Errorf("err = %q, want the status in the sentence", err)
+	}
+}

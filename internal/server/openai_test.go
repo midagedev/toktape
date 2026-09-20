@@ -332,3 +332,59 @@ func TestOpenAIBodyKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestModelsUnauthorizedIsNotStartingServerAdvice is the /v1/models half of
+// the TTP-169 client gate (2026-09-21): an auth-fronted vLLM answering 401 on
+// the listing is a server that is running, and the error must carry the
+// credentials sentence the /props path carries.
+//
+// FAIL-first (2026-09-21, pre-change source): the message read
+// "server: unreachable: …: GET /v1/models: HTTP 401: {…}" and no sentinel
+// existed to branch on.
+func TestModelsUnauthorizedIsNotStartingServerAdvice(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":{"message":"Invalid API key"}}`, http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	_, err := New(srv.URL).Models(context.Background())
+	if err == nil {
+		t.Fatal("Models accepted a 401")
+	}
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Errorf("errors.Is(err, ErrUnauthorized) = false: %v", err)
+	}
+	if !errors.Is(err, ErrUnreachable) {
+		t.Errorf("errors.Is(err, ErrUnreachable) = false; the sentinel must keep wrapping it: %v", err)
+	}
+	if !strings.Contains(err.Error(), "wants credentials (HTTP 401)") {
+		t.Errorf("err = %q, want the plain credentials sentence", err)
+	}
+}
+
+// TestModelsParsesMaxModelLen pins the listing field the OpenAI-kind run
+// reads as its context (TTP-165): per model, optional, 0 when absent.
+//
+// FAIL-first (2026-09-21, pre-change source): MaxLenOf did not exist and the
+// field was dropped at decode.
+func TestModelsParsesMaxModelLen(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[` +
+			`{"id":"Qwen/Qwen3-0.6B","max_model_len":8192},` +
+			`{"id":"no-len"}]}`))
+	}))
+	defer srv.Close()
+	models, err := New(srv.URL).Models(context.Background())
+	if err != nil {
+		t.Fatalf("Models: %v", err)
+	}
+	if got := models.MaxLenOf("Qwen/Qwen3-0.6B"); got != 8192 {
+		t.Errorf("MaxLenOf(Qwen/Qwen3-0.6B) = %d, want 8192", got)
+	}
+	if got := models.MaxLenOf("no-len"); got != 0 {
+		t.Errorf("MaxLenOf(no-len) = %d, want 0 (absent is unknown)", got)
+	}
+	if got := models.MaxLenOf("absent"); got != 0 {
+		t.Errorf("MaxLenOf(absent) = %d, want 0", got)
+	}
+}

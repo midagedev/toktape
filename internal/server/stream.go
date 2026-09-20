@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -146,6 +147,12 @@ type StreamHooks struct {
 	// enough: a stream that stopped at EOS with ten tokens would hold such a
 	// floor open forever.
 	OnEnd func()
+	// OnFingerprint fires at most once per stream, for the first chunk that
+	// carried a system_fingerprint (TTP-169, 2026-09-21): the engine's own
+	// name for what is serving, verbatim. Like the other hooks it runs on the
+	// goroutine reading the stream, so a caller latching the value across
+	// concurrent streams synchronises it itself.
+	OnFingerprint func(claim string)
 }
 
 // Body builds the JSON request body. timings_per_token, return_progress and
@@ -283,7 +290,7 @@ func (c *Client) Stream(ctx context.Context, req StreamRequest, hooks StreamHook
 		}
 		if err != nil {
 			if err != io.EOF {
-				readErr = fmt.Errorf("server: stream: read: %w", err)
+				readErr = midStreamReadError(err, len(rec.rec.Tokens))
 			}
 			break
 		}
@@ -310,4 +317,26 @@ func (c *Client) Stream(ctx context.Context, req StreamRequest, hooks StreamHook
 		return out, timings, readErr
 	}
 	return out, timings, err
+}
+
+// midStreamReadError translates a read failure that arrived after the stream
+// was under way (TTP-169's server-side half, matrix gap 4, 2026-09-21). Go's
+// own words for it — "server: stream: read: unexpected EOF" — name the
+// transport, not the event: an OOM-killed llama-server mid-generation is the
+// classic big-model low-RAM story, and the sentence a user reads should say
+// what happened and where the answer is (the server's log). The underlying
+// error stays wrapped, so errors.Is keeps working through the translation.
+//
+// A cancellation is translated separately: there the client ended the stream
+// (this run's clock, or the caller giving up), and blaming the server for it
+// would be the exact opposite of the record.
+func midStreamReadError(err error, tokens int) error {
+	// Cancellation and the caller's own deadline are the client's act —
+	// this run's clock, or the user giving up — and blaming the server for
+	// them would be the opposite of the record.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("server: the stream was cancelled after %d tokens: %w", tokens, err)
+	}
+	return fmt.Errorf("server: the connection closed mid-answer after %d tokens — the server may have crashed or been killed (out of memory is the usual cause); its log says which: %w",
+		tokens, err)
 }

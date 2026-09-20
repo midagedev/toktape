@@ -131,3 +131,107 @@ func TestAPromptTooBigForItsSlotIsRefusedWithBothNumbers(t *testing.T) {
 		t.Errorf("%d requests went out before the refusal; it belongs before the first", len(caps))
 	}
 }
+
+// TestNoSlotsServerStillPlansAgainstItsPropsContext is the --no-slots gate
+// (TTP-165's llama half, matrix gap 3 / row 5, 2026-09-21): a llama-server
+// started with --no-slots answers 501 on /slots, smallestSlotCtx used to
+// read nothing there, and the run sent the whole ~7.4k-token prompt with the
+// 8000-token guard behind it into a context of 8192 — every stream lost,
+// exit 3. /props carries the per-slot n_ctx on mainline (verified against a
+// live -np 4 server that day: /props 4096 and every /slots entry 4096), and
+// the fallback reads exactly that figure, undivided.
+//
+// FAIL-first (2026-09-21, pre-change source): Record failed with
+// recorder: all streams failed: server: stream error:
+// context_length_exceeded: the request exceeds the available context size.
+func TestNoSlotsServerStillPlansAgainstItsPropsContext(t *testing.T) {
+	mux := http.NewServeMux()
+	// The mainline /props spelling: n_ctx is the per-slot context (the live
+	// :8080 measurement above), so a --no-slots server of 4 slots x 8192
+	// reports 8192 here, not 32768.
+	mux.HandleFunc("/props", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Server", "llama.cpp")
+		_, _ = w.Write([]byte(`{
+		  "model_path": "` + modelPath + `",
+		  "build_info": "b4321-abcdef12",
+		  "chat_template": "chatml",
+		  "total_slots": 4,
+		  "default_generation_settings": {"n_ctx": 8192}
+		}`))
+	})
+	// --no-slots: the endpoint exists and refuses.
+	mux.HandleFunc("/slots", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "slots endpoint is disabled", http.StatusNotImplemented)
+	})
+	mux.HandleFunc("/tokenize", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tokens": make([]int, firstTryTokens(in.Content)),
+		})
+	})
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Messages  []tape.Message `json:"messages"`
+			MaxTokens *int           `json:"max_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var b strings.Builder
+		for _, m := range in.Messages {
+			b.WriteString(m.Content)
+		}
+		cap := 0
+		if in.MaxTokens != nil {
+			cap = *in.MaxTokens
+		}
+		if firstTryTokens(b.String())+firstTryTemplate+cap > firstTryNCtx {
+			writeCtxRefused(w)
+			return
+		}
+		writeFirstTryChat(w, firstTryTokens(b.String()), 25.0)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	tp, err := recorder.Record(context.Background(), recorder.Options{
+		BaseURL:        srv.URL,
+		Concurrency:    1,
+		For:            3500 * time.Millisecond,
+		FSRoot:         t.TempDir(),
+		GPU:            gpu.Null{},
+		SampleInterval: 50 * time.Millisecond,
+		Clock:          fixedClock{time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC)},
+	})
+	if err != nil {
+		t.Fatalf("Record against a --no-slots server: %v", err)
+	}
+	s := tp.Summary
+	if s.Aggregate.StreamsFailed != 0 {
+		t.Errorf("%d of %d streams failed; the /props context was there to plan against",
+			s.Aggregate.StreamsFailed, s.Aggregate.Streams)
+	}
+	if len(tp.Requests) != 1 || tp.Requests[0].Error != "" {
+		t.Fatalf("the stream did not finish clean: %+v", tp.Requests)
+	}
+	// The context the run planned against is the one /props carried, and
+	// the prompt was trimmed into it rather than refused by the server.
+	if s.Server.CtxSize != firstTryNCtx {
+		t.Errorf("Server.CtxSize = %d, want the /props n_ctx %d", s.Server.CtxSize, firstTryNCtx)
+	}
+	if s.Plan == nil || s.Plan.SlotCtx != firstTryNCtx {
+		t.Errorf("Plan.SlotCtx = %+v, want %d from /props", s.Plan, firstTryNCtx)
+	}
+	for i, rec := range tp.Requests {
+		if got := rec.Timings.PromptN; got > 6976 || float64(got) < 0.97*6976 {
+			t.Errorf("stream %d: prompt_n %d, want within [0.97 x 6976, 6976] (8192 less template and answer room)", i, got)
+		}
+	}
+}
