@@ -19,7 +19,7 @@ func runLs(c *cli, args []string) int {
 	outDir := fs.String("out", defaultRunsDir(), "directory to list")
 	extra, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("ls", usageFor("ls"), args, err)
+		return c.badFlags("ls", usageFor("ls"), fs, args, err)
 	}
 	if len(extra) > 0 {
 		return c.usagef("toktape ls: unexpected argument %q", extra[0])

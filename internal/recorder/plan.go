@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
@@ -299,7 +300,20 @@ func (r *run) countSet(ctx context.Context, reqs []server.StreamRequest) ([]int,
 	out := make([]int, len(reqs))
 	if r.kind == tape.ServerOpenAI {
 		// /tokenize is llama-server's route (Client.Tokenize doc); an
-		// OpenAI-compatible server is priced, never asked.
+		// OpenAI-compatible server is priced, never asked — at the fallback
+		// price, unless the decode calibration counted a real prompt of its
+		// own (TTP-156): its PromptN is the server's own count of bytes this
+		// run actually sent, which is a measurement of this tokenizer where
+		// planFallbackBytesPerToken is a band measured on another one.
+		if cal := r.calibration(); cal != nil && cal.PromptN >= calibrationPriceFloorPromptN {
+			bpt := float64(cal.PromptBytes) / float64(cal.PromptN)
+			for i := range reqs {
+				if reqs[i].Set == server.PromptSetID {
+					out[i] = int(math.Ceil(float64(len(*promptTextOf(&reqs[i]))) / bpt))
+				}
+			}
+			return out, false
+		}
 		for i := range reqs {
 			if reqs[i].Set == server.PromptSetID {
 				out[i] = pricedTokens(len(*promptTextOf(&reqs[i])))
@@ -457,8 +471,13 @@ func promptTextOf(q *server.StreamRequest) *string {
 // when the prompts went whole), the prefill the plan's lengths cost at the
 // same rate the plan used (the measured concurrent rate when the probe made
 // one, the fitted rate with the fallback concurrency factor when it did
-// not), the cap as resolved, the slot as reported. "" when the run planned
-// nothing, which is the caller's cue to print nothing.
+// not), the cap as resolved, the slot as reported. A prompt length that was
+// never counted is omitted rather than printed as "0-token" (TTP-160,
+// 2026-09-21: an OpenAI-kind run priced nothing and printed one anyway), and
+// a cap the decode calibration computed says so in plain words, because why
+// the cap is what it is — answers end before the clock, so the server's own
+// count arrives — is the one question that cap begs (TTP-156). "" when the
+// run planned nothing, which is the caller's cue to print nothing.
 func PlanLine(s *tape.RunSummary, streams int) string {
 	if s == nil || s.Plan == nil {
 		return ""
@@ -469,7 +488,17 @@ func PlanLine(s *tape.RunSummary, streams int) string {
 		n = p.LongestPromptTokens
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "plan: %d × %s-token prompts (%s)", streams, commaInt(n), planBindingWord(p.Binding))
+	if n > 0 {
+		fmt.Fprintf(&b, "plan: %d × %s-token prompts (%s)", streams, commaInt(n), planBindingWord(p.Binding))
+	} else {
+		// Unknown is no figure, never zero: the token count was not counted
+		// on this run, and the count it never had must not be printed.
+		word := "prompts"
+		if streams == 1 {
+			word = "prompt"
+		}
+		fmt.Fprintf(&b, "plan: %d %s (%s)", streams, word, planBindingWord(p.Binding))
+	}
 	if s.Probe != nil && s.Probe.PrefillPerSecond > 0 && p.LongestPromptTokens > 0 && streams > 0 {
 		rate, _ := planConcurrentRate(s.Probe, streams)
 		sec := strconv.FormatFloat(float64(streams)*float64(p.LongestPromptTokens)/rate, 'f', 1, 64)
@@ -477,11 +506,25 @@ func PlanLine(s *tape.RunSummary, streams int) string {
 	}
 	if s.Limit.MaxTokens > 0 {
 		fmt.Fprintf(&b, " · cap %s", commaInt(s.Limit.MaxTokens))
+		if capCameFromCalibration(s) {
+			fmt.Fprintf(&b, " (so answers end before the %s clock and the server counts the tokens)",
+				s.Limit.For.Round(time.Second))
+		}
 	}
 	if p.SlotCtx > 0 {
 		fmt.Fprintf(&b, " · slot %s", commaInt(p.SlotCtx))
 	}
 	return b.String()
+}
+
+// capCameFromCalibration reports whether the resolved answer cap was computed
+// from the decode calibration against the clock: the calibration exists only
+// on a run whose cap it lowered (calibrateOpenAI applies the cap and the
+// binding in one decision), so its presence beside a clock binding is the
+// mark of that path.
+func capCameFromCalibration(s *tape.RunSummary) bool {
+	return s.Plan.Binding == tape.PlanBoundClock &&
+		s.Probe != nil && s.Probe.Calibration != nil
 }
 
 // planBindingWord is the binding's clause for PlanLine: the same four words

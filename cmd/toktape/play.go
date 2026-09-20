@@ -22,7 +22,7 @@ func runPlay(ctx context.Context, c *cli, args []string) int {
 	grid := fs.String("grid", tui.DefaultGrid.String(), "tile grid per page as COLSxROWS (0 = fit to the terminal)")
 	files, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("play", usageFor("play"), args, err)
+		return c.badFlags("play", usageFor("play"), fs, args, err)
 	}
 	if len(files) != 1 {
 		return c.usageTextf(usageText, "toktape play: expected one tape file")

@@ -95,6 +95,24 @@ func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 	r.prefillProbe(ctx)
 
 	rounds := roundRequests(r.opts, r.model.ActiveBytesPerToken)
+	if err := r.chooseOpenAIModel(rounds[0]); err != nil {
+		return nil, err
+	}
+	// Shaping precedes the plan here for the same reason it does in Record:
+	// the calibration measures as the model the run will request, and the
+	// plan prices with what the calibration counted (TTP-156/TTP-157,
+	// 2026-09-21).
+	for k := range rounds {
+		if shaped, err := r.shapeOpenAIRequests(rounds[k]); err != nil {
+			return nil, err
+		} else {
+			rounds[k] = shaped
+		}
+	}
+	// One calibration request for the whole tape, capping every round's
+	// requests (TTP-156): the answer cap is a property of the clock and the
+	// rate, neither of which changes between rounds.
+	r.calibrateOpenAI(ctx, rounds...)
 	// The plan is one decision for the whole tape, made from the first
 	// round and applied to every round (lead, 2026-09-20): a rounds run
 	// sends the same set every round, and where it does not, the set's
@@ -110,13 +128,7 @@ func (r *run) recordRounds(ctx context.Context) (*tape.Tape, error) {
 			return nil, err
 		}
 	}
-	for k := range rounds {
-		if shaped, err := r.shapeOpenAIRequests(rounds[k]); err != nil {
-			return nil, err
-		} else {
-			rounds[k] = shaped
-		}
-	}
+	r.markCalibrationPlan()
 	if len(rounds) > 0 {
 		r.promptSet = promptSetOf(rounds[0])
 	}

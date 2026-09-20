@@ -66,12 +66,22 @@ var (
 // against serves on it, and the first thing anyone there saw was "no server
 // answered /props" while a server ran one port away — which reads as "there is
 // no server", not as "pass --url".
+//
+// 11434 and 1234 are here because of TTP-158 (2026-09-21): a bare `toktape`
+// did not find Ollama or LM Studio, and both are first-run servers, not
+// specialist ones. Measured that day on Ollama 0.34.2: it answers 404 on
+// /props ("404 page not found") and 200 on /v1/models, so Discover's second
+// pass — the ErrNoProps candidates tried against /v1/models — is what finds
+// it. They sit AFTER every llama port so a /props server still wins wherever
+// it listens.
 var DefaultCandidates = []string{
-	"http://127.0.0.1:8080", // llama-server's own default
-	"http://127.0.0.1:8081", // a second llama-server, numbered off 8080
-	"http://127.0.0.1:8001", // a second llama-server, numbered off 8000 (TTP-75)
-	"http://127.0.0.1:8000", // uvicorn/FastAPI-shaped wrappers
-	"http://127.0.0.1:5000", // the other wrapper convention
+	"http://127.0.0.1:8080",  // llama-server's own default
+	"http://127.0.0.1:8081",  // a second llama-server, numbered off 8080
+	"http://127.0.0.1:8001",  // a second llama-server, numbered off 8000 (TTP-75)
+	"http://127.0.0.1:8000",  // uvicorn/FastAPI-shaped wrappers
+	"http://127.0.0.1:5000",  // the other wrapper convention
+	"http://127.0.0.1:11434", // Ollama's default port: 404 /props, 200 /v1/models (TTP-158)
+	"http://127.0.0.1:1234",  // LM Studio's default port, the same shape (TTP-158)
 }
 
 // DefaultPorts is the ports of DefaultCandidates as one human list, for the

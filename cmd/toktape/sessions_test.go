@@ -198,9 +198,53 @@ func TestRetiredFlagsNameTheirReplacement(t *testing.T) {
 			}
 		})
 	}
-	// A flag this verb never had is not given somebody else's advice.
-	if _, stdout, _ := exec(t, "--nope", "-o", "json"); errorHint(t, stdout) != "" {
+	// 2026-09-21, TTP-159: this used to be --nope, which now legitimately
+	// suggests --note (edit distance 1) under the misspelling rule — a flag
+	// close to a real one is exactly the case the suggestion exists for. A
+	// flag nowhere near any declared one still gets no invented advice.
+	if _, stdout, _ := exec(t, "--xyzzy", "-o", "json"); errorHint(t, stdout) != "" {
 		t.Errorf("an unknown flag got a retired-flag hint: %s", stdout)
+	}
+}
+
+// TestBadFlagSuggestsAndStaysShort (2026-09-21, TTP-159, re-authored): an
+// unknown flag used to print its error and then 123 lines of usage, and in a
+// terminal the error scrolled off the screen. A flag-parse error now prints
+// the error line, the retired-flag hint when one applies, otherwise the
+// closest declared flag of that verb within edit distance 2, and the one
+// sentence saying where the flags live — never the usage block. -h/--help and
+// the JSON error object's shape are unchanged.
+func TestBadFlagSuggestsAndStaysShort(t *testing.T) {
+	hermetic(t)
+	for _, tc := range []struct {
+		flag string
+		want string
+	}{
+		{"--sesions", "did you mean --sessions?"},
+		{"--promts", "did you mean --prompts?"},
+		{"--engin", "did you mean --engine?"},
+		{"--quietx", "did you mean --quiet?"},
+		{"--xyzzy", ""}, // nothing within reach: no invented suggestion
+	} {
+		t.Run(tc.flag, func(t *testing.T) {
+			code, stdout, stderr := exec(t, tc.flag, "-o", "json")
+			if code != exitUsage {
+				t.Fatalf("exit %d, want %d\n%s", code, exitUsage, stderr)
+			}
+			if strings.Contains(stderr, "Usage:") {
+				t.Errorf("a flag-parse error printed the usage block:\n%s", stderr)
+			}
+			if !strings.Contains(stderr, "Run 'toktape help' for the flags.") {
+				t.Errorf("stderr lacks the where-the-flags-live line:\n%s", stderr)
+			}
+			if hint := errorHint(t, stdout); hint != tc.want {
+				t.Errorf("hint = %q, want %q", hint, tc.want)
+			}
+		})
+	}
+	// -h still prints the usage text and exits 0.
+	if code, out, _ := exec(t, "-h"); code != exitOK || !strings.Contains(out, "Usage:") {
+		t.Errorf("-h: exit %d, want 0 and the usage text", code)
 	}
 }
 

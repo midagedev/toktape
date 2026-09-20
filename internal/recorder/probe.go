@@ -529,6 +529,178 @@ func fitPrefill(points []tape.PrefillPoint) (perSecond, fixedMs float64) {
 	return 1000 / msPerTok, fixed
 }
 
+// The decode calibration (TTP-156, 2026-09-21): the OpenAI-kind server's own
+// answer to "how fast does this box decode", asked with one request before
+// the run.
+//
+// Measured that day on Ollama 0.34.2 with llama3.2:1b: a ServerOpenAI server
+// counts tokens only in the closing usage chunk of a stream that ended on its
+// own, the default 20 s clock cancels the stream instead, and a cancelled
+// stream's usage chunk never arrives — so the run that streamed 1127 chunks
+// printed "Sample ?" and the tokens_uncounted caveat. Counting chunks would
+// have been the guess lesson 1 forbids. The calibration measures the rate
+// once, the run plan turns it into an answer cap every stream reaches before
+// the clock, and the clock stays armed behind it as the guard it always was.
+const (
+	// calibrationTokens is the answer cap the calibration request carries.
+	// Long enough that (n-1)/decode_ms is not one chunk's jitter, short
+	// enough to cost about a second at 50 tok/s — the two bounds of the
+	// decision, and the same order as the real Ollama take (40 tokens
+	// counted for a 48 cap, 2026-09-21).
+	calibrationTokens = 48
+	// calibrationTimeout bounds the whole calibration request. It is its own
+	// budget, not the run's: the run's clock has not started yet, and a
+	// calibration that eats into the run's budget would be trading the thing
+	// it exists to protect.
+	calibrationTimeout = 30 * time.Second
+	// calibrationMinPredicted is the least server-counted answer a
+	// calibration may be used from. Below it the rate is one or two chunks'
+	// jitter wearing a unit.
+	calibrationMinPredicted = 8
+	// calibrationPriceFloorPromptN is the least server-counted prompt a
+	// calibration may price this tokenizer at, in prompt tokens: the
+	// calibration's own prompt is short, and a chat template dominates a
+	// short one — the real Ollama take counted 51 tokens for a 119-byte
+	// ask, most of them template — so below this floor the bytes-per-token
+	// ratio is the template's, not the tokenizer's, and the fallback price
+	// is the more honest ruler.
+	calibrationPriceFloorPromptN = 16
+)
+
+// calibrationAsk is the fixed question the calibration sends. It asks for a
+// long mechanical answer, so the 48-token cap is what ends the stream and
+// not the model finishing: a stream ended by EOS measures how long the model
+// felt like answering, not how fast the box decodes.
+const calibrationAsk = "Count upward from one, digits only, one number per line, and do not stop until you are told to."
+
+// calibrateOpenAI sends the one calibration request and lowers the run's
+// answer cap onto what it measured (TTP-156). rounds is every slice of
+// requests the run will send — one slice for a plain run — and the cap is
+// applied to all of them: one run sends one shape.
+//
+// It runs only on a ServerOpenAI server, only when the run has a clock, and
+// only when the user named no cap of their own (--n-predict is an answer on
+// the same axis, and the recorder does not overrule it). It never fails a
+// run and never warns by itself: a calibration that times out, errors, or
+// comes back without a usage figure records nothing, and the run proceeds
+// exactly as it did before this existed — clock, cut and caveat included.
+func (r *run) calibrateOpenAI(ctx context.Context, rounds ...[]server.StreamRequest) {
+	if r.kind != tape.ServerOpenAI || r.limit.For <= 0 || r.limit.MaxTokensNamed {
+		return
+	}
+	var first []server.StreamRequest
+	for _, rd := range rounds {
+		if len(rd) > 0 {
+			first = rd
+			break
+		}
+	}
+	if first == nil {
+		return
+	}
+	// The salt is derived from the run's own clock the way the plan's and
+	// the probe's salts are (planSet, probeSalts), with a word of its own so
+	// no run's prompt, probe or calibration ever shares a first token with
+	// another: a calibration answered from a prefix cache would measure the
+	// cache, not the box.
+	prompt := "[cal " + strconv.FormatInt(r.opts.Clock.Now().UnixNano(), 36) + "] " + calibrationAsk
+
+	cctx, cancel := context.WithTimeout(ctx, calibrationTimeout)
+	defer cancel()
+	rec, st, err := r.client.Stream(cctx, server.StreamRequest{
+		Protocol:  tape.ServerOpenAI,
+		Model:     requestModelOf(&first[0]),
+		MaxTokens: calibrationTokens,
+		Messages:  []tape.Message{{Role: "user", Content: prompt}},
+	}, server.StreamHooks{})
+	// The conditions of a usable calibration, all of them: the stream ended
+	// on its own (no error), the server counted the answer (usage, never
+	// chunks), the count is more than jitter, and the client saw a window to
+	// time. st.PromptN is the usage chunk's prompt_tokens — the one figure
+	// sse.go surfaces on the returned ServerTimings of a client-timed
+	// stream, deliberately kept out of the record itself.
+	if err != nil || rec == nil || rec.Timings.PredictedNSource != "usage" ||
+		rec.Timings.PredictedN < calibrationMinPredicted || st.PromptN <= 0 ||
+		len(rec.Tokens) < 2 {
+		return
+	}
+	window := rec.Tokens[len(rec.Tokens)-1].T - rec.Tokens[0].T
+	if window <= 0 {
+		return
+	}
+	cal := &tape.DecodeCalibration{
+		PromptN:     st.PromptN,
+		PredictedN:  rec.Timings.PredictedN,
+		PromptBytes: len(prompt),
+		TTFTMs:      rec.Timings.TTFTMs,
+		DecodeMs:    float64(window) / float64(time.Millisecond),
+		// Server-counted tokens over a client-timed span: the same figure
+		// every client-timed rate on the tape is (reduceClientTimed), one
+		// stream, nothing else running.
+		PerSecond: float64(rec.Timings.PredictedN-1) / window.Seconds(),
+	}
+	if cal.PerSecond <= 0 {
+		return
+	}
+	if r.prefill == nil {
+		r.prefill = &tape.ProbeSummary{}
+	}
+	r.prefill.Calibration = cal
+
+	// The cap: 0.8 x the measured rate x the clock, divided over the
+	// streams. A server that batches gives each of N streams at least
+	// rate/N; one that serialises (Ollama with OLLAMA_NUM_PARALLEL=1)
+	// finishes them one after another in N x cap/rate — both are 0.8 x For,
+	// so every stream ends on its own before the clock and its usage chunk
+	// arrives. The floor is tape.MinCutTokens, the same minimum the clock's
+	// own cut respects: below tape.MinDecodeTokens a rate is not a rate at
+	// all, and MinCutTokens is twice that with room to spare. Only a
+	// lowering — a cap some other rule already chose smaller keeps its own.
+	streams := max(r.opts.Concurrency, 1)
+	cap := int(0.8 * cal.PerSecond * r.limit.For.Seconds() / float64(streams))
+	cap = max(cap, tape.MinCutTokens)
+	if cap >= r.limit.MaxTokens {
+		return
+	}
+	for _, rd := range rounds {
+		for i := range rd {
+			if rd[i].MaxTokens > cap {
+				rd[i].MaxTokens = cap
+			}
+		}
+	}
+	// Recorded where an unnamed cap is recorded today — LimitSummary, with
+	// MaxTokensNamed left false — so the tape reproduces the run's shape
+	// without crediting the user with a number they did not type.
+	r.limit.MaxTokens = cap
+	r.opts.MaxTokens = cap
+	r.calibCapped = true
+}
+
+// calibration is this run's decode calibration, nil when none was recorded.
+func (r *run) calibration() *tape.DecodeCalibration {
+	if r.prefill == nil {
+		return nil
+	}
+	return r.prefill.Calibration
+}
+
+// markCalibrationPlan puts the calibrated cap on the run plan: the plan is
+// the one place a reader sees which limit decided the run's shape, and on
+// this path the limit was the clock the cap was computed against. It runs
+// after plan(), which may have created the plan for the set's own reasons,
+// and creates one on a path that planned nothing else (a user's own prompts)
+// so the decision is never left off the tape.
+func (r *run) markCalibrationPlan() {
+	if !r.calibCapped {
+		return
+	}
+	if r.runPlan == nil {
+		r.runPlan = &tape.RunPlan{}
+	}
+	r.runPlan.Binding = tape.PlanBoundClock
+}
+
 // resolvePromptTrim and trimSetPrompts lived here until 2026-09-20, when
 // the run plan (plan.go) became the single owner of prompt length: the
 // fixed-share character trim they implemented kept every same-length prompt

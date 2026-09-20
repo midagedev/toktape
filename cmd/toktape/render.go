@@ -169,7 +169,7 @@ func runRender(c *cli, args []string) int {
 	fps, size, outDir := f.fps, f.size, f.outDir
 	files, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("render", usageFor("render"), args, err)
+		return c.badFlags("render", usageFor("render"), fs, args, err)
 	}
 	if len(files) > 1 {
 		return c.usageTextf(usageFor("render"), "toktape render: expected one tape file, got %d", len(files))

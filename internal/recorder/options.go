@@ -140,6 +140,13 @@ type Options struct {
 	// observation: it is recorded into ServerInfo.EngineClaim and every
 	// surface prints it with that word, and it is ignored on any other kind.
 	EngineClaim string
+	// Model names the model to request (`--model`), on a server that hosts
+	// more than one (TTP-157, 2026-09-21). Empty means the server's own
+	// default: whatever is loaded on a llama-server, the first /v1/models id
+	// on an OpenAI-compatible one. `--param model=…` is the raw spelling of
+	// the same choice and this flag wins when both are given; the tape's
+	// model stamp is the model the requests actually carried either way.
+	Model string
 	// SampleInterval is how often a tape.RunSample is taken. 0 means
 	// tape.DefaultSampleInterval.
 	SampleInterval time.Duration
@@ -280,6 +287,11 @@ const (
 	// EventWarning fires for every sentence appended to
 	// tape.RunSummary.Warnings.
 	EventWarning EventKind = "warning"
+	// EventNote is a one-line observation printed before the run and recorded
+	// nowhere (TTP-157, 2026-09-21): the server lists several models and the
+	// run took the first. A note is not a caveat — it qualifies no figure —
+	// so it reaches the CLI's stderr and the TUI ignores it.
+	EventNote EventKind = "note"
 	// EventAttached fires once the static picture is complete — server,
 	// model, flags, host and devices — and before the first request is
 	// sent. Its Summary is that partial summary, which is what the CLI's
@@ -425,6 +437,14 @@ func buildRequests(o Options, activeBytesPerToken int64) []server.StreamRequest 
 		reqs[i].ActiveBytesPerToken = activeBytesPerToken
 		mergeParams(&reqs[i], o.Params)
 		applyEndpoint(&reqs[i], o.Endpoint)
+		// After the params merge, so the explicit choice cannot be overridden:
+		// the body assembles model from Model before it overlays Params, and a
+		// --model left in Params would put the raw spelling back on top (the
+		// flag wins, TTP-157). Servers that host one model ignore the field.
+		if o.Model != "" {
+			reqs[i].Model = o.Model
+			delete(reqs[i].Params, "model")
+		}
 	}
 	return reqs
 }

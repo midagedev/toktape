@@ -204,7 +204,14 @@ func (c *cli) reportRecordError(err error, urlGiven bool) int {
 // that a rejection looks like every other rejection and its sentence is the
 // one the JSON carries. `-help`, which the flag package answers itself, is not
 // a rejection at all.
-func (c *cli) badFlags(verb, usage string, args []string, err error) int {
+//
+// 2026-09-21, TTP-159: the error was scrolling off the screen under 123 lines
+// of usage, so a flag-parse error no longer prints the usage block at all —
+// it prints the error line, the retired-flag hint when one applies, otherwise
+// the closest declared flag of this verb within edit distance 2, and the one
+// sentence saying where the flags live. The JSON object's shape is unchanged;
+// the suggestion rides in the hint it already carries.
+func (c *cli) badFlags(verb, usage string, fs *flag.FlagSet, args []string, err error) int {
 	if errors.Is(err, flag.ErrHelp) {
 		fmt.Fprint(c.stdout, usage)
 		return exitOK
@@ -212,12 +219,77 @@ func (c *cli) badFlags(verb, usage string, args []string, err error) int {
 	// The flags did not parse, so the parsed -o is not to be trusted;
 	// the raw arguments are all there is.
 	c.json = jsonRequested(args)
+	hint := retiredFlagHint(verb, err)
+	if hint == "" {
+		hint = misspelledFlagHint(fs, err)
+	}
 	return c.fail(failure{
 		code:    exitUsage,
 		msg:     fmt.Sprintf("toktape %s: %v", verb, err),
-		hint:    retiredFlagHint(verb, err),
-		trailer: usage,
+		hint:    hint,
+		trailer: "Run 'toktape help' for the flags.\n",
 	})
+}
+
+// misspelledFlagHint is "did you mean --sessions?" for a flag name this verb
+// declares within edit distance 2 of the one that failed to parse (TTP-159,
+// 2026-09-21). The flag package's own sentence names the unknown flag and
+// nothing else, and the usage block it used to sit above lists every flag
+// without saying which one this was. Ties go to the lexicographically
+// smallest name, so the suggestion is a function of the flag set alone; ""
+// when the error is not an unknown flag or nothing is close enough.
+func misspelledFlagHint(fs *flag.FlagSet, err error) string {
+	if fs == nil {
+		return ""
+	}
+	name, ok := strings.CutPrefix(err.Error(), "flag provided but not defined: ")
+	if !ok {
+		return ""
+	}
+	name = strings.TrimLeft(name, "-")
+	best, bestD := "", 3
+	fs.VisitAll(func(f *flag.Flag) {
+		if d := editDistance(name, f.Name); d < bestD || (d == bestD && f.Name < best) {
+			best, bestD = f.Name, d
+		}
+	})
+	if best == "" {
+		return ""
+	}
+	spell := "--"
+	if len(best) == 1 {
+		spell = "-" // a short form: -n, not --n
+	}
+	return fmt.Sprintf("did you mean %s%s?", spell, best)
+}
+
+// editDistance is the Levenshtein distance between a and b: the smallest
+// number of single-character insertions, deletions and substitutions that
+// turns one into the other. Case-sensitive, because flags are.
+func editDistance(a, b string) int {
+	if len(a) == 0 {
+		return len(b)
+	}
+	if len(b) == 0 {
+		return len(a)
+	}
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(cur[j-1]+1, prev[j]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
 }
 
 // retiredFlagHint names the flag to use instead of one the verb no longer

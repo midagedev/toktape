@@ -44,7 +44,7 @@ func runCard(c *cli, args []string) int {
 	var outPath string
 	files, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("card", usageFor("card"), args, err)
+		return c.badFlags("card", usageFor("card"), fs, args, err)
 	}
 	format, refused := outputFor("card", *f.output)
 	c.json = format.isJSON()

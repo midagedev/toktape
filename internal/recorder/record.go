@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,14 @@ type run struct {
 	// model name the server itself gave, which fills ModelInfo.FileName and
 	// defaults the requests' model. "" when the server listed nothing.
 	openaiModel string
+	// openaiModels is every id the listing carried, in its order (TTP-157,
+	// 2026-09-21): what --model is validated against and what the
+	// several-models note names. nil on any other kind of server.
+	openaiModels []string
+	// calibCapped says the decode calibration lowered this run's answer cap
+	// (TTP-156, 2026-09-21), which is what Plan.Binding names once the plan
+	// has been made.
+	calibCapped bool
 	model       tape.ModelInfo
 	tensors     []placement.Tensor
 	pid         int
@@ -133,21 +142,35 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	// sampler's fault baseline start clean after it. It runs before the
 	// requests are built because its fit is one of the ceilings the run
 	// plan takes (2026-09-20, plan.go) — the measurement has to exist
-	// before the thing it measures for.
+	// before the thing it measures for. A ServerOpenAI server skips the
+	// pass whole (no /completion, no timings object) and gets its own
+	// measurement instead: the decode calibration (TTP-156, probe.go).
 	r.prefillProbe(ctx)
 
 	reqs := buildRequests(opts, r.model.ActiveBytesPerToken)
-	// The run plan: one owner for the salt, the prompt length and the
-	// answer cap, decided together against the probe's fit and the slot's
-	// context before the first request goes out (lead, 2026-09-20).
-	if err := r.plan(ctx, reqs); err != nil {
+	if err := r.chooseOpenAIModel(reqs); err != nil {
 		return nil, err
 	}
+	// Shaping precedes the plan so the calibration can be sent as the model
+	// the run will actually request (TTP-157) and the plan can price the
+	// set with the calibration's own bytes-per-token (TTP-156): both need
+	// the requests in their final shape before anything measures for them.
 	if shaped, err := r.shapeOpenAIRequests(reqs); err != nil {
 		return nil, err
 	} else {
 		reqs = shaped
 	}
+	r.calibrateOpenAI(ctx, reqs)
+	// The run plan: one owner for the salt, the prompt length and the
+	// answer cap, decided together against the probe's fit and the slot's
+	// context before the first request goes out (lead, 2026-09-20). On an
+	// OpenAI-kind run the calibrated cap has already been lowered into the
+	// requests, and markCalibrationPlan below names the limit that decided
+	// it.
+	if err := r.plan(ctx, reqs); err != nil {
+		return nil, err
+	}
+	r.markCalibrationPlan()
 	r.promptSet = promptSetOf(reqs)
 	r.collectTemplate(ctx, reqs)
 	r.emitAttached()
@@ -349,7 +372,7 @@ func (r *run) checkSlots() error {
 // endpoint, and an OpenAI-compatible server has /v1/chat/completions only.
 // On any other kind the requests pass through untouched.
 func (r *run) shapeOpenAIRequests(reqs []server.StreamRequest) ([]server.StreamRequest, error) {
-	if r.kind != tape.ServerOpenAI {
+	if r.kind != tape.ServerOpenAI || len(reqs) == 0 {
 		return reqs, nil
 	}
 	for i := range reqs {
@@ -361,7 +384,22 @@ func (r *run) shapeOpenAIRequests(reqs []server.StreamRequest) ([]server.StreamR
 			reqs[i].Model = r.openaiModel
 		}
 	}
+	// The tape's model stamp is the model the requests actually carried
+	// (TTP-157, 2026-09-21): --model, a --param model=, or the first listing
+	// id — never the listing's first id over a request that named another,
+	// which is what stamped the day's qwen3 run as llama3.2.
+	if m := requestModelOf(&reqs[0]); m != "" {
+		r.model.FileName = m
+	}
 	return reqs, nil
+}
+
+// requestModelOf is the model one request will carry on the wire: the body's
+// model key, whichever of the request's own Model field and its Params put it
+// there. "" when the request names none.
+func requestModelOf(q *server.StreamRequest) string {
+	m, _ := q.Body()["model"].(string)
+	return m
 }
 
 // probe is one attach attempt: discovery when no URL was given, then /props.
@@ -407,7 +445,42 @@ func (r *run) probeOpenAI(ctx context.Context, c *server.Client) (*server.Client
 	}
 	r.kind = tape.ServerOpenAI
 	r.openaiModel = models.FirstID()
+	for _, m := range models.Data {
+		r.openaiModels = append(r.openaiModels, m.ID)
+	}
 	return c, &server.Props{}, nil
+}
+
+// chooseOpenAIModel settles the model an OpenAI-kind run requests, before any
+// request is sent (TTP-157, 2026-09-21). Measured that day on Ollama 0.34.2:
+// `--param model=qwen3:1.7b` ran qwen3 (confirmed in `ollama ps`) while the
+// header and the card said llama3.2:1b — the stamp came from the listing, not
+// from the request. The listing is kept for exactly this: a --model that names
+// an id it does not carry is refused with the ids, and a server that lists
+// several, with no model chosen by flag or param, gets one note saying which
+// one the run took and how to pick another.
+func (r *run) chooseOpenAIModel(reqs []server.StreamRequest) error {
+	if r.kind != tape.ServerOpenAI || len(reqs) == 0 || len(r.openaiModels) == 0 {
+		return nil
+	}
+	if m := r.opts.Model; m != "" && !slices.Contains(r.openaiModels, m) {
+		return fmt.Errorf("--model %q is not one of the %d models the server lists (%s)",
+			m, len(r.openaiModels), strings.Join(r.openaiModels, ", "))
+	}
+	if len(r.openaiModels) > 1 && r.opts.Model == "" {
+		if _, viaParam := reqs[0].Params["model"]; !viaParam {
+			ids := append([]string(nil), r.openaiModels...)
+			if len(ids) > 5 {
+				ids = ids[:5]
+			}
+			r.emit(Event{
+				Kind: EventNote,
+				Message: fmt.Sprintf("note: the server lists %d models; using %s. Pick one with --model <id> (%s)",
+					len(r.openaiModels), r.openaiModel, strings.Join(ids, ", ")),
+			})
+		}
+	}
+	return nil
 }
 
 // waitReason says whether err is worth waiting out, and which sentence the CLI

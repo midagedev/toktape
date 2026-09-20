@@ -437,6 +437,16 @@ func (r *recorder) finish(sentAt time.Time, activeBytesPerToken int64) (*tape.Re
 	}
 	rec.Timings = Reduce(rec, sentAt, activeBytesPerToken)
 	rec.Cache = CacheVerdict(rec.Timings, 0, rec.Timings.PredictedN)
+	// The usage chunk's prompt count rides the RETURNED ServerTimings only,
+	// filled in after every read of r.timings the record was built from, so
+	// the record's own PromptN stays exactly what it was: on a client-timed
+	// stream that is 0 — unknown — and no reader of the tape sees a new
+	// figure. The decode calibration is the one caller that reads this
+	// (recorder, TTP-156, 2026-09-21): it needs the server's own count of the
+	// prompt it sent, and no other surface of this package carries it.
+	if !r.sawTimings && r.usage != nil {
+		r.timings.PromptN = r.usage.PromptTokens
+	}
 	if r.errMsg != "" {
 		rec.Error = r.errMsg
 		return rec, r.timings, fmt.Errorf("server: stream error: %s", r.errMsg)

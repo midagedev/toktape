@@ -135,6 +135,12 @@ func (p *progress) handle(ev recorder.Event) {
 		if !p.quiet {
 			fmt.Fprintf(p.w, "  ! %s\n", ev.Message)
 		}
+	case recorder.EventNote:
+		// A note qualifies no figure, so it is never a "!" and never reaches
+		// the card: it is the several-models line a first run meets (TTP-157).
+		if !p.quiet {
+			fmt.Fprintf(p.w, "  %s\n", ev.Message)
+		}
 	case recorder.EventStreamStarted:
 		if ev.Rounds > 1 && ev.Round+1 != p.round {
 			p.beginRound(ev)

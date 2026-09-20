@@ -85,6 +85,11 @@ Any OpenAI-compatible server, not just llama-server
   slots and no flags block, and --engine TEXT (e.g. "vLLM 0.11") names the
   engine as a claim, printed with that word. --endpoint completion is
   llama-server's raw endpoint and is refused with --engine-kind openai.
+  Ollama and LM Studio are found by a bare "toktape" (ports 11434 and 1234),
+  and such a server may host several models: --model ID requests one, the
+  run notes which it took when it defaulted to the first listed, and the
+  header and card name the model that actually ran. --param model=ID is
+  the raw spelling of the same choice; --model wins when both are given.
 
 Careful: one invocation can block for ten minutes
   --wait defaults to 10m, because a server loading a 450 GB model is the case

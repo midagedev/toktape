@@ -139,6 +139,7 @@ type recordFlags struct {
 	endpoint       *string
 	engineKind     *string
 	engine         *string
+	model          *string
 	params         *repeatedFlag
 	ramGBs         *float64
 	ramGBsMeasured *float64
@@ -207,6 +208,10 @@ func declareRecordFlags(fs *flag.FlagSet) *recordFlags {
 	// prints it with that word.
 	f.engineKind = fs.String("engine-kind", "auto", "server protocol: auto, llama or openai")
 	f.engine = fs.String("engine", "", "name the engine on an OpenAI-compatible server, e.g. \"vLLM 0.11\" (a claim)")
+	// The model to request, when the server hosts more than one (TTP-157):
+	// Ollama and LM Studio list several and the run otherwise takes the
+	// first. `--param model=ID` spells the same thing; the flag wins.
+	f.model = fs.String("model", "", "model id to request, when the server hosts more than one")
 	fs.Var(f.params, "param", "extra request parameter as key=value; repeatable")
 	// The host's memory bandwidth (TTP-45). On Linux the machine cannot be
 	// asked — see hostRAMOverride — so the operator may state it.
@@ -228,7 +233,7 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 	f := declareRecordFlags(fs)
 	extra, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("record", usageText, args, err)
+		return c.badFlags("record", usageText, fs, args, err)
 	}
 	format, refused := outputFor("record", *f.output)
 	c.json = format.isJSON()
@@ -328,6 +333,7 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 		Endpoint:     sampling.endpoint,
 		EngineKind:   *f.engineKind,
 		EngineClaim:  *f.engine,
+		Model:        *f.model,
 		Version:      version,
 		WaitForModel: waitBudget(fs, *f.wait),
 		// Waiting for a server that is not listening yet is only done when

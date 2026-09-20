@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -216,6 +217,31 @@ func TestDiscover(t *testing.T) {
 	}
 	if got != alive.URL {
 		t.Errorf("Discover = %q, want %q (first candidate that answers /props)", got, alive.URL)
+	}
+}
+
+// TestDefaultCandidatesEndWithOllamaAndLMStudio (2026-09-21, TTP-158): a bare
+// `toktape` did not find Ollama (its default port is 11434) nor LM Studio
+// (1234). Both answer /v1/models and 404 /props — measured on Ollama 0.34.2,
+// `curl http://127.0.0.1:11434/props` → 404 "404 page not found" — so
+// Discover's second pass over the ErrNoProps candidates is what finds them.
+// They sit AFTER the llama ports so a /props server still wins wherever it
+// listens (TestDiscoverPrefersPropsServerListedEarlier).
+func TestDefaultCandidatesEndWithOllamaAndLMStudio(t *testing.T) {
+	want := []string{"http://127.0.0.1:11434", "http://127.0.0.1:1234"}
+	got := DefaultCandidates[len(DefaultCandidates)-len(want):]
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("DefaultCandidates end with %v, want %v after the llama ports", got, want)
+		}
+	}
+	for _, llama := range []string{"http://127.0.0.1:8080", "http://127.0.0.1:8001"} {
+		if !slices.Contains(DefaultCandidates, llama) {
+			t.Errorf("DefaultCandidates lost the llama port %s", llama)
+		}
+	}
+	if ports := DefaultPorts(); !strings.Contains(ports, "11434") || !strings.Contains(ports, "1234") {
+		t.Errorf("DefaultPorts = %q, want it to name 11434 and 1234 (the failed-scan hint offers what was probed)", ports)
 	}
 }
 

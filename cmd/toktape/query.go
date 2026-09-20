@@ -111,7 +111,7 @@ func runRuns(ctx context.Context, c *cli, args []string) int {
 	token := fs.String("token", "", "a journal token to present as typed, to whatever --url names (for --mine)")
 	extra, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("runs", usageFor("runs"), args, err)
+		return c.badFlags("runs", usageFor("runs"), fs, args, err)
 	}
 	if len(extra) > 0 {
 		return c.usagef("toktape runs: unexpected argument %q", extra[0])
@@ -247,7 +247,7 @@ func runShow(ctx context.Context, c *cli, args []string) int {
 	force := fs.Bool("force", false, "overwrite FILE with --save")
 	files, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("show", usageFor("show"), args, err)
+		return c.badFlags("show", usageFor("show"), fs, args, err)
 	}
 	if len(files) != 1 {
 		return c.usageTextf(usageText, "toktape show: expected one run id or link")
@@ -765,7 +765,7 @@ func runReindex(ctx context.Context, c *cli, args []string) int {
 	svcURL := fs.String("url", "", "the service to read from: this flag, TOKTAPE_SERVICE, service in config.toml, else "+publish.DefaultBaseURL)
 	names, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("reindex", usageFor("reindex"), args, err)
+		return c.badFlags("reindex", usageFor("reindex"), fs, args, err)
 	}
 	if len(names) == 0 {
 		return c.usageTextf(usageText, "toktape reindex: expected one run id or link")

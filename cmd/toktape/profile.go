@@ -61,7 +61,7 @@ func runProfile(c *cli, args []string) int {
 	clear := fs.Bool("clear", false, "remove the name, the link, the avatar and the bio")
 	files, err := parseArgs(fs, args)
 	if err != nil {
-		return c.badFlags("profile", usageFor("profile"), args, err)
+		return c.badFlags("profile", usageFor("profile"), fs, args, err)
 	}
 	if len(files) != 0 {
 		return c.usageTextf(usageFor("profile"), "toktape profile: takes no file, only flags")
