@@ -133,9 +133,10 @@ toktape
 2. **Attach** — read the model path, context size and slots from `/props`,
    find the server's PID by matching that path against `/proc/*/cmdline`, and
    open the `/proc` view on it.
-3. **Prompt** — send one request from a fixed prompt set with
-   `timings_per_token` and `return_progress` on, and stream the answer while
-   sampling major faults, RSS and GPU state.
+3. **Prompt** — send a request from the built-in prompt set (21 long
+   artifacts, trimmed to a prefix this machine's measured prefill can pay
+   for) with `timings_per_token` and `return_progress` on, and stream the
+   answer while sampling major faults, RSS and GPU state.
 4. **Tape** — write the whole run to `~/.toktape/runs/<id>.toktape`.
 5. **Card** — print the 72-column card, save it beside the tape, and print the
    line that tells you how to share it.
@@ -177,77 +178,133 @@ toktape render                                          # the newest run as a GI
 toktape play ~/.toktape/runs/<id>.toktape --speed 2
 ```
 
+## How it measures
+
+- **Prefill is a machine rate plus a fixed cost, measured before your run.**
+  Two raw `/completion` prompts — one 128 tokens, one as long as the short
+  one's own observed cost says the budget allows — are fitted into a
+  per-token rate and a per-request fixed cost, with nothing else in flight.
+  A prefill figure that is mostly fixed cost is not a throughput, and the
+  fit is what says which is which; the card carries both. Each run's probe
+  prompts open with a per-run salt, so measuring the same warm server twice
+  still measures — the prefix cache never hands the probe a free point.
+- **The prompt set is the instrument.** The run does not send a prompt you
+  typed; it sends a fixed set of 21 artifacts — code with real bugs and
+  passing tests, a query plan, incident timelines, an ADR, Korean and
+  Japanese prose — each 18–30 KB, longer than any one box should send
+  whole, on purpose: a prefill rate needs the fixed cost to be a small
+  share of what it measures. A run sends a prefix of each, sized from the
+  probe's fit so that share stays under a twentieth, and records how many
+  characters it sent. Two boxes that trimmed differently still ran the same
+  work — the published record is verified against the set, prefix and all.
+- **The server's figures are the record, the client's are the check.**
+  Requests carry `timings_per_token`, so every chunk brings the server's own
+  `prompt_per_second`, `predicted_per_second` and token counts. toktape
+  computes the same rates from its own clock and keeps both; the tape records
+  whether they agreed within 2 percent. A disagreement is never resolved by
+  taking the nicer number.
+- **The client's rate is measured over the content window** — the gaps
+  between the first token that carried text and the last — not over the wall
+  time from request to socket close.
+- **A rate is called "decode" only above 32 generated tokens.** Below that
+  the card says `Sample`.
+- **Reasoning tokens count.** A thinking model's `reasoning_content` deltas
+  are recorded as decode tokens, shown dimmed on the live screen, and TTFT is
+  the first token of either kind.
+- **"Never loaded" is read from the GGUF tensor headers**, per tensor class.
+- **Residency is derived, never recorded.** What is in RAM of a host
+  placement is the process's file-backed resident set at that instant;
+  without a `/proc` view the split is not printed at all rather than
+  defaulted to zero.
+- **A machine witness at every round edge.** Load average, IO pressure, the
+  page cache, the live `llama-*` processes, the cpufreq cap and one hwmon
+  temperature. A run whose machine changed under it was never one
+  measurement, and the card says so.
+- **Without a PID** (a remote server, a container you cannot see into) the
+  rates, prefix-cache hit and GPU state are still recorded; host RSS, page
+  faults and flags print as `?`. **Without a GPU** the VRAM and thermal rows
+  do. A run with no fault measurement is never labelled cold.
+- **Unknown prints as `?`.** The card never shows a value it did not observe.
+
+## A number worth quoting
+
+The card qualifies every figure it prints. These are the habits that produce
+a card with little to qualify — most of them are one flag, or none.
+
+- **Run twice, quote the second.** The first run against a just-loaded model
+  pulls its weights off disk while it decodes, and the card labels it `cold`
+  from the fault count, not from a guess. The warm rate is the quotable one;
+  quoting the cold one is fine if you say so.
+- **Length in seconds.** `--for 30s`. A token count is a different amount of
+  time on every machine — which is the thing you are recording to find out —
+  and naming `--n-predict` yourself turns the clock off, so a run that names
+  a cap is cut by it.
+- **Reasoning models think on the clock.** Thinking tokens are decode
+  tokens, so a default budget can be spent before the answer starts:
+  `--for 60s` to hold the thought, or `--no-think` for a like-for-like with
+  a non-reasoning model. The card names the sampling and the switch it
+  measured.
+- **Read the caveats line before quoting anything.** Every card ends with
+  the reasons it might not be quotable, spelled out by code; `-o json`
+  carries the same list with severities. A generation too short to be a
+  rate, a busy machine, a clock cut — all of it is on the card before it is
+  in your post.
+- **Compare like with like.** The prompt set id, the sampling, the endpoint
+  and the engine build are all on the card; two cards are comparable or they
+  say why not.
+- **As many streams as the question.** `--sessions 8` is what eight agents
+  do to a server — queueing, slot contention, the aggregate under load. A
+  single stream answers a different question, and per-stream tok/s falling
+  as N rises is the finding, not a defect.
+- **Leave the box alone.** A compile job or a second harness moves decode by
+  more than most of the changes people test; the witnesses are read at every
+  round edge and the card says `contended` or `conditions_changed` when the
+  ground moved.
+
 ## What the card shows
 
 The same fields in the same places on every card, so two cards can be read
 side by side. Each field is there because it settles an argument.
 
-- **Whether the number is quotable.** Every card ends with the reasons it
-  might not be: `! 3 caveats — cold run: weights arrived from disk while it
-  decoded, 4.4 maj faults/token · conditions_changed · run_cut_by_clock`. The
-  most serious one is spelled out and the rest are named by their code, because
-  a code is the thing you look up. `-o json` carries the same list as
-  `caveats`, each with a severity: `figure` means one number is affected, `run`
-  means the whole run is, `view` means the card could not see something it
-  wanted. Read that field before quoting a rate anywhere.
-- **Decode and prefill, never mixed.** Prefill is compute-bound, decode is
-  memory-bandwidth bound; one "45 tok/s" says nothing. The card prints TTFT,
-  prompt tok/s and decode tok/s separately, with both token counts. A prompt
-  too short to be a prefill measurement is said to be one rather than averaged
-  in — `30 prompt tokens — not a prefill measurement`. And on a concurrent run
-  the wait for a free slot is split out of the engine's own work,
-  `engine prefill 10732 ms · queue 22 ms`, so a queue is never read as a slow
-  model.
+- **Whether the number is quotable.** The caveats line, described above.
+- **Decode and prefill, never mixed.** TTFT, prompt tok/s and decode tok/s
+  separately with both token counts, the machine's prefill fit beside them,
+  and — on a concurrent run — the wait for a free slot split out of the
+  engine's own work (`engine prefill 10732 ms · queue 22 ms`), so a queue is
+  never read as a slow model.
 - **Prefix cache hit.** `0% hit (0/512)` or `78% hit (400/512)`. A system
   prompt that differs by one character misses the cache, and prefill then
   looks ten times slower or faster for no visible reason.
-- **cold / warm.** The first prompt against an mmap'd model pulls thousands of
-  4 KiB pages off NVMe and reports a fraction of the warm rate. The label comes
-  from the major faults taken during decode, not from a guess.
+- **cold / warm.** From the major faults taken during decode, not from a
+  guess.
 - **Page faults per token.** The one number that explains "it freezes, then
-  continues". The live view draws them on the same time axis as the tokens.
-- **RSS is not "loaded".** Under mmap, resident set is what the process has
-  touched. The card splits host RSS into file and anon, splits VRAM into
-  weights, KV cache and compute buffers, and computes never-loaded bytes from
-  the GGUF tensor headers rather than from file size minus RSS.
-- **Placed on the CPU is not the same as in RAM.** `-ot ... exps=CPU` is a
-  backend assignment, not a residency: the card above places 394 GiB on the
-  host and only 201 of it is resident, so 193 GiB is read back off the disk as
-  the model decodes. `Host placed 394.1 GiB (200.8 in RAM / 193.3 on disk)`
-  says which, and on the live screen the part that is not there is drawn in
-  the warning colour beside the fault count that explains it.
-- **Bandwidth against the bus the bytes crossed.** A model split between VRAM
-  and host RAM has no single bandwidth: adding the three buses' traffic
-  together produced `≈ 155 GB/s` on a machine whose host bus tops out at 116.
-  The card names the side that is the wall —
-  `≈ 115 GB/s from RAM per verify step, 99% of peak` — and prints a percentage
-  only when the placement proves what the host reads. With a draft model the
-  step is not a token: the target verifies a batch at a time, so the bytes are
-  counted per verify step, which is what the bus actually saw.
-- **What the request asked for.** Greedy against the server's default sampling
-  against a thinking model left to think is an eleven per cent spread on one
-  engine. `Sampling  temp default · chat` says which of them the rates belong
-  to, and never invents a temperature nobody sent.
-- **The draft, when there was one.** The model, the block size and how often
-  the target agreed, with the counts: `n_max 3 · 52% accepted (260/504)`, and
-  the shape of the work that acceptance rate produced,
-  `170 verify steps of 4.0 tokens`.
-- **Conditions changed.** The clock cap and a CPU temperature are read at the
-  start and the end of every round. When a thermal watchdog moves the cap
-  mid-run, the card says so instead of leaving a slow number unexplained.
-- **Flags, in full.** `-ngl -fa -b -ub -ctk -ctv --load-mode -ot`. Flash
-  attention state and batch sizing are the two omissions that reliably turn a
-  results post into a fifty-comment thread.
-- **The exact quantization.** `UD-Q4_K_M`, never shortened to "Q4".
-- **contended.** Another harness on the box moves decode by more than most of
-  the changes people test. The card reads the load average and the other GPU
-  processes and labels the run.
-- **Streams.** How many there were, when each of them saw its first token
-  (TTFT p50 and p95) and the most slots busy at once. The rates are on the
-  Decode row and are not repeated here — but whether N × per-stream really is
-  the aggregate is said out loud: streams that stopped at different times leave
-  the aggregate measured over a window whose tail held one of them, and the row
-  reads `4 streams · not all decoding at once`.
+  continues".
+- **Where the model actually sits.** Host RSS split into file and anon, VRAM
+  split into weights, KV cache and compute buffers, never-loaded bytes from
+  the GGUF tensor headers, and the difference between placed and resident:
+  `-ot ... exps=CPU` places bytes on the host without putting them in RAM,
+  and the card says how much is read back off disk as the model decodes.
+- **Bandwidth against the bus the bytes crossed.** A model split between
+  VRAM and host RAM has no single bandwidth; the card names the side that is
+  the wall (`≈ 115 GB/s from RAM per verify step, 99% of peak`) and prints a
+  percentage only when the placement proves what the host reads. With a
+  draft model the bytes are counted per verify step, which is what the bus
+  actually saw.
+- **What the request asked for.** Greedy against the server's default
+  sampling against a thinking model left to think is an eleven per cent
+  spread on one engine; `Sampling  temp default · chat` says which, and
+  never invents a temperature nobody sent.
+- **The draft, when there was one.** `n_max 3 · 52% accepted (260/504)` and
+  the shape of the work it produced, `170 verify steps of 4.0 tokens`.
+- **Flags, in full, and the exact quantization.** `-ngl -fa -b -ub -ctk
+  -ctv --load-mode -ot`; `UD-Q4_K_M`, never shortened to "Q4". Flash
+  attention state and batch sizing are the two omissions that reliably turn
+  a results post into a fifty-comment thread.
+- **contended.** The load average and the other GPU processes, labelled.
+- **Streams.** TTFT p50 and p95, the most slots busy at once, and whether
+  N × per-stream really is the aggregate — streams that stopped at
+  different times leave it measured over a window whose tail held one of
+  them, and the row says `4 streams · not all decoding at once`.
 
 ## Commands
 
@@ -340,16 +397,9 @@ Most people who run toktape will not type the command: Claude Code or Codex
 will, on their behalf. There is a page written for that reader —
 [`docs/agents.md`](docs/agents.md) — and `toktape help agents` is the same
 contract inside the binary, where an agent can find it without being told.
-The short version:
+The measurement habits are in [A number worth quoting](#a-number-worth-quoting);
+what is left is the calling convention:
 
-- **Ask for a length in seconds, not in tokens.** `--for 20s` is the default.
-  A token count means a different amount of time on every machine, which is
-  the thing you are recording to find out.
-- **Read `caveats` before quoting a figure.** The card qualifies every number
-  it prints — a generation too short to be a rate, a prompt too short to be a
-  prefill measurement, a busy machine — and `-o json` carries the same
-  qualifications as one array. An agent that reads it cannot quote a number
-  the card would have footnoted.
 - **Branch on the exit code, never on the message.** Every verb ends on one
   of five documented codes, and `-o json` prints one object on stdout whether
   the run succeeded or failed, so there is one parse path and not two.
@@ -474,41 +524,6 @@ takes the run and its card down. The service itself never opens a tape: the
 figures on its pages are the index row the client derived next to the
 schema, and everything richer is the same renderer this binary uses,
 compiled to WebAssembly and run in your browser.
-
-## How it measures
-
-- **The server's figures are the record, the client's are the check.**
-  Requests carry `timings_per_token`, so every chunk brings the server's own
-  `prompt_per_second`, `predicted_per_second` and token counts. toktape
-  computes the same rates from its own clock and keeps both; the tape records
-  whether they agreed within 2 percent. A disagreement is never resolved by
-  taking the nicer number.
-- **The client's rate is measured over the content window** — the gaps
-  between the first token that carried text and the last — not over the wall
-  time from request to socket close.
-- **A rate is called "decode" only above 32 generated tokens.** Below that
-  the card says `Sample`.
-- **Reasoning tokens count.** A thinking model's `reasoning_content` deltas
-  are recorded as decode tokens, shown dimmed on the live screen, and TTFT is
-  the first token of either kind.
-- **"Never loaded" is read from the GGUF tensor headers**, per tensor class.
-- **Residency is derived, never recorded.** What is in RAM of a host
-  placement is the process's file-backed resident set at that instant, which
-  is the model mapping's pages and nothing else — so the pane, the card and
-  the clip all print one split from one sample, and it moves during the run as
-  the sample does. Without a `/proc` view the split is not printed at all
-  rather than defaulted to zero.
-- **A machine witness at every round edge.** Load average, IO pressure, the
-  page cache, the live `llama-*` processes, the cpufreq cap and one hwmon
-  temperature. A run whose machine changed under it was never one
-  measurement, and the card says so.
-- **Without a PID** (a remote server, a container you cannot see into) the
-  rates, prefix-cache hit and GPU state are still recorded. Host RSS, page
-  faults and flags print as `?`, and the card says the `/proc` view was
-  unavailable. A run with no fault measurement is never labelled cold.
-- **Without a GPU** the VRAM and thermal rows print as `?` with the reason on
-  the card.
-- Unknown prints as `?`. The card never shows a value it did not observe.
 
 ## FAQ
 
