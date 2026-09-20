@@ -5,9 +5,34 @@ tree is laid out, what the gate is, and the few rules that keep the card
 truthful. The design document is `docs/toktape-spec.ko.md` (Korean); the
 research that led here is under `docs/research/`.
 
+## Fork it, change it, send it back
+
+toktape is MIT-licensed. Fork it and use it however you like — a private
+build for your team, a different card, your own hub (`web/README.md` has
+the self-hosting notes). You do not need to ask, and you do not owe a PR.
+
+Pull requests are welcome, small ones especially: an engine whose flags the
+card misreads, a collector for hardware we do not own, a caveat that fires
+when it should not.
+
+**PRs written with AI tools are welcome too.** Much of this tree was written
+that way. What the review looks at is the change, not who typed it, so the
+same things are asked of every PR:
+
+- you ran `./scripts/check.sh` and it passed;
+- you read the diff yourself and can say why each part is there;
+- a claim about a server's behaviour ("llama-server reports X") comes with
+  where you saw it — a source line, a log, a tape — because a model's
+  confident memory of an API is the most common way a wrong number gets in;
+- a test that changed says why in a dated comment, and the old code fails
+  the new test (*Goldens*, below).
+
+Say in the description which tool you used if you like; it is not required
+and it does not change how the PR is read.
+
 ## Before you start
 
-- **Bug reports:** attach the `.tape`. A run is fully described by its tape,
+- **Bug reports:** attach the `.toktape` file. A run is fully described by its tape,
   so the maintainers can render the exact card you saw and step through the
   run. If the tape contains a prompt you would rather not share, say so and
   describe the card instead. `toktape version` and the llama-server build line
