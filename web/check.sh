@@ -690,7 +690,10 @@ npx wrangler d1 execute toktape --local --command \
   "INSERT OR REPLACE INTO tokens (id, hash, created_at, label) VALUES ('harness', '$jh', '2026-09-19T00:00:00Z', 'web/check.sh')" \
   >"$work/token.log" 2>&1 || { cat "$work/token.log"; die "could not mint the harness token"; }
 mkdir -p "$work/home-journal/.toktape"
-printf 'token = "%s"\nfirst_publish_warning_seen = true\n' "$jt" >"$work/home-journal/.toktape/config.toml"
+# The service key names this dev server, so the journal token belongs to it
+# and travels (cmd/toktape/service.go: a token whose service is not named is
+# withheld — without this line every publish below would go anonymous).
+printf 'token = "%s"\nservice = "%s"\nfirst_publish_warning_seen = true\n' "$jt" "$base" >"$work/home-journal/.toktape/config.toml"
 HOME="$work/home-journal" "$work/toktape" publish "$repo/assets/hero.tape" --url "$base" --title "owned by a journal" \
   >"$work/receipt3" 2>"$work/publish3.err" || { cat "$work/publish3.err"; die "a token-owned publish failed"; }
 grep -q 'Delete token' "$work/publish3.err" && die "a token-owned publish was handed a delete token"

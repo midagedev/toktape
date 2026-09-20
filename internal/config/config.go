@@ -48,6 +48,16 @@ type Config struct {
 	// name this machine goes by in public, for people who never want their
 	// real hostname in a tape.
 	HostLabel string
+	// Service is the service this machine publishes to and reads from, as a
+	// base URL (e.g. "https://tapes.example.com"): the resident form of the
+	// verbs' --url, for a machine whose hub is not the hosted one. Unset
+	// means the hosted service.
+	//
+	// Token belongs to this service and to no other. A command aimed
+	// elsewhere (--url, TOKTAPE_SERVICE) does not carry the journal token
+	// there; the resolver that enforces this lives in cmd/toktape/service.go
+	// and a --token typed on the command line is consent that overrides it.
+	Service string
 	// ProfileName, ProfileLink and ProfileAvatar are the resident author
 	// profile (TTP-125): the nickname, the one link and the avatar file
 	// path one publish carries as "who it says published it". All three
@@ -149,6 +159,12 @@ func (c *Config) set(key, value string) error {
 			return fmt.Errorf("host_label: %w", err)
 		}
 		c.HostLabel = s
+	case "service":
+		s, err := unquote(value)
+		if err != nil {
+			return fmt.Errorf("service: %w", err)
+		}
+		c.Service = s
 	case "profile_name":
 		s, err := unquote(value)
 		if err != nil {
@@ -261,6 +277,9 @@ func (c *Config) render() string {
 	}
 	if c.HostLabel != "" {
 		fmt.Fprintf(&b, "host_label = %s\n", quote(c.HostLabel))
+	}
+	if c.Service != "" {
+		fmt.Fprintf(&b, "service = %s\n", quote(c.Service))
 	}
 	if c.ProfileName != "" {
 		fmt.Fprintf(&b, "profile_name = %s\n", quote(c.ProfileName))

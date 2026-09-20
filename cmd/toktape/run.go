@@ -105,14 +105,14 @@ Card flags:
   --explain             why the card says what it says, on stderr as well
 
 Publish flags:
-  --dry-run             print what would be uploaded and upload nothing. A run
-                        is public and carries its text by default, and this
-                        lists field by field what that means for this tape
+  --dry-run             print what would be uploaded and upload nothing, field
+                        by field; a run is public and carries its text by default
   --private             keep the run out of the search (the link still works)
   --no-text, --with-text  with or without the prompts and the generated text,
                         over publish_text in ~/.toktape/config.toml
   --yes                 take the first-publish warning as read
-  --url URL             the service to publish to
+  --url URL             the service to publish to (default: the service in
+                        config.toml, else https://tape.midagedev.com)
   --delete <id|url>     take a published run down (saved token, --token, config)
 
   Hostnames and absolute paths are removed whatever the visibility is.

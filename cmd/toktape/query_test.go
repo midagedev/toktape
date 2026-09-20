@@ -382,8 +382,6 @@ func TestRunsFigureFilters(t *testing.T) {
 // TestReindexRoundTrip: the run's own bytes come back down, are re-indexed
 // with this build's figures, and go back up as an "index" PATCH body.
 func TestReindexRoundTrip(t *testing.T) {
-	publishHome(t, "token = \"tk_journal\"\n")
-
 	var gz bytes.Buffer
 	tp := &tape.Tape{Schema: tape.SchemaVersion, Summary: *card.Example()}
 	// A record uploaded before the public view learned to drop the zone
@@ -417,6 +415,9 @@ func TestReindexRoundTrip(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
+	// The service key names this test's hub, so the journal token belongs to
+	// it and travels (cmd/toktape/service.go's rule).
+	publishHome(t, "token = \"tk_journal\"\nservice = \""+srv.URL+"\"\n")
 
 	code, stdout, stderr := exec(t, "reindex", "herorun", "--url", srv.URL)
 	if code != exitOK {
@@ -493,12 +494,12 @@ func TestReindexNeedsToken(t *testing.T) {
 // TestReindexFailureIsPublish: a run that cannot come back down is named on
 // stderr and skipped, and the exit says nothing was fully published.
 func TestReindexFailureIsPublish(t *testing.T) {
-	publishHome(t, "token = \"tk_journal\"\n")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte("no run with that id"))
 	}))
 	defer srv.Close()
+	publishHome(t, "token = \"tk_journal\"\nservice = \""+srv.URL+"\"\n")
 
 	code, stdout, stderr := exec(t, "reindex", "missingrun", "--url", srv.URL)
 	if code != exitPublish {

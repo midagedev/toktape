@@ -48,7 +48,7 @@ func declarePublishFlags(fs *flag.FlagSet) *publishFlags {
 		noText:    fs.Bool("no-text", false, "upload without the prompts and the generated text"),
 		withText:  fs.Bool("with-text", false, "upload with them, overriding publish_text in the config"),
 		yes:       fs.Bool("yes", false, "acknowledge the first-publish warning without being asked"),
-		url:       fs.String("url", "", "the service to publish to (default "+publish.DefaultBaseURL+")"),
+		url:       fs.String("url", "", "the service to publish to: this flag, TOKTAPE_SERVICE, service in config.toml, else "+publish.DefaultBaseURL),
 		noProfile: fs.Bool("no-profile", false, "this run travels without the author profile"),
 		title:     fs.String("title", "", "the lab-note's title for this run (or its new title with --edit)"),
 		note:      fs.String("note", "", "the lab-note's body for this run (or its new body with --edit)"),
@@ -56,7 +56,7 @@ func declarePublishFlags(fs *flag.FlagSet) *publishFlags {
 		public:    fs.Bool("public", false, "with --edit: list the run in the search again"),
 		edit:      fs.String("edit", "", "change a run you own instead of uploading: the run id or its /r/<id> link"),
 		del:       fs.String("delete", "", "take a published run down: the run id or its /r/<id> link"),
-		token:     fs.String("token", "", "with --delete: the delete token (or journal token) to present"),
+		token:     fs.String("token", "", "a token to present as typed, to whatever --url names (with --delete: the run's delete token)"),
 	}
 }
 
@@ -114,6 +114,16 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 	if *f.public {
 		return c.usagef("toktape publish: --public lists a run again and only makes sense with --edit")
 	}
+
+	// Which service, and with which token — one resolver for every verb that
+	// reaches a hub (cmd/toktape/service.go): the journal token in the config
+	// belongs to the config's service and travels nowhere else, so a --url
+	// pointing elsewhere publishes anonymously rather than leaking it.
+	svc, err := resolveService(*f.url, *f.token, cfg, os.Getenv)
+	if err != nil {
+		return c.usagef("toktape publish: %v", err)
+	}
+	sayWithheldToken(c, cfg, svc)
 	if len(files) != 1 {
 		return c.usageTextf(usageText, "toktape publish: expected one tape file")
 	}
@@ -152,9 +162,10 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 	// The bio travels only on a token-owned publish: an anonymous run has
 	// no home to show it on, so without a token it is left off here (and
 	// the uploader drops it again, so a hand-built Options cannot send it
-	// either).
+	// either). svc.Token, not cfg.Token — a withheld journal token makes
+	// this an anonymous upload too.
 	var bio string
-	if cfg.Token != "" && cfg.ProfileBio != "" {
+	if svc.Token != "" && cfg.ProfileBio != "" {
 		if bio, err = publish.ValidateBio(cfg.ProfileBio); err != nil {
 			return c.usagef("toktape publish: %v", err)
 		}
@@ -184,8 +195,8 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 	}
 
 	client := &publish.Client{
-		BaseURL:   *f.url,
-		Token:     cfg.Token,
+		BaseURL:   svc.BaseURL,
+		Token:     svc.Token,
 		UserAgent: "toktape/" + version,
 	}
 	receipt, err := client.Upload(ctx, view, idx, opts)
@@ -198,32 +209,38 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 	}
 	// An anonymous upload's key is the only one there will ever be, and the
 	// upload has already succeeded — so remembering it can only warn, never
-	// unwind the publish.
+	// unwind the publish. The service rides along: the key opens the run only
+	// where it was issued.
 	var tokenErr error
 	if receipt.DeleteToken != "" {
-		tokenErr = rememberDeleteToken(receipt)
+		tokenErr = rememberDeleteToken(receipt, svc.BaseURL)
 	}
 	return c.publishReceipt(receipt, tokenErr)
 }
 
-// rememberDeleteToken files an anonymous upload's delete token under
-// ~/.toktape/published.json (publish.Remember).
-func rememberDeleteToken(r *publish.Receipt) error {
+// rememberDeleteToken files an anonymous upload's delete token and service
+// under ~/.toktape/published.json (publish.Remember).
+func rememberDeleteToken(r *publish.Receipt, service string) error {
 	dir, err := config.Dir()
 	if err != nil {
 		return err
 	}
-	return publish.Remember(dir, *r)
+	return publish.Remember(dir, *r, service)
 }
 
-// runPublishDelete takes one published run down. The key is whichever of the
-// two the server accepts, resolved in a fixed order: a --token given on the
-// command line, the delete token this machine saved when it uploaded
-// anonymously, or the journal token in the config. Already-gone is a success
-// shape, because the server reads it that way (web/src/del.js): a delete
-// retried after a dropped connection must not report a failure the second
-// time. Either way the saved entry is dropped, so the file never holds a key
-// to a run that is no longer up.
+// runPublishDelete takes one published run down. The service is the one that
+// knows the run, in order of how much each source knows about it: the --url
+// flag, the host inside a pasted /r/<id> link, the service the receipt
+// recorded when this machine uploaded the run, then the resident chain
+// (TOKTAPE_SERVICE, config, default — cmd/toktape/service.go). The key is
+// whichever of the three the service accepts, in a fixed order: a --token
+// typed on the command line, the saved delete token — presented only to the
+// service its entry names, since it opens the run nowhere else — or the
+// journal token in the config, which the resolver sends only to the service
+// it belongs to. Already-gone is a success shape, because the server reads it
+// that way (web/src/del.js): a delete retried after a dropped connection must
+// not report a failure the second time. Either way the saved entry is
+// dropped, so the file never holds a key to a run that is no longer up.
 func runPublishDelete(ctx context.Context, c *cli, f *publishFlags, cfg *config.Config) int {
 	id := editTargetID(*f.del)
 	if id == "" {
@@ -235,21 +252,41 @@ func runPublishDelete(ctx context.Context, c *cli, f *publishFlags, cfg *config.
 		return c.usagef("toktape: %v", err)
 	}
 	srcFlag := "the --token flag"
+	srcEnvToken := "the TOKTAPE_TOKEN variable"
 	srcSaved := "the saved delete token in " + tildePath(publish.ReceiptsPath(receiptsDir))
 	srcJournal := "the journal token in config.toml"
+
+	// The service the run lives on. An entry from before services were
+	// recorded (empty service) went to the hosted one, so that is what it
+	// means here, not "wherever the config points".
+	savedSvc, savedTok, hasSaved := publish.EntryFor(receiptsDir, id)
+	savedHome := firstSet(savedSvc, publish.DefaultBaseURL)
+	flagURL := firstSet(*f.url, runLinkBase(*f.del))
+	if flagURL == "" && hasSaved {
+		flagURL = savedHome
+	}
+	svc, err := resolveService(flagURL, *f.token, cfg, os.Getenv)
+	if err != nil {
+		return c.usagef("toktape publish: %v", err)
+	}
+
 	var token, source string
 	switch {
 	case *f.token != "":
 		token, source = *f.token, srcFlag
+	case os.Getenv("TOKTAPE_TOKEN") != "":
+		token, source = os.Getenv("TOKTAPE_TOKEN"), srcEnvToken
+	case hasSaved && sameService(svc.BaseURL, savedHome):
+		token, source = savedTok, srcSaved
+	case svc.Token != "":
+		token, source = svc.Token, srcJournal
 	default:
-		if saved, ok := publish.TokenFor(receiptsDir, id); ok {
-			token, source = saved, srcSaved
-		} else if cfg.Token != "" {
-			token, source = cfg.Token, srcJournal
-		} else {
-			return c.usagef("toktape publish --delete %s: no key to present; it would come from %s, %s or %s",
-				id, srcFlag, srcSaved, srcJournal)
-		}
+		// The journal token was the last candidate and stayed home (or there
+		// never was one); the note says which knob turns, the refusal names
+		// all three sources.
+		sayWithheldToken(c, cfg, svc)
+		return c.usagef("toktape publish --delete %s: no key to present; it would come from %s, %s or %s",
+			id, srcFlag, srcSaved, srcJournal)
 	}
 
 	if *f.dryRun {
@@ -261,7 +298,7 @@ func runPublishDelete(ctx context.Context, c *cli, f *publishFlags, cfg *config.
 	}
 
 	client := &publish.Client{
-		BaseURL:   *f.url,
+		BaseURL:   svc.BaseURL,
 		UserAgent: "toktape/" + version,
 	}
 	err = client.Delete(ctx, id, token)
@@ -302,7 +339,15 @@ func runPublishEdit(ctx context.Context, c *cli, f *publishFlags, cfg *config.Co
 	if *f.title == "" && *f.note == "" && *f.noteFile == "" && !*f.private && !*f.public {
 		return c.usagef("toktape publish: --edit changes nothing without --title, --note or --private/--public")
 	}
-	if cfg.Token == "" {
+	// One resolver for every verb that reaches a hub: the journal token
+	// travels only to the service it belongs to (cmd/toktape/service.go), and
+	// an edit aimed elsewhere is refused here rather than sent tokenless.
+	svc, err := resolveService(*f.url, *f.token, cfg, os.Getenv)
+	if err != nil {
+		return c.usagef("toktape publish: %v", err)
+	}
+	sayWithheldToken(c, cfg, svc)
+	if svc.Token == "" {
 		return c.usagef("toktape publish --edit needs a journal token in config.toml; an anonymous run cannot be edited")
 	}
 
@@ -329,8 +374,8 @@ func runPublishEdit(ctx context.Context, c *cli, f *publishFlags, cfg *config.Co
 	}
 
 	client := &publish.Client{
-		BaseURL:   *f.url,
-		Token:     cfg.Token,
+		BaseURL:   svc.BaseURL,
+		Token:     svc.Token,
 		UserAgent: "toktape/" + version,
 	}
 	receipt, err := client.Edit(ctx, id, e)

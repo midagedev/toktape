@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/midagedev/toktape/internal/publish"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -231,10 +232,50 @@ A tape that gets posted
 `
 }
 
+// serviceTopic is `toktape help service`: which hub a command talks to and
+// which token it may carry — the contract behind every --url, the config's
+// `service` key and the credential rule that keeps the journal token home
+// (cmd/toktape/service.go).
+func serviceTopic() string {
+	return `toktape service — which hub, and with which token
+
+  Every verb that reaches a hub — publish, runs, show, reindex — talks to one
+  service, picked in this order:
+
+    1. the --url flag
+    2. the TOKTAPE_SERVICE environment variable
+    3. service in ~/.toktape/config.toml
+    4. ` + publish.DefaultBaseURL + ` (the hosted service)
+
+  A self-hosted hub is named once with the service key and every verb
+  follows. The address is normalised: the scheme must be http or https, plain
+  http is allowed only on localhost (off it the token would travel in clear
+  text), the host is case-folded, a trailing slash goes and an explicit
+  default port (https://…:443) is dropped — so HTTPS://Host:443/ and
+  https://host are the same service.
+
+  The journal token in config.toml belongs to that service and is sent to no
+  other. Aim a command elsewhere and it runs without the token: a publish is
+  anonymous, runs --mine and publish --edit refuse, and one line on stderr
+  says which knob to turn. --token (or TOKTAPE_TOKEN) is consent: it is sent
+  to whatever service was resolved.
+
+  publish --delete follows the run first: the --url flag, then the host
+  inside a pasted /r/<id> link, then the service recorded in
+  ~/.toktape/published.json when this machine uploaded the run anonymously,
+  and only then the order above. A saved delete token is presented only to
+  the service its entry names.
+
+  Standing one up yourself: web/README.md in the repository, "Hosting your
+  own".
+`
+}
+
 // helpTopics are the words `toktape help <word>` answers with something other
 // than the usage text.
 var helpTopics = map[string]func() string{
-	"agents": agentsTopic,
+	"agents":  agentsTopic,
+	"service": serviceTopic,
 }
 
 // runHelp prints the usage text, or one topic.

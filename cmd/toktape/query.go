@@ -23,7 +23,8 @@ Usage:
   toktape runs [flags]
 
 Flags:
-  --url URL         the service to read from (default ` + publish.DefaultBaseURL + `)
+  --url URL         the service to read from (default: the service in
+                    config.toml, else ` + publish.DefaultBaseURL + `)
   -q TEXT           free-text query
   --model TEXT      normalised model id
   --repo TEXT       exact repository, e.g. bartowski/model-GGUF
@@ -56,7 +57,8 @@ Usage:
   toktape show <id|url> [flags]
 
 Flags:
-  --url URL         the service to read from (default ` + publish.DefaultBaseURL + `)
+  --url URL         the service to read from (default: the service in
+                    config.toml, else ` + publish.DefaultBaseURL + `)
   --save FILE       download the record to FILE
   --force           with --save: overwrite FILE when it already exists
   -o, --output FORMAT  json instead of the summary
@@ -73,7 +75,8 @@ Usage:
   toktape reindex <id|url>... [flags]
 
 Flags:
-  --url URL         the service to read from (default ` + publish.DefaultBaseURL + `)
+  --url URL         the service to read from (default: the service in
+                    config.toml, else ` + publish.DefaultBaseURL + `)
 
 Each run is downloaded, re-read and re-indexed with this build's figures,
 then patched back with the journal token that owns it. A run that cannot
@@ -86,7 +89,7 @@ be reindexed is named and skipped; the exit is publish when any was.
 func runRuns(ctx context.Context, c *cli, args []string) int {
 	fs := newFlagSet("runs")
 	output := declareOutputFlag(fs)
-	svcURL := fs.String("url", "", "the service to read from (default "+publish.DefaultBaseURL+")")
+	svcURL := fs.String("url", "", "the service to read from: this flag, TOKTAPE_SERVICE, service in config.toml, else "+publish.DefaultBaseURL)
 	q := fs.String("q", "", "free-text query")
 	model := fs.String("model", "", "normalised model id")
 	repo := fs.String("repo", "", "exact repository")
@@ -105,6 +108,7 @@ func runRuns(ctx context.Context, c *cli, args []string) int {
 	cursor := fs.String("cursor", "", "continue the cut page")
 	mine := fs.Bool("mine", false, "your own runs")
 	user := fs.String("user", "", "one user home")
+	token := fs.String("token", "", "a journal token to present as typed, to whatever --url names (for --mine)")
 	extra, err := parseArgs(fs, args)
 	if err != nil {
 		return c.badFlags("runs", usageFor("runs"), args, err)
@@ -128,14 +132,24 @@ func runRuns(ctx context.Context, c *cli, args []string) int {
 	if err != nil {
 		return c.usagef("toktape: %v", err)
 	}
+	// One resolver for every verb that reaches a hub (cmd/toktape/service.go):
+	// the journal token travels only to the service it belongs to, so a
+	// listing from elsewhere reads anonymously instead of leaking it.
+	svc, err := resolveService(*svcURL, *token, cfg, os.Getenv)
+	if err != nil {
+		return c.usagef("toktape runs: %v", err)
+	}
+	sayWithheldToken(c, cfg, svc)
 	// Named before the request like publish --edit's: the journal scope is
-	// one token's own runs, and without a token there is nothing to ask.
-	if *mine && cfg.Token == "" {
+	// one token's own runs, and without a token there is nothing to ask —
+	// including when the config's token stayed home because the service is
+	// not its own.
+	if *mine && svc.Token == "" {
 		return c.usagef("toktape runs: --mine needs a journal token in config.toml")
 	}
 	client := &publish.Client{
-		BaseURL:   *svcURL,
-		Token:     cfg.Token,
+		BaseURL:   svc.BaseURL,
+		Token:     svc.Token,
 		UserAgent: "toktape/" + version,
 	}
 	listing, err := client.List(ctx, publish.ListQuery{
@@ -228,7 +242,7 @@ func runRuns(ctx context.Context, c *cli, args []string) int {
 func runShow(ctx context.Context, c *cli, args []string) int {
 	fs := newFlagSet("show")
 	output := declareOutputFlag(fs)
-	svcURL := fs.String("url", "", "the service to read from (default "+publish.DefaultBaseURL+")")
+	svcURL := fs.String("url", "", "the service to read from: this flag, TOKTAPE_SERVICE, service in config.toml, else "+publish.DefaultBaseURL)
 	save := fs.String("save", "", "download the record to FILE")
 	force := fs.Bool("force", false, "overwrite FILE with --save")
 	files, err := parseArgs(fs, args)
@@ -252,9 +266,17 @@ func runShow(ctx context.Context, c *cli, args []string) int {
 	if err != nil {
 		return c.usagef("toktape: %v", err)
 	}
+	// The run is public, so a read works without a token — and a service
+	// that is not the config's own never sees one (cmd/toktape/service.go).
+	// Without the token the service answers owned:false; the note says why.
+	svc, err := resolveService(*svcURL, "", cfg, os.Getenv)
+	if err != nil {
+		return c.usagef("toktape show: %v", err)
+	}
+	sayWithheldToken(c, cfg, svc)
 	client := &publish.Client{
-		BaseURL:   *svcURL,
-		Token:     cfg.Token,
+		BaseURL:   svc.BaseURL,
+		Token:     svc.Token,
 		UserAgent: "toktape/" + version,
 	}
 	detail, err := client.Run(ctx, id)
@@ -740,7 +762,7 @@ func machineLine(idx publish.Index) string {
 func runReindex(ctx context.Context, c *cli, args []string) int {
 	fs := newFlagSet("reindex")
 	output := declareOutputFlag(fs)
-	svcURL := fs.String("url", "", "the service to read from (default "+publish.DefaultBaseURL+")")
+	svcURL := fs.String("url", "", "the service to read from: this flag, TOKTAPE_SERVICE, service in config.toml, else "+publish.DefaultBaseURL)
 	names, err := parseArgs(fs, args)
 	if err != nil {
 		return c.badFlags("reindex", usageFor("reindex"), args, err)
@@ -758,12 +780,19 @@ func runReindex(ctx context.Context, c *cli, args []string) int {
 	if err != nil {
 		return c.usagef("toktape: %v", err)
 	}
-	if cfg.Token == "" {
+	// An edit path like publish --edit's: it needs the journal token, which
+	// travels only to the service it belongs to (cmd/toktape/service.go).
+	svc, err := resolveService(*svcURL, "", cfg, os.Getenv)
+	if err != nil {
+		return c.usagef("toktape reindex: %v", err)
+	}
+	sayWithheldToken(c, cfg, svc)
+	if svc.Token == "" {
 		return c.usagef("toktape publish --edit needs a journal token in config.toml; an anonymous run cannot be edited")
 	}
 	client := &publish.Client{
-		BaseURL:   *svcURL,
-		Token:     cfg.Token,
+		BaseURL:   svc.BaseURL,
+		Token:     svc.Token,
 		UserAgent: "toktape/" + version,
 	}
 	failed := false

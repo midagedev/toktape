@@ -386,7 +386,6 @@ func TestPublishEditUsageErrors(t *testing.T) {
 }
 
 func TestPublishEditPrintsTheLink(t *testing.T) {
-	publishHome(t, "token = \"tk_journal\"\nfirst_publish_warning_seen = true\n")
 	var method, auth, path string
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -396,6 +395,9 @@ func TestPublishEditPrintsTheLink(t *testing.T) {
 		_, _ = io.WriteString(w, `{"id":"abc123","published_at":"2026-09-19T00:00:00Z","private":false,"tape":"/r/abc123.tape","tape_bytes":25,"card":null,"owned":true,"index":{"schema":1}}`)
 	}))
 	defer srv.Close()
+	// The service key names this test's hub, so the journal token belongs to
+	// it and travels (cmd/toktape/service.go's rule).
+	publishHome(t, "token = \"tk_journal\"\nservice = \""+srv.URL+"\"\nfirst_publish_warning_seen = true\n")
 
 	code, stdout, stderr := exec(t, "publish", "--edit", "abc123", "--title", "edited", "--url", srv.URL)
 	if code != exitOK {
@@ -474,16 +476,46 @@ func publishAnonymously(t *testing.T, srv *httptest.Server) string {
 	return "abc123"
 }
 
+// hubServer is both halves of the anonymous flow on one service: a POST
+// answered with a receipt carrying a delete token, and a DELETE answered with
+// the status given, recording the key it was presented.
+func hubServer(t *testing.T, deleteToken string, deleteStatus int, deleteReply string) (*httptest.Server, *string) {
+	t.Helper()
+	auth := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			body := map[string]string{"id": "abc123", "url": r.Host + "/r/abc123"}
+			if deleteToken != "" {
+				body["delete_token"] = deleteToken
+			}
+			_ = json.NewEncoder(w).Encode(body)
+		case http.MethodDelete:
+			auth = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(deleteStatus)
+			io.WriteString(w, deleteReply)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &auth
+}
+
 // Taking a run down is one command: the anonymous upload from this machine
-// left its key in published.json, --delete finds it, presents it, and removes
-// the entry once the run is down. The token itself never reaches stdout.
+// left its key — and the service it was issued on — in published.json, and
+// `--delete` with no --url follows that service, presents the key, and
+// removes the entry once the run is down. The token itself never reaches
+// stdout.
 func TestPublishDeleteWithSavedToken(t *testing.T) {
 	publishHome(t, "first_publish_warning_seen = true\n")
-	upload, _ := acceptingServer(t, "dt_saved_key")
-	id := publishAnonymously(t, upload)
+	srv, auth := hubServer(t, "dt_saved_key", http.StatusNoContent, "")
+	id := publishAnonymously(t, srv)
 
-	srv, auth := deletingServer(t, http.StatusNoContent, "")
-	code, stdout, stderr := exec(t, "publish", "--delete", id, "--url", srv.URL)
+	code, stdout, stderr := exec(t, "publish", "--delete", id)
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -506,10 +538,10 @@ func TestPublishDeleteWithSavedToken(t *testing.T) {
 }
 
 // A run this machine never uploaded anonymously is still deletable with the
-// journal token from the config.
+// journal token from the config, on the service the token belongs to.
 func TestPublishDeleteWithJournalToken(t *testing.T) {
-	publishHome(t, "token = \"tk_journal\"\nfirst_publish_warning_seen = true\n")
 	srv, auth := deletingServer(t, http.StatusNoContent, "")
+	publishHome(t, "token = \"tk_journal\"\nservice = \""+srv.URL+"\"\nfirst_publish_warning_seen = true\n")
 
 	code, stdout, stderr := exec(t, "publish", "--delete", "abc123", "--url", srv.URL)
 	if code != exitOK {
@@ -525,8 +557,8 @@ func TestPublishDeleteWithJournalToken(t *testing.T) {
 
 // A full URL names the run the same way an id does.
 func TestPublishDeleteTakesAURL(t *testing.T) {
-	publishHome(t, "token = \"tk_journal\"\nfirst_publish_warning_seen = true\n")
 	srv, _ := deletingServer(t, http.StatusNoContent, "")
+	publishHome(t, "token = \"tk_journal\"\nservice = \""+srv.URL+"\"\nfirst_publish_warning_seen = true\n")
 
 	code, stdout, stderr := exec(t, "publish", "--delete", srv.URL+"/r/abc123", "--url", srv.URL)
 	if code != exitOK {
@@ -559,11 +591,10 @@ func TestPublishDeleteRefusalIsQuoted(t *testing.T) {
 // and still cleans the saved entry up.
 func TestPublishDeleteAlreadyGone(t *testing.T) {
 	publishHome(t, "first_publish_warning_seen = true\n")
-	upload, _ := acceptingServer(t, "dt_saved_key")
-	id := publishAnonymously(t, upload)
+	srv, _ := hubServer(t, "dt_saved_key", http.StatusNotFound, `{"error":"no run with that id; if you just deleted it, it is gone"}`)
+	id := publishAnonymously(t, srv)
 
-	srv, _ := deletingServer(t, http.StatusNotFound, `{"error":"no run with that id; if you just deleted it, it is gone"}`)
-	code, stdout, stderr := exec(t, "publish", "--delete", id, "--url", srv.URL)
+	code, stdout, stderr := exec(t, "publish", "--delete", id)
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
@@ -621,11 +652,10 @@ func TestPublishDeleteUsageErrors(t *testing.T) {
 // itself — and sends nothing.
 func TestPublishDeleteDryRun(t *testing.T) {
 	publishHome(t, "first_publish_warning_seen = true\n")
-	upload, _ := acceptingServer(t, "dt_saved_key")
-	publishAnonymously(t, upload)
+	srv, auth := hubServer(t, "dt_saved_key", http.StatusNoContent, "")
+	publishAnonymously(t, srv)
 
-	srv, auth := deletingServer(t, http.StatusNoContent, "")
-	code, stdout, stderr := exec(t, "publish", "--delete", "abc123", "--dry-run", "--url", srv.URL)
+	code, stdout, stderr := exec(t, "publish", "--delete", "abc123", "--dry-run")
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}

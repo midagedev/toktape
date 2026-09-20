@@ -184,6 +184,48 @@ profile_avatar = "~/pic.png"
 	}
 }
 
+// The service key round-trips the way host_label does: parsed by set, written
+// by render, absent when unset — and it decides where the journal token may
+// travel (cmd/toktape/service.go), which is why its doc comment states that
+// rule.
+func TestServiceKeyRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	write(t, path, "service = \"https://tapes.example.com\"\n")
+	c, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if c.Service != "https://tapes.example.com" {
+		t.Errorf("Service = %q", c.Service)
+	}
+
+	out := filepath.Join(t.TempDir(), "out.toml")
+	if err := SaveTo(out, c); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	back, err := LoadFrom(out)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if back.Service != c.Service {
+		t.Errorf("round trip lost the service: %q became %q", c.Service, back.Service)
+	}
+
+	// Unset is not written: a machine on the hosted service has no key, and
+	// the file must not invent a destination for the token.
+	plain := filepath.Join(t.TempDir(), "plain.toml")
+	if err := SaveTo(plain, &Config{Token: "tk"}); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "service") {
+		t.Errorf("unset key \"service\" was written:\n%s", body)
+	}
+}
+
 func write(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
