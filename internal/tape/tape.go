@@ -1173,6 +1173,17 @@ type ProbeSummary struct {
 	// is the engine's business and changes with the prompt length; it is
 	// measured here, once, the way the run will actually load the server.
 	Concurrent *ConcurrentPrefill `json:"concurrent,omitempty"`
+	// Calibration is one short request that was let end on its own, on a
+	// server that reports tokens only in the closing usage object (lead,
+	// 2026-09-21, TTP-156). nil everywhere else.
+	//
+	// Measured on Ollama 0.34.2: the default 20 s clock cancels the stream,
+	// a cancelled stream never sends its usage chunk, and the card printed
+	// "Sample ?" for a run that had streamed 1127 chunks. Counting chunks
+	// would have been a guess (a chunk is not a token). The calibration is
+	// what lets the plan pick an answer cap the run reaches before the clock
+	// does, so the stream ends on its own and the server's count arrives.
+	Calibration *DecodeCalibration `json:"calibration,omitempty"`
 	// Salt is the nonce the short fit prompt opened with (lead, 2026-09-20):
 	// base36 of twice the unix second the pass started. The long prompt's
 	// salt is its base36 successor, which keeps the two from sharing a first
@@ -1204,6 +1215,24 @@ type ProbeSummary struct {
 	// that does not report faults.
 	MajFaults         uint64  `json:"maj_faults,omitempty"`
 	MajFaultsPerToken float64 `json:"maj_faults_per_token,omitempty"`
+}
+
+// DecodeCalibration is the short request behind ProbeSummary.Calibration.
+type DecodeCalibration struct {
+	// PromptN and PredictedN are the server's usage figures for it.
+	PromptN    int `json:"prompt_n"`
+	PredictedN int `json:"predicted_n"`
+	// PromptBytes is the length of the prompt text sent, so PromptN prices
+	// this tokenizer in bytes per token for a server with no /tokenize.
+	PromptBytes int `json:"prompt_bytes"`
+	// TTFTMs and DecodeMs are client-timed: request out to first content
+	// chunk, and first content chunk to last.
+	TTFTMs   float64 `json:"ttft_ms"`
+	DecodeMs float64 `json:"decode_ms"`
+	// PerSecond is (PredictedN-1) over DecodeMs — server-counted tokens over
+	// a client-timed span, which is what every client-timed rate on the tape
+	// is. One stream, nothing else running.
+	PerSecond float64 `json:"per_second"`
 }
 
 // ConcurrentPrefill is one burst of probe prompts sent together.
