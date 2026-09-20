@@ -187,10 +187,22 @@ func (c *cli) reportRecordError(err error, urlGiven bool) int {
 			hint: hint,
 		})
 	case errors.Is(err, recorder.ErrAllStreamsFailed):
+		// The server was reachable and every stream it was sent refused — and
+		// the refusals are inside the error itself, in the server's own words.
+		// nextStep reads them (the one owner of the what-to-type-next table,
+		// shared with the failed-stream block of a finished run), so a context
+		// overflow is answered with the context lever for the engine rather
+		// than "check its slot count", which names nothing to type. There is
+		// no summary at this door — the run died before a tape existed — so
+		// the engine is unknown and the lever names all three spellings.
+		hint := "the server was reachable but answered no stream; check its log and its slot count"
+		if step := nextStep(err.Error(), nil); step != "" {
+			hint = step
+		}
 		return c.fail(failure{
 			code: exitStreams,
 			msg:  fmt.Sprintf("toktape: %v", err),
-			hint: "the server was reachable but answered no stream; check its log and its slot count",
+			hint: hint,
 		})
 	default:
 		return c.failf(exitUsage, "toktape: %v", err)

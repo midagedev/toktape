@@ -533,10 +533,16 @@ func saveRun(outDir string, tp *tape.Tape, wantCard bool) (artifacts, error) {
 // A run with failed streams is not a run to post, so it opens with the
 // server's own words instead (streamFailureBlock) and the Markdown line is
 // held back; the tape and card lines stay, because the run did happen and its
-// files are on disk.
+// files are on disk. A run that lost no stream but is not a usable
+// measurement — every stream too short for a rate, or no token count to
+// derive one from — gets the same treatment (unusableMeasurementBlock,
+// 2026-09-21): an 8-token answer saved, exited 0 and was invited to be
+// posted, and the tape was a sample wearing a card.
 func shareHint(outDir string, tp *tape.Tape, a artifacts) string {
 	var b strings.Builder
 	b.WriteString(streamFailureBlock(tp))
+	unusable := unusableMeasurementBlock(tp)
+	b.WriteString(unusable)
 	// What the run decided before its first request, in one line (TTP-150):
 	// two cards with different prompt lengths are two plans, and the line is
 	// where a reader sees which limit chose this one. Not on the card — the
@@ -559,8 +565,10 @@ func shareHint(outDir string, tp *tape.Tape, a artifacts) string {
 	// A run with failed streams is not a run to post: the card reports the
 	// streams that finished, and a Reddit post of it would quote figures the
 	// tape itself says are partial. The failure block above says what happened
-	// instead, and the tape/card lines stay because the files do exist.
-	if tp.Summary.Aggregate.StreamsFailed == 0 {
+	// instead, and the tape/card lines stay because the files do exist. The
+	// unusable block holds the line back for the same reason: a sample is not
+	// a figure to post, whatever the exit code said.
+	if tp.Summary.Aggregate.StreamsFailed == 0 && unusable == "" {
 		// 2026-09-21: this read "Post it: … (Reddit-ready, copied to clipboard)".
 		// The user called that over the top, and it was: a tool does not
 		// advertise its own output. The line names the command and what it
@@ -991,7 +999,7 @@ func streamFailureBlock(tp *tape.Tape) string {
 		// erroring. The count is still the fact; an invented sentence is not.
 		b.WriteString(" (no error text on the tape)")
 	}
-	fmt.Fprintf(&b, "\n→ %s\n", failureLever(strings.Join(errs, "; ")))
+	fmt.Fprintf(&b, "\n→ %s\n", failureLever(strings.Join(errs, "; "), &tp.Summary))
 	return b.String()
 }
 
@@ -1024,16 +1032,14 @@ func dedupeErrors(errs []string) (texts []string, counts []int) {
 }
 
 // failureLever is the one line of advice under a failed-streams block,
-// matched from the server's own words. An error this table does not recognise
-// gets no invented advice — the server's sentence is printed above it, and a
-// guess dressed as a fix is how a first-time user learns to distrust the tool.
-func failureLever(errText string) string {
-	s := strings.ToLower(errText)
-	if strings.Contains(s, "context") && (strings.Contains(s, "exceed") || strings.Contains(s, "length")) {
-		return "the prompt plus the answer did not fit the slot: lower --n-predict, or raise the server's -c (which -np divides)"
-	}
-	if strings.Contains(s, "429") || strings.Contains(s, "rate") {
-		return "the server refused the load: fewer --sessions"
+// matched from the server's own words and the engine the summary names —
+// both by nextStep, the one owner of that table. An error the table does not
+// recognise gets no invented advice — the server's sentence is printed above
+// it, and a guess dressed as a fix is how a first-time user learns to
+// distrust the tool.
+func failureLever(errText string, s *tape.RunSummary) string {
+	if step := nextStep(errText, s); step != "" {
+		return step
 	}
 	return "the server's words are above; the streams that finished are what the card reports"
 }

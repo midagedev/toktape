@@ -130,7 +130,10 @@ func caveatCases() []caveatCase {
 			s.Timings.PredictedN, s.Timings.DecodeLabel = 19, "sample"
 		},
 		// Lesson 2 lives in the row's own label, and the caveat must not be
-		// able to fire without it.
+		// able to fire without it. The lever tail (--prompt, matrix gap 2,
+		// 2026-09-21) has its own sentence pin in
+		// TestShortGenerationNamesALever: the card is a standalone artifact,
+		// so the caveat sentence itself has to name the way out.
 		onCard:  "Sample ",
 		notCard: "Decode ",
 	}, {
@@ -509,6 +512,24 @@ func TestIsSampleIsTheOnlyOwnerOfTheSampleVerdict(t *testing.T) {
 	}
 }
 
+// TestShortGenerationNamesALever (matrix gap 2, 2026-09-21): a terse model's
+// "sample, not a rate" stated the fact and stopped, and the reader of a card —
+// a standalone artifact with no hint line under it — was left with a finding
+// and nothing to type. The tail names --prompt, the flag that replaces the
+// default prompt set with one that asks for a longer answer (cmd/toktape
+// declares it; --for is deliberately absent: the model stopped on its own
+// finish, the clock did not cut it). FAIL-first: the sentence below failed on
+// the source before the tail, which ended at "(under 32)".
+func TestShortGenerationNamesALever(t *testing.T) {
+	s := clean(t)
+	s.Timings.PredictedN, s.Timings.DecodeLabel = 8, "sample"
+	want := "short generation: 8 tokens is a sample, not a decode rate (under 32) — a longer answer needs a prompt that asks for one (--prompt), or a model that is not terse"
+	cs := Caveats(s)
+	if len(cs) != 1 || cs[0].Code != CodeShortGeneration || cs[0].Text != want {
+		t.Fatalf("Caveats = %+v, want exactly %s: %q", cs, CodeShortGeneration, want)
+	}
+}
+
 // TestShortPromptUsesTheWholePrompt: the threshold is measured against the
 // prompt the run sent, cached prefix included, which is the count the Prefill
 // row prints. A 512-token prompt served entirely from the prefix cache is
@@ -562,16 +583,50 @@ func TestStreamsNotConcurrentTextAndGates(t *testing.T) {
 	}
 
 	cs := twoStreams(func(s *tape.RunSummary) { s.Aggregate.PeakDecodingStreams = 1 })
-	if want := "the 2 streams decoded one at a time: the aggregate is one stream behind a queue, not 2 at once"; len(cs) != 1 || cs[0].Text != want {
+	// Re-pinned 2026-09-21 (first-run matrix, gap 4's sibling): the sentence
+	// gained a lever tail — a caveat that states the queue and stops leaves
+	// the reader with a finding and nothing to type. FAIL-first: the old pin
+	// ended at "not 2 at once" and passed on a sentence with no tail.
+	if want := "the 2 streams decoded one at a time: the aggregate is one stream behind a queue, not 2 at once — the server's parallel/slot setting, or --sessions 1"; len(cs) != 1 || cs[0].Text != want {
 		t.Errorf("peak 1 of 2: Caveats = %+v, want exactly that one sentence %q", cs, want)
 	}
 	if cs[0].Severity != SeverityFigure {
 		t.Errorf("severity = %q, want figure: the aggregate row's claim is what is wrong", cs[0].Severity)
 	}
+	// The Ollama shape of the same finding (matrix, measured 2026-09-21:
+	// --sessions 2 decoded one at a time, TTFT 53 s / 106 s). Ollama's lever
+	// is its own env var, and it is named only when something says Ollama —
+	// the engine claim, or the port Ollama answers by default.
+	for name, mutate := range map[string]func(*tape.RunSummary){
+		"the engine claim says Ollama": func(s *tape.RunSummary) {
+			s.Aggregate.PeakDecodingStreams = 1
+			s.Server.EngineClaim = "Ollama"
+		},
+		"the URL is Ollama's own port": func(s *tape.RunSummary) {
+			s.Aggregate.PeakDecodingStreams = 1
+			s.Server.URL = "http://127.0.0.1:11434"
+		},
+	} {
+		cs := twoStreams(mutate)
+		if want := "the 2 streams decoded one at a time: the aggregate is one stream behind a queue, not 2 at once — restart Ollama with OLLAMA_NUM_PARALLEL=2, or record with --sessions 1"; len(cs) != 1 || cs[0].Text != want {
+			t.Errorf("%s: Caveats = %+v, want exactly that one sentence %q", name, cs, want)
+		}
+	}
+	// A port that is not Ollama's keeps the generic lever: guessing the
+	// engine from nothing would name a setting the server may not have.
+	cs = twoStreams(func(s *tape.RunSummary) {
+		s.Aggregate.PeakDecodingStreams = 1
+		s.Server.URL = "http://127.0.0.1:8080"
+	})
+	if cs[0].Text != "the 2 streams decoded one at a time: the aggregate is one stream behind a queue, not 2 at once — the server's parallel/slot setting, or --sessions 1" {
+		t.Errorf("a plain port got Ollama's lever:\n%s", cs[0].Text)
+	}
 	cs = twoStreams(func(s *tape.RunSummary) {
 		s.Concurrency = 3
 		s.Aggregate.PeakDecodingStreams = 2
 	})
+	// The partial-peak sentence keeps its shape: it is a different finding
+	// (some overlap, not a queue), and a lever for it is not this round's.
 	if want := "at most 2 of 3 streams decoded at once: the aggregate is not 3 concurrent streams"; len(cs) != 1 || cs[0].Text != want {
 		t.Errorf("peak 2 of 3: Caveats = %+v, want exactly that one sentence %q", cs, want)
 	}
