@@ -643,6 +643,7 @@ func TestShareHintFailedStreams(t *testing.T) {
 	tp := &tape.Tape{Schema: tape.SchemaVersion, Summary: tape.RunSummary{
 		ID:          "20260913-120000-qwen3.5-35b-a3b",
 		Model:       tape.ModelInfo{FileName: "Qwen3.5-35B-A3B-UD-Q4_K_M.gguf"},
+		Server:      tape.ServerInfo{Kind: tape.ServerLlamaCPP},
 		Concurrency: 4,
 		Aggregate:   tape.AggregateTimings{Streams: 4, StreamsFailed: 2},
 	}, Requests: []tape.RequestRecord{
@@ -693,23 +694,127 @@ func TestShareHintFailedStreams(t *testing.T) {
 }
 
 // TestFailureLever: the one line of advice under a failed-streams block is
-// matched from the server's own words, and an error this table does not know
-// gets no invented advice.
+// nextStep's, matched from the server's own words and the engine the summary
+// names, and an error this table does not know gets no invented advice — the
+// fallback sentence, not a guess dressed as a fix. Re-pinned 2026-09-21
+// (first-run matrix): a mid-answer transport cut now names the likely cause
+// (the server died) instead of offering nothing, and the context lever
+// follows the engine.
 func TestFailureLever(t *testing.T) {
+	llama := &tape.RunSummary{Server: tape.ServerInfo{Kind: tape.ServerLlamaCPP}}
 	for _, tc := range []struct {
 		name, errText, want string
+		s                   *tape.RunSummary
 	}{
-		{"the measured context error", "context_length_exceeded: the request exceeds the available context size", "--n-predict"},
-		{"a context error in other words", "Requested tokens exceed context limit", "-c"},
-		{"a rate limit", "429 Too Many Requests", "--sessions"},
-		{"a rate limit in other words", "rate limit exceeded, retry later", "--sessions"},
-		{"an unknown error", "connection reset by peer", "the server's words are above"},
+		{"the measured context error", "context_length_exceeded: the request exceeds the available context size", "--n-predict", llama},
+		{"a context error in other words", "Requested tokens exceed context limit", "-c", llama},
+		{"a vLLM context refusal", "This model's maximum context length is 8192 tokens. However, you requested 15421 tokens", "--max-model-len", &tape.RunSummary{Server: tape.ServerInfo{Kind: tape.ServerOpenAI, EngineClaim: "vLLM 0.11"}}},
+		{"a rate limit", "429 Too Many Requests", "--sessions", llama},
+		{"a rate limit in other words", "rate limit exceeded, retry later", "--sessions", nil},
+		{"a stream cut by a dying server", "server: stream: read: unexpected EOF", "may have crashed or been killed", llama},
+		{"a reset connection", "connection reset by peer", "may have crashed or been killed", nil},
+		{"an unknown error", "something novel happened", "the server's words are above", llama},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := failureLever(tc.errText); !strings.Contains(got, tc.want) {
+			if got := failureLever(tc.errText, tc.s); !strings.Contains(got, tc.want) {
 				t.Errorf("failureLever(%q) = %q, want it to name %q", tc.errText, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestShareHintUnusableRun (2026-09-21, first-run matrix): a run that
+// finished, exited 0 and lost no stream can still be worthless as a
+// measurement — every stream too short for a rate, or no token count to
+// derive one from. The block a finished run ends with has to say so, name the
+// lever, and hold the Markdown line back exactly as a failed-stream run
+// does; the tape and card lines stay, because the files do exist. A healthy
+// run prints nothing new.
+func TestShareHintUnusableRun(t *testing.T) {
+	dir := t.TempDir()
+	summary := func(mutate func(*tape.RunSummary)) *tape.Tape {
+		s := tape.RunSummary{
+			ID:    "20260921-120000-qwen3.5-35b-a3b",
+			Model: tape.ModelInfo{FileName: "Qwen3.5-35B-A3B-UD-Q4_K_M.gguf"},
+		}
+		mutate(&s)
+		return &tape.Tape{Schema: tape.SchemaVersion, Summary: s}
+	}
+	artsFor := func(tp *tape.Tape) artifacts {
+		return artifacts{tape: filepath.Join(dir, tp.Summary.ID+tape.Ext)}
+	}
+
+	short := summary(func(s *tape.RunSummary) {
+		s.Timings.PredictedN, s.Timings.DecodeLabel = 8, "sample"
+	})
+	got := shareHint(dir, short, artsFor(short))
+	if !strings.Contains(got, "✗ this run is not a usable measurement: short generation: 8 tokens is a sample") {
+		t.Errorf("a run of 8-token answers is not said to be unusable:\n%s", got)
+	}
+	if !strings.Contains(got, "→ a longer answer needs a prompt that asks for one: --prompt") {
+		t.Errorf("the unusable block names no lever:\n%s", got)
+	}
+	if strings.Contains(got, "→ Markdown:") {
+		t.Errorf("an unusable run was invited to be posted:\n%s", got)
+	}
+	for _, want := range []string{"✓ Tape   ", "→ Replay:   "} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the block is missing %q, which an unusable run keeps:\n%s", want, got)
+		}
+	}
+
+	// No rate at all: the server streamed but never said how many tokens,
+	// so the chunks were counted and no rate exists. The block says that,
+	// and the lever states the honest fact — toktape already asked.
+	uncounted := summary(func(s *tape.RunSummary) {
+		s.Timings = tape.TimingsSummary{PredictedN: 40, PredictedNSource: "chunks", Source: "client"}
+	})
+	got = shareHint(dir, uncounted, artsFor(uncounted))
+	if !strings.Contains(got, "✗ this run is not a usable measurement: tokens uncounted") {
+		t.Errorf("a run with no token count is not said to be unusable:\n%s", got)
+	}
+	// Lead, 2026-09-21: the first wording restated the fact ("asked for one
+	// (include_usage)") and named nothing to type. The count is missing
+	// because the stream was cut before its closing chunk, so the lever is a
+	// cap the clock does not reach.
+	if !strings.Contains(got, "--n-predict") {
+		t.Errorf("the uncounted block names nothing to type:\n%s", got)
+	}
+	if strings.Contains(got, "→ Markdown:") {
+		t.Errorf("an uncounted run was invited to be posted:\n%s", got)
+	}
+
+	// Failed streams keep their own block: one ✗ line, not two. The
+	// short-generation caveat fires on this summary too, and the failure
+	// block alone must speak for the run.
+	failed := summary(func(s *tape.RunSummary) {
+		s.Concurrency = 4
+		s.Timings.PredictedN, s.Timings.DecodeLabel = 8, "sample"
+		s.Aggregate.Streams, s.Aggregate.StreamsFailed = 4, 1
+	})
+	failed.Requests = []tape.RequestRecord{
+		{Index: 0}, {Index: 1}, {Index: 2},
+		{Index: 3, Error: "context_length_exceeded: the request exceeds the available context size"},
+	}
+	got = shareHint(dir, failed, artsFor(failed))
+	if n := strings.Count(got, "✗"); n != 1 {
+		t.Errorf("a failed-stream run printed %d ✗ blocks, want the one it already had:\n%s", n, got)
+	}
+	if strings.Contains(got, "not a usable measurement") {
+		t.Errorf("a failed-stream run also printed the unusable block:\n%s", got)
+	}
+
+	// A healthy run prints nothing new: the block is an addition for
+	// unusable runs, not a change to the good ones.
+	healthy := summary(func(s *tape.RunSummary) {
+		s.Timings.PredictedN, s.Timings.DecodeLabel = 900, "decode"
+	})
+	got = shareHint(dir, healthy, artsFor(healthy))
+	if !strings.Contains(got, "→ Markdown:") {
+		t.Errorf("a healthy run lost its Markdown line:\n%s", got)
+	}
+	if strings.Contains(got, "not a usable measurement") {
+		t.Errorf("a healthy run was told it is unusable:\n%s", got)
 	}
 }
 

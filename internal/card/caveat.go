@@ -374,15 +374,41 @@ func streamsNotConcurrent(s *tape.RunSummary) bool {
 // trial's own "one stream behind a queue" and says so, and a partial peak says
 // how many of the N ever shared an instant — "at most 2 of 4" is a different
 // machine finding than "one at a time", and one sentence for both would hide it.
+//
+// The queue case gained its lever on 2026-09-21 (first-run matrix, measured on
+// a real Ollama: --sessions 2 decoded one at a time, TTFT 53 s / 106 s): a
+// card is a standalone artifact with no hint line under it, so a caveat that
+// states the queue and stops leaves the reader with a finding and nothing to
+// type. Ollama's setting is its own env var and is named only when something
+// says Ollama; everything else gets the generic wording, because guessing the
+// engine from nothing would name a setting the server may not have.
 func streamsNotConcurrentText(s *tape.RunSummary) string {
 	n := s.Concurrency
 	if s.Aggregate.PeakDecodingStreams == 1 {
-		return fmt.Sprintf(
+		head := fmt.Sprintf(
 			"the %d streams decoded one at a time: the aggregate is one stream behind a queue, not %d at once", n, n)
+		if ollamaServer(s) {
+			return head + fmt.Sprintf(" — restart Ollama with OLLAMA_NUM_PARALLEL=%d, or record with --sessions 1", n)
+		}
+		return head + " — the server's parallel/slot setting, or --sessions 1"
 	}
 	return fmt.Sprintf(
 		"at most %d of %d streams decoded at once: the aggregate is not %d concurrent streams",
 		s.Aggregate.PeakDecodingStreams, n, n)
+}
+
+// ollamaServer reports whether something about the run says the engine is
+// Ollama: the user's engine claim on a server that cannot say, or the port
+// Ollama answers on by default. The claim check is lowercase — claims are
+// free text ("Ollama", "ollama 0.9"). It exists only to pick between two
+// lever wordings (streamsNotConcurrentText); nextStep, the CLI's advice
+// table, keeps to the summary's own Kind and EngineClaim and lets its
+// all-engines fallback cover a port-only Ollama.
+func ollamaServer(s *tape.RunSummary) bool {
+	if strings.Contains(strings.ToLower(s.Server.EngineClaim), "ollama") {
+		return true
+	}
+	return strings.Contains(s.Server.URL, ":11434")
 }
 
 // RaggedAggregate reports whether the run's aggregate decode rate sits
@@ -746,8 +772,16 @@ func Caveats(s *tape.RunSummary) []Caveat {
 	// their sentences count tokens, and chunks are not tokens —
 	// tokens_uncounted below says what the count is.
 	if isSample(s) && !tokensUncounted(s) {
+		// The tail names the way out (matrix gap 2, 2026-09-21): the project
+		// solved this shape for reasoning runs with answerCutWarning naming
+		// the flag that matches what ended the run, and a terse model's
+		// 8-token stop is the same shape one axis over. --prompt replaces the
+		// default prompt set with one that asks for a longer answer
+		// (cmd/toktape/record.go declares it, repeatable). --for is
+		// deliberately absent: the model stopped on its own finish, the clock
+		// did not cut it.
 		add(CodeShortGeneration, SeverityFigure, fmt.Sprintf(
-			"short generation: %s tokens is a sample, not a decode rate (under %d)",
+			"short generation: %s tokens is a sample, not a decode rate (under %d) — a longer answer needs a prompt that asks for one (--prompt), or a model that is not terse",
 			formatInt(s.Timings.PredictedN), tape.MinDecodeTokens))
 	}
 	if shortStream(s) && !tokensUncounted(s) {

@@ -16,6 +16,14 @@ Reproduce: `go test ./cmd/toktape/ -run TestFirstRunMatrix -count=1 -v`
 are printed into `knownGaps` and are **not** asserted — each becomes a
 failing gate when fixed.
 
+Re-audited 2026-09-21, later the same day (the `msgs` track): every
+degraded run now says what happened and what to type next — `nextStep`
+(`cmd/toktape/nextstep.go`) is the one table both the failed-stream block and
+the all-streams-failed door read, the terse-model and serial-decode caveats
+name their levers, and a finished-but-worthless run says so before the ✓
+lines and is not invited to be posted. Rows 5, 11, 17 and 19's EXPLAINED
+verdicts are pinned; the table and the gap list below are the new output.
+
 ## The verdict rules (mechanical, in the test)
 
 - **USABLE**: `yes` iff exit 0 AND `StreamsFailed == 0` AND every stream
@@ -44,35 +52,45 @@ lines.
 | 2 | `llama-1slot-4k` (default command) | 0 | **yes** | n/a | `· plan: 1 × 2,880-token prompts (slot-bound) · ~0 s prefill · cap 1,054 · slot 4,096` · same header · same caveat line |
 | 3 | `llama-4slot-2k` (`--sessions 4 --for 2s`) | 0 | **yes** | n/a | `· plan: 4 × 832-token prompts (slot-bound) · cap 1,024 · slot 2,048` · same header · same caveat line |
 | 4 | `llama-sessions-gt-slots` (`--sessions 4`, 2 slots) | 1 | **refused-cleanly** | **yes** | `toktape: 4 sessions asked of http://127.0.0.1:PORT, which offers 2 slots; the 2 past its slots would wait in its queue, and the card cannot tell queue wait …` · `→ ask for --sessions 2, or restart llama-server with -np 4 to offer 4 slots` |
-| 5 | `llama-no-slots-endpoint` (/slots 501, 4096 ctx enforced) | 3 | no | partial | `toktape: recorder: all streams failed: server: run: all 1 streams failed: server: stream error: context_length_exceeded: the request exceeds the available context size (code 500)` · `→ the server was reachable but answered no stream; check its log and its slot count` · `→ llama-server at … (b4321) · …` |
+| 5 | `llama-no-slots-endpoint` (/slots 501, 4096 ctx enforced) | 3 | no | **yes** | `toktape: recorder: all streams failed: server: run: all 1 streams failed: server: stream error: context_length_exceeded: the request exceeds the available context size (code 500)` · `→ the prompt plus the answer did not fit the context: lower --n-predict, or raise the server's context — --max-model-len on vLLM, OLLAMA_CONTEXT_LENGTH on Ollama, -c on llama-server` · `→ llama-server at … (b4321) · …` |
 | 6 | `llama-no-tokenize` (/tokenize 404) | 0 | **yes** | n/a | `· plan: 1 × 6,976-token prompts (slot-bound) · ~0.1 s prefill · cap 1,164 · slot 8,192` · same header · same caveat line |
 | 7 | `llama-thinking-default` (reasoning-only stream, `--for 2s`) | 0 | **yes** | **yes** | `· plan: 1 × 6,976-token prompts (slot-bound) · ~0.1 s prefill · cap 1,100 · slot 8,192` · `│ ! 8 caveats — answer cut: all N predicted tokens were reasoning — │` (N ≈ 600–900) — the caveat continues `… the default budget did not hold the thinking; try --for or --think-budget` |
 | 8 | `llama-slow-box` (30 tok/s prefill, `--for 2s`) | 0 | **yes** | n/a | `· plan: 1 × 6,976-token prompts (slot-bound) · cap 1,100 · slot 8,192` (no `~X s prefill`: the probe refused its long point, so no rate exists) · same header |
 | 9 | `llama-rerun-same-server` (scenario 1, twice, exact-text prefix cache) | 0 | **yes** | n/a | two `· plan: 4 × 6,976-token prompts (slot-bound) …` lines · both takes' `prompt_n` 6,900 — the run salt defeated the cache; take 2 prefilled real tokens |
 | 10 | `openai-only-32k` (vLLM-shaped, generous ctx) | 0 | no | no | `· plan: 1 × 0-token prompts (whole) · cap 8,000` · `→ openai at http://127.0.0.1:PORT (?) · mat-model · no /proc view` · `│ ! 5 caveats — client-timed: the server reported no timings, so every │` |
-| 11 | `openai-only-4k` (vLLM 400 over 4096) | 3 | no | partial | `toktape: recorder: all streams failed: … POST /v1/chat/completions: 400 Bad Request: {"error":{"message":"This model's maximum context length is 4096 tokens. However, you requested 15421 tokens (7421 in your messages, 8000 in the completion). Please reduce the length of the messages o` (clipped at 200 chars) · `→ the server was reachable but answered no stream; check its log and its slot count` |
+| 11 | `openai-only-4k` (vLLM 400 over 4096) | 3 | no | **yes** | `toktape: recorder: all streams failed: … POST /v1/chat/completions: 400 Bad Request: {"error":{"message":"This model's maximum context length is 4096 tokens. However, you requested 15421 tokens (7421 in your messages, 8000 in the completion). Please reduce the length of the messages o` (clipped at 200 chars) · `→ the prompt plus the answer did not fit the context: lower --n-predict, or raise the server's context — --max-model-len on vLLM, OLLAMA_CONTEXT_LENGTH on Ollama, -c on llama-server` |
 | 12 | `ollama-shape` (silent truncation to 2048) | 0 | no | no | identical to row 10: `· plan: 1 × 0-token prompts (whole) · cap 8,000` · client-timed caveat · nothing anywhere says the prompt was truncated |
 | 13 | `server-not-running` (connection refused) | 2 | **refused-cleanly** | **yes** | `toktape: recorder: cannot attach: server: unreachable: http://127.0.0.1:1: connection refused` · `→ check the host and port, or add --wait 30s to wait for a server that is still starting` |
 | 14 | `server-loading` (503 Loading model, `--wait 1s`) | 2 | **refused-cleanly** | **yes** | `toktape: recorder: cannot attach: gave up after 1s: server: loading the model: http://127.0.0.1:PORT: Loading model` · `→ the server is there and was not ready in time; give it longer with --wait 30m` |
 | 15 | `wrong-port-http-200-html` | 2 | **refused-cleanly** | **yes** | `toktape: recorder: cannot attach: server: unreachable: http://127.0.0.1:PORT: /props is not JSON: invalid character '<' looking for beginning of value` · `→ check the host and port, or add --wait 30s …` |
 | 16 | `auth-required` (401 everywhere) | 2 | **refused-cleanly** | partial | `toktape: recorder: cannot attach: server: unreachable: http://127.0.0.1:PORT: HTTP 401: {"error":{"message":"Invalid API key"}}` · `→ check the host and port, or add --wait 30s to wait for a server that is still starting` — the lever answers a starting server, not authentication |
 | 17 | `rate-limited` (429 on 2 of 4 chat streams) | 0 | no | **yes** | `✗ 2 of 4 streams failed: server: POST /v1/chat/completions: 429 Too Many Requests: {"error":{"message":"This server is rate limited; try again later","type…` (the ✗ line clips at 160 runes) · `→ the server refused the load: fewer --sessions` · `· plan: 4 × 6,976-token prompts (slot-bound) …` |
-| 18 | `stream-dies-midway` (cut after 50 tokens) | 0 | no | no | `✗ 1 of 4 streams failed: server: stream: read: unexpected EOF` · `→ the server's words are above; the streams that finished are what the card reports` · `· plan: 4 × 6,976-token prompts (slot-bound) …` |
-| 19 | `model-answers-instantly` (stop after 8 tokens) | 0 | no | partial | `· plan: 1 × 6,976-token prompts (slot-bound) · ~0.1 s prefill · cap 1,100 · slot 8,192` · `│ ! 7 caveats — short generation: 8 tokens is a sample, not a decode │` — the caveat continues `… rate (under 32)` and names no lever |
+| 18 | `stream-dies-midway` (cut after 50 tokens) | 0 | no | partial | `✗ 1 of 4 streams failed: server: stream: read: unexpected EOF` · `→ the server may have crashed or been killed; its log says which, and out of memory is the usual cause` · `│ ! 8 caveats — 1 of 4 streams failed: the aggregate is over the ones that finished │` |
+| 19 | `model-answers-instantly` (stop after 8 tokens) | 0 | no | **yes** | `✗ this run is not a usable measurement: short generation: 8 tokens is a sample, not a decode rate (under 32) — a longer answer needs a prompt that asks for one (--prompt), or a model that is not terse` · `→ a longer answer needs a prompt that asks for one: --prompt, or a model that is not terse` · `│ ! 7 caveats — short generation: 8 tokens is a sample, not a decode │` |
 
-**Summary: 11 of 19 rows fully good** (7 usable-yes, 4 refused-cleanly and
-explained). All seven healthy llama.cpp shapes — including 2k slots, no
-/tokenize, the slow box and the prefix-cache re-run — plan, trim, cap and
-record without losing a stream; the reasoning-model default run explains
-itself and names the right flags. Yesterday's three real failures (prefill
-eating the clock, streams lost to `context_length_exceeded` with exit 0, the
-"5 prompt tokens" cache re-run) did not reproduce: the plan and the salt hold
-against every llama.cpp shape here. Every remaining gap is a non-llama.cpp
-shape, a dead connection, or a terse model.
+**Summary after the 2026-09-21 `msgs` pass: 7 rows in `knownGaps`** (was 8).
+Every degraded llama.cpp shape now explains itself and names a lever that
+fits; the terse model's run says it is not a usable measurement and is no
+longer invited to be posted; the two exit-3 doors answer a context overflow
+with the context lever instead of "check its slot count". The remaining gaps
+are all owned elsewhere: the prompt-count and truncation holes, the
+`--no-slots` and vLLM pre-flight caps and the 401 classification are the
+recorder track's; the exit-0-with-dead-streams contract is the lead's call.
+Before that pass: 11 of 19 rows fully good (7 usable-yes, 4 refused-cleanly
+and explained), 8 gaps.
 
 ## The gaps, ranked by how likely a r/LocalLLaMA reader hits them
 
+Status after the 2026-09-21 `msgs` pass, per gap: **closed here** (the row's
+EXPLAINED verdict is pinned in the test), **half closed** (this track's side
+is done; the recorder side owns the rest), or **open** with its owner named.
+
 ### 1. Every OpenAI-compatible run drops the server's own prompt count (rows 10, 12)
+
+**Open — owner: recorder track.** (Partly moved since the audit: the usage
+prompt count is now *taken* — `internal/server/sse.go:447-449` — but only for
+the decode calibration's return value; the record's own `PromptN` stays 0, so
+every symptom below still holds.)
 
 **Likelihood: highest — every Ollama, LM Studio and vLLM user, on every run,
 not only failures.** These are the engines a first-time reader most likely
@@ -108,6 +126,14 @@ Smallest changes (each one line-ish, none implemented):
 
 ### 2. A terse model's "sample, not a rate" names no lever (row 19)
 
+**Closed here (2026-09-21).** The caveat ends "— a longer answer needs a
+prompt that asks for one (--prompt), or a model that is not terse", and the
+closing block says the run is not a usable measurement, names the same lever,
+and holds the Markdown line back. Row 19's EXPLAINED verdict is pinned.
+(`--for` is deliberately absent from the tail — the e.g. below oversold it:
+the model stopped on its own finish, the clock did not cut it, so the budget
+axis is not the one that ended the answer.)
+
 **Likelihood: high — small instruct models answer the default prompt in a
 handful of tokens, and those are the models first-time readers run.**
 
@@ -122,6 +148,13 @@ Smallest change: give `short_generation` the same tail — e.g. `… (under 32) 
 ask for more with --for 60s, or a prompt that asks for a longer answer`.
 
 ### 3. A `--no-slots` llama-server loses every stream (row 5)
+
+**Half closed (2026-09-21).** The exit-3 door now reads the error's own words
+through `nextStep` and answers a context overflow with the context lever (all
+three engine spellings at that door — no tape exists, so no summary names the
+engine); row 5's EXPLAINED verdict is pinned **yes**. Still open on the
+recorder side: the run still loses every stream, because the plan cannot read
+a context from a `--no-slots` server (owner: recorder track).
 
 **Likelihood: medium-high — `--no-slots` is a documented llama-server flag
 (memory-constrained boxes, exactly this tool's audience), and the failure is
@@ -150,6 +183,17 @@ Smallest changes:
 
 ### 4. A stream cut mid-answer is reported in Go's words, with no lever (row 18)
 
+**Half closed (2026-09-21).** `nextStep`'s transport class now answers
+`unexpected EOF` / `connection reset` / `closed the connection` with "the
+server may have crashed or been killed; its log says which, and out of memory
+is the usual cause" — the cause in plain words, which is why the row's verdict
+moved from `no` to `partial`. Still open on the recorder side: the ✗ line
+still quotes the Go transport sentence verbatim, because the wrap site
+(`internal/server/stream.go:284-288`) is the recorder's; and the verdict
+stays `partial` honestly — there is no toktape flag for a crashed server, so
+no lever the audit's rule would count (owner: recorder track, for the plain
+sentence at the wrap site).
+
 **Likelihood: medium — an OOM-killed llama-server mid-generation is the
 classic big-model low-RAM story on r/LocalLLaMA.**
 
@@ -168,6 +212,15 @@ class a lever in `failureLever` ("re-run; if it repeats, check the server's
 log — it may have crashed or been killed").
 
 ### 5. A small-context vLLM refuses everything, and the advice is llama-speak (row 11)
+
+**Half closed (2026-09-21, same pass).** The exit-3 door reads the vLLM 400's
+own words and answers with the context lever naming all three spellings
+(`--max-model-len` first); row 11's EXPLAINED verdict is pinned **yes**. With
+a summary that names the engine (`--engine "vLLM 0.11"`), the failed-stream
+block's lever is the engine's own flag alone. Still open on the recorder
+side: the OpenAI path still never lowers the 8000-token runaway guard, so a
+small-context vLLM loses every stream before a tape exists (owner: recorder
+track).
 
 **Likelihood: medium-low — vLLM defaults to large contexts, but
 `--max-model-len 4096` configs exist (VRAM-constrained, long-context
@@ -189,6 +242,15 @@ the one-line start.
 
 ### 6. 401 is answered with starting-server advice (row 16)
 
+**Open — owner: recorder track.** (`nextStep` already has the 401/403/
+credentials branch for stream-level refusals, and its sentence is honest
+about the flag: "the server refused the request as unauthenticated: it wants
+a key, and toktape has no flag for one yet" — grep over `internal/server`
+and `cmd/toktape` finds no `Authorization`/`Bearer`/`api-key` flag to name.
+But row 16 fails at *attach* time, through `classifyProps` mapping every
+non-2xx refusal to `ErrUnreachable`, and that classification is the
+recorder's to write.)
+
 **Likelihood: low — `--api-key` llama-servers and auth-fronted proxies exist
 but are rarely a first run.**
 
@@ -204,6 +266,10 @@ authentication; llama-server's --api-key, or the proxy in front of it, wants
 a key — toktape sends none today".
 
 ### 7. Exit 0 with dead streams (row 17, residual)
+
+**Open — the lead's call** (exit codes are out of this track's scope by
+spec). The explanation is pinned good: the server's 429 words plus "fewer
+--sessions" held through the share-block changes.
 
 The explanation itself is good — the server's 429 words plus "fewer
 --sessions" is exactly the contract — and the ✗ block holds the "Post it"
@@ -247,7 +313,7 @@ hint is empty or generic.
 | `cmd/toktape/record.go:443`, `:465` | `saving the run file: %v` / `renderRun` errors | **no next action** (disk/output errors, bare) |
 | `cmd/toktape/fail.go:169` | `recorder: cannot attach: …` + three hints (discovery / loading-busy / urlGiven) | yes — ports to probe + `--url`; `--wait 30m`; `--wait 30s` |
 | `cmd/toktape/fail.go:184` | `ErrMoreSessionsThanSlots` (`4 sessions asked of …, which offers 2 slots; …`) | yes — `--sessions 2` or `restart llama-server with -np 4` |
-| `cmd/toktape/fail.go:190` | `recorder: all streams failed: …` | **no next action** — "check its log and its slot count" names no flag/command/setting, and "slot count" is llama-speak to a vLLM/Ollama user (gaps 3 and 5) |
+| `cmd/toktape/fail.go:190` | `recorder: all streams failed: …` | yes since 2026-09-21 — the door reads `nextStep` (same table as the failed-stream block): the context lever for the engine (all three spellings; no tape exists, so no summary names it), fewer `--sessions` on a 429, the no-flag-yet auth sentence, the crash sentence on a mid-answer cut. "Check its log and its slot count" remains only as the fallback for an error the table does not know |
 | `cmd/toktape/fail.go:196` | default door `toktape: %v` | **no next action** (catch-all) |
 | `internal/recorder/slotctx.go:70-74` | `ErrPromptOverflowsSlot` ("the prompt is ~N tokens … send a shorter prompt, or raise the slot's context (llama-server's -c, which -np divides)") | yes — both levers |
 | `internal/recorder/slotctx.go:141` | `n-predict %d capped to %d: the slot's context is %d and the longest prompt is ~%d tokens` | states the numbers, names no lever |
@@ -271,11 +337,17 @@ hint is empty or generic.
 | `internal/recorder/rounds.go:272` | `run cancelled after round %d of %d` | **no next action** (fact) |
 | `internal/recorder/sweep.go:121` | `no draft model: --spec-n-max %s ran only n_max %d` | names the flag (self-explaining) |
 
-The share block carries the partial-failure machinery with its own three
-levers (`cmd/toktape/record.go:950-1030`): the ✗ count with the server's own
-words (deduped, ×N, clipped at 160 runes) plus `failureLever`'s context /
-rate / fallback sentences — good where it runs; gaps 3, 4 and 5 are the
-paths where the run dies before it runs.
+The share block carries the partial-failure machinery with its own levers
+(`cmd/toktape/record.go`): the ✗ count with the server's own words (deduped,
+×N, clipped at 160 runes) plus `failureLever` — which is `nextStep`'s table
+(`cmd/toktape/nextstep.go`), the same one the exit-3 door reads: the context
+lever for the engine the summary names, fewer `--sessions` on a rate limit,
+the crash sentence on a mid-answer cut, and no invented advice otherwise.
+Since 2026-09-21 it also carries the unusable-run block: a run that lost no
+stream but has no rate (`tokens_uncounted`) or no stream long enough for one
+(`short_generation`) opens with `✗ this run is not a usable measurement:
+<sentence>` plus one `→` lever, and the Markdown line is held back exactly as
+a failed-stream run's is.
 
 ## Notes on method
 

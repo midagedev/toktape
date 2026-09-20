@@ -890,9 +890,10 @@ func TestFirstRunMatrix(t *testing.T) {
 			},
 		},
 		{
-			name:         "llama-no-slots-endpoint",
-			gapWhy:       "a --no-slots server hides the one number that caps answers: prompts go whole with the 8000-token guard, every stream dies on context_length_exceeded, exit 3, and the hint names no lever",
-			causeMarkers: []string{"context_length_exceeded"},
+			name:          "llama-no-slots-endpoint",
+			wantExplained: "yes", // pinned 2026-09-21: the exit-3 door names the context lever
+			gapWhy:        "usable stays no: a --no-slots server hides the context that would cap answers, so every stream dies on context_length_exceeded before a tape exists — the pre-flight cap that reads /props n_ctx is the recorder's to write (owner: recorder track)",
+			causeMarkers:  []string{"context_length_exceeded"},
 			run: func(t *testing.T) *matOutcome {
 				cfg := fast
 				cfg.noSlots501 = true
@@ -964,16 +965,17 @@ func TestFirstRunMatrix(t *testing.T) {
 		},
 		{
 			name:   "openai-only-32k",
-			gapWhy: "every figure the fake reported about the prompt is dropped: usage.prompt_tokens is parsed (internal/server/sse.go:107) but never copied into the record (sse.go:430 fills only completion_tokens), so a clean exit-0 run carries no prompt size anywhere — the plan line even reads '1 × 0-token prompts (whole)' (LongestPromptTokens is filled only under a slot, internal/recorder/slotctx.go:118)",
+			gapWhy: "the fake's prompt figures still never reach the tape: the usage prompt count is taken (internal/server/sse.go:447-449) but only for the decode calibration's return value — the record's own PromptN stays 0, the card prints ? for the prompt size, and this row's prompt_n clause cannot pass (owner: recorder track)",
 			run: func(t *testing.T) *matOutcome {
 				srv, _ := matOpenAIServer(t, matOpenAICfg{chatTokens: 80})
 				return matRecord(t, srv.URL, t.TempDir())
 			},
 		},
 		{
-			name:         "openai-only-4k",
-			gapWhy:       "vLLM with a 4k context: the OpenAI path never lowers the 8000-token runaway guard (no slots to read), every stream is refused with a 400, exit 3, and the only advice is llama-speak ('check its slot count')",
-			causeMarkers: []string{"maximum context length"},
+			name:          "openai-only-4k",
+			wantExplained: "yes", // pinned 2026-09-21: the exit-3 door names the context lever for an unknown engine (all three spellings)
+			gapWhy:        "usable stays no: the OpenAI path never lowers the 8000-token runaway guard (no slots to read), so a small-context vLLM refuses every stream up front — a pre-flight cap for OpenAI-kind runs is the recorder's to write (owner: recorder track)",
+			causeMarkers:  []string{"maximum context length"},
 			run: func(t *testing.T) *matOutcome {
 				srv, f := matOpenAIServer(t, matOpenAICfg{ctxLimit: 4096, chatTokens: 80})
 				o := matRecord(t, srv.URL, t.TempDir())
@@ -983,7 +985,7 @@ func TestFirstRunMatrix(t *testing.T) {
 		},
 		{
 			name:   "ollama-shape",
-			gapWhy: "the tape lies silently: Ollama truncated the ~7.4k-token prompt to 2048, and the one figure that would have exposed it — the server's usage.prompt_tokens, 2048 against the ~7.4k sent — is parsed and dropped (internal/server/sse.go:107 vs :430), so nothing on the run contradicts the truncation",
+			gapWhy: "the tape lies silently: Ollama truncated the ~7.4k-token prompt to 2048, and the one figure that would have exposed it — the server's usage.prompt_tokens, 2048 against the ~7.4k sent — still never reaches the record (sse.go:447-449 hands it only to the calibration), so nothing on the run contradicts the truncation (owner: recorder track)",
 			run: func(t *testing.T) *matOutcome {
 				srv, _ := matOpenAIServer(t, matOpenAICfg{truncateTo: 2048, chatTokens: 80, apiTags: true})
 				return matRecord(t, srv.URL, t.TempDir())
@@ -1030,7 +1032,7 @@ func TestFirstRunMatrix(t *testing.T) {
 		},
 		{
 			name:          "auth-required",
-			gapWhy:        "401 on every route: the server's sentence is quoted, but the only lever offered (--wait 30s) answers a starting server, not authentication — nothing mentions keys or auth",
+			gapWhy:        "401 on every route: the server's sentence is quoted, but the only lever offered (--wait 30s) answers a starting server, not authentication — classifying 401/403 in classifyProps and giving the attach door an auth hint is the recorder's to write (owner: recorder track)",
 			causeMarkers:  []string{"Invalid API key"},
 			leverMismatch: "the only lever printed (--wait 30s) answers a server that is still starting, not one refusing authentication; no flag, command or setting for auth is offered",
 			run: func(t *testing.T) *matOutcome {
@@ -1042,9 +1044,10 @@ func TestFirstRunMatrix(t *testing.T) {
 			},
 		},
 		{
-			name:         "rate-limited",
-			gapWhy:       "two of four streams are refused with 429 and the explanation is good (server words + 'fewer --sessions'), but the process exits 0 — a wrapper script cannot tell this run from a clean one",
-			causeMarkers: []string{"Too Many Requests"},
+			name:          "rate-limited",
+			wantExplained: "yes", // pinned 2026-09-21: the server's words plus 'fewer --sessions' held through the share-block changes
+			gapWhy:        "two of four streams are refused with 429 and the explanation is good (server words + 'fewer --sessions'), but the process exits 0 — a wrapper script cannot tell this run from a clean one; the exit code is the lead's call, not this track's",
+			causeMarkers:  []string{"Too Many Requests"},
 			run: func(t *testing.T) *matOutcome {
 				cfg := fast
 				cfg.chatGate = func(call int) matGate {
@@ -1059,7 +1062,11 @@ func TestFirstRunMatrix(t *testing.T) {
 		},
 		{
 			name:   "stream-dies-midway",
-			gapWhy: "one of four streams is cut mid-answer: exit 0, the failure block quotes Go transport jargon ('unexpected EOF') rather than a plain statement, and the lever line deliberately offers no action",
+			gapWhy: "one of four streams is cut mid-answer: exit 0, and the lever now names the likely cause (the server may have crashed or been killed; its log says which) — but the ✗ line still quotes Go transport words ('unexpected EOF') because the wrap site (internal/server/stream.go) is the recorder's, and no toktape flag exists for a crashed server (owner: recorder track for the plain sentence)",
+			// causeMarkers added 2026-09-21 with the lever that names the
+			// cause in plain words; before it, no wording this audit would
+			// call recognisable ever reached the user.
+			causeMarkers: []string{"crashed or been killed"},
 			run: func(t *testing.T) *matOutcome {
 				cfg := fast
 				cfg.chatGate = func(call int) matGate {
@@ -1073,9 +1080,14 @@ func TestFirstRunMatrix(t *testing.T) {
 			},
 		},
 		{
-			name:         "model-answers-instantly",
-			gapWhy:       "the model stopped at 8 tokens on every stream: exit 0, the short_generation caveat states the fact but names no lever — no --for, no prompt advice",
-			causeMarkers: []string{"short generation"},
+			// Pinned 2026-09-21: the short_generation caveat names --prompt and
+			// the closing block says the run is not a usable measurement. The
+			// row stays deliberately NOT usable — a model that answers in 8
+			// tokens is honestly a sample, whatever the tool prints.
+			name:          "model-answers-instantly",
+			wantUsable:    "no",
+			wantExplained: "yes",
+			causeMarkers:  []string{"short generation"},
 			run: func(t *testing.T) *matOutcome {
 				cfg := fast
 				cfg.chatTokens = 8
