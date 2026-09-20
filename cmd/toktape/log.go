@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/midagedev/toktape/internal/tape"
 	"io"
 	"os"
 	"sort"
@@ -330,13 +331,15 @@ func logTable(rows []ledger.Row) string {
 	return table(header, out, right)
 }
 
-// shortDate trims a stored RFC3339 timestamp to the minute, in the reader's
-// own timezone. A ledger copied from another machine keeps its offset, so the
-// conversion is what makes two rigs' rows comparable at a glance.
+// shortDate trims a stored RFC3339 timestamp to the minute and keeps the
+// offset it was written with (tape.Stamp; user, 2026-09-21). It used to
+// convert to the reader's zone so two rigs' rows compared at a glance; the
+// offset on the row does that without making the output depend on where it
+// is read.
 func shortDate(v string) string {
 	t, ok := parseTime(v)
 	if !ok {
 		return ""
 	}
-	return t.Local().Format("2006-01-02 15:04")
+	return tape.Stamp(t)
 }

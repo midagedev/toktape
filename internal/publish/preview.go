@@ -30,7 +30,7 @@ func Preview(view *tape.Tape, idx Index, opts Options) string {
 
 	fmt.Fprintf(&b, "Publishing %s\n", nonEmpty(s.ID, "a run with no id"))
 	fmt.Fprintf(&b, "  visibility     %s\n", visibility(opts))
-	fmt.Fprintf(&b, "  recorded       %s\n", s.StartedAt.Format("2006-01-02 15:04:05 MST"))
+	fmt.Fprintf(&b, "  recorded       %s\n", tape.Stamp(s.StartedAt))
 	b.WriteString("\n")
 
 	b.WriteString("What is in it\n")

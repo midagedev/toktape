@@ -1491,3 +1491,24 @@ type PromptProgress struct {
 	Processed int           `json:"processed"`
 	TimeMs    float64       `json:"time_ms"`
 }
+
+// StampLayout is how a moment is written for a reader, everywhere text shows
+// one: ISO 8601 to the minute with the UTC offset, "2026-09-21T04:40+09:00"
+// ("…Z" for UTC itself). One token with no space, so it stays one column in a
+// table and one field to a script.
+const StampLayout = "2006-01-02T15:04Z07:00"
+
+// Stamp writes t in StampLayout, in the zone t already carries — for a tape,
+// the recorder's — and never converts it to the viewer's (user, 2026-09-21:
+// "UTC 기준에 오프셋 표시하는 표준 표기"). The hero was recorded at 04:40
+// +09:00; surfaces that called Local() drew 09-21 in Seoul and 09-20 on a UTC
+// CI box, so one recording had two dates and the frame goldens split by
+// continent. With the offset on the page the instant is unambiguous wherever
+// it is read, and the same bytes come out everywhere. "" for the zero time:
+// unknown is not printed as a date.
+func Stamp(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(StampLayout)
+}

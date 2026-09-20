@@ -96,9 +96,11 @@ func TestFromTapeSingleStream(t *testing.T) {
 			t.Errorf("%s = %q, want %q", col, got, w)
 		}
 	}
-	// started_at carries this reader's own offset, so it is built through the
-	// same conversion rather than hard-coded to one timezone.
-	if got, w := get(t, tp, "started_at"), card.Example().StartedAt.Local().Format(time.RFC3339); got != w {
+	// 2026-09-21 (user: dates keep the offset they were written with): this
+	// asserted the reader's own offset, built through Local(). started_at is
+	// now the tape's own moment, so the expectation is a literal and holds in
+	// every timezone the suite runs in.
+	if got, w := get(t, tp, "started_at"), card.Example().StartedAt.Format(time.RFC3339); got != w {
 		t.Errorf("started_at = %q, want %q", got, w)
 	}
 	// The two devices held 23.8 and 22.8 GiB at the end of the run.

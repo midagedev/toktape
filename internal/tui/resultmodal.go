@@ -64,7 +64,13 @@ func resultModal(m Model, th Theme, boxW int) []string {
 	// Omitted rather than faked when the tape carries no time.
 	var dateSeg string
 	if !s.StartedAt.IsZero() {
-		dateSeg = " " + s.StartedAt.Local().Format("2006-01-02") + " "
+		// The moment is the recorder's, offset and all (tape.Stamp), not the viewer's
+		// (lead, 2026-09-21). This read StartedAt.Local(), so a hero recorded
+		// at 04:40 +09:00 drew "09-21" in Seoul and "09-20" on a UTC CI box:
+		// a replay that depended on where it was watched, which is the one
+		// thing a replay may not do — and the frame goldens caught it only
+		// because this recording crossed midnight between the two zones.
+		dateSeg = " " + tape.Stamp(s.StartedAt) + " "
 	}
 	title = truncate(title, boxW-6-width(dateSeg))
 	fill := boxW - 3 - width(title) - width(dateSeg)

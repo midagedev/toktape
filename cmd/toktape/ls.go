@@ -52,7 +52,7 @@ func runLs(c *cli, args []string) int {
 			orUnknown(s.Model.Quant),
 			formatRate(summaryRate(s)),
 			fmt.Sprintf("%d", s.Concurrency),
-			s.StartedAt.Local().Format("2006-01-02 15:04"),
+			tape.Stamp(s.StartedAt),
 		})
 	}
 	if len(rows) == 0 {

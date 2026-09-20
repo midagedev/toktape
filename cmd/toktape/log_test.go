@@ -92,10 +92,11 @@ func TestLogVerbBuildsTheLedger(t *testing.T) {
 	if len(rows) != 4 {
 		t.Fatalf("the table has %d rows, want 4:\n%s", len(rows), stdout)
 	}
-	// Newest first. The expected date is built through the same conversion
-	// the table uses, so the assertion holds in whatever timezone the suite
-	// runs in.
-	newest := card.ExampleConcurrent().StartedAt.Local().Format("2006-01-02 15:04")
+	// Newest first. 2026-09-21 (user): a date is tape.Stamp — ISO 8601 with
+	// the offset the run was recorded at, never converted to the reader's
+	// zone — so it is one field now ("2026-09-14T00:02+09:00", was the two
+	// fields "2026-09-14 00:02"), and TAG below moved from column 2 to 1.
+	newest := tape.Stamp(card.ExampleConcurrent().StartedAt)
 	if !strings.HasPrefix(rows[0], newest) {
 		t.Errorf("the first row is %q, want the newest run at %s", rows[0], newest)
 	}
@@ -103,7 +104,7 @@ func TestLogVerbBuildsTheLedger(t *testing.T) {
 	// "-" (lead, 2026-09-13): an absent tag is "the user gave none", not an
 	// unobserved measurement, so it is a dash rather than the "?" the
 	// numeric columns use for unknowns.
-	if got := column(rows[0], 2); got != "-" {
+	if got := column(rows[0], 1); got != "-" {
 		t.Errorf("the untagged run's TAG column = %q, want -", got)
 	}
 	if !strings.Contains(rows[0], "72.9") {
@@ -124,7 +125,7 @@ func TestLogVerbSortDecode(t *testing.T) {
 	}
 	var tags []string
 	for _, r := range rows {
-		tags = append(tags, column(r, 2))
+		tags = append(tags, column(r, 1))
 	}
 	if want := []string{"ngl=99", "ngl=60", "ngl=40"}; strings.Join(tags, ",") != strings.Join(want, ",") {
 		t.Errorf("--sort decode gave %v, want %v (fastest first)", tags, want)
@@ -211,7 +212,7 @@ func TestLogVerbExportsLeaveUnknownsEmpty(t *testing.T) {
 
 	// The same run on the terminal prints "?" for the tag it does not have.
 	_, table, _ := exec(t, "log", "--out", dir)
-	if got := column(rowsOf(table)[0], 2); got != "-" {
+	if got := column(rowsOf(table)[0], 1); got != "-" {
 		t.Errorf("the human table's TAG column = %q, want -", got)
 	}
 }

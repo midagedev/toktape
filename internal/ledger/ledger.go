@@ -129,10 +129,12 @@ func FromTape(tp *tape.Tape) Row {
 
 	set("id", s.ID)
 	if !s.StartedAt.IsZero() {
-		// Local time with its offset: the person reading the ledger ran the
-		// sweep in their own timezone, and the offset keeps the column
-		// sortable and parseable anywhere.
-		set("started_at", s.StartedAt.Local().Format(time.RFC3339))
+		// The time as the tape wrote it, offset included (2026-09-21, with
+		// tape.Stamp): a recorder stamps its own zone, so this is local time
+		// for the person who ran the sweep, and a tape from another rig keeps
+		// that rig's offset instead of being moved into this machine's zone —
+		// the same row comes out wherever the ledger is rebuilt.
+		set("started_at", s.StartedAt.Format(time.RFC3339))
 	}
 	if s.ID != "" {
 		set("tape", s.ID+tape.Ext)

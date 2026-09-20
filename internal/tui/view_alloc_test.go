@@ -118,6 +118,11 @@ func sampleKey(s viewSample) string {
 // moved). The regenerated hero frames were eyeballed through tuidump before
 // being accepted: four streams on the new 20-second clock, ttft 8.25 s /
 // 8.45 s, no place names.
+// 2026-09-21: the eight *-card lines were regenerated when the result modal's
+// date became tape.Stamp ("2026-09-21T04:40+09:00": the recorder's moment with
+// its offset, never the viewer's day). The old lines were generated in Seoul
+// and failed on the UTC CI box, because the modal called StartedAt.Local().
+// Only card frames moved; every non-modal frame kept its hash.
 func TestViewFramesPinned(t *testing.T) {
 	sweep, hero := loadViewTapes(t)
 	samples := viewSamples(sweep, hero)
