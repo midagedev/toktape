@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/midagedev/toktape/internal/bandwidth"
-	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -538,7 +537,7 @@ func shortPromptCount(n int) bool {
 }
 
 // cacheHitCached is the run- and round-level "mostly served from the prefix
-// cache" test: hits of total at or above server.CachedHitRatio (TTP-88,
+// cache" test: hits of total at or above tape.CachedHitRatio (TTP-88,
 // 2026-09-19).
 //
 // It is the single owner of that question: CodeCachedPrefill asks it here
@@ -555,7 +554,7 @@ func cacheHitCached(hits, total int) bool {
 	if total <= 0 || hits <= 0 {
 		return false
 	}
-	return float64(hits)/float64(total) >= server.CachedHitRatio
+	return float64(hits)/float64(total) >= tape.CachedHitRatio
 }
 
 // cachedPrefill reports whether the run's prompt was substantially served

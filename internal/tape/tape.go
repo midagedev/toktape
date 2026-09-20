@@ -161,7 +161,7 @@ type RunSummary struct {
 	GPUsAtEnd []GPUSample   `json:"gpus_at_end,omitempty"`
 
 	// PromptSet is the published prompt set every stream of this run came
-	// from (server.PromptSetID, "prompts@v1"), and "" when any of them did
+	// from (server.PromptSetID, "prompts@v2"), and "" when any of them did
 	// not — a user's own prompts, or a mix (TTP-112).
 	//
 	// It is what makes a comparison set possible without a leaderboard: two
@@ -806,6 +806,28 @@ type RoundSpread struct {
 
 // CacheLabel is the cold/warm verdict printed on the card.
 type CacheLabel string
+
+// CachedHitRatio is the prefix-cache hit ratio at or above which a run is
+// labelled CacheCached ("prompt (mostly) served from prefix cache"). 0.5 is
+// the literal reading of "mostly".
+//
+// It moved here from internal/server (lead, 2026-09-20), where it lived as
+// that package's own reading of the sentence. The reading gained a second
+// reader — the card's caveat and explainer quote the same number — and one
+// reading with two readers needs the one home they both import, or the card
+// imports the whole server package for a float. That import edge was harmless
+// until the prompt set grew twenty-fold (TTP-144): the browser player pulls
+// the card, and through this constant it was pulling all 21 prompts into a
+// download it never renders. A policy constant beside the label it
+// interprets is the bend this package's measured-only discipline takes, dated
+// here; the rejected alternatives were raising the player's byte budget (390
+// KB more brotli for every reader, for text the reader never sees) and
+// duplicating the constant (two homes for one reading, free to drift).
+//
+// Note that a server re-evaluates at least the last prompt token to get
+// logits, so a 100% hit ratio is not reachable and a threshold of 1.0 would
+// make the label dead.
+const CachedHitRatio = 0.5
 
 const (
 	CacheCold   CacheLabel = "cold"   // maj faults during decode ≥ threshold

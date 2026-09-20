@@ -8,17 +8,10 @@ import (
 	"github.com/midagedev/toktape/internal/tape"
 )
 
-// CachedHitRatio is the prefix-cache hit ratio at or above which a run is
-// labelled tape.CacheCached ("prompt (mostly) served from prefix cache", per
-// the CacheCached doc in internal/tape/tape.go). 0.5 is the literal reading of
-// "mostly".
-//
-// It lives here rather than in tape because it is this package's reading of
-// that sentence, not a measured constant; see the report's schema proposals.
-// Note that a server re-evaluates at least the last prompt token to get
-// logits, so a 100% hit ratio is not reachable and a threshold of 1.0 would
-// make the label dead.
-const CachedHitRatio = 0.5
+// CachedHitRatio lived here from TTP-88 until 2026-09-20, when it moved to
+// internal/tape beside the label it interprets: the card reads it too, and
+// this package is not worth 390 KB of prompt text in the browser player that
+// imports the card. tape.CachedHitRatio is the one reading.
 
 // Reduce computes the client-side cross-check of one stream and returns the
 // complete tape.TimingsSummary: the server figures from rec.Timings unchanged
@@ -204,7 +197,7 @@ func CacheVerdict(t tape.TimingsSummary, majFaultsDecode uint64, predictedN int)
 	switch {
 	case predictedN > 0 && float64(majFaultsDecode)/float64(predictedN) >= tape.ColdMajFaultsPerToken:
 		out.Label = tape.CacheCold
-	case out.PromptTotal > 0 && out.HitRatio >= CachedHitRatio:
+	case out.PromptTotal > 0 && out.HitRatio >= tape.CachedHitRatio:
 		out.Label = tape.CacheCached
 	default:
 		out.Label = tape.CacheWarm

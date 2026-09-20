@@ -6,7 +6,6 @@ import (
 
 	"github.com/midagedev/toktape/internal/bandwidth"
 	"github.com/midagedev/toktape/internal/placement"
-	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -169,7 +168,7 @@ func explainRoundPrompt(p tape.RoundSummary) string {
 	switch {
 	case r.cached:
 		text := fmt.Sprintf("cache line: %d of %d cached (%s, cached from %s), %d evaluated",
-			r.cachedN, r.prompt, formatPct(r.hitRatio), formatPct(server.CachedHitRatio), r.evaluated)
+			r.cachedN, r.prompt, formatPct(r.hitRatio), formatPct(tape.CachedHitRatio), r.evaluated)
 		if r.rate > 0 {
 			text += " at " + formatRateUnit(r.rate)
 		}
@@ -196,7 +195,7 @@ func cachedPrefillReading(s *tape.RunSummary) string {
 		return "no prompt total recorded"
 	}
 	return fmt.Sprintf("cache %s hit (%d/%d), threshold %s",
-		formatPct(float64(hits)/float64(total)), hits, total, formatPct(server.CachedHitRatio))
+		formatPct(float64(hits)/float64(total)), hits, total, formatPct(tape.CachedHitRatio))
 }
 
 // countOrEmpty is n, or "" when it was never recorded, for orUnknown.

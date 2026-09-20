@@ -680,7 +680,7 @@ const maxRoundsListed = 8
 //
 // A round goes on one of the two lines, never both, and readRoundPrompt
 // decides which. A prompt mostly served from the prefix cache, by the reading
-// that labels a whole run "cached" (server.CachedHitRatio), has a rate over the
+// that labels a whole run "cached" (tape.CachedHitRatio), has a rate over the
 // few hundred tokens the server re-evaluated at the end of a long context. That
 // is not the prefill of a prompt that long, and next to the cold rounds it
 // would read as one, so the cache line gives such a round its hit and its

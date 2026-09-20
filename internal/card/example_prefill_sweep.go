@@ -53,7 +53,7 @@ import (
 //	           prompt_per_second the mean of the four rates, 88.6 tok/s — the
 //	           figure the Prefill row prints, and the one the Prompts row's
 //	           prefill line exists to take apart.
-//	cache      3969 of 17416 is 23 %, under server.CachedHitRatio: the run is
+//	cache      3969 of 17416 is 23 %, under tape.CachedHitRatio: the run is
 //	           "warm" although one round in four was 97 % cached.
 //	aggregate  1024 tokens over the four decode windows, 57.87 s, 17.7 tok/s;
 //	           prefill 53786 tokens over 661.3 s of prompt_ms, 81.3 tok/s.
