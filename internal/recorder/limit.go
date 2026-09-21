@@ -105,6 +105,21 @@ const (
 	// cut have reached the floor. It is short next to a decode step on any
 	// machine, so the cut lands within a token of the moment it becomes legal.
 	floorPoll = 10 * time.Millisecond
+	// openAICutGraceShare is the share of For the clock may hold its cut
+	// back on a ServerOpenAI run, waiting for the live streams to end on
+	// their own (TTP-170, 2026-09-21). On that one kind a cut destroys the
+	// whole measurement — the server counts tokens only in a closing usage
+	// message, and a cancelled stream never gets one — so where the floor
+	// already holds the cut back to keep a measurement VALID, the grace
+	// holds it back to keep the measurement AT ALL. Half the clock again is
+	// sized against the day it was measured: the six overrun caps needed up
+	// to 4.4 s past a 20 s clock (0.22 x For), and half covers that class
+	// with margin while keeping the bound honest — a 20 s ask can become at
+	// most 30 s, so a pathological server cannot hang the run. Every other
+	// kind gets no grace at all: on llama.cpp a cut stream still reports its
+	// timings, the same cut costs nothing, and the clock's behaviour is
+	// byte-identical to before this existed.
+	openAICutGraceShare = 0.5
 )
 
 // limit resolves the five rows of the table `--help` prints, once per run.
@@ -197,6 +212,15 @@ func limitOf(asked tape.LimitSummary, cutAt time.Duration, recs []tape.RequestRe
 // a request and generates nothing — but that is the package's existing
 // contract ("the only deadline is ctx", internal/server Client.Stream), not a
 // new hazard, and the caller's own context is still the way out of it.
+//
+// The grace (TTP-170, 2026-09-21) is a second, bounded hold with a different
+// job: on a ServerOpenAI run — the kind whose streams report nothing without
+// a closing usage message — the cut does not shorten the measurement, it
+// destroys it, so within openAICutGraceShare x For of the budget the cut also
+// waits for the live streams to end on their own. Unlike the floor it is
+// bounded: when the allowance runs out the cut fires exactly as it always
+// did. The allowance is recorded on LimitSummary.Grace as it is armed, so a
+// reader tells a run that went long on purpose from one whose floor held it.
 type clock struct {
 	cancel  context.CancelFunc
 	stopped chan struct{} // closed by stop
@@ -227,6 +251,17 @@ func (r *run) startClock(ctx context.Context, st *state, origin time.Time) (cont
 	cctx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	min := r.limit.MinTokens
+	// The grace is armed before the goroutine starts so the allowance is on
+	// the limit whatever the clock then does with it: Grace records what
+	// WAS allowed, and CutAt — read against For — says whether any of it
+	// was spent. It exists only on the kind whose cut destroys the
+	// measurement; arming it changes nothing about when the cut fires on
+	// any other kind.
+	grace := time.Duration(0)
+	if r.kind == tape.ServerOpenAI {
+		grace = time.Duration(openAICutGraceShare * float64(r.limit.For))
+		r.limit.Grace = grace
+	}
 	go func() {
 		defer close(c.exited)
 		timer := time.NewTimer(r.limit.For)
@@ -238,10 +273,28 @@ func (r *run) startClock(ctx context.Context, st *state, origin time.Time) (cont
 			return
 		case <-timer.C:
 		}
-		// The budget is up; the floor decides when the cut is legal.
+		// The budget is up. The floor decides when the cut is legal, the
+		// grace whether cutting now buys anything, and they compose into one
+		// wait: the cut lands on the first poll at which the floor is
+		// satisfied AND (no grace remains OR nothing is live any more). With
+		// no grace that is the floor alone — today's behaviour, byte for
+		// byte; with a grace and nothing live (every stream already ended on
+		// its own) it breaks at once, so the common capped run is not held.
+		live := func() bool {
+			for _, on := range st.cutSnapshot() {
+				if on {
+					return true
+				}
+			}
+			return false
+		}
+		deadline := time.Now().Add(grace)
 		tick := time.NewTicker(floorPoll)
 		defer tick.Stop()
-		for !st.atFloor(min) {
+		for {
+			if st.atFloor(min) && (grace <= 0 || !live() || !time.Now().Before(deadline)) {
+				break
+			}
 			select {
 			case <-c.stopped:
 				return

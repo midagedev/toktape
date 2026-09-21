@@ -303,21 +303,32 @@ func TestOpenAIFirstRunCalibratedCapBeatsTheClock(t *testing.T) {
 					t.Fatalf("%d requests, want %d", len(tp.Requests), n)
 				}
 
-				// The cap the calibration planned: 0.8 x its own measured
-				// rate x For / N, floored at tape.MinCutTokens, never above
-				// what was there. The expectation is taken from the
+				// The cap the calibration planned: 0.65 x its own measured
+				// rate x 3/4 of For / N, floored at tape.MinCutTokens, never
+				// above what was there. The expectation is taken from the
 				// calibration the tape carries — the planted rate is
 				// firstRunRate's, and the measured one carries this fake's
 				// few per cent of real wall around it, exactly as the
 				// firsttry gate takes its target from the probe's own fit.
+				//
+				// Re-pinned 2026-09-21 (TTP-170): the 0.8 sat at the centre
+				// of the measured long-context slowdown (actual/calibrated
+				// 0.729-0.808 over five runs on one box) and reserved no
+				// prefill when the point was missing, so every cap of the
+				// day's six landed above its clock. The derate is now 0.65
+				// (recorder.calibrationDecodeShare, below the measured
+				// floor), and with no prefill point on this fake a quarter
+				// of the clock is reserved (recorder.planPrefillShare) —
+				// old wantCap 0.8 x rate x For / N, new 0.65 x rate x
+				// 0.75 x For / N.
 				if s.Probe == nil || s.Probe.Calibration == nil {
 					t.Fatalf("Probe.Calibration = nil, want the one-request decode calibration")
 				}
 				cal := s.Probe.Calibration
-				wantCap := int(0.8 * cal.PerSecond * firstRunFor.Seconds() / float64(n))
+				wantCap := int(0.65 * cal.PerSecond * 0.75 * firstRunFor.Seconds() / float64(n))
 				wantCap = max(wantCap, tape.MinCutTokens)
 				if s.Limit.MaxTokens != wantCap {
-					t.Errorf("Limit.MaxTokens = %d, want %d (0.8 x the calibrated %.0f tok/s x %s / %d)",
+					t.Errorf("Limit.MaxTokens = %d, want %d (0.65 x the calibrated %.0f tok/s x 0.75 x %s / %d)",
 						s.Limit.MaxTokens, wantCap, cal.PerSecond, firstRunFor, n)
 				}
 				if s.Limit.MaxTokensNamed {

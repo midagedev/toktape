@@ -2,6 +2,7 @@ package recorder
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -549,6 +550,19 @@ func fitPrefill(points []tape.PrefillPoint) (perSecond, fixedMs float64) {
 // once, the run plan turns it into an answer cap every stream reaches before
 // the clock, and the clock stays armed behind it as the guard it always was.
 const (
+	// calibrationDecodeShare is the share of the calibration's decode rate
+	// the cap may promise, because decode at the run's own prompt length
+	// runs slower than the calibration measured at its short one — the KV
+	// cache the prompt leaves behind is paid on every token. Five runs on
+	// one unchanged box (M1 Pro, Ollama 0.34.2, llama3.2:1b, ~6,150-token
+	// prompts, 2026-09-21) measured actual/calibrated at 0.798, 0.808,
+	// 0.786, 0.787 and 0.729, and the 0.8 this replaces sat at the centre
+	// of that spread: wrong half the time, and all five caps landed above
+	// their 20 s clock (TTP-170). A factor set to a centre loses the race
+	// on every run slower than the middle; 0.65 is below the slowest run
+	// measured, with the margin a wider spread on another box still has to
+	// get through (and the clock's grace behind it when one does).
+	calibrationDecodeShare = 0.65
 	// calibrationTokens is the answer cap the calibration request carries.
 	// Long enough that (n-1)/decode_ms is not one chunk's jitter, short
 	// enough to cost about a second at 50 tok/s — the two bounds of the
@@ -741,7 +755,24 @@ func (r *run) calibratePrefill(ctx context.Context, first []server.StreamRequest
 		rec.Timings.PromptNSource != "usage" {
 		return nil
 	}
+	// The span removes the fixed request overhead BOTH requests pay — queue,
+	// HTTP, tokenize — so the quotient below is the prompt's own marginal
+	// cost. The subtraction is clamped at subtracting nothing: its purpose
+	// is to remove what the two requests share, and a decode calibration
+	// that paid the model's load (the first request a cold server serves)
+	// carries that load in its TTFT while this request, sent after it, did
+	// not pay it — the raw difference went negative and silently dropped
+	// the point exactly on the coldest box (measured 2026-09-21, six runs:
+	// cal.ttft_ms 1094.2 and 1611.7 on the two cold runs, no point; 72.8,
+	// 82.8 and 107.6 on the warm ones, point present, spans 462–494 ms —
+	// TTP-170). When the clamp fires, the overhead this request DID pay
+	// stays inside the span, which under-states the rate and so reserves
+	// more clock than the prompt needs — the safe side for a budget. A warm
+	// run's span is positive and is subtracted exactly as before.
 	span := rec.Timings.TTFTMs - cal.TTFTMs
+	if span < 0 {
+		span = rec.Timings.TTFTMs
+	}
 	if rec.Timings.PromptN < calibrationPrefillMinPromptN || span < calibrationPrefillMinMs {
 		return nil
 	}
@@ -767,27 +798,32 @@ func (r *run) calibratePrefill(ctx context.Context, first []server.StreamRequest
 // binding half it ends with). rounds is every slice the run will send; one
 // run sends one shape, so the cap lands on all of them.
 //
-// The cap: 0.8 x the measured decode rate x whatever clock is left after
-// the prefill the plan chose is predicted to take, divided over the
-// streams. A server that batches gives each of N streams at least rate/N;
-// one that serialises (Ollama with OLLAMA_NUM_PARALLEL=1) finishes them one
-// after another in N x cap/rate — both land inside the clock, so every
-// stream ends on its own and its usage chunk arrives. The prefill is
-// predicted SERIALLY (N x tokens / rate): nothing measured this server's
-// concurrent prefill, and Ollama at parallel 1 is literally serial, so the
-// serial prediction is the one that cannot promise time the box has not
-// been heard to deliver (a batching server then finishes early, which costs
-// nothing).
+// The cap: calibrationDecodeShare (0.65, below the measured floor of the
+// long-context slowdown — its constant) x the measured decode rate x
+// whatever clock is left after the prefill the plan chose is predicted to
+// take, divided over the streams. A server that batches gives each of N
+// streams at least rate/N; one that serialises (Ollama with
+// OLLAMA_NUM_PARALLEL=1) finishes them one after another in N x cap/rate —
+// both land inside the clock, so every stream ends on its own and its usage
+// chunk arrives. The prefill is predicted SERIALLY (N x tokens / rate):
+// nothing measured this server's concurrent prefill, and Ollama at parallel
+// 1 is literally serial, so the serial prediction is the one that cannot
+// promise time the box has not been heard to deliver (a batching server
+// then finishes early, which costs nothing).
 //
-// The 0.8 is what absorbs the two honest unknowns left: decode at the run's
-// prompt length runs slower than the calibration measured at its short one
-// (86 tok/s at a ~6k-token context against 104-110 at 58 tokens, Ollama
-// 0.34.2, 2026-09-21 — the KV cache the prompt leaves behind is paid on
-// every token), and a prefill price measured on 4 kB extrapolated to the
-// run's own prompts carries a few per cent of its own. Both push the same
-// direction; when they bite anyway the clock stays armed behind the cap and
-// the run is cut, cut and caveat included, exactly as it was before the cap
-// existed.
+// When no prefill point was observed, planPrefillShare of the clock is
+// reserved instead of nothing (TTP-170, 2026-09-21): both cold runs of the
+// day's six lost their point to a negative span (calibratePrefill's clamp
+// is the fix) and sized their caps as if TTFT were zero — 4.1 s of a 20 s
+// clock given away. The plan's own share is the reserve because it is the
+// same fraction the plan would have budgeted prefill with had it been able
+// to price it.
+//
+// When the derate and the reserve still lose the race — a box with a wider
+// spread than the five runs the share was set from — the clock's grace
+// (limit.go) waits, bounded, for the streams to end on their own rather
+// than destroying the measurement; and if the grace runs out too, the run
+// is cut, cut and caveat included, exactly as it was before the cap existed.
 //
 // The floor is tape.MinCutTokens, the same minimum the clock's own cut
 // respects: below tape.MinDecodeTokens a rate is not a rate at all, and
@@ -810,8 +846,12 @@ func (r *run) applyCalibratedCap(rounds ...[]server.StreamRequest) {
 	}
 	// The prefill the plan's own lengths are predicted to cost, serial over
 	// the streams: the longest prompt as sent, priced on the same ruler the
-	// plan priced it with.
+	// plan priced it with. With no point to price it, the plan's own share
+	// of the clock is reserved instead — the prompts still cost prefill the
+	// clock pays before the first token, and reserving nothing is how the
+	// day's cold runs gave 4.1 s of a 20 s clock away (TTP-170).
 	budget := r.limit.For.Seconds()
+	reserved := 0.0
 	if pf := r.calibrationPrefill(); pf != nil && pf.PerSecond > 0 {
 		longest := 0
 		for i := range first {
@@ -819,13 +859,16 @@ func (r *run) applyCalibratedCap(rounds ...[]server.StreamRequest) {
 				longest = est
 			}
 		}
-		budget -= float64(max(r.opts.Concurrency, 1)) * float64(longest) / pf.PerSecond
-		if budget < 0 {
-			budget = 0
-		}
+		reserved = float64(max(r.opts.Concurrency, 1)) * float64(longest) / pf.PerSecond
+	} else {
+		reserved = planPrefillShare * r.limit.For.Seconds()
+	}
+	budget -= reserved
+	if budget < 0 {
+		budget = 0
 	}
 	streams := max(r.opts.Concurrency, 1)
-	cap := int(0.8 * cal.PerSecond * budget / float64(streams))
+	cap := int(calibrationDecodeShare * cal.PerSecond * budget / float64(streams))
 	cap = max(cap, tape.MinCutTokens)
 	if cap < r.limit.MaxTokens {
 		for _, rd := range rounds {
@@ -841,6 +884,37 @@ func (r *run) applyCalibratedCap(rounds ...[]server.StreamRequest) {
 		r.limit.MaxTokens = cap
 		r.opts.MaxTokens = cap
 		r.calibCapped = true
+		// What the cap predicted, said where a reader reaches it (TTP-170):
+		// the run used to print the cap it chose and never the prediction
+		// behind it, and diagnosing a cut run was a session of guessing. A
+		// note rather than a schema field because every input of the
+		// prediction is already on the tape — the calibration's rate and
+		// prefill point (Probe.Calibration), the reserved share's fallback
+		// rule, the cap (Limit.MaxTokens) — so `-o json` carries them all
+		// and the note is the same arithmetic spoken beside the plan line.
+		//
+		// The figure is a BAND, and the reason is arithmetic (lead,
+		// 2026-09-21): the cap is chosen as share x rate x budget, so
+		// cap / (share x rate) is the budget back again and a single
+		// "predicted finish" would print the clock every time on a
+		// one-stream run — a checksum of its own sum, not a fact about the
+		// box. The two ends are the ones a reader can be wrong between: at
+		// the rate the calibration actually measured, and at the derated
+		// rate the cap was bought at. A run that lands inside the band went
+		// as planned; one that is cut anyway came in slower than the
+		// derate, which is the sentence the next diagnosis needs and could
+		// not get.
+		fast := reserved + float64(cap)/cal.PerSecond
+		slow := reserved + float64(cap)/(calibrationDecodeShare*cal.PerSecond)
+		r.emit(Event{Kind: EventNote, Stream: -1, Message: fmt.Sprintf(
+			"cap %s: %s tok/s calibrated, %s s prefill reserved, so the run finishes in %s-%s s of the %s s clock (the high end assumes %s of the calibrated rate, which is what the cap was bought at)",
+			commaInt(cap),
+			strconv.FormatFloat(cal.PerSecond, 'f', 0, 64),
+			strconv.FormatFloat(reserved, 'f', 1, 64),
+			strconv.FormatFloat(fast, 'f', 1, 64),
+			strconv.FormatFloat(slow, 'f', 1, 64),
+			strconv.FormatFloat(r.limit.For.Seconds(), 'f', 0, 64),
+			strconv.FormatFloat(calibrationDecodeShare, 'f', 2, 64))})
 	}
 	// The plan names its limit when the cap landed: markCalibrationPlan
 	// guards on calibCapped, exactly as it did when the cap was applied
