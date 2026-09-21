@@ -35,6 +35,9 @@ const capMovedFraction = 0.01
 // A few degrees is the normal breathing of a part under load; 5 °C is the
 // point at which the reader is looking at a different thermal situation, and
 // it is also comfortably above the 1 °C granularity the card prints.
+//
+// It is a distance, not a direction. Which directions are worth printing is
+// tempClause's question and is answered there (TTP-140).
 const tempMovedC = 5
 
 // conditionsLine is the one-line warning that the machine was not the same at
@@ -78,10 +81,13 @@ func conditionsClauses(s *tape.RunSummary) []string {
 		return nil
 	}
 	var clauses []string
-	if c := capClause(start.CPUMaxKHz, end.CPUMaxKHz); c != "" {
-		clauses = append(clauses, c)
+	// The cap clause is computed first because the temperature clause needs to
+	// know whether there is a cap movement for it to explain (TTP-140).
+	capMove := capClause(start.CPUMaxKHz, end.CPUMaxKHz)
+	if capMove != "" {
+		clauses = append(clauses, capMove)
 	}
-	if c := tempClause(start, end); c != "" {
+	if c := tempClause(start, end, capMove != ""); c != "" {
 		clauses = append(clauses, c)
 	}
 	return clauses
@@ -144,11 +150,35 @@ func formatGHzPair(startKHz, endKHz int64) (from, to string) {
 // way would be exactly the kind of number this repo refuses to print. An empty
 // sensor is no reading at all (tape.ContentionWitness), so TempC is then not a
 // figure either.
-func tempClause(start, end *tape.ContentionWitness) string {
+//
+// A RISE is only printed beside a cap that moved (TTP-140, 2026-09-21).
+// Warming up is what a machine does when it decodes for a minute: both runs
+// recorded on 2026-09-19 that did real work carried "conditions changed:
+// k10temp Tctl 47 → 58 °C" and nothing about them had changed. This file's
+// own opening says what the temperature is for — it is "usually the reason the
+// cap moved" — so with no cap movement to explain it is not a finding, it is
+// the null case, and a caveat that fires on the null case is not read. The
+// cards that carried it also carried "cold run: weights arrived from disk
+// while it decoded, 11.3 maj faults/token", in the same list at the same
+// weight.
+//
+// A FALL is printed on its own, and it is the reading this line could not make
+// before. A machine that is cooler at the end than at the start was hotter
+// when the run began than the run ever made it — it was still shedding heat
+// from something else. That is exactly "was already warm when it started",
+// the distinction the caveat's name claims to make, and comparing the two
+// edges is the only way the card can see it: nothing here knows an absolute
+// limit for an arbitrary sensor, and a threshold invented per chip would be a
+// number nobody measured.
+func tempClause(start, end *tape.ContentionWitness, capMoved bool) string {
 	if start.TempSensor == "" || start.TempSensor != end.TempSensor {
 		return ""
 	}
-	if math.Abs(end.TempC-start.TempC) < tempMovedC {
+	moved := end.TempC - start.TempC
+	if math.Abs(moved) < tempMovedC {
+		return ""
+	}
+	if moved > 0 && !capMoved {
 		return ""
 	}
 	return start.TempSensor + " " +

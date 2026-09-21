@@ -63,12 +63,43 @@ func TestConditionsLine(t *testing.T) {
 			want: "conditions changed: CPU cap 3.6 → 2.7 GHz",
 		},
 		{
-			name: "temperature rise alone",
+			// Re-pinned 2026-09-21 (TTP-140): this used to want the clause.
+			// A machine that decoded for a minute and ended 9 °C warmer at a
+			// cap that never moved is the null case — both runs recorded on
+			// 2026-09-19 that did real work carried exactly this line, and a
+			// caveat that fires on every working run is not read. The
+			// deliberate behaviour change is argued in tempClause's doc.
+			name: "a temperature rise at a steady cap is the machine working",
 			ws: []tape.ContentionWitness{
 				witnessAt(0, "start", 3600000, 41, k10),
 				witnessAt(0, "end", 3600000, 50, k10),
 			},
-			want: "conditions changed: k10temp Tctl 41 → 50 °C",
+			want: "",
+		},
+		{
+			// The reading this line could not make before (TTP-140): cooler
+			// at the end than at the start means it was hotter when the run
+			// began than the run ever made it, i.e. it was still shedding
+			// heat from something else. "Was already warm when it started" is
+			// the distinction the caveat's name claims to make, and this is
+			// the only way two edges can see it.
+			name: "a temperature fall is a machine that started hot",
+			ws: []tape.ContentionWitness{
+				witnessAt(0, "start", 3600000, 62, k10),
+				witnessAt(0, "end", 3600000, 50, k10),
+			},
+			want: "conditions changed: k10temp Tctl 62 → 50 °C",
+		},
+		{
+			// A rise still speaks when there is a cap movement for it to
+			// explain — which is what the temperature was always for
+			// (conditions.go's opening).
+			name: "a temperature rise beside a cap that moved",
+			ws: []tape.ContentionWitness{
+				witnessAt(0, "start", 3600000, 41, k10),
+				witnessAt(0, "end", 2700000, 50, k10),
+			},
+			want: "conditions changed: CPU cap 3.6 → 2.7 GHz · k10temp Tctl 41 → 50 °C",
 		},
 		{
 			name: "a cap that went up is a change too",
@@ -214,12 +245,28 @@ func TestConditionsShort(t *testing.T) {
 	if got := conditionsLine(changed); got != conditionsPrefix+"CPU cap 3.6 → 2.7 GHz · k10temp Tctl 41 → 50 °C" {
 		t.Errorf("the long form lost a clause or its sentence: %q", got)
 	}
-	// A run where only the temperature moved still says something.
-	warm := &tape.RunSummary{Contention: tape.ContentionInfo{Witnesses: []tape.ContentionWitness{
+	// Re-pinned 2026-09-21 (TTP-140). This used to hand ConditionsShort a
+	// warm-up and want the clause back; a rise at a steady cap now says
+	// nothing, so the case that exercises "the short form can carry a
+	// temperature-only clause" has to be one that still is one — a fall.
+	cooling := &tape.RunSummary{Contention: tape.ContentionInfo{Witnesses: []tape.ContentionWitness{
+		{Edge: "start", CPUMaxKHz: 3600000, TempC: 62, TempSensor: "k10temp Tctl"},
+		{Edge: "end", CPUMaxKHz: 3600000, TempC: 50, TempSensor: "k10temp Tctl"},
+	}}}
+	if got := ConditionsShort(cooling); got != "k10temp Tctl 62 → 50 °C" {
+		t.Errorf("a temperature-only change says %q", got)
+	}
+	// And the warm-up itself reaches neither form: one predicate, both
+	// renderings, so the PNG's environment line and the text card cannot
+	// disagree about whether this run's machine changed.
+	warmUp := &tape.RunSummary{Contention: tape.ContentionInfo{Witnesses: []tape.ContentionWitness{
 		{Edge: "start", CPUMaxKHz: 3600000, TempC: 41, TempSensor: "k10temp Tctl"},
 		{Edge: "end", CPUMaxKHz: 3600000, TempC: 55, TempSensor: "k10temp Tctl"},
 	}}}
-	if got := ConditionsShort(warm); got != "k10temp Tctl 41 → 55 °C" {
-		t.Errorf("a temperature-only change says %q", got)
+	if got := ConditionsShort(warmUp); got != "" {
+		t.Errorf("an ordinary warm-up still says %q", got)
+	}
+	if got := conditionsLine(warmUp); got != "" {
+		t.Errorf("an ordinary warm-up still says %q on the text card", got)
 	}
 }
