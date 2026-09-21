@@ -3,6 +3,7 @@ package placement
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/midagedev/toktape/internal/tape"
@@ -476,4 +477,70 @@ func TestLayersSummary(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestEstimateGPUViewNotTaken pins the difference between "there are no GPUs"
+// and "nobody looked" (TTP-178, 2026-09-21).
+//
+// Measured on an M1 Pro on 2026-09-21: brew llama-server on Metal reported
+// "offloaded 29/29 layers to GPU" and "MTL0_Mapped model buffer size =
+// 1217.35 MiB" in its own load log, while the recorded tape said the whole
+// 1.2 GiB sat on the CPU. toktape's GPU inventory is nvidia-smi, which is
+// absent on every Mac, so the device list was empty — and the estimate read
+// that emptiness as an observation.
+//
+// FAIL-first: before the fix the negative gpus was clamped to 0 by
+// EstimateVerbose's first statement, so this case returned a CPU device
+// holding every byte and both sub-tests below failed on the first check.
+func TestEstimateGPUViewNotTaken(t *testing.T) {
+	// The Mac shape: no inventory (-1) and no -ngl on the command line.
+	// llama.cpp's own default is "auto", so silence does not mean the CPU.
+	t.Run("unknown", func(t *testing.T) {
+		s, warns := EstimateVerbose(synModel(), tape.ServerFlags{}, -1, true)
+
+		if s.Source != SourceUnknown {
+			t.Errorf("Source = %q, want %q", s.Source, SourceUnknown)
+		}
+		if len(s.Devices) != 0 {
+			t.Fatalf("Devices = %v, want none: an unread inventory cannot name one", deviceNames(s))
+		}
+		// The tensor headers still say what is never loaded; that reading
+		// does not depend on where the layers went.
+		if s.NeverLoadedBytes != bNgram {
+			t.Errorf("NeverLoadedBytes = %d, want %d", s.NeverLoadedBytes, int64(bNgram))
+		}
+		// Layer 3 of the fix: the missing premise has to be visible. A silent
+		// unknown is what made this invisible for as long as it lasted.
+		if !slices.ContainsFunc(warns, func(w string) bool {
+			return strings.Contains(w, "GPU inventory not read")
+		}) {
+			t.Errorf("warnings = %q, want one naming the unread GPU inventory", warns)
+		}
+	})
+
+	// An explicit -ngl 0 is derivable without an inventory: whatever the
+	// machine has, nothing was offloaded to it.
+	t.Run("explicit ngl 0 stays derivable", func(t *testing.T) {
+		s := Estimate(synModel(), tape.ServerFlags{NGL: "0"}, -1, false)
+
+		if s.Source != SourceGGUFArgs {
+			t.Errorf("Source = %q, want %q", s.Source, SourceGGUFArgs)
+		}
+		if len(s.Devices) != 1 || s.Devices[0].Device != tape.DeviceCPU {
+			t.Fatalf("devices = %v, want CPU only", deviceNames(s))
+		}
+	})
+
+	// A read inventory that found nothing is unchanged: that zero is an
+	// observation and -ngl 99 on a machine with no card still means the CPU.
+	t.Run("observed zero is still an observation", func(t *testing.T) {
+		s := Estimate(synModel(), tape.ServerFlags{NGL: "99"}, 0, false)
+
+		if s.Source != SourceGGUFArgs {
+			t.Errorf("Source = %q, want %q", s.Source, SourceGGUFArgs)
+		}
+		if len(s.Devices) != 1 || s.Devices[0].Device != tape.DeviceCPU {
+			t.Fatalf("devices = %v, want CPU only", deviceNames(s))
+		}
+	})
 }

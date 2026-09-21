@@ -417,7 +417,7 @@ func (r *run) narrowPlacement(gpusAtEnd []tape.GPUSample) {
 	// lazy stays false as collectPlacement left it, and WithModel rides along
 	// so the per-device active bytes are filled the same way, over the
 	// narrowed device set.
-	sum, warns := placement.EstimateVerbose(r.tensors, r.flags, len(r.host.GPUs), false,
+	sum, warns := placement.EstimateVerbose(r.tensors, r.flags, r.placementGPUs(), false,
 		placement.WithModel(r.model),
 		placement.WithGPUIndices(inPlay))
 	// The re-estimate spreads tensors and knows nothing about the KV cache —
@@ -506,9 +506,10 @@ func (r *run) contention(samples []tape.RunSample) tape.ContentionInfo {
 	}
 	// The GPU side counts as observed whenever a real backend is open, even
 	// when it reported no foreign process: that zero is a reading. Only the
-	// Null collector means nothing was looked at.
-	_, noGPUBackend := r.gpus.(gpu.Null)
-	if load == 0 && (r.gpus == nil || noGPUBackend) && len(r.witnesses) == 0 {
+	// Null collector means nothing was looked at. gpuViewTaken is that
+	// sentence; it lives on run so the placement replay asks the same
+	// question this line does (TTP-178).
+	if load == 0 && !r.gpuViewTaken() && len(r.witnesses) == 0 {
 		r.warn("host load unknown, contention not judged")
 		return tape.ContentionInfo{}
 	}

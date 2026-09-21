@@ -92,8 +92,13 @@ func (o options) devices(gpus int) []int {
 // Estimate replays llama.cpp's placement rules over the tensor headers and
 // the server's flags.
 //
-// gpus is the number of GPU devices llama.cpp was given; with gpus == 0 every
-// tensor is on the CPU whatever -ngl said. Pass WithGPUIndices to spread the
+// gpus is the number of GPU devices llama.cpp was given, and it is a
+// tri-state: 0 means an inventory was taken and found no device, while a
+// NEGATIVE gpus means no inventory was taken at all and the device list may be
+// incomplete (TTP-178, 2026-09-21). The two are not the same claim and the
+// difference decides whether a placement can be derived — see the guard below.
+// With gpus == 0 every tensor is on the CPU whatever -ngl said. Pass
+// WithGPUIndices to spread the
 // estimate over the devices a measurement says are actually in play, named by
 // their host indices instead of position. lazy says whether the server loads
 // the n-gram / engram tables lazily; when it does, those bytes are reported as
@@ -117,6 +122,12 @@ func EstimateVerbose(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bo
 	for _, o := range opts {
 		o(&opt)
 	}
+	// A negative gpus is "nobody looked", not "there are none" — the one
+	// distinction this whole estimate turns on. Clamping it to 0 here, as
+	// this line used to do unconditionally, is what let a Mac's empty
+	// nvidia-smi view be replayed as a positive claim that every tensor sat
+	// in host RAM (TTP-178).
+	gpuViewTaken := gpus >= 0 || len(opt.gpuIndices) > 0
 	if gpus < 0 {
 		gpus = 0
 	}
@@ -152,8 +163,33 @@ func EstimateVerbose(tensors []Tensor, flags tape.ServerFlags, gpus int, lazy bo
 	if !nglOK && len(devices) > 0 {
 		// The flag that decides which layers were offloaded was not observed.
 		// Guessing a default here would print a device breakdown nobody
-		// measured, so the summary stays unknown. (With no device in play
-		// there is nothing to guess: llama.cpp keeps everything on the CPU.)
+		// measured, so the summary stays unknown.
+		//
+		// It used to return in silence, which made the missing premise
+		// invisible: the card printed "VRAM ?" and nothing said why. The
+		// warning rides RunSummary.Warnings and the card prints it verbatim
+		// (TTP-178, 2026-09-21).
+		warnings = append(warnings, "-ngl not observed, so where the layers went is unknown")
+		return sum, warnings
+	}
+	// The old parenthetical here read "with no device in play there is nothing
+	// to guess: llama.cpp keeps everything on the CPU". That is true of a
+	// machine with no GPU and false of a machine nobody asked. toktape's
+	// inventory is nvidia-smi, so it is empty on every Mac — and on 2026-09-21
+	// an M1 Pro running llama.cpp on Metal, which its own log reports as
+	// "offloaded 29/29 layers to GPU", was recorded as 1.2 GiB entirely on the
+	// CPU. The claim came from here (TTP-178).
+	//
+	// An unread inventory cannot name a device, so only one spelling stays
+	// derivable: an explicit -ngl 0 puts everything on the CPU whatever the
+	// machine has. Anything else is unknown.
+	//
+	// Note the boundary this leaves: the inventory is NVIDIA-only, so a ROCm
+	// or Vulkan card on Linux is still counted as absent. Asking the engine
+	// itself (llama.cpp's `--list-devices` names MTL0/CUDA0/... with capacity)
+	// is what closes that, and it needs the server's binary — TTP-178 stage 3.
+	if !gpuViewTaken && !(nglOK && ngl == 0) {
+		warnings = append(warnings, "GPU inventory not read, so where the layers went is unknown")
 		return sum, warnings
 	}
 

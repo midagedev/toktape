@@ -933,6 +933,41 @@ func (r *run) collectHost(ctx context.Context) {
 	r.host.GPUs = devices
 }
 
+// gpuViewTaken says whether anything actually looked at this machine's GPUs.
+//
+// A real backend that reported no device is a reading — that zero is
+// observed. Only the Null collector (nvidia-smi absent or unreadable) means
+// nothing was looked at, and the two must never collapse: the contention
+// judgement has drawn this line since it was written, and the placement
+// replay did not, which is how a Metal run came out as "all in host RAM"
+// (TTP-178, 2026-09-21). One owner now, so the next reader of the inventory
+// cannot forget it.
+func (r *run) gpuViewTaken() bool {
+	if r.gpus == nil {
+		return false
+	}
+	_, null := r.gpus.(gpu.Null)
+	return !null
+}
+
+// placementGPUs is gpuViewTaken folded into the tri-state placement.Estimate
+// takes: the device count when the inventory was read, and -1 when it was not.
+//
+// Only an EMPTY list is ambiguous. A list with devices in it is an
+// observation on its face — something enumerated them — so it is passed as
+// the count whatever backend the run is holding; the recorder's own fixtures
+// set host.GPUs without opening a collector and they are reading a real
+// inventory, not an unread one.
+func (r *run) placementGPUs() int {
+	if n := len(r.host.GPUs); n > 0 {
+		return n
+	}
+	if !r.gpuViewTaken() {
+		return -1
+	}
+	return 0
+}
+
 // collectPlacement replays llama.cpp's placement rules over the tensor
 // headers and the observed flags. Without a header there is nothing to
 // replay, and the summary says so rather than guessing a breakdown.
@@ -963,7 +998,7 @@ func (r *run) collectPlacement() {
 	// already filled. Without it the per-device field stays 0 and a reader
 	// falls back to the class-proportion estimate that under-counts a sparse
 	// MoE's router and shared expert.
-	sum, warns := placement.EstimateVerbose(r.tensors, r.flags, len(r.host.GPUs), false,
+	sum, warns := placement.EstimateVerbose(r.tensors, r.flags, r.placementGPUs(), false,
 		placement.WithModel(r.model))
 	r.place = sum
 	for _, w := range warns {
