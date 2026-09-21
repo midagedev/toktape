@@ -70,9 +70,16 @@ npx wrangler d1 migrations apply toktape --local >"$work/migrate.log" 2>&1 ||
 npx wrangler d1 execute toktape --local --command "DELETE FROM upload_rate" >"$work/rate.log" 2>&1 ||
   { cat "$work/rate.log"; die "could not clear the local rate counter"; }
 
+# The gate's own beacon token, never production's: wrangler.jsonc carries the
+# real one, and a dev server that inherited it would put the hub's site token
+# on pages served from 127.0.0.1. Thirty-two hex characters, because that is
+# the only shape src/analytics.js will print.
+gate_beacon="0123456789abcdef0123456789abcdef"
+
 say "wrangler dev on $base"
 npx wrangler dev --port "$port" --inspector-port 0 \
   --var "PUBLIC_BASE_URL:$base" --var "RATE_SALT:local-harness-salt" \
+  --var "CF_BEACON_TOKEN:$gate_beacon" \
   >"$work/dev.log" 2>&1 &
 dev_pid=$!
 for _ in $(seq 1 60); do
@@ -103,6 +110,20 @@ printf 'published %s\n' "$url"
 # receipt that names a host the run is not on looks exactly like one that
 # works until somebody clicks it.
 curl -fsS "$url" -o /dev/null || die "the receipt's own link does not open: $url"
+
+say "the page-view counter"
+# One beacon per HTML page, the sentence that discloses it on the same page,
+# and neither on anything that is not a page (src/analytics.js). Counted, not
+# grepped for presence: two beacons double every figure.
+for page in "$base/" "$url" "$base/r/nosuchrun00"; do
+  curl -sS "$page" >"$work/counted.html"
+  n="$(grep -o 'static.cloudflareinsights.com/beacon.min.js' "$work/counted.html" | wc -l | tr -d ' ')"
+  [ "$n" = 1 ] || die "$page carries $n beacons, want exactly 1"
+  grep -q "\"token\":\"$gate_beacon\"" "$work/counted.html" || die "$page: the beacon does not carry the configured token"
+  grep -q 'class="counted"' "$work/counted.html" || die "$page counts its visitors and does not say so"
+done
+curl -fsS "$base/api/v1/runs" >"$work/counted.json"
+grep -q 'cloudflareinsights' "$work/counted.json" && die "the JSON API was rewritten as if it were a page"
 
 say "the author and the note"
 # The profile is set once per machine (web/static/favicon.png is a 64x64

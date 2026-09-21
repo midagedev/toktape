@@ -104,7 +104,11 @@ npm run migrate:remote   # the real one, before the first deploy
 Migrations go first: deploying code that inserts into a table the remote
 database does not have yet is a window where every upload fails.
 
-**3. Name the service.** Set `vars.PUBLIC_BASE_URL` in `wrangler.jsonc` to
+**3. Name the service, and remove our page-view counter.** Delete
+`vars.CF_BEACON_TOKEN` from `wrangler.jsonc`: it is tape.midagedev.com's
+Cloudflare Web Analytics site, and with it gone no page carries a beacon or
+the sentence about one (`src/analytics.js`). Put your own site's token there
+if you want the count. Then set `vars.PUBLIC_BASE_URL` in `wrangler.jsonc` to
 the URL your Worker will answer on — every receipt's link, every `og:image`
 and the sitemap are built from it, and it is declared rather than derived
 from the request because `wrangler dev` simulates the configured route

@@ -23,7 +23,13 @@
     // tape.midagedev.com and a derived link would send a developer's own
     // publish to production. It is declared here and overridden with
     // `--var` where the service is not the one at this address.
-    "PUBLIC_BASE_URL": "https://tape.midagedev.com"
+    "PUBLIC_BASE_URL": "https://tape.midagedev.com",
+    // Cloudflare Web Analytics for tape.midagedev.com, a site of its own so
+    // the hub's figures are not mixed with the zone's other hosts. Public by
+    // nature (it is printed in every page). Hosting your own hub: delete this
+    // line and no page carries a beacon or the sentence about it
+    // (src/analytics.js).
+    "CF_BEACON_TOKEN": "89f8a44523b2461ca801e06bd4ed491e"
   },
   "routes": [
     {

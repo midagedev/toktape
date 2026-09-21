@@ -13,6 +13,7 @@
 // request body internal/publish/client_test.go parses; this side is written
 // against those, never the other way round.
 
+import { counted } from "./analytics.js";
 import { serveAvatar } from "./author.js";
 import { replaceCard } from "./card.js";
 import { deleteRun } from "./del.js";
@@ -90,7 +91,7 @@ function secured(resp) {
 
 export default {
   async fetch(request, env) {
-    return secured(await route(request, env));
+    return secured(counted(await route(request, env), env));
   },
 };
 
