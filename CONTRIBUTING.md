@@ -118,10 +118,13 @@ These are short because each one has a story behind it.
 - **Animation is a function of clip time.** Anything that moves on the live
   screen — cursor, bars, sparklines, spinner — takes `t` and never reads the
   wall clock, so a replay and a render draw identical frames.
-- **Strings are English.** Code, comments, UI strings and the English README.
-  `README.ko.md` and `README.ja.md` are maintained by the maintainer; when
-  you change a command or flag in `README.md`, mention it in the PR so the
-  other two can follow. Design documents are Korean.
+- **Strings are English.** Code, comments, UI strings, `README.md` and the
+  reference under `docs/`. The README is short on purpose — what it is, how
+  to install it, how to use it — and anything a reader looks up goes in
+  `docs/`, in English only. The four translated READMEs (`ko`, `ja`, `zh-CN`,
+  `zh-TW`) are maintained by the maintainer; when you change a command in
+  `README.md`, mention it in the PR so they can follow. Design documents are
+  Korean.
 
 ## Goldens
 

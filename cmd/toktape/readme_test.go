@@ -11,13 +11,20 @@ import (
 	"github.com/midagedev/toktape/internal/tape"
 )
 
-// The three READMEs are one document in three languages. Prose differs; the
+// The five READMEs are one document in five languages. Prose differs; the
 // commands and the card do not. These tests pin the two things a reader
 // copies: the card must be the card the code renders today (the golden), and
 // every fenced code block must be byte-identical across languages, so a flag
-// renamed in one file cannot go stale in the other two.
+// renamed in one file cannot go stale in the other four.
 
 var readmes = []string{"README.md", "README.ko.md", "README.ja.md", "README.zh-CN.md", "README.zh-TW.md"}
+
+// detailDocs is the reference the README links to (2026-09-21). The README
+// was cut to what it is, how to install it and how to use it; everything a
+// reader looks up rather than reads moved here, in English only, so that five
+// languages carry one short page instead of five long ones. They are still
+// places a reader copies a command from, so every surface gate reads them.
+var detailDocs = []string{"docs/measurement.md", "docs/commands.md", "docs/publish.md", "docs/install.md"}
 
 func repoFile(t *testing.T, rel string) string {
 	t.Helper()
@@ -82,13 +89,17 @@ func TestREADMECodeBlocksMatchAcrossLanguages(t *testing.T) {
 
 var relLink = regexp.MustCompile(`\]\(([^)#:]+)\)`)
 
-// TestREADMERelativeLinksResolve: every relative link in the READMEs and
-// CONTRIBUTING.md points at a file that exists.
+// TestREADMERelativeLinksResolve: every relative link in the READMEs,
+// CONTRIBUTING.md and the detail docs points at a file that exists. A link is
+// resolved from the directory of the file that carries it, the way a browser
+// resolves it.
 func TestREADMERelativeLinksResolve(t *testing.T) {
-	for _, name := range append(readmes, "CONTRIBUTING.md") {
+	files := append(append([]string{}, readmes...), "CONTRIBUTING.md")
+	files = append(files, detailDocs...)
+	for _, name := range files {
 		for _, m := range relLink.FindAllStringSubmatch(repoFile(t, name), -1) {
 			target := m[1]
-			if _, err := os.Stat(filepath.Join("..", "..", target)); err != nil {
+			if _, err := os.Stat(filepath.Join("..", "..", filepath.Dir(name), target)); err != nil {
 				t.Errorf("%s: link target %q does not exist", name, target)
 			}
 		}

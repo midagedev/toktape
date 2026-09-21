@@ -339,7 +339,7 @@ var deletedFlag = regexp.MustCompile(`--(json|jsonl|md|csv|tsv|png|sql)\b`)
 var logDashN = regexp.MustCompile(`toktape log\b[^\n]*\s-n\b`)
 
 // TestNoSurfaceSpellsADeletedFormatFlag: every place a reader copies a command
-// from spells the format -o FORMAT. The Korean and Japanese READMEs are
+// from spells the format -o FORMAT. The other four READMEs are
 // checked through their code blocks only; their prose is the lead's.
 func TestNoSurfaceSpellsADeletedFormatFlag(t *testing.T) {
 	surfaces := map[string]string{
@@ -349,6 +349,9 @@ func TestNoSurfaceSpellsADeletedFormatFlag(t *testing.T) {
 		"docs/agents.md":  repoFile(t, "docs/agents.md"),
 		"README.md":       repoFile(t, "README.md"),
 		"CONTRIBUTING.md": repoFile(t, "CONTRIBUTING.md"),
+	}
+	for _, name := range detailDocs {
+		surfaces[name] = repoFile(t, name)
 	}
 	for _, name := range readmes {
 		var blocks []string
@@ -371,7 +374,11 @@ func TestNoSurfaceSpellsADeletedFormatFlag(t *testing.T) {
 		"--help":         {"-o, --output FORMAT", "llama-bench"},
 		"help agents":    {"-o json", "-o jsonl"},
 		"docs/agents.md": {"-o json"},
-		"README.md":      {"-o sql", "--limit"},
+		// 2026-09-21: the export formats and the ledger moved from README.md
+		// to docs/commands.md with the rest of the reference, and this pin
+		// moved with them. FAIL-first: the short README failed here on both
+		// strings before the row was re-aimed.
+		"docs/commands.md": {"-o sql", "--limit"},
 	} {
 		for _, w := range want {
 			if !strings.Contains(surfaces[name], w) {

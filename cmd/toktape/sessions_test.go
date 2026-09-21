@@ -249,11 +249,11 @@ func TestBadFlagSuggestsAndStaysShort(t *testing.T) {
 }
 
 // TestNoSurfaceSpellsTheRetiredFlag: every place a reader copies a command
-// from — --help, `help agents`, `help render`, the three READMEs' code blocks
-// and docs/agents.md — names the stream count --sessions and never
+// from — --help, `help agents`, `help render`, the five READMEs' code blocks,
+// docs/agents.md and the detail docs the README links to — names the stream count --sessions and never
 // --concurrency. A rename is 90 % done when this is the part that is missing.
 //
-// The Korean and Japanese READMEs are checked through their code blocks only:
+// The other four READMEs are checked through their code blocks only:
 // their prose is written by the lead, and TestREADMECodeBlocksMatchAcrossLanguages
 // already holds the blocks to README.md's bytes.
 func TestNoSurfaceSpellsTheRetiredFlag(t *testing.T) {
@@ -263,6 +263,9 @@ func TestNoSurfaceSpellsTheRetiredFlag(t *testing.T) {
 		"help render":    renderUsage,
 		"docs/agents.md": repoFile(t, "docs/agents.md"),
 		"README.md":      repoFile(t, "README.md"),
+	}
+	for _, name := range detailDocs {
+		surfaces[name] = repoFile(t, name)
 	}
 	for _, name := range readmes {
 		var blocks []string
@@ -288,7 +291,13 @@ func TestNoSurfaceSpellsTheRetiredFlag(t *testing.T) {
 		"--help":         {"--sessions N", "--max-sessions N", "-n, --n-predict N", "llama-bench"},
 		"help agents":    {"--sessions", "--max-sessions", "llama-bench"},
 		"docs/agents.md": {"--sessions", "llama-bench"},
-		"README.md":      {"--sessions", "--max-sessions"},
+		"README.md":      {"--sessions"},
+		// 2026-09-21: --max-sessions is reference, and the reference moved
+		// out of the README into docs/commands.md when the README was cut
+		// to what-install-use. The requirement moved with the paragraph; it
+		// was not dropped. FAIL-first: the short README failed this test on
+		// exactly that string before the row below existed.
+		"docs/commands.md": {"--sessions", "--max-sessions"},
 	} {
 		for _, w := range want {
 			if !strings.Contains(surfaces[name], w) {
