@@ -3,6 +3,12 @@
 // major-fault counter behind the per-token sparkline, and the hardware line of
 // the card.
 //
+// The hardware line is the one part with a second source: where there is no
+// procfs to read and the caller asked about the live machine, the platform's
+// own reader answers instead — sysctl on darwin (TTP-164, 2026-09-21). Every
+// other reader here is /proc and nothing else, so off Linux they return
+// ErrUnsupported rather than a picture from somewhere.
+//
 // Every reader takes an fsRoot — the directory that contains "proc". In
 // production that is "/"; in tests it is a fixture tree. That is why each
 // parser here is a pure function of bytes and the I/O wrapper around it is

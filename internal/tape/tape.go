@@ -484,14 +484,21 @@ type HostInfo struct {
 	// that matters today.
 	Hostname       string `json:"hostname,omitempty"`
 	HostnameSource string `json:"hostname_source,omitempty"`
-	OS             string `json:"os"` // linux | darwin
-	Kernel         string `json:"kernel,omitempty"`
-	CPU            string `json:"cpu,omitempty"` // model name
-	CPUCores       int    `json:"cpu_cores,omitempty"`
-	CPUThreads     int    `json:"cpu_threads,omitempty"`
-	RAMBytes       int64  `json:"ram_bytes"`
-	RAMSpeed       string `json:"ram_speed,omitempty"` // "DDR5-6000" when readable, else ""
-	RAMChannels    int    `json:"ram_channels,omitempty"`
+	// OS is the platform facet, not the kernel: the bare token the hub
+	// indexes and filters on (internal/publish), which a reader picks from a
+	// list. "linux" and "macos" are what a recorder writes today; "darwin"
+	// was named here before a Mac could be read and never was one of them
+	// (lead, TTP-164, 2026-09-21). Kernel beside it carries the version that
+	// platform's own users quote — the kernel release on Linux, the product
+	// version on macOS.
+	OS          string `json:"os"`
+	Kernel      string `json:"kernel,omitempty"`
+	CPU         string `json:"cpu,omitempty"` // model name
+	CPUCores    int    `json:"cpu_cores,omitempty"`
+	CPUThreads  int    `json:"cpu_threads,omitempty"`
+	RAMBytes    int64  `json:"ram_bytes"`
+	RAMSpeed    string `json:"ram_speed,omitempty"` // "DDR5-6000" when readable, else ""
+	RAMChannels int    `json:"ram_channels,omitempty"`
 	// RAMBytesPerSec is the host's memory bandwidth, and RAMSource says where
 	// the figure came from. Together they are the host leg of the bandwidth
 	// ceiling, which decides whether the card can print an "of peak" ratio on

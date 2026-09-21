@@ -11,13 +11,24 @@ import (
 	"github.com/midagedev/toktape/internal/tape"
 )
 
-// HostInfo fills the hardware line of the card from /proc, minus the GPUs,
-// which another reader supplies.
+// HostInfo fills the hardware line of the card, minus the GPUs, which another
+// reader supplies.
+//
+// A <fsRoot>/proc that stats as a directory owns the answer outright, on
+// every platform: the Linux parsers below read it, and nothing any platform
+// reader could say may override a tree that is right there. Only when there
+// is no procfs to read does the platform's own live reader get a turn —
+// readLiveHost, host_darwin.go today — and only for the live machine's root
+// (isLiveRoot); a copied or fixture tree without a proc in it is a broken
+// tree, not a machine, and stays an error. A third platform is a new
+// host_<goos>.go plus a narrowed build constraint on host_notdarwin.go, not
+// an edit to this function.
 //
 // It is deliberately lenient: a field whose file is missing or unreadable
 // stays "" or 0 and the card prints "?", per the tape contract. Only a
-// <fsRoot>/proc that is not a readable directory is an error, because then
-// nothing below it can be trusted.
+// <fsRoot>/proc that is not a readable directory — and no live reader that
+// answered in its place — is an error, because then nothing below it can be
+// trusted.
 //
 // RAMSpeed and RAMChannels are always left empty. They live in the DMI tables,
 // and on every distribution checked /sys/firmware/dmi/tables/DMI is mode 0400
@@ -26,11 +37,16 @@ import (
 // an explicit --ram-speed flag or from a root helper.
 func HostInfo(fsRoot string) (tape.HostInfo, error) {
 	root := procPath(fsRoot)
-	fi, err := os.Stat(root)
-	if err != nil {
-		return tape.HostInfo{}, fmt.Errorf("procmon: host info: stat %s: %w", root, err)
-	}
-	if !fi.IsDir() {
+	fi, statErr := os.Stat(root)
+	if statErr != nil || !fi.IsDir() {
+		if isLiveRoot(fsRoot) {
+			if h, err := readLiveHost(); err == nil {
+				return h, nil
+			}
+		}
+		if statErr != nil {
+			return tape.HostInfo{}, fmt.Errorf("procmon: host info: stat %s: %w", root, statErr)
+		}
 		return tape.HostInfo{}, fmt.Errorf("procmon: host info: %s is not a directory", root)
 	}
 
@@ -52,6 +68,15 @@ func HostInfo(fsRoot string) (tape.HostInfo, error) {
 		}
 	}
 	return h, nil
+}
+
+// isLiveRoot reports whether fsRoot names the live machine's own root — the
+// only root a platform reader without a procfs may speak about. Both live
+// spellings count, "" and "/", because recorder options normalize FSRoot to
+// "/" while the zero value means the same root. Every other path is a copied
+// or fixture tree, whose answer can only come from the tree.
+func isLiveRoot(fsRoot string) bool {
+	return fsRoot == "" || fsRoot == "/"
 }
 
 // ParseKernelVersion pulls the release string out of /proc/version: the first
