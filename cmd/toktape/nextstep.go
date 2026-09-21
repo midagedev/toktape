@@ -19,7 +19,11 @@ import (
 // in itself. Both call this function now, so there is one table, and the
 // lever it returns names the setting the engine actually has: llama-server's
 // context flag is -c, vLLM's is --max-model-len, Ollama's is
-// OLLAMA_CONTEXT_LENGTH (measured on real servers, 2026-09-21).
+// OLLAMA_CONTEXT_LENGTH (measured on real servers, 2026-09-21). The
+// empty-server 400 answers through the same table (TTP-172, 2026-09-21): an
+// Ollama with nothing pulled says "model is required", and the lever names
+// ollama pull or --model — never "its slot count", a llama.cpp concept that
+// server does not have.
 //
 // An error this table does not recognise gets no invented advice: "" is
 // returned and each caller prints its own fallback sentence — a guess dressed
@@ -38,6 +42,21 @@ func nextStep(errText string, s *tape.RunSummary) string {
 	isContextOverflow := strings.Contains(low, "maximum context length") ||
 		(strings.Contains(low, "context") &&
 			(strings.Contains(low, "exceed") || strings.Contains(low, "length") || strings.Contains(low, "size")))
+	// The no-model class (TTP-172, measured 2026-09-21 on a real Ollama
+	// 0.33.3 with nothing pulled): a 400 whose own words say the request
+	// named no model the server could run. Wordings verified against a real
+	// server: Ollama 0.33.3's "model is required" (Windows 11, the state a
+	// reader is in for the minutes between installing Ollama and pulling
+	// something). Wordings generalised to, not measured: OpenAI's
+	// `"model" is a required property`, and the `model not found` /
+	// `model is missing` shapes other OpenAI-compatible servers answer. The
+	// status is read with httpStatusIn, never as a substring: "400" inside
+	// "14400 tokens" is not a refusal.
+	isModelRequired := httpStatusIn(low, "400") && strings.Contains(low, "model") &&
+		(strings.Contains(low, "is required") ||
+			strings.Contains(low, "required property") ||
+			strings.Contains(low, "model not found") ||
+			strings.Contains(low, "model is missing"))
 	switch {
 	case isContextOverflow:
 		if s == nil {
@@ -47,6 +66,13 @@ func nextStep(errText string, s *tape.RunSummary) string {
 			s = &tape.RunSummary{}
 		}
 		return contextLever(s)
+	case isModelRequired:
+		if s == nil {
+			// Same door as above: no tape, so no claim names the engine and
+			// only the engine-neutral lever is honest.
+			s = &tape.RunSummary{}
+		}
+		return modelLever(s)
 	case httpStatusIn(low, "401", "403") || strings.Contains(low, "credentials"):
 		return "the server refused the request as unauthenticated: it wants a key, and toktape has no flag for one yet"
 	case httpStatusIn(low, "429") || strings.Contains(low, "rate limit") || strings.Contains(low, "too many requests"):
@@ -101,6 +127,22 @@ func contextLever(s *tape.RunSummary) string {
 	default:
 		return "the prompt plus the answer did not fit the context: lower --n-predict, or raise the server's context — --max-model-len on vLLM, OLLAMA_CONTEXT_LENGTH on Ollama, -c on llama-server"
 	}
+}
+
+// modelLever is the no-model lever for the engine the summary says answered
+// (TTP-172, 2026-09-21). An Ollama that listed nothing is one `ollama pull`
+// away from working, and that is the sentence the reader in their first
+// minutes after installing needs; a server that did not say it is Ollama is
+// not told to run Ollama's command — the same rule that keeps contextLever
+// from naming a flag the engine lacks — so it gets --model and its own model
+// list, which is what toktape picks the first id from when the user gave none
+// (verified: internal/server/stream.go openaiBody omits model only when the
+// listing carried none, and the recorder refuses a --model the listing lacks).
+func modelLever(s *tape.RunSummary) string {
+	if claim := strings.ToLower(s.Server.EngineClaim); strings.Contains(claim, "ollama") {
+		return "the server has no model loaded: ollama pull one first (ollama pull <model>), or name one already on it with --model <id>"
+	}
+	return "the server answered that no usable model was named: load a model on the server, or name one it carries with --model <id> (its /v1/models list is what toktape picks from)"
 }
 
 // unusableRunLever is the → line under the share block's "not a usable

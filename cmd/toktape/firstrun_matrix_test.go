@@ -26,7 +26,7 @@ import (
 // command, first try. One real server combination is verified
 // (internal/recorder/firsttry_test.go); everything a first-time user can
 // actually meet is not. This test runs the CLI in-process, exactly as that
-// user would, against nineteen fake servers — the shapes llama.cpp, Ollama,
+// user would, against twenty-one fake servers — the shapes llama.cpp, Ollama,
 // LM Studio and vLLM present — and records two verdicts per row, by rule:
 //
 //   - USABLE: yes iff exit 0, StreamsFailed 0, every stream predicted_n >= 64
@@ -46,8 +46,9 @@ import (
 // the ranked gaps and the inventory of every refusal sentence).
 //
 // The fakes answer instantly with planted cost figures, so the whole matrix
-// runs in seconds: the only real waits are the reasoning row's 2 s clock and
-// the loading row's one 2 s attach poll.
+// runs in seconds: the real waits are the reasoning row's 2 s clock, the
+// loading row's one 2 s attach poll, and the Ollama row's default 20 s clock
+// cutting a stream the honest fake paces at real decode speed.
 
 // ---------------------------------------------------------------------------
 // The fake's tokenizer. Byte-compatible with internal/recorder/firsttry_test
@@ -308,14 +309,44 @@ type matOpenAICfg struct {
 	// ctxLimit, when > 0, refuses prompt+max_tokens over it with a
 	// vLLM-shaped 400 whose numbers are the real ones.
 	ctxLimit int
-	// truncateTo, when > 0, is what usage.prompt_tokens reports no matter
-	// what arrived (Ollama truncates long prompts silently).
+	// truncateTo, when > 0, is what usage.prompt_tokens reports for a
+	// prompt longer than it (Ollama truncates long prompts silently; a
+	// shorter prompt is reported as it was counted).
 	truncateTo int
 	chatTokens int
 	apiTags    bool
 	// advertiseMaxLen puts ctxLimit in /v1/models as max_model_len, which
 	// is what a real vLLM does (measured 2026-09-21, vLLM 0.29.0).
 	advertiseMaxLen bool
+	// emptyModels, when set, is an Ollama with nothing pulled: the listings
+	// carry nothing and the chat endpoint answers the 400 a real Ollama
+	// 0.33.3 answered, verbatim (measured 2026-09-21 on Windows 11) — the
+	// state a reader is in for the minutes between installing Ollama and
+	// pulling something.
+	emptyModels bool
+	// decodeTokPerSec, when non-nil, paces the chat stream's deltas as a
+	// function of the prompt tokens it received: real Ollama decodes slower
+	// at a long prompt than at a short one — the KV cache the prompt leaves
+	// behind is paid on every token. Real Ollama's counting shape — usage
+	// only on a stream that ended on its own, never on one the client cut —
+	// is not a knob: it is structural in matWriteOpenAIChat.
+	decodeTokPerSec func(promptTokens int) float64
+}
+
+// matOllamaTokPerSec is the measured decode curve of the real Ollama this
+// fake models (2026-09-21): ~110 tok/s at a ~59-token prompt, ~85 tok/s at a
+// ~6,000-token one. Linear between the two measured points, clamped outside
+// them.
+func matOllamaTokPerSec(promptN int) float64 {
+	const lo, loRate = 59, 110.0
+	const hi, hiRate = 6000, 85.0
+	if promptN <= lo {
+		return loRate
+	}
+	if promptN >= hi {
+		return hiRate
+	}
+	return loRate + (hiRate-loRate)*float64(promptN-lo)/float64(hi-lo)
 }
 
 func matOpenAIServer(t *testing.T, cfg matOpenAICfg) (*httptest.Server, *matOpenAI) {
@@ -328,6 +359,10 @@ func matOpenAIServer(t *testing.T, cfg matOpenAICfg) (*httptest.Server, *matOpen
 		})
 	}
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		if cfg.emptyModels {
+			_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+			return
+		}
 		if cfg.advertiseMaxLen {
 			_, _ = fmt.Fprintf(w, `{"object":"list","data":[{"id":"mat-model","object":"model","owned_by":"vllm","max_model_len":%d}]}`, cfg.ctxLimit)
 			return
@@ -336,6 +371,10 @@ func matOpenAIServer(t *testing.T, cfg matOpenAICfg) (*httptest.Server, *matOpen
 	})
 	if cfg.apiTags {
 		mux.HandleFunc("/api/tags", func(w http.ResponseWriter, r *http.Request) {
+			if cfg.emptyModels {
+				_, _ = w.Write([]byte(`{"models":[]}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"models":[{"name":"mat-model:latest"}]}`))
 		})
 	}
@@ -343,6 +382,13 @@ func matOpenAIServer(t *testing.T, cfg matOpenAICfg) (*httptest.Server, *matOpen
 		f.mu.Lock()
 		f.posts++
 		f.mu.Unlock()
+		if cfg.emptyModels {
+			// The real server's own sentence, byte for byte as measured
+			// (2026-09-21, Ollama 0.33.3): toktape sent no model id because
+			// the listing carried none to pick.
+			matWriteStatus(w, http.StatusBadRequest, `{"error":{"message":"model is required","type":"invalid_request_error","param":null,"code":null}}`)
+			return
+		}
 		var in struct {
 			Messages  []tape.Message `json:"messages"`
 			MaxTokens *int           `json:"max_tokens"`
@@ -368,10 +414,16 @@ func matOpenAIServer(t *testing.T, cfg matOpenAICfg) (*httptest.Server, *matOpen
 			return
 		}
 		reported := promptTokens
-		if cfg.truncateTo > 0 {
+		if cfg.truncateTo > 0 && promptTokens > cfg.truncateTo {
 			reported = cfg.truncateTo
 		}
-		matWriteOpenAIChat(w, reported, cfg.chatTokens)
+		perToken := time.Duration(0)
+		if cfg.decodeTokPerSec != nil {
+			if rate := cfg.decodeTokPerSec(promptTokens); rate > 0 {
+				perToken = time.Duration(float64(time.Second) / rate)
+			}
+		}
+		matWriteOpenAIChat(w, reported, cfg.chatTokens, maxTokens, perToken)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -508,17 +560,30 @@ func matWriteCompletion(w http.ResponseWriter, promptN int, promptMs float64) {
 }
 
 // matWriteOpenAIChat answers one generic OpenAI chat request: content deltas,
-// a stop chunk carrying usage, [DONE].
-func matWriteOpenAIChat(w http.ResponseWriter, promptTokens, nTok int) {
+// a finish chunk carrying usage, [DONE]. The stream ends at the request's own
+// cap or the model's EOS (eosTok), whichever comes first — finish_reason says
+// which — and usage rides only that closing chunk: a stream the client cut
+// never says how many tokens it sent, the way real Ollama counts (measured
+// 2026-09-21: only a closing usage message carries the count, so a cut costs
+// the entire measurement, not part of it). perToken spaces the deltas
+// (0 = as fast as the loop writes them).
+func matWriteOpenAIChat(w http.ResponseWriter, promptTokens, eosTok, cap int, perToken time.Duration) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.WriteHeader(http.StatusOK)
 	matChunk(w, `{"id":"m","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}`)
-	for i := 0; i < nTok; i++ {
+	n, finish := eosTok, "stop"
+	if cap > 0 && cap < eosTok {
+		n, finish = cap, "length"
+	}
+	for i := 0; i < n; i++ {
 		if !matChunk(w, `{"id":"m","choices":[{"index":0,"delta":{"content":"w"},"finish_reason":null}]}`) {
 			return
 		}
+		if perToken > 0 {
+			time.Sleep(perToken)
+		}
 	}
-	matChunk(w, fmt.Sprintf(`{"id":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":%d,"completion_tokens":%d}}`, promptTokens, nTok))
+	matChunk(w, fmt.Sprintf(`{"id":"m","choices":[{"index":0,"delta":{},"finish_reason":"%s"}],"usage":{"prompt_tokens":%d,"completion_tokens":%d}}`, finish, promptTokens, n))
 	fmt.Fprint(w, "data: [DONE]\n\n")
 	matFlush(w)
 }
@@ -1009,11 +1074,64 @@ func TestFirstRunMatrix(t *testing.T) {
 			},
 		},
 		{
-			name:   "ollama-shape",
-			gapWhy: "2026-09-21: the server's 2048 now reaches the tape, but nothing compares it with the ~7.4k tokens sent, so a truncating server still reads as a short prompt rather than as truncation — a caveat for count-vs-sent is the open half (a live Ollama 0.34.2 did not truncate: it sized its context to the prompt)",
+			// 2026-09-21 (TTP-172): the fake now fails the way real Ollama
+			// fails — usage only on a stream that ended on its own, decode
+			// paced at the measured ~110 tok/s (short prompt) to ~85 tok/s
+			// (~6k-token prompt) curve — where before it stopped at 80
+			// tokens at full speed and so always ended on its own and could
+			// never lose the race the real server loses. The model's EOS
+			// (chatTokens) is past any clock: what ends the stream is the
+			// request's cap or the run's clock, whichever comes first. The
+			// row's verdict is whatever the recorder under test honestly
+			// does with that.
+			//
+			// PINNED 2026-09-21, and the pin is the point (lead). Written
+			// against the recorder as it then stood, this row FLIPPED: the
+			// cap was 0.8 x the calibration's short-prompt rate x the whole
+			// clock, which needs ~20.5 s of long-prompt decode against a
+			// 20 s clock, so it was cut and lost 5 runs in 7. Real Ollama
+			// lost the same race 3 of 6 on a real Mac the same day. The two
+			// were measured from opposite ends — a fake written from the
+			// real server's shape, and the real server — and they agreed,
+			// which is what says the fake is honest rather than merely
+			// harsh.
+			//
+			// TTP-170 then re-priced the cap (0.65 below the measured floor
+			// of the long-context slowdown, a prefill reserve when no point
+			// was measured, and a bounded grace on the clock so this kind's
+			// cut cannot destroy the measurement). Pinned usable-yes after
+			// 5 consecutive runs. If it ever flips back, the pricing
+			// regressed — that is the whole reason this row is no longer a
+			// gap but an assertion.
+			name:       "ollama-shape",
+			wantUsable: "yes",
 			run: func(t *testing.T) *matOutcome {
-				srv, _ := matOpenAIServer(t, matOpenAICfg{truncateTo: 2048, chatTokens: 80, apiTags: true})
+				srv, _ := matOpenAIServer(t, matOpenAICfg{
+					truncateTo: 2048, chatTokens: 100000, apiTags: true,
+					decodeTokPerSec: matOllamaTokPerSec,
+				})
 				return matRecord(t, srv.URL, t.TempDir())
+			},
+		},
+		{
+			// Added 2026-09-21 (TTP-172): the server that is healthy but
+			// empty — every Ollama reader's first five minutes. Measured on
+			// real Windows 11 + Ollama 0.33.3 with no model pulled: the run
+			// reached the chat endpoint, sent no model id (the listing had
+			// none to pick), and the server answered the 400 quoted in the
+			// fake. The old lever at this door named "its slot count", a
+			// llama.cpp concept this server does not have.
+			name:       "ollama-empty",
+			wantUsable: "no",
+			// Pinned 2026-09-21: the server's own sentence is quoted and the
+			// lever names what to type — ollama pull, or --model — instead.
+			wantExplained: "yes",
+			causeMarkers:  []string{"model is required"},
+			run: func(t *testing.T) *matOutcome {
+				srv, f := matOpenAIServer(t, matOpenAICfg{emptyModels: true, apiTags: true})
+				o := matRecord(t, srv.URL, t.TempDir())
+				o.streamsSent = f.postsSeen() > 0
+				return o
 			},
 		},
 		{
@@ -1090,7 +1208,7 @@ func TestFirstRunMatrix(t *testing.T) {
 		},
 		{
 			name:   "stream-dies-midway",
-			gapWhy: "one of four streams is cut mid-answer: exit 0, and the lever now names the likely cause (the server may have crashed or been killed; its log says which) — but the ✗ line still quotes Go transport words ('unexpected EOF') because the wrap site (internal/server/stream.go) is the recorder's, and no toktape flag exists for a crashed server (owner: recorder track for the plain sentence)",
+			gapWhy: "one of four streams is cut mid-answer: exit 0; the ✗ line and the lever now both say the likely cause in plain words (the connection closed mid-answer — the server may have crashed or been killed, out of memory the usual one), but no toktape flag or command exists for a crashed server, so the verdict stays partial honestly — a lever the rule counts would have to be invented first, and whether one ever exists is the lead's call",
 			// causeMarkers added 2026-09-21 with the lever that names the
 			// cause in plain words; before it, no wording this audit would
 			// call recognisable ever reached the user.

@@ -7,28 +7,56 @@ useless, is the cause explained in detail and kindly?*
 One real server combination is verified (`internal/recorder/firsttry_test.go`,
 the ik_llama.cpp 4×8192-slot shape). Everything else a first-time user can
 meet was unknown. This matrix runs the CLI **in-process, as that user types
-it** — default command unless the scenario names a flag — against nineteen
+it** — default command unless the scenario names a flag — against twenty-one
 fake servers shaped like llama.cpp, Ollama, LM Studio and vLLM, and records
 two verdicts per row.
 
 Reproduce: `go test ./cmd/toktape/ -run TestFirstRunMatrix -count=1 -v`
-(~12 s wall). The rows that are already good are pinned in the test; the gaps
-are printed into `knownGaps` and are **not** asserted — each becomes a
-failing gate when fixed.
+(~34 s wall — the Ollama row's default 20 s clock is a real wait now). The
+rows that are already good are pinned in the test; the gaps are printed into
+`knownGaps` and are **not** asserted — each becomes a failing gate when fixed.
 
-Re-audited 2026-09-21, later the same day (the `msgs` track): every
-degraded run now says what happened and what to type next — `nextStep`
+Re-audited 2026-09-21, later the same day (the `msgs` track): every degraded
+run now says what happened and what to type next — `nextStep`
 (`cmd/toktape/nextstep.go`) is the one table both the failed-stream block and
 the all-streams-failed door read, the terse-model and serial-decode caveats
 name their levers, and a finished-but-worthless run says so before the ✓
-lines and is not invited to be posted. Rows 5, 11, 17 and 19's EXPLAINED
-verdicts are pinned; the table and the gap list below are the new output.
+lines and is not invited to be posted.
+
+Re-audited again 2026-09-21 (the `empty` track, TTP-172), against a HEAD the
+old table had drifted from — three commits had moved rows 5, 10 and 18
+without the doc noticing. Two rows changed shape and one was added:
+
+- **`ollama-empty` is new.** Measured on real Windows 11 + Ollama 0.33.3 with
+  no model pulled: the run sends no model id (the listing carried none to
+  pick), the server answers `model is required`, and the old lever at that
+  door said "check its log and its slot count" — a llama.cpp concept an
+  empty Ollama does not have. `nextStep` now answers the no-model 400 with
+  `ollama pull` when the engine claimed Ollama, else `--model <id>` and the
+  server's own model list. EXPLAINED is pinned **yes**.
+- **`ollama-shape` got honest, went bad, and was then fixed.** The fake
+  stopped at 80 tokens at full speed and always sent `usage`, so it always
+  ended on its own and could never lose the race real Ollama loses — real
+  Ollama counts tokens ONLY in a closing usage message (a stream cut by the
+  clock never gets one, so a cut costs the entire measurement) and decodes
+  slower at a long prompt (~110 tok/s at ~59 tokens, ~85 at ~6,000). The
+  fake now does both. Against the recorder as it then stood the row flipped
+  run to run — 5 of 7 cut and lost — which is what the real server was doing
+  the same day, 3 of 6. TTP-170 re-priced the cap and the row is now pinned
+  **usable yes**. The two measurements came from opposite ends, a fake
+  written from the real server's shape and the real server itself, and they
+  agreed; that agreement is what says the fake is honest rather than harsh.
+- **`stream-dies-midway`'s ✗ line is plain words now** (the wrap-site
+  translation landed): "the connection closed mid-answer … the server may
+  have crashed or been killed". What keeps the verdict `partial` is only
+  that no lever the rule counts exists for a crashed server.
 
 ## The verdict rules (mechanical, in the test)
 
 - **USABLE**: `yes` iff exit 0 AND `StreamsFailed == 0` AND every stream
   `predicted_n >= 64` AND (the fakes report real prompt figures) every stream
-  `prompt_n >= 256` — a prefix-cache hit reports 5 on these fakes.
+  `prompt_n >= 256` — a prefix-cache hit reports 5 on these fakes, and a
+  stream cut before its closing usage reports 0.
   `refused-cleanly` iff exit != 0 before any stream was sent. Else `no`.
 - **EXPLAINED**, assessed only when USABLE != yes or the tape carries a
   figure-severity caveat: `yes` iff the user-facing output (stdout + stderr)
@@ -43,8 +71,8 @@ verdicts are pinned; the table and the gap list below are the new output.
 ## The table
 
 Sight lines are verbatim from the run (stderr unless a `│` card line; ports
-and token counts vary between runs). Each row keeps its three most relevant
-lines.
+and token counts vary between runs — the Ollama row's verdict does too, see
+gap 1). Each row keeps its three most relevant lines.
 
 | # | scenario | exit | usable | explained | what the user literally saw |
 |---|----------|------|--------|-----------|------------------------------|
@@ -52,239 +80,179 @@ lines.
 | 2 | `llama-1slot-4k` (default command) | 0 | **yes** | n/a | `· plan: 1 × 2,880-token prompts (slot-bound) · ~0 s prefill · cap 1,054 · slot 4,096` · same header · same caveat line |
 | 3 | `llama-4slot-2k` (`--sessions 4 --for 2s`) | 0 | **yes** | n/a | `· plan: 4 × 832-token prompts (slot-bound) · cap 1,024 · slot 2,048` · same header · same caveat line |
 | 4 | `llama-sessions-gt-slots` (`--sessions 4`, 2 slots) | 1 | **refused-cleanly** | **yes** | `toktape: 4 sessions asked of http://127.0.0.1:PORT, which offers 2 slots; the 2 past its slots would wait in its queue, and the card cannot tell queue wait …` · `→ ask for --sessions 2, or restart llama-server with -np 4 to offer 4 slots` |
-| 5 | `llama-no-slots-endpoint` (/slots 501, 4096 ctx enforced) | 3 | no | **yes** | `toktape: recorder: all streams failed: server: run: all 1 streams failed: server: stream error: context_length_exceeded: the request exceeds the available context size (code 500)` · `→ the prompt plus the answer did not fit the context: lower --n-predict, or raise the server's context — --max-model-len on vLLM, OLLAMA_CONTEXT_LENGTH on Ollama, -c on llama-server` · `→ llama-server at … (b4321) · …` |
+| 5 | `llama-no-slots-endpoint` (/slots 501, 4096 ctx enforced) | 0 | **yes** | n/a | `· plan: 1 × 2,880-token prompts (slot-bound) · ~0 s prefill · cap 1,054 · slot 4,096` — identical to row 2: the recorder reads n_ctx from /props when /slots refuses, so the run finishes (was exit 3, every stream lost, before the fallback landed) |
 | 6 | `llama-no-tokenize` (/tokenize 404) | 0 | **yes** | n/a | `· plan: 1 × 6,976-token prompts (slot-bound) · ~0.1 s prefill · cap 1,164 · slot 8,192` · same header · same caveat line |
-| 7 | `llama-thinking-default` (reasoning-only stream, `--for 2s`) | 0 | **yes** | **yes** | `· plan: 1 × 6,976-token prompts (slot-bound) · ~0.1 s prefill · cap 1,100 · slot 8,192` · `│ ! 8 caveats — answer cut: all N predicted tokens were reasoning — │` (N ≈ 600–900) — the caveat continues `… the default budget did not hold the thinking; try --for or --think-budget` |
+| 7 | `llama-thinking-default` (reasoning-only stream, `--for 2s`) | 0 | **yes** | **yes** | `· plan: 1 × 6,976-token prompts (slot-bound) · ~0.1 s prefill · cap 1,100 · slot 8,192` · `│ ! 8 caveats — answer cut: all 718 predicted tokens were reasoning — │` (the count varies run to run, ~600–900) — the caveat continues `… the default budget did not hold the thinking; try --for or --think-budget` |
 | 8 | `llama-slow-box` (30 tok/s prefill, `--for 2s`) | 0 | **yes** | n/a | `· plan: 1 × 6,976-token prompts (slot-bound) · cap 1,100 · slot 8,192` (no `~X s prefill`: the probe refused its long point, so no rate exists) · same header |
 | 9 | `llama-rerun-same-server` (scenario 1, twice, exact-text prefix cache) | 0 | **yes** | n/a | two `· plan: 4 × 6,976-token prompts (slot-bound) …` lines · both takes' `prompt_n` 6,900 — the run salt defeated the cache; take 2 prefilled real tokens |
-| 10 | `openai-only-32k` (vLLM-shaped, generous ctx) | 0 | no | no | `· plan: 1 × 0-token prompts (whole) · cap 8,000` · `→ openai at http://127.0.0.1:PORT (?) · mat-model · no /proc view` · `│ ! 5 caveats — client-timed: the server reported no timings, so every │` |
-| 11 | `openai-only-4k` (vLLM 400 over 4096) | 3 | no | **yes** | `toktape: recorder: all streams failed: … POST /v1/chat/completions: 400 Bad Request: {"error":{"message":"This model's maximum context length is 4096 tokens. However, you requested 15421 tokens (7421 in your messages, 8000 in the completion). Please reduce the length of the messages o` (clipped at 200 chars) · `→ the prompt plus the answer did not fit the context: lower --n-predict, or raise the server's context — --max-model-len on vLLM, OLLAMA_CONTEXT_LENGTH on Ollama, -c on llama-server` |
-| 12 | `ollama-shape` (silent truncation to 2048) | 0 | no | no | identical to row 10: `· plan: 1 × 0-token prompts (whole) · cap 8,000` · client-timed caveat · nothing anywhere says the prompt was truncated |
-| 13 | `server-not-running` (connection refused) | 2 | **refused-cleanly** | **yes** | `toktape: recorder: cannot attach: server: unreachable: http://127.0.0.1:1: connection refused` · `→ check the host and port, or add --wait 30s to wait for a server that is still starting` |
-| 14 | `server-loading` (503 Loading model, `--wait 1s`) | 2 | **refused-cleanly** | **yes** | `toktape: recorder: cannot attach: gave up after 1s: server: loading the model: http://127.0.0.1:PORT: Loading model` · `→ the server is there and was not ready in time; give it longer with --wait 30m` |
-| 15 | `wrong-port-http-200-html` | 2 | **refused-cleanly** | **yes** | `toktape: recorder: cannot attach: server: unreachable: http://127.0.0.1:PORT: /props is not JSON: invalid character '<' looking for beginning of value` · `→ check the host and port, or add --wait 30s …` |
-| 16 | `auth-required` (401 everywhere) | 2 | **refused-cleanly** | partial | `toktape: recorder: cannot attach: server: unreachable: http://127.0.0.1:PORT: HTTP 401: {"error":{"message":"Invalid API key"}}` · `→ check the host and port, or add --wait 30s to wait for a server that is still starting` — the lever answers a starting server, not authentication |
-| 17 | `rate-limited` (429 on 2 of 4 chat streams) | 0 | no | **yes** | `✗ 2 of 4 streams failed: server: POST /v1/chat/completions: 429 Too Many Requests: {"error":{"message":"This server is rate limited; try again later","type…` (the ✗ line clips at 160 runes) · `→ the server refused the load: fewer --sessions` · `· plan: 4 × 6,976-token prompts (slot-bound) …` |
-| 18 | `stream-dies-midway` (cut after 50 tokens) | 0 | no | partial | `✗ 1 of 4 streams failed: server: stream: read: unexpected EOF` · `→ the server may have crashed or been killed; its log says which, and out of memory is the usual cause` · `│ ! 8 caveats — 1 of 4 streams failed: the aggregate is over the ones that finished │` |
-| 19 | `model-answers-instantly` (stop after 8 tokens) | 0 | no | **yes** | `✗ this run is not a usable measurement: short generation: 8 tokens is a sample, not a decode rate (under 32) — a longer answer needs a prompt that asks for one (--prompt), or a model that is not terse` · `→ a longer answer needs a prompt that asks for one: --prompt, or a model that is not terse` · `│ ! 7 caveats — short generation: 8 tokens is a sample, not a decode │` |
+| 10 | `openai-only-32k` (vLLM-shaped, generous ctx) | 0 | **yes** | n/a | `· plan: 1 × 7,937-token prompts (whole) · cap 8,000` · `→ openai at http://127.0.0.1:PORT (?) · mat-model · no /proc view` · `│ ! 5 caveats — client-timed: the server reported no timings, so every │` (usage.prompt_tokens 7,431 is on the tape now; was usable no before the recorder took the count) |
+| 11 | `openai-only-4k` (vLLM 400 over 4096) | 3 | no | **yes** | `toktape: recorder: all streams failed: … POST /v1/chat/completions: 400 Bad Request: {"error":{"message":"This model…` · `→ the prompt plus the answer did not fit the context: lower --n-predict, or raise the server's context — --max-model-len on vLLM, OLLAMA_CONTEXT_LENGTH o…` |
+| 12 | `vllm-4k-advertised` (max_model_len in /v1/models) | 0 | **yes** | n/a | `· plan: 1 × 2,880-token prompts (slot-bound) · cap 1,082 · ctx 4,096` — the listing states the context, so the plan trims and caps inside it and the default command finishes |
+| 13 | `ollama-shape` (silent truncation to 2048, honest pacing) | 0 | **yes** | n/a | `· plan: 1 × 7,937-token prompts (clock-bound) · cap 840` · `→ openai at http://127.0.0.1:PORT (?) · mat-model · no /proc view` · `│ ! 5 caveats — client-timed: the server reported no timings, so every │` — pinned after TTP-170; before it this row flipped, 5 of 7 runs cut and lost |
+| 14 | `ollama-empty` (installed, nothing pulled) | 3 | no | **yes** | `toktape: recorder: all streams failed: server: run: all 1 streams failed: server: POST /v1/chat/completions: 400 Bad Request: {"error":{"message":"model is r…` · `→ the server answered that no usable model was named: load a model on the server, or name one it carries with --model <id> (its /v1/models list is what tok…` · `→ openai at http://127.0.0.1:PORT (?) · ? · no /proc view` (the model prints `?`: the listing carried none) |
+| 15 | `server-not-running` (connection refused) | 2 | **refused-cleanly** | **yes** | `toktape: recorder: cannot attach: server: unreachable: http://127.0.0.1:1: connection refused` · `→ check the host and port, or add --wait 30s to wait for a server that is still starting` |
+| 16 | `server-loading` (503 Loading model, `--wait 1s`) | 2 | **refused-cleanly** | **yes** | `toktape: recorder: cannot attach: gave up after 1s: server: loading the model: http://127.0.0.1:PORT: Loading model` · `→ the server is there and was not ready in time; give it longer with --wait 30m` |
+| 17 | `wrong-port-http-200-html` | 2 | **refused-cleanly** | **yes** | `toktape: recorder: cannot attach: server: unreachable: http://127.0.0.1:PORT: /props is not JSON: invalid character '<' looking for beginning of value` · `→ check the host and port, or add --wait 30s …` |
+| 18 | `auth-required` (401 everywhere) | 2 | **refused-cleanly** | partial | `toktape: recorder: cannot attach: server: unauthorized: server: unreachable: the server at http://127.0.0.1:PORT wants credentials (HTTP 401): {"error":{"me…` · `→ the server refused the request as unauthenticated: it wants a key, and toktape has no flag for one yet` — the 401 is classified and the sentence is honest; the lever is an absence (gap 5) |
+| 19 | `rate-limited` (429 on 2 of 4 chat streams) | 0 | no | **yes** | `✗ 2 of 4 streams failed: server: POST /v1/chat/completions: 429 Too Many Requests: {"error":{"message":"This server is rate limited; try again later","type…` · `→ the server refused the load: fewer --sessions` · `· plan: 4 × 6,976-token prompts (slot-bound) …` |
+| 20 | `stream-dies-midway` (cut after 50 tokens) | 0 | no | partial | `✗ 1 of 4 streams failed: server: the connection closed mid-answer after 50 tokens — the server may have crashed or been killed (out of memory is the usua…` · `→ the server may have crashed or been killed; its log says which, and out of memory is the usual cause` · `│ ! 8 caveats — 1 of 4 streams failed: the aggregate is over the ones that finished │` |
+| 21 | `model-answers-instantly` (stop after 8 tokens) | 0 | no | **yes** | `✗ this run is not a usable measurement: short generation: 8 tokens is a sample, not a decode rate (under 32) — a longer answer needs a prompt that asks f…` · `→ a longer answer needs a prompt that asks for one: --prompt, or a model that is not terse` · `│ ! 8 caveats — short generation: 8 tokens is a sample, not a decode │` |
 
-**Summary after the 2026-09-21 `msgs` pass: 7 rows in `knownGaps`** (was 8).
-Every degraded llama.cpp shape now explains itself and names a lever that
-fits; the terse model's run says it is not a usable measurement and is no
-longer invited to be posted; the two exit-3 doors answer a context overflow
-with the context lever instead of "check its slot count". The remaining gaps
-are all owned elsewhere: the prompt-count and truncation holes, the
-`--no-slots` and vLLM pre-flight caps and the 401 classification are the
-recorder track's; the exit-0-with-dead-streams contract is the lead's call.
-Before that pass: 11 of 19 rows fully good (7 usable-yes, 4 refused-cleanly
-and explained), 8 gaps.
+**Summary after TTP-170 and TTP-172, both on 2026-09-21: 4 rows in
+`knownGaps`** (5 before TTP-170 landed, 7 at the `msgs` pass, 8 at the first
+audit). Of 21 rows, **11 are usable-yes, 5 refuse cleanly and are explained,
+and 5 are usable-no** — two of those five pinned as honestly-not-a-measurement
+(`ollama-empty`, `model-answers-instantly`), the other three in the gap list.
+
+The four remaining gaps are all owned elsewhere, and none is a launch
+blocker: the small-context pre-flight cap is the recorder track's, the exit-0
+contract on dead streams is the lead's call, and two are levers that do not
+exist yet (a crashed server has no flag; an API key has no flag, which the
+run says rather than inventing one).
+
+**What moved this day, and the order matters.** The `msgs` pass made every
+degraded run name a lever that fits its engine. TTP-172 then made the
+`ollama-shape` fake fail the way the real server fails, and the row went from
+green to flipping — the honest verdict, and the one that showed the matrix
+had been scoring the most common engine as fine while it failed three real
+runs in six. TTP-170 re-priced the cap against that, and the row is now
+pinned. Rows 5, 10 and 12 turned usable-yes earlier under work from other
+tracks, which is what this re-run caught up with; `ollama-empty` is new.
 
 ## The gaps, ranked by how likely a r/LocalLLaMA reader hits them
 
-Status after the 2026-09-21 `msgs` pass, per gap: **closed here** (the row's
+Status per gap, after the 2026-09-21 `empty` pass: **closed here** (the row's
 EXPLAINED verdict is pinned in the test), **half closed** (this track's side
-is done; the recorder side owns the rest), or **open** with its owner named.
+is done; the named owner holds the rest), or **open** with its owner.
 
-### 1. Every OpenAI-compatible run drops the server's own prompt count (rows 10, 12)
+### 1. The default Ollama run was a coin flip between the cap and the clock (row 13)
 
-**Open — owner: recorder track.** (Partly moved since the audit: the usage
-prompt count is now *taken* — `internal/server/sse.go:447-449` — but only for
-the decode calibration's return value; the record's own `PromptN` stays 0, so
-every symptom below still holds.)
+**Closed 2026-09-21 (TTP-170).** Found by making the fake fail the way the
+real server fails (TTP-172): before that, the fake stopped at 80 tokens at
+full speed and always sent `usage`, so this row read usable-yes while real
+Ollama was failing three runs out of six. **The instrument was the defect
+for as long as the code was**, and it is the reason this gap is written up
+after it is closed rather than deleted.
 
-**Likelihood: highest — every Ollama, LM Studio and vLLM user, on every run,
-not only failures.** These are the engines a first-time reader most likely
-has, and the miss is silent.
+**Likelihood, while it was open: highest — every Ollama user, on the default
+command, every run.** Ollama is the engine a first-time reader most likely
+has.
 
-Root cause: the usage object is parsed wholesale
-(`internal/server/sse.go:107` reads `prompt_tokens`), but `finish()` copies
-only `completion_tokens` into the record (`internal/server/sse.go:430-431`).
-So a client-timed stream's `Timings.PromptN` stays 0 forever: the Context
-row, `Aggregate.TotalPromptN` and the cache verdict all lose their prompt
-side, and the plan line prints nonsense — `plan: 1 × 0-token prompts (whole)`
-— because `RunPlan.LongestPromptTokens` is filled only under a slot
-(`internal/recorder/slotctx.go:118-121`, reached through
-`internal/recorder/slotctx.go:106-108`, which returns early when slotCtx is
-0, as it always is on this kind).
+The shape, both halves measured on real Ollama (2026-09-21): tokens are
+counted ONLY in a closing `usage` message, which a stream cut by the clock
+never sends — so a cut costs the entire measurement, not part of it — and
+decode runs slower at a long prompt than at a short one (~110 tok/s at a
+~59-token prompt, ~85 at a ~6,000-token one; the KV cache the prompt leaves
+behind is paid on every token).
 
-On the Ollama shape this is worse than missing information: the fake
-truncated the ~7.4k-token prompt to 2048 and answered normally; the one
-figure that would have exposed it — `usage.prompt_tokens` 2048 against the
-~7.4k tokens of prompt text the tape says it sent — is exactly the figure
-that is dropped. Nothing on the run contradicts the truncation.
+The race: the calibrated cap (`internal/recorder/probe.go`,
+`applyCalibratedCap`) was `0.8 × the calibration's short-prompt rate × the
+clock`, and the 0.8 was set at the CENTRE of the measured long-context
+slowdown — a factor at a centre loses half the time. Six real runs on one
+Mac all needed 20.3–24.4 s of a 20 s clock; the three that produced a card
+were the three where the model happened to stop on its own first. Here the
+row flipped 5 of 7. Two further faults compounded it: no prefill was
+reserved when the prefill calibration had no point, and that point was
+silently dropped exactly on a cold model, because the span subtracted a
+decode calibration's TTFT that had paid the model's load and went negative.
 
-Smallest changes (each one line-ish, none implemented):
-- `sse.go` `finish()`: when `!r.sawTimings`, also take
-  `rec.Timings.PromptN = r.usage.PromptTokens` (guarded `> 0`), the same way
-  `PredictedN` is taken. That alone fills the Context row and the cache
-  verdict's denominator.
-- `plan.go` `planSet()`: fill `runPlan.LongestPromptTokens` from the counts
-  it already computed, so the plan line stops printing "0-token prompts".
-- Truncation detection (separate, second): warn when the server's reported
-  prompt tokens are below half the priced count of the bytes actually sent —
-  the recorder already has both numbers at reduce time.
+The fix was three layers, not a constant:
 
-### 2. A terse model's "sample, not a rate" names no lever (row 19)
+- **sizing** — the derate is now `calibrationDecodeShare` = 0.65, below the
+  measured floor of 0.729 rather than at the centre of 0.729–0.808;
+  `planPrefillShare` of the clock is reserved when no prefill point exists;
+  the span is clamped so a cold calibration cannot destroy the point;
+- **structural** — the clock's cut is held back, bounded at half the budget
+  again, on `ServerOpenAI` runs only: where the floor already holds a cut
+  back to keep a measurement VALID, the grace holds it to keep the
+  measurement AT ALL. On every other kind the behaviour is unchanged, which
+  is asserted;
+- **debuggability** — the run now says what the cap predicted, as a band
+  (`cap 1,158: 112 tok/s calibrated, 4.1 s prefill reserved, so the run
+  finishes in 14.5-20.0 s of the 20 s clock`). A single figure would have
+  printed the clock every time: the cap is chosen as share × rate × budget,
+  so on one stream the quotient is the budget back again.
 
-**Closed here (2026-09-21).** The caveat ends "— a longer answer needs a
-prompt that asks for one (--prompt), or a model that is not terse", and the
-closing block says the run is not a usable measurement, names the same lever,
-and holds the Markdown line back. Row 19's EXPLAINED verdict is pinned.
-(`--for` is deliberately absent from the tail — the e.g. below oversold it:
-the model stopped on its own finish, the clock did not cut it, so the budget
-axis is not the one that ended the answer.)
+Confirmed from both ends: this row pinned usable-yes over five consecutive
+runs, and the real cold Mac run that produced `Sample ?` before now prints
+`Decode 87.2 tok/s`.
 
-**Likelihood: high — small instruct models answer the default prompt in a
-handful of tokens, and those are the models first-time readers run.**
+Still open beside it, owner: recorder track — the silent-truncation hole
+this row carries. `usage.prompt_tokens` is 2048 against the ~7.4k tokens the
+tape says it sent, and nothing compares the two, so a truncating server is
+not contradicted by anything on the run.
 
-Root cause: the `short_generation` caveat sentence states the fact and stops
-(`internal/card/caveat.go:748-752`). The project already solved this exact
-shape for reasoning runs: `answerCutWarning`
-(`internal/card/card.go:1709-1723`) ends with "try --for or --think-budget"
-and was re-authored (TTP-139) to name the flag that matches what actually
-ended the run.
+### 2. A small-context vLLM refuses every stream up front (row 11)
 
-Smallest change: give `short_generation` the same tail — e.g. `… (under 32) —
-ask for more with --for 60s, or a prompt that asks for a longer answer`.
-
-### 3. A `--no-slots` llama-server loses every stream (row 5)
-
-**Half closed (2026-09-21).** The exit-3 door now reads the error's own words
-through `nextStep` and answers a context overflow with the context lever (all
-three engine spellings at that door — no tape exists, so no summary names the
-engine); row 5's EXPLAINED verdict is pinned **yes**. Still open on the
-recorder side: the run still loses every stream, because the plan cannot read
-a context from a `--no-slots` server (owner: recorder track).
-
-**Likelihood: medium-high — `--no-slots` is a documented llama-server flag
-(memory-constrained boxes, exactly this tool's audience), and the failure is
-total: exit 3, no tape.**
-
-Root cause: `smallestSlotCtx` reads only `/slots`
-(`internal/recorder/slotctx.go:83-98`); on 501 it returns 0, and
-`capAnswersToSlot` treats unknown as no limit (`slotctx.go:106-108`) — while
-`/props` had already reported `n_ctx` 4096 (`internal/server/client.go:430-
-436`, `Props.CtxSize()` exists and is unused here). The run therefore sends
-the whole ~7.4k-token prompt with the 8000-token runaway guard behind it, and
-the server refuses all of it. The exit-3 door then offers no lever
-(`cmd/toktape/fail.go:190-194`: "check its log and its slot count" — for a
-`--no-slots` server, the slot count is exactly what the endpoint hid).
-
-Smallest changes:
-- `slotctx.go` `smallestSlotCtx()`: fall back to `props.CtxSize() /
-  max(total_slots, 1)` (or bare `props.CtxSize()` when total_slots is
-  unknown) when `/slots` refuses. Unknown stays unknown; a reported n_ctx is
-  an observation.
-- `fail.go` the `ErrAllStreamsFailed` door: when the error text carries the
-  contextLength marker, print the lever `failureLever` already knows
-  (`cmd/toktape/record.go:1021-1025`: "lower --n-predict, or raise the
-  server's -c (which -np divides)") — today that lever exists only in the
-  share block, which a total failure never reaches.
-
-### 4. A stream cut mid-answer is reported in Go's words, with no lever (row 18)
-
-**Half closed (2026-09-21).** `nextStep`'s transport class now answers
-`unexpected EOF` / `connection reset` / `closed the connection` with "the
-server may have crashed or been killed; its log says which, and out of memory
-is the usual cause" — the cause in plain words, which is why the row's verdict
-moved from `no` to `partial`. Still open on the recorder side: the ✗ line
-still quotes the Go transport sentence verbatim, because the wrap site
-(`internal/server/stream.go:284-288`) is the recorder's; and the verdict
-stays `partial` honestly — there is no toktape flag for a crashed server, so
-no lever the audit's rule would count (owner: recorder track, for the plain
-sentence at the wrap site).
-
-**Likelihood: medium — an OOM-killed llama-server mid-generation is the
-classic big-model low-RAM story on r/LocalLLaMA.**
-
-Root cause: the read failure is wrapped verbatim
-(`internal/server/stream.go:284-288`) — "server: stream: read: unexpected
-EOF" is Go transport jargon, not a sentence a user recognises; and
-`failureLever`'s fallback deliberately offers nothing
-(`cmd/toktape/record.go:1029`: "the server's words are above; the streams
-that finished are what the card reports" — written for server error frames,
-reached here by a transport error that has no words of its own).
-
-Smallest change: translate mid-stream read failures at the wrap site into a
-plain sentence with the cause kept in parentheses ("the connection to the
-server was cut mid-answer (read: unexpected EOF)"), and give the transport
-class a lever in `failureLever` ("re-run; if it repeats, check the server's
-log — it may have crashed or been killed").
-
-### 5. A small-context vLLM refuses everything, and the advice is llama-speak (row 11)
-
-**Half closed (2026-09-21, same pass).** The exit-3 door reads the vLLM 400's
-own words and answers with the context lever naming all three spellings
-(`--max-model-len` first); row 11's EXPLAINED verdict is pinned **yes**. With
-a summary that names the engine (`--engine "vLLM 0.11"`), the failed-stream
-block's lever is the engine's own flag alone. Still open on the recorder
-side: the OpenAI path still never lowers the 8000-token runaway guard, so a
-small-context vLLM loses every stream before a tape exists (owner: recorder
-track).
+**Half closed.** The exit-3 door reads the vLLM 400's own words and answers
+with the context lever naming all three spellings (`--max-model-len` first);
+row 11's EXPLAINED verdict is pinned **yes**. With a summary that names the
+engine (`--engine "vLLM 0.11"`), the failed-stream block's lever is the
+engine's own flag alone. Still open on the recorder side: the OpenAI path
+never lowers the 8000-token runaway guard on a server that advertises no
+`max_model_len` (no slots to read), so a small-context vLLM loses every
+stream before a tape exists (owner: recorder track). A server that does
+advertise it — row 12 — finishes.
 
 **Likelihood: medium-low — vLLM defaults to large contexts, but
 `--max-model-len 4096` configs exist (VRAM-constrained, long-context
 quantisations).**
 
-Root cause: the OpenAI path has no slot to read, so `capAnswersToSlot`
-no-ops and `DefaultMaxTokens` (8000, `internal/recorder/limit.go:94`) rides
-on every request; the vLLM 400 arrives with the real numbers in it — 15421
-requested = 7421 prompt + 8000 completion — and the user could fix it with
-`--n-predict 512`, but no output says so. The exit-3 hint names "its slot
-count", a concept a vLLM does not have (`cmd/toktape/fail.go:193`).
+### 3. Exit 0 with dead streams (row 19, residual)
 
-Smallest change: the same `ErrAllStreamsFailed` lever as gap 3 fixes this
-row too ("lower --n-predict…" fits a vLLM user directly, since the error
-text literally says "reduce the length of the messages or completion"). A
-pre-flight cap for OpenAI-kind runs (lower the guard when the plan's priced
-prompt is known large) would prevent the failure entirely, but the lever is
-the one-line start.
+**Open — the lead's call** (exit codes are out of this track's scope by
+spec). The explanation is pinned good: the server's 429 words plus "fewer
+--sessions" is exactly the contract, and the ✗ block holds the "Post it"
+line back, so a human is told. What is not told is the process exit: a
+wrapper script (or a coding agent) sees 0 and cannot distinguish this run
+from a clean one. The smallest change is one sentence of documentation
+(`toktape help agents`: branch on `streams_failed > 0`, not the exit code),
+or a distinct exit code for "answered but degraded".
 
-### 6. 401 is answered with starting-server advice (row 16)
+**Likelihood: medium — a loaded box rate-limiting a 4-stream run.**
 
-**Open — owner: recorder track.** (`nextStep` already has the 401/403/
-credentials branch for stream-level refusals, and its sentence is honest
-about the flag: "the server refused the request as unauthenticated: it wants
-a key, and toktape has no flag for one yet" — grep over `internal/server`
-and `cmd/toktape` finds no `Authorization`/`Bearer`/`api-key` flag to name.
-But row 16 fails at *attach* time, through `classifyProps` mapping every
-non-2xx refusal to `ErrUnreachable`, and that classification is the
-recorder's to write.)
+### 4. A stream cut mid-answer has no lever the rule counts (row 20)
+
+**Half closed.** The ✗ line now says what happened in plain words at the
+wrap site (`internal/server/stream.go` midStreamReadError: "the connection
+closed mid-answer after N tokens — the server may have crashed or been
+killed (out of memory is the usual cause); its log says which") and the `→`
+lever under it repeats the cause. The verdict stays `partial` honestly:
+there is no toktape flag or command for a crashed server, so the mechanical
+rule's "concrete next action" cannot exist until one is invented — whether
+one ever should is the lead's call, not the recorder's.
+
+**Likelihood: medium — an OOM-killed llama-server mid-generation is the
+classic big-model low-RAM story on r/LocalLLaMA.**
+
+### 5. 401 is explained honestly, but the lever is an absence (row 18)
+
+**Half closed.** The 401 is classified now (`server: unauthorized` reaches
+the user with the server's own body quoted) and `nextStep`'s sentence is
+honest about the flag: "the server refused the request as unauthenticated:
+it wants a key, and toktape has no flag for one yet" — grep over
+`internal/server` and `cmd/toktape` finds no `Authorization`/`Bearer`/
+`api-key` flag to name. The open half is the flag itself (`--api-key`, or
+`--header`), and it is a feature decision, not a sentence.
 
 **Likelihood: low — `--api-key` llama-servers and auth-fronted proxies exist
 but are rarely a first run.**
 
-Root cause: `classifyProps` maps every non-2xx non-loading refusal to
-`ErrUnreachable` (`internal/server/client.go:347-372`), and the door has a
-single `urlGiven` hint for all of them (`cmd/toktape/fail.go:166-167`). The
-server's own sentence does reach the user (the 401 body is quoted), so the
-cause is stated; the lever is the mismatch.
+### Closed since the first audit, kept for the record
 
-Smallest change: a 401/403 branch in `classifyProps` returning a wrapped
-error, plus its hint in `reportRecordError` — "the server refused
-authentication; llama-server's --api-key, or the proxy in front of it, wants
-a key — toktape sends none today".
-
-### 7. Exit 0 with dead streams (row 17, residual)
-
-**Open — the lead's call** (exit codes are out of this track's scope by
-spec). The explanation is pinned good: the server's 429 words plus "fewer
---sessions" held through the share-block changes.
-
-The explanation itself is good — the server's 429 words plus "fewer
---sessions" is exactly the contract — and the ✗ block holds the "Post it"
-line back, so a human is told. What is not told is the process exit: a
-wrapper script (or a coding agent) sees 0 and cannot distinguish this run
-from a clean one. `Record` treats partial failure as success by design
-(`internal/recorder/record.go:88-92`), and `recordPlain` exits 0
-(`cmd/toktape/record.go:429-454`).
-
-This row's USABLE verdict cannot honestly become yes — the streams really
-did fail — so the smallest change is on the contract side, and it is the
-lead's call: either a distinct exit code for "answered but degraded", or a
-line in `toktape help agents` telling agents to branch on
-`streams_failed > 0` rather than the exit code. The latter is one sentence
-of documentation.
+- **Every OpenAI-compatible run dropped the server's own prompt count**
+  (was gap 1, rows 10 and 12): closed by the recorder track —
+  `usage.prompt_tokens` is recorded (`PredictNSource "usage"`), the plan
+  prices real lengths (`plan: 1 × 7,937-token prompts`), and row 10 is
+  usable-yes and pinned.
+- **A `--no-slots` llama-server lost every stream** (was gap 3, row 5):
+  closed by the recorder track — the plan reads `n_ctx` from `/props` when
+  `/slots` refuses, and the row is usable-yes and pinned.
+- **A terse model's "sample, not a rate" named no lever** (was gap 2, row
+  21): closed at the `msgs` pass — the caveat ends "— a longer answer needs
+  a prompt that asks for one (--prompt), or a model that is not terse", the
+  closing block says the run is not a usable measurement, and the Markdown
+  line is held back. Pinned.
 
 ## Every user-facing sentence the record path can print
 
@@ -293,70 +261,62 @@ of documentation.
 their own). **no next action** marks sentences that state a fact or a
 rejection without naming a flag, command or server setting.
 
-The one door out (`cmd/toktape/fail.go:93-123`) guarantees every failure
-carries code + sentence + hint, so the unmarked ones below are the ones whose
-hint is empty or generic.
+The one door out (`cmd/toktape/fail.go`) guarantees every failure carries
+code + sentence + hint, so the unmarked ones below are the ones whose hint
+is empty or generic.
 
 | file:line | sentence (shape) | next action? |
 |---|---|---|
-| `cmd/toktape/record.go:239` | `unexpected argument %q` | **no next action** (the argument is named; nothing says what to do with it) |
-| `cmd/toktape/record.go:243` | `--for %s: a budget cannot be negative` | yes — `--for 30s …; --for 0 turns the clock off` |
-| `cmd/toktape/record.go:253` | `--prompts and --prompt are alternatives, not a pair` | implied only — **no explicit lever** |
-| `cmd/toktape/record.go:256` | `--prompts needs a file` | yes — the JSONL example |
-| `cmd/toktape/record.go:260` | `--prompts %s: %v` (read error) | yes — the JSONL example |
-| `cmd/toktape/record.go:272` | `--spec-n-max %s: %v` | names the flag |
-| `cmd/toktape/record.go:286`, `:292` | sampling refusals (`--endpoint`, `--no-think`, `--think-budget`, `--param`) | yes — each names the flag or the alternative (`prompts.go` shapes, surfaced via `samplingOptions`) |
-| `cmd/toktape/record.go:300-306` | `--engine-kind`, `--engine`, `--endpoint completion` refusals | yes — each names the fix |
-| `cmd/toktape/record.go:316` | `--ram-*` refusals | yes — names the flag |
-| `cmd/toktape/record.go:347` | `--grid` parse error | names the flag |
-| `cmd/toktape/record.go:372-423` | `--sessions` / `--max-sessions` ceiling refusals (4 shapes) | yes — every hint names `--sessions`/`--max-sessions`, plus the llama-bench `-n` disambiguation at ≥32 |
-| `cmd/toktape/record.go:443`, `:465` | `saving the run file: %v` / `renderRun` errors | **no next action** (disk/output errors, bare) |
-| `cmd/toktape/fail.go:169` | `recorder: cannot attach: …` + three hints (discovery / loading-busy / urlGiven) | yes — ports to probe + `--url`; `--wait 30m`; `--wait 30s` |
-| `cmd/toktape/fail.go:184` | `ErrMoreSessionsThanSlots` (`4 sessions asked of …, which offers 2 slots; …`) | yes — `--sessions 2` or `restart llama-server with -np 4` |
-| `cmd/toktape/fail.go:190` | `recorder: all streams failed: …` | yes since 2026-09-21 — the door reads `nextStep` (same table as the failed-stream block): the context lever for the engine (all three spellings; no tape exists, so no summary names it), fewer `--sessions` on a 429, the no-flag-yet auth sentence, the crash sentence on a mid-answer cut. "Check its log and its slot count" remains only as the fallback for an error the table does not know |
-| `cmd/toktape/fail.go:196` | default door `toktape: %v` | **no next action** (catch-all) |
-| `internal/recorder/slotctx.go:70-74` | `ErrPromptOverflowsSlot` ("the prompt is ~N tokens … send a shorter prompt, or raise the slot's context (llama-server's -c, which -np divides)") | yes — both levers |
-| `internal/recorder/slotctx.go:141` | `n-predict %d capped to %d: the slot's context is %d and the longest prompt is ~%d tokens` | states the numbers, names no lever |
-| `internal/recorder/record.go:506` | `server did not report model_path, model shape unknown` | **no next action** |
-| `internal/recorder/record.go:522` | `model file not readable here, shape and placement unknown` | **no next action** (expected on every remote attach) |
-| `internal/recorder/record.go:589`, `:639` | `pid not found: no memory, page faults or flags` | **no next action** (expected on every non-local run) |
-| `internal/recorder/record.go:621` | `server declared pid %d, which is not running here; searching for it instead` | **no next action** (progress note) |
-| `internal/recorder/record.go:652-654` | `argv of pid %d unreadable[, server flags unknown]` | **no next action** |
-| `internal/recorder/record.go:685` | engine commit read from the checkout (provenance note) | **no next action** (fact) |
-| `internal/recorder/record.go:741` | `/proc not readable, CPU, RAM and kernel unknown` | **no next action** (expected on macOS/Windows) |
-| `internal/recorder/record.go:757`, `:802` | GPU-open and placement-estimator warnings (passed through) | **no next action** |
-| `internal/recorder/record.go:762` | `GPU inventory unreadable, device list empty` | **no next action** |
-| `internal/recorder/record.go:838-873` | engine-placement mismatch notes (bytes vs classes; active bytes zeroed) | **no next action** (facts) |
-| `internal/recorder/record.go:969` | `/apply-template failed for %d/%d streams, prompt unknown` | **no next action** — the fix for the common cause (llama-server without `--jinja` dropping `chat_template_kwargs`) is a server flag nobody names here |
-| `internal/recorder/record.go:1062` | `process sampler unavailable, no memory or fault series` | **no next action** |
-| `internal/recorder/record.go:1121` | `memory, faults and CPU summed over the server and its N child processes` | **no next action** (provenance) |
-| `internal/recorder/reduce.go:421-425` | placement re-estimate notes | **no next action** (facts) |
-| `internal/recorder/reduce.go:493` | `host load unknown, contention not judged` | **no next action** (fact) |
-| `internal/recorder/shards.go:116` | `model: %d of %d shards not found` | **no next action** |
-| `internal/recorder/rounds.go:269` | `the run's budget ran out after round %d of %d` | **no next action** — `--for` is the lever and is not named |
-| `internal/recorder/rounds.go:272` | `run cancelled after round %d of %d` | **no next action** (fact) |
-| `internal/recorder/sweep.go:121` | `no draft model: --spec-n-max %s ran only n_max %d` | names the flag (self-explaining) |
+| `cmd/toktape/record.go` | `unexpected argument %q` | **no next action** (the argument is named; nothing says what to do with it) |
+| `cmd/toktape/record.go` | `--for %s: a budget cannot be negative` | yes — `--for 30s …; --for 0 turns the clock off` |
+| `cmd/toktape/record.go` | `--prompts and --prompt are alternatives, not a pair` | implied only — **no explicit lever** |
+| `cmd/toktape/record.go` | `--prompts needs a file` | yes — the JSONL example |
+| `cmd/toktape/record.go` | `--prompts %s: %v` (read error) | yes — the JSONL example |
+| `cmd/toktape/record.go` | `--spec-n-max %s: %v` | names the flag |
+| `cmd/toktape/record.go` | sampling refusals (`--endpoint`, `--no-think`, `--think-budget`, `--param`) | yes — each names the flag or the alternative |
+| `cmd/toktape/record.go` | `--engine-kind`, `--engine`, `--endpoint completion` refusals | yes — each names the fix |
+| `cmd/toktape/record.go` | `--ram-*` refusals | yes — names the flag |
+| `cmd/toktape/record.go` | `--grid` parse error | names the flag |
+| `cmd/toktape/record.go` | `--sessions` / `--max-sessions` ceiling refusals | yes — every hint names `--sessions`/`--max-sessions` |
+| `cmd/toktape/record.go` | `saving the run file: %v` / render errors | **no next action** (disk/output errors, bare) |
+| `cmd/toktape/fail.go` | `recorder: cannot attach: …` + its hints (discovery / loading-busy / urlGiven / unauthorized) | yes — ports to probe + `--url`; `--wait 30m`; `--wait 30s`; the no-flag-yet auth sentence |
+| `cmd/toktape/fail.go` | `ErrMoreSessionsThanSlots` (`4 sessions asked of …, which offers 2 slots; …`) | yes — `--sessions 2` or `restart llama-server with -np 4` |
+| `cmd/toktape/fail.go` | `recorder: all streams failed: …` | yes — the door reads `nextStep` (same table as the failed-stream block): the context lever for the engine (all three spellings at this door — no tape exists, so no summary names it), `ollama pull`/`--model` on the no-model 400 (TTP-172), fewer `--sessions` on a 429, the no-flag-yet auth sentence, the crash sentence on a mid-answer cut. "Check its log and its slot count" remains only as the fallback for an error the table does not know |
+| `cmd/toktape/fail.go` | default door `toktape: %v` | **no next action** (catch-all) |
+| `internal/recorder/slotctx.go` | `ErrPromptOverflowsSlot` ("the prompt is ~N tokens … send a shorter prompt, or raise the slot's context (llama-server's -c, which -np divides)") | yes — both levers |
+| `internal/recorder/slotctx.go` | `n-predict %d capped to %d …` | states the numbers, names no lever |
+| `internal/recorder/record.go` | model/shape/pid//proc/GPU warnings and provenance notes | **no next action** (facts and expected-on-remote notes) |
+| `internal/recorder/rounds.go` | `the run's budget ran out after round %d of %d` | **no next action** — `--for` is the lever and is not named |
+| `internal/recorder/rounds.go` | `run cancelled after round %d of %d` | **no next action** (fact) |
+| `internal/recorder/sweep.go` | `no draft model: --spec-n-max %s ran only n_max %d` | names the flag (self-explaining) |
 
 The share block carries the partial-failure machinery with its own levers
 (`cmd/toktape/record.go`): the ✗ count with the server's own words (deduped,
 ×N, clipped at 160 runes) plus `failureLever` — which is `nextStep`'s table
 (`cmd/toktape/nextstep.go`), the same one the exit-3 door reads: the context
-lever for the engine the summary names, fewer `--sessions` on a rate limit,
-the crash sentence on a mid-answer cut, and no invented advice otherwise.
-Since 2026-09-21 it also carries the unusable-run block: a run that lost no
-stream but has no rate (`tokens_uncounted`) or no stream long enough for one
+lever for the engine the summary names, `ollama pull`/`--model` on the
+no-model 400, fewer `--sessions` on a rate limit, the crash sentence on a
+mid-answer cut, and no invented advice otherwise. Since the `msgs` pass it
+also carries the unusable-run block: a run that lost no stream but has no
+rate (`tokens_uncounted`) or no stream long enough for one
 (`short_generation`) opens with `✗ this run is not a usable measurement:
-<sentence>` plus one `→` lever, and the Markdown line is held back exactly as
-a failed-stream run's is.
+<sentence>` plus one `→` lever, and the Markdown line is held back exactly
+as a failed-stream run's is.
 
 ## Notes on method
 
 - The fakes' tokenizer is byte-compatible with `firsttry_test.go`'s (prose
   4.0 bytes/token for the first 6 kB, then 2.2), so the default set's prompts
   count ~7.4k tokens and the plan's arithmetic is exercised at real sizes.
-- Decode timings on the fakes are measured, not planted (a planted constant
-  disagrees with the client clock through flush overhead, and the card's 2 %
-  identity checks flag the run as ragged — an artifact, not a finding).
+- Decode timings on the llama fakes are measured, not planted (a planted
+  constant disagrees with the client clock through flush overhead, and the
+  card's 2 % identity checks flag the run as ragged — an artifact, not a
+  finding).
+- The Ollama fake paces decode at the measured long-prompt curve
+  (`matOllamaTokPerSec`: 110 tok/s at 59 prompt tokens falling to 85 at
+  6,000) and sends `usage` only on a stream that ended on the cap or EOS —
+  which is why row 13 is the matrix's one real 20 s wait, and why its
+  verdict flips inside the cap/clock margin instead of being planted.
 - `server-loading` uses `--wait 1s` to stand in for the default 10-minute
   patience; the sentence, the give-up shape and the hint are the same.
 - `llama-thinking-default`'s token count varies run to run (the clock cuts

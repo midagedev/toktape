@@ -7,6 +7,13 @@ import (
 	"github.com/midagedev/toktape/internal/tape"
 )
 
+// emptyServerErr is the empty-server failure verbatim, as measured on real
+// Windows 11 + Ollama 0.33.3 with no model pulled (2026-09-21): the state a
+// reader is in for the minutes between installing Ollama and pulling
+// something. Discovery worked and the server's own sentence is in the error,
+// so the only question is what the lever answers it with.
+const emptyServerErr = `recorder: all streams failed: server: run: all 1 streams failed: server: POST /v1/chat/completions: 400 Bad Request: {"error":{"message":"model is required","type":"invalid_request_error","param":null,"code":null}}`
+
 // TestNextStep: the one owner of "what to type next" after a run went wrong.
 //
 // The table is the first-run matrix's measured failures (2026-09-21): llama's
@@ -47,6 +54,21 @@ func TestNextStep(t *testing.T) {
 		{"a connection cut mid-answer", "server: stream: read: unexpected EOF", llama, "may have crashed or been killed"},
 		{"a reset connection", "read tcp 127.0.0.1:1->127.0.0.1:2: read: connection reset by peer", nil, "may have crashed or been killed"},
 		{"a server that closed the connection", "the server closed the connection", nil, "may have crashed or been killed"},
+		// The empty-server 400 (TTP-172, measured 2026-09-21 on real
+		// Windows 11 + Ollama 0.33.3 with no model pulled): the state a
+		// reader is in for the minutes between installing Ollama and
+		// pulling something. The answer is ollama pull — or --model if one
+		// is already there — never "check its slot count", a llama.cpp
+		// concept this server does not have.
+		{"an empty Ollama, the engine claimed", emptyServerErr, ollama, "ollama pull"},
+		{"an empty Ollama, the engine claimed, also names --model", emptyServerErr, ollama, "--model"},
+		{"an empty server, no summary so no engine", emptyServerErr, nil, "--model"},
+		{"an OpenAI-kind server that did not say its engine", emptyServerErr, stranger, "--model"},
+		{"an engine that is not Ollama is not told ollama pull either", emptyServerErr, vllm, "--model"},
+		{"a required-property wording, generalised", `POST /v1/chat/completions: 400 Bad Request: {"error":{"message":"\"model\" is a required property of this request"}}`, stranger, "--model"},
+		{"a model-not-found wording, generalised", "400 Bad Request: model not found", stranger, "--model"},
+		{"a model is missing wording, generalised", "400 Bad Request: the model is missing for this endpoint", stranger, "--model"},
+		{"a 400 about a model that is neither required nor missing", "400 Bad Request: model is warming up", llama, ""},
 		{"an error the table does not know", "something novel happened", llama, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -76,15 +98,21 @@ func TestNextStepNamesNoLeverTheEngineLacks(t *testing.T) {
 
 	for _, tc := range []struct {
 		name    string
+		errText string
 		s       *tape.RunSummary
 		notWant string
 	}{
-		{"vLLM is not told llama flags", vllm, "-c (which"},
-		{"Ollama is not told vLLM's flag", ollama, "--max-model-len"},
-		{"llama-server is not told vLLM's flag", llama, "--max-model-len"},
+		{"vLLM is not told llama flags", refusal, vllm, "-c (which"},
+		{"Ollama is not told vLLM's flag", refusal, ollama, "--max-model-len"},
+		{"llama-server is not told vLLM's flag", refusal, llama, "--max-model-len"},
+		// The two 400 classes must not answer each other: a vLLM context
+		// 400 keeps its context lever (never the no-model one), and a
+		// server that did not say it is Ollama is never told ollama pull.
+		{"a vLLM context 400 is not answered as a missing model", refusal, vllm, "--model"},
+		{"an engine that did not say Ollama is not told ollama pull", emptyServerErr, &tape.RunSummary{Server: tape.ServerInfo{Kind: tape.ServerOpenAI}}, "ollama pull"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := nextStep(refusal, tc.s); strings.Contains(got, tc.notWant) {
+			if got := nextStep(tc.errText, tc.s); strings.Contains(got, tc.notWant) {
 				t.Errorf("nextStep on a %s names %q:\n%s", tc.name, tc.notWant, got)
 			}
 		})
