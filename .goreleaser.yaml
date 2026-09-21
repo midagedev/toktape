@@ -102,52 +102,55 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **The first try is the release.** The default command used to need luck:
-    on a real 4-slot server it lost streams to the context, measured a cached
-    prompt on the second run, and spent the whole clock in prefill. One planner
-    now decides prompt length, answer cap and clock together, before the first
-    request, from what it measured on your server — and prints that decision as
-    one `plan:` line.
+    **The card stops saying things it did not see.** The thread through this
+    release is one defect wearing different clothes: something toktape never
+    observed was printed as if it had been observed and found empty.
 
-    **What the plan does.** Every run salts its prompts, so a prefix cache never
-    answers for the machine. Prompts are counted by the server's own tokenizer
-    and trimmed to the tightest of two ceilings: a quarter of the clock, using
-    the prefill rate measured with as many prompts at once as the run will send
-    (several prefills at once ran at a fifth of the one-stream rate on the box
-    this was built on — it is measured, not assumed), and the slot's context
-    less the answer. The trim converges to within 3% in tokens, because equal
-    characters were 4901 to 7458 tokens on one tokenizer.
+    **Thinking models get a rate.** Measured on Ollama 0.34.2 with qwen3:1.7b:
+    the server counted 48 tokens and the client parsed none, because the
+    thinking text arrives under `reasoning` where vLLM and exl3-serve send
+    `reasoning_content`. No calibration, no cap, `Sample ?`. Both spellings are
+    read now, and the same run prints `Decode 60.5 tok/s`. The tape also
+    records how many tokens the client actually saw, so the next unknown
+    dialect raises a caveat (`tokens_unseen`) instead of a blank card.
 
-    **Ollama, LM Studio and vLLM work on the first try too.** Bare `toktape`
-    finds ports 11434 and 1234, and `--model <id>` picks a model when the server
-    lists several (the card names the one that was sent). These servers count
-    tokens only in a closing `usage` message, which a stream cut by the clock
-    never sends, so the card printed `?`. toktape now sends two short requests
-    to measure decode and prefill, then sizes prompts and the cap so streams end
-    on their own inside the clock. vLLM's `max_model_len` is read as the
-    context and its count is requested on every chunk; the server's prompt
-    count is recorded; `system_fingerprint` names the engine. Measured on
-    Ollama 0.34 and vLLM 0.29: about twenty seconds, a rate on the card.
+    **The clock waits when cutting would destroy the run.** On a server that
+    counts tokens only in a closing `usage` message, a stream the clock cancels
+    sends no count at all. Six runs on one Mac against Ollama: every answer cap
+    was over budget, and the three that produced a card were the three where
+    the model happened to stop early. The cap is now priced below the slowest
+    run measured, prefill is reserved even when it could not be calibrated, and
+    on these servers the cut is held back — bounded at half the budget again —
+    for live streams to end on their own. llama.cpp runs take the identical
+    path as before. The tape says the allowance was there.
 
-    **A run that went wrong says why, and what to type.** Failed streams open
-    the closing lines with the server's own words and one lever that follows
-    the engine — `--max-model-len` on vLLM, `OLLAMA_CONTEXT_LENGTH` on Ollama,
-    `-c` on llama-server. A run that finished but is no measurement says so
-    before the file list. An unknown flag prints its error, the nearest flag and
-    one pointer instead of 123 lines of help. A 401 is answered as a 401, and a
-    connection closed mid-answer no longer reads `unexpected EOF`. Nineteen
-    first-run scenarios are a gate (`TestFirstRunMatrix`).
+    **A Mac states its own hardware.** `RIG ? · ? · ?` is now
+    `RIG ? · Apple M1 Pro · 32 GB`, with the macOS version beside the engine.
+    And a machine whose GPU inventory was never read (no `nvidia-smi`) is no
+    longer described as a machine without GPUs: the placement line says where
+    the layers went is unknown, rather than claiming they all ran on the CPU
+    while Metal was holding them. Unified memory still has no word of its own
+    on the card; that is the next piece of work.
 
-    **Take a run down, or host the hub yourself.** `toktape publish --delete <id>`
-    removes a published run; an anonymous upload's delete key is kept in
-    `~/.toktape/published.json` so it is not lost with the scrollback.
-    `service = "https://…"` in `config.toml` (or `TOKTAPE_SERVICE`, or `--url`)
-    points every verb at your own deployment — `web/README.md` has the steps —
-    and the journal token is sent only to the service it belongs to.
+    **Two caveats stopped crying wolf.** `conditions changed` fired on both
+    recorded runs that did real work, because a machine warms up when it
+    decodes for a minute. A temperature rise is now printed only beside a clock cap that
+    moved — it is the cap's explanation, not a finding. A fall is printed on its
+    own: a machine cooler at the end than at the start was already warm when
+    the run began. And `contended` no longer counts a process on a GPU holding
+    none of the server's weights.
 
-    The closing lines stopped advertising: they name the commands
-    (`→ Markdown:`, `→ Replay:`) and nothing else. CONTRIBUTING says forks and
-    AI-written pull requests are welcome.
+    **An empty server is told what to type.** Ollama with nothing pulled —
+    every reader's first five minutes — answered `model is required` and was
+    told to check its slot count. It is now told `ollama pull`. That row, and
+    a fake Ollama that can actually lose the race the real one loses, are in
+    the first-run matrix (21 rows).
+
+    `toktape render` and `toktape play` no longer print `tape saved: <path>`
+    for a path they never wrote. `--explain` is gated to have a reading for
+    every caveat the card can raise. README: what Windows actually does,
+    measured on one, and simplified and traditional Chinese, each written on
+    its own.
   footer: |
     ## Install
 
