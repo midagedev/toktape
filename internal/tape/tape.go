@@ -681,6 +681,30 @@ type TimingsSummary struct {
 	ClientPromptPerSecond    float64 `json:"client_prompt_per_second"`
 	ClientPredictedPerSecond float64 `json:"client_predicted_per_second"` // decode window, reasoning tokens included
 	ClientAgreesWithServer   bool    `json:"client_agrees_with_server"`   // within RateTolerance
+	// TokensObserved is how many decode deltas the client actually parsed
+	// out of the stream, whatever the server then said it had counted
+	// (lead, TTP-177, 2026-09-21).
+	//
+	// It exists because those two can disagree completely and the tape had
+	// no way to show it. Measured on Ollama 0.34.2 with qwen3:1.7b: the
+	// server's closing usage said completion_tokens 48, and the client
+	// parsed 0 — every delta carried the thinking text under a key the
+	// parser did not know (`reasoning`, where vLLM and exl3-serve send
+	// `reasoning_content`), with `content` present and empty beside it. The
+	// run then had no calibration, no cap and no rate, and nothing anywhere
+	// said why.
+	//
+	// A server-counted answer the client did not see is the signature of an
+	// unparsed dialect whatever the key is called, so this is the figure a
+	// gate can be written against without anyone having to think of the
+	// next engine first. 0 with a positive PredictedN is the total miss; a
+	// count well under PredictedN is a partial one.
+	//
+	// Unknown is 0, as everywhere — and 0 beside a 0 PredictedN says
+	// nothing, which is correct: a stream that produced no tokens and a
+	// stream whose tokens were all invisible are told apart by the server's
+	// count, not by this one.
+	TokensObserved int `json:"tokens_observed,omitempty"`
 	// DecodeLabel is "decode" when PredictedN >= MinDecodeTokens, else "sample".
 	DecodeLabel string `json:"decode_label"`
 	// Per-token latency percentiles from the token timeline (ms).
