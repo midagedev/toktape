@@ -637,9 +637,14 @@ const calibrationAsk = "Count upward from one, digits only, one number per line,
 // It runs only on a ServerOpenAI server, only when the run has a clock, and
 // only when the user named no cap of their own (--n-predict is an answer on
 // the same axis, and the recorder does not overrule it). It never fails a
-// run and never warns by itself: a calibration that times out, errors, or
-// comes back without a usage figure records nothing, and the run proceeds
-// exactly as it did before this existed — clock, cut and caveat included.
+// run; a calibration that is dropped says so in ONE note naming the guard
+// that dropped it (TTP-177, 2026-09-21). Until that change a drop recorded
+// nothing and said nothing, which was right when the calibration was an
+// optimisation and wrong now that the cap and the plan behind it depend on
+// it: the whole first-run defect of TTP-177 — 48 server-counted tokens, 0
+// parsed, cap fallen back to the runaway guard — was invisible for exactly
+// that silence. The run itself still proceeds exactly as it did before this
+// existed — clock, cut and caveat included.
 func (r *run) calibrateOpenAI(ctx context.Context, rounds ...[]server.StreamRequest) {
 	if r.kind != tape.ServerOpenAI || r.limit.For <= 0 || r.limit.MaxTokensNamed {
 		return
@@ -675,18 +680,51 @@ func (r *run) calibrateOpenAI(ctx context.Context, rounds ...[]server.StreamRequ
 		MaxTokens: calibrationTokens,
 		Messages:  []tape.Message{{Role: "user", Content: prompt}},
 	}, server.StreamHooks{OnFingerprint: r.noteFingerprint})
-	// The conditions of a usable calibration, all of them: the stream ended
-	// on its own (no error), the server counted the answer (usage, never
-	// chunks), the count is more than jitter, and the client saw a window to
-	// time. rec.Timings.PromptN is the usage chunk's prompt_tokens — the
-	// server's own count, on the record since TTP-167.
-	if err != nil || rec == nil || rec.Timings.PredictedNSource != "usage" ||
-		rec.Timings.PredictedN < calibrationMinPredicted || rec.Timings.PromptN <= 0 ||
-		len(rec.Tokens) < 2 {
+	// The conditions of a usable calibration, each named when it fails: a
+	// drop says which guard dropped it, in one note — never a warning, the
+	// run still proceeds exactly as before. A timeout arrives here as the
+	// request's own error.
+	drop := func(why string) {
+		r.emit(Event{Kind: EventNote, Stream: -1,
+			Message: "no decode calibration: " + why + " — the run proceeds without one"})
+	}
+	// The stream ended on its own (no error), the server counted the answer
+	// (usage, never chunks), the count is more than jitter, the client parsed
+	// enough of the stream to time a window, and the window and the count
+	// together yield a rate. rec.Timings.PromptN is the usage chunk's
+	// prompt_tokens — the server's own count, on the record since TTP-167.
+	if err != nil {
+		drop(fmt.Sprintf("the request failed (%v)", err))
+		return
+	}
+	if rec == nil {
+		drop("the request returned no record")
+		return
+	}
+	if rec.Timings.PredictedNSource != "usage" {
+		drop("the server's token count never arrived (no usage figure)")
+		return
+	}
+	if rec.Timings.PredictedN < calibrationMinPredicted {
+		drop(fmt.Sprintf("the server counted only %d tokens, under %d",
+			rec.Timings.PredictedN, calibrationMinPredicted))
+		return
+	}
+	if rec.Timings.PromptN <= 0 {
+		drop("the usage figure carried no prompt count")
+		return
+	}
+	if len(rec.Tokens) < 2 {
+		// TTP-177's own guard: the server counted its answer and the client
+		// parsed none of it, so there is no client window at any rate — the
+		// unparsed-dialect signature, named with both counts.
+		drop(fmt.Sprintf("the client parsed %d of the %d counted tokens, too few to time",
+			len(rec.Tokens), rec.Timings.PredictedN))
 		return
 	}
 	window := rec.Tokens[len(rec.Tokens)-1].T - rec.Tokens[0].T
 	if window <= 0 {
+		drop("every parsed token arrived at one instant, so there is no window to time")
 		return
 	}
 	cal := &tape.DecodeCalibration{
@@ -701,6 +739,7 @@ func (r *run) calibrateOpenAI(ctx context.Context, rounds ...[]server.StreamRequ
 		PerSecond: float64(rec.Timings.PredictedN-1) / window.Seconds(),
 	}
 	if cal.PerSecond <= 0 {
+		drop("the counted window yields no rate")
 		return
 	}
 	cal.Prefill = r.calibratePrefill(ctx, first, cal)

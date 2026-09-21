@@ -101,10 +101,55 @@ type chunkChoice struct {
 // chunkDelta is the incremental text of one choice. A nil pointer and an
 // empty string are both "no text": lesson 1 counts only a delta that carried
 // text as a token.
+//
+// The thinking text has more than one wire spelling; reasoningText is the
+// one place that knows them, so a fourth engine is a line there and not a
+// hunt through the parser.
 type chunkDelta struct {
 	Role             string  `json:"role"`
 	Content          *string `json:"content"`
 	ReasoningContent *string `json:"reasoning_content"`
+	Reasoning        *string `json:"reasoning"`
+}
+
+// reasoningText is the thinking text this delta carried, "" when it carried
+// none — the single owner of the known spellings of the thinking delta, each
+// with the engine it was measured on:
+//
+//   - reasoning_content — llama.cpp b40 serving DeepSeek-V4.1-Flash is the
+//     capture we hold (TTP-20, 2026-09-13; testdata/stream_reasoning_real.sse,
+//     48 deltas), and internal/recorder/reduce.go:557 names exl3-serve and
+//     vLLM on the same spelling.
+//   - reasoning — Ollama 0.34.2 with qwen3:1.7b (TTP-177, 2026-09-21; the
+//     capture behind testdata/stream_ollama_reasoning.sse sent 46 of these
+//     with `content` present and empty beside every one, and a parser that
+//     knew only the first spelling recorded no token at all — no
+//     calibration, no rate, no TTFT but an answer token that never came).
+//
+// llama.cpp is not a third spelling but a switch between two, so it is not
+// listed: --reasoning-format decides what the wire carries, and its three
+// values are none (thoughts left unparsed inside content), deepseek
+// (reasoning_content, the capture above) and deepseek-legacy (both at once).
+// A server on none sends the thinking as inline <think> tags inside content,
+// which internal/recorder's own tag reading (thoughtAnyway) handles on its
+// separate path — here such a delta is answer text, tags included. Reading
+// that flag off /props is how a run could say which of the two it is
+// (lead, 2026-09-21: an ollama-backed llama.cpp reported
+// "reasoning_format": "none" there), and nothing does yet.
+//
+// A delta that carries BOTH spellings counts once: the list is asked in
+// order and the first non-empty text wins, because no engine measured has
+// ever restated one thought in two dialects, and counting both would make
+// one decode step two tokens against the server's own predicted_n — the one
+// thing the shared Index sequence must never do.
+func (d chunkDelta) reasoningText() string {
+	if s := d.ReasoningContent; s != nil && *s != "" {
+		return *s
+	}
+	if s := d.Reasoning; s != nil && *s != "" {
+		return *s
+	}
+	return ""
 }
 
 // chunkProgress is the return_progress object of a prefill chunk.
@@ -393,10 +438,11 @@ func (r *recorder) apply(c *streamChunk, t time.Duration) {
 		// rate must count it too (TTP-20, 2026-09-13). Only the transcript
 		// keeps the two apart — the text goes to Prompt.Reasoning, never to
 		// Prompt.Completion, and the event carries Reasoning: true so a
-		// renderer can style it differently.
-		if rc := ch.Delta.ReasoningContent; rc != nil && *rc != "" {
-			ev := r.addToken(t, *rc, true)
-			r.reasoning.WriteString(*rc)
+		// renderer can style it differently. Whichever spelling carried it
+		// (reasoningText), the token is the same one decode step.
+		if rt := ch.Delta.reasoningText(); rt != "" {
+			ev := r.addToken(t, rt, true)
+			r.reasoning.WriteString(rt)
 			// OnReasoning is the transcript hook and still fires, so a caller
 			// that wants only the thinking text does not have to filter
 			// OnToken. addToken has already fired OnToken for this event.

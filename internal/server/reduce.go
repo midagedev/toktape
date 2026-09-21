@@ -57,6 +57,14 @@ func Reduce(rec *tape.RequestRecord, sentAt time.Time, activeBytesPerToken int64
 	out.EffectiveBandwidthBytesPerSec = 0
 
 	toks := rec.Tokens
+	// The client's own count of the decode deltas it parsed, whatever the
+	// server then said it had counted (TTP-177, 2026-09-21). It is a function
+	// of the timeline like every client figure above, so a caller that
+	// assembles a record by hand gets the count of the tokens it supplied and
+	// a second Reduce does not move it. Beside PredictedN — the server's
+	// count — the two are the unparsed-dialect signature the card's caveat
+	// reads, whatever the fourth engine calls its key.
+	out.TokensObserved = len(toks)
 	// How many of the generated tokens were thinking. Counted from the tokens
 	// rather than copied from rec.Prompt.ReasoningN so that Reduce stays a
 	// function of the timeline it measures: a caller that assembles a record

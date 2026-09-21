@@ -88,6 +88,11 @@ func ExplainCaveats(s *tape.RunSummary) string {
 			t.Source, formatRate(t.PredictedPerSecond), formatRate(t.ClientPredictedPerSecond))},
 		{CodeTokensUncounted, fmt.Sprintf("predicted_n source %q, predicted_n %d",
 			t.PredictedNSource, t.PredictedN)},
+		// The reading is the three figures the predicate asks for, in its
+		// order: the server's count, the client's own, and the TTFT that
+		// witnesses a zero was measured rather than absent (TTP-177).
+		{CodeTokensUnseen, fmt.Sprintf("predicted_n %d, tokens observed %d, ttft %s",
+			t.PredictedN, t.TokensObserved, formatMs(t.TTFTMs))},
 		{CodeThinkingIgnored, fmt.Sprintf("thinking requested %q, %d of %d streams opened a thinking block",
 			s.Sampling.Thinking, s.Sampling.ThoughtAnyway, streamsSent(s))},
 		{CodeRecorded, fmt.Sprintf("%d recorded warning(s)", len(s.Warnings))},

@@ -1,0 +1,64 @@
+# The client clock for stream_ollama_reasoning.sse, one millisecond offset
+# per data event, in order. The .sse half is the wire capture itself
+# (Ollama 0.34.2, qwen3:1.7b, 2026-09-21); the capture kept the bytes and
+# not the clock, so these arrivals are a plausible client timeline attached
+# for the timing assertions — a 37-token prompt prefilled in ~0.6 s and 46
+# thinking deltas at ~45 tok/s. Only the shape is load-bearing: the first
+# reasoning delta's arrival must be the TTFT, and the span from it to the
+# last one must be a real decode window. Nothing here is a measured figure
+# and no test asserts these numbers as ones the server produced.
+#
+# events: 46 reasoning deltas (the first also carries the role), the finish
+# chunk, the usage chunk, [DONE].
+612
+634
+656
+678
+700
+722
+744
+766
+788
+810
+832
+854
+876
+898
+920
+942
+964
+986
+1008
+1030
+1052
+1074
+1096
+1118
+1140
+1162
+1184
+1206
+1228
+1250
+1272
+1294
+1316
+1338
+1360
+1382
+1404
+1426
+1448
+1470
+1492
+1514
+1536
+1558
+1580
+1602
+# finish_reason "length"
+1608
+# usage: prompt 37 (4 cached), completion 48
+1610
+# [DONE]
+1611

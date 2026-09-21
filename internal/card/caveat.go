@@ -127,6 +127,21 @@ const (
 	// 2026-09-19). Severity run: the headline is absent, not wrong, but a
 	// run without a decode figure compares with nothing on it.
 	CodeTokensUncounted = "tokens_uncounted"
+	// CodeTokensUnseen: the server counted a completion the client never
+	// parsed out of the stream — all of it, or all but a fraction (TTP-177,
+	// 2026-09-21). Measured on Ollama 0.34.2 with qwen3:1.7b: every delta
+	// carried its thinking under `reasoning`, a spelling the parser did not
+	// know, with `content` present and empty beside it, so the closing usage
+	// said 48 while the client had parsed 0 — and the run had no calibration,
+	// no rate and no sentence that said why. The two counts side by side are
+	// the signature of an unparsed dialect whatever the key is called, which
+	// is what makes this a gate rather than a per-engine patch: the fourth
+	// engine fires it without anyone having thought of its spelling first.
+	// Severity figure: on the partial shape the printed rate counts tokens
+	// the client never saw, and on the total shape no client figure exists
+	// to check the server's — either way the row does not mean what it
+	// looks like.
+	CodeTokensUnseen = "tokens_unseen"
 	// CodeThinkingIgnored: the request asked for thinking off and the run
 	// reasoned anyway (TTP-106, 2026-09-17). llama-server drops a request's
 	// chat_template_kwargs unless it was started with --jinja, and reports
@@ -245,6 +260,17 @@ const (
 // clock, so there is nothing to disagree with, only a narrower comparison
 // set; an uncounted run has no decode figure at all, which costs more than a
 // narrow set and so ranks under it.
+//
+// tokens_unseen sits directly under tokens_uncounted (TTP-177, 2026-09-21),
+// completing that family on its count side: client_disagrees is the two
+// clocks differing about a rate, tokens_uncounted is the server having said
+// nothing to differ about, and this is the server's count and the client's
+// own differing about the tokens themselves — the figures, not the
+// circumstances, so it ranks as a figure caveat inside a run-level
+// neighbourhood. It outranks thinking_ignored the way the rest of the family
+// does: a run that reasoned when it was told not to is still a measurement
+// of something, where here the card prints a count beside a timeline that
+// cannot produce it.
 var caveatRank = map[string]int{
 	CodeStreamsFailed:         0,
 	CodeStreamsNotConcurrent:  1,
@@ -260,12 +286,13 @@ var caveatRank = map[string]int{
 	CodeClientDisagrees:       11,
 	CodeClientTimed:           12,
 	CodeTokensUncounted:       13,
-	CodeThinkingIgnored:       14,
-	CodeRecorded:              15,
-	CodeMachineContended:      16,
-	CodeConditionsChanged:     17,
-	CodeRunCutByClock:         18,
-	CodeNoProcView:            19,
+	CodeTokensUnseen:          14,
+	CodeThinkingIgnored:       15,
+	CodeRecorded:              16,
+	CodeMachineContended:      17,
+	CodeConditionsChanged:     18,
+	CodeRunCutByClock:         19,
+	CodeNoProcView:            20,
 }
 
 // MinPrefillPromptTokens is tape.MinPrefillPromptTokens, re-exported so this
@@ -672,6 +699,69 @@ func tokensUncounted(s *tape.RunSummary) bool {
 	return s != nil && s.Timings.PredictedNSource == "chunks"
 }
 
+// tokensUnseen reports whether the server counted a completion the client
+// never parsed out of the stream: the whole answer (TTP-177's own shape) or
+// all but a fraction of it (TTP-177, 2026-09-21).
+//
+// It is the count-side twin of clientDisagrees and inherits that family's
+// guards. The server's figure must be a count the server actually stated:
+// PredictedNSource "usage" — on a chunks run the server counted nothing, so
+// there is nothing to contradict and tokensUncounted owns the sentence. And
+// the client's zero must be a measurement, not an absence: tokens_observed
+// is omitempty, so a tape older than the field, a hand-built summary and a
+// multi-stream run whose per-stream mean drops the figure all carry 0 beside
+// a positive count, and a caveat firing on a figure nobody recorded is what
+// this file refuses. TTFTMs is the witness — Reduce derives it from the
+// first parsed token, so it is 0 exactly when the timeline never saw one —
+// and the two zeros together are the total miss, read twice.
+//
+// The partial line, "far fewer", is two thresholds and both are measured:
+//
+//   - strictly below HALF the server's count. The one healthy
+//     delta-to-token ratio this repo has measured sits exactly at half — a
+//     server that batches two tokens per delta (the OpenAI e2e fake and
+//     vLLM's continuous usage both deliver 6 deltas for 12 counted tokens) —
+//     so batching never falls below the line, while a dialect that hides the
+//     thinking phase, the majority of a thinking model's budget, always
+//     does.
+//   - a shortfall of at least tape.MinDecodeTokens. Below 32 missing tokens
+//     the shortfall is inside the sample floor, the range the schema already
+//     treats as too small to carry a rate, and a miss that small is
+//     indistinguishable from batching jitter.
+func tokensUnseen(s *tape.RunSummary) bool {
+	if s == nil {
+		return false
+	}
+	t := s.Timings
+	if t.PredictedNSource != "usage" || t.PredictedN <= 0 {
+		return false
+	}
+	if t.TokensObserved == 0 {
+		// The total miss, witnessed by a timeline that never saw a token.
+		return t.TTFTMs == 0
+	}
+	return 2*t.TokensObserved < t.PredictedN && t.PredictedN-t.TokensObserved >= tape.MinDecodeTokens
+}
+
+// tokensUnseenText is the sentence: the two counts, because they are the
+// whole case — a caveat a reader cannot check is one they will ignore.
+//
+// No lever, deliberately. The honest action on an unparsed dialect is a fix
+// in toktape, not a setting on the server; naming a flag here would be the
+// guess dressed as a fix that both this file and cmd/toktape's nextStep
+// refuse to print.
+func tokensUnseenText(s *tape.RunSummary) string {
+	t := s.Timings
+	if t.TokensObserved == 0 {
+		return fmt.Sprintf(
+			"tokens unseen: the server counted %s completion tokens and the client parsed none — a field this toktape does not read carried the whole answer, so no client figure exists to check the server's",
+			formatInt(t.PredictedN))
+	}
+	return fmt.Sprintf(
+		"tokens unseen: the server counted %s completion tokens and the client parsed %s — the rest arrived under a field this toktape does not read, so the client figures are measured over only the fraction that arrived",
+		formatInt(t.PredictedN), formatInt(t.TokensObserved))
+}
+
 // clientDisagreesText is the sentence for CodeClientDisagrees, which is two
 // facts wearing one code (lead, 2026-09-15): the run-level figures disagree,
 // or they agree while some of the streams behind their mean did not. Above one
@@ -822,6 +912,9 @@ func Caveats(s *tape.RunSummary) []Caveat {
 		add(CodeTokensUncounted, SeverityRun, fmt.Sprintf(
 			"tokens uncounted: the server sent no usage figure, so the %s stream chunks are not a token count and no decode rate is printed",
 			formatInt(s.Timings.PredictedN)))
+	}
+	if tokensUnseen(s) {
+		add(CodeTokensUnseen, SeverityFigure, tokensUnseenText(s))
 	}
 	if n := s.Sampling.ThoughtAnyway; n > 0 {
 		// Only the positive case speaks: a zero is "none seen", which on a

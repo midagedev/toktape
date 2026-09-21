@@ -189,6 +189,21 @@ func caveatCases() []caveatCase {
 		mutate: func(s *tape.RunSummary) { s.Timings.PredictedNSource = "chunks" },
 		onCard: "tokens uncounted",
 	}, {
+		// TTP-177 (lead, 2026-09-21): the server stated a count and the
+		// client parsed a fraction of it. The partial shape is used rather
+		// than the total one because the total needs TTFTMs == 0 as its
+		// witness, and a run with no first token is a different run — it
+		// would raise the shortness family too and this table asks for the
+		// smallest change that raises exactly one code. 100 parsed of the
+		// fixture's 320 clears both thresholds: under half, and 220 short of
+		// the count where tape.MinDecodeTokens asks for 32.
+		code: CodeTokensUnseen,
+		mutate: func(s *tape.RunSummary) {
+			s.Timings.PredictedNSource = "usage"
+			s.Timings.TokensObserved = 100
+		},
+		onCard: "tokens unseen",
+	}, {
 		// TTP-106: thinking off was sent and the streams reasoned anyway,
 		// which is what llama-server does with chat_template_kwargs when it
 		// was started without --jinja. The count is the recorder's, taken at
@@ -769,11 +784,16 @@ func TestStreamsNotConcurrentRanksDirectlyUnderStreamsFailed(t *testing.T) {
 	// short_prompt_for_prefill: both qualify the Prefill row, but a short
 	// prompt was never a measurement while a cached one measured the cache
 	// path — the stronger disqualification ranks first.
+	//
+	// tokens_unseen entered at rank 14 (TTP-177, 2026-09-21), directly under
+	// tokens_uncounted — the two-clocks family's count side completed; the
+	// re-pin below shifts thinking_ignored and everything under it by one,
+	// order unchanged among themselves.
 	want := []string{
 		CodeStreamsFailed, CodeStreamsNotConcurrent, CodeRaggedAggregate, CodePlacementContradicted,
 		CodeBandwidthOverCeiling, CodeAnswerCut, CodeShortGeneration,
 		CodeShortStream, CodeColdCache, CodeShortPromptForPrefill, CodeCachedPrefill, CodeClientDisagrees,
-		CodeClientTimed, CodeTokensUncounted,
+		CodeClientTimed, CodeTokensUncounted, CodeTokensUnseen,
 		CodeThinkingIgnored,
 		CodeRecorded, CodeMachineContended, CodeConditionsChanged, CodeRunCutByClock,
 		CodeNoProcView,
