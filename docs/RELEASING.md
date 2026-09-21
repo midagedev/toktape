@@ -19,9 +19,22 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
+Before the tag, two things the workflow cannot do for you:
+
+- **Rewrite `release.header` in `.goreleaser.yaml`.** The changelog is every
+  commit subject in one flat list; the header is what a reader has to know
+  before reading it, and it is written per release, not templated. Check
+  each claim against its source (the commit, the line of code) before it
+  goes in. Commit it, push, and let CI go green on that push.
+- **Look at the previous push's CI, not only the local gate.** v0.4.0's
+  hero re-pin was red on CI alone (a viewer-timezone date); the local gate
+  was green.
+
+Minor when the tape schema or the caveat set grew, patch otherwise.
+
 `.github/workflows/release.yml` runs GoReleaser (`.goreleaser.yaml`):
 
-- static binaries for linux/darwin × amd64/arm64, `-X main.version=<tag>`;
+- static binaries for linux/darwin/windows × amd64/arm64, `-X main.version=<tag>`;
 - archives named `toktape_<version>_<os>_<arch>.tar.gz` plus a plain
   `checksums.txt` — `scripts/install.sh` reconstructs exactly that name from
   `uname`, and the `release-contract` CI job asserts the two agree on every
