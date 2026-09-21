@@ -96,7 +96,7 @@ ${rowGrid(q.rows, url)}`;
       style: PAGE_STYLE,
       figure: "peek",
       body: `
-<div class="uhead">${avatar ? `<img class="avatar" src="${esc(avatar)}" width="64" height="64" alt="">` : ""}<h1>${esc(name)}</h1></div>
+<div class="uhead">${avatar ? `<img class="avatar" src="${esc(avatar)}" width="96" height="96" alt="">` : ""}<h1>${esc(name)}</h1></div>
 ${t.link ? `<p class="ulink"><a rel="nofollow ugc noopener" href="${esc(t.link)}">${esc(t.link)}</a></p>` : ""}
 ${t.bio ? noteSection(t.bio) : ""}
 ${filterForm(url, facets)}

@@ -703,7 +703,7 @@ export function resultRow(r, url) {
 </article>`;
 }
 
-// The row's `.who` line: the avatar at 16 px and the name, linked the way
+// The row's `.who` line: the avatar at 20 px and the name, linked the way
 // the run page links it. Absent entirely when no author travels. On a run
 // a journal token owns, the name links at the owner's home (/u/<handle>,
 // TTP-127) — the external link moved there, so it is not printed here —
@@ -712,7 +712,7 @@ export function resultRow(r, url) {
 function whoLine(r) {
   const avatar = avatarPath(r.avatar_key);
   if (!r.author_name && !avatar && r.owned === 1) return "";
-  const img = avatar ? `<img class="avatar" src="${esc(avatar)}" width="16" height="16" alt="">` : "";
+  const img = avatar ? `<img class="avatar" src="${esc(avatar)}" width="20" height="20" alt="">` : "";
   let who = "";
   if (r.owner_token) {
     if (r.author_name) who = `<a href="/u/${esc(r.owner_token)}">${esc(r.author_name)}</a>`;
@@ -1123,7 +1123,9 @@ kbd { font: .7rem ui-monospace, Menlo, monospace; color: #6b727d; border: 1px so
 .model { font-size: .78rem; color: #6b727d; }
 .who { display: flex; align-items: center; gap: .35rem; margin: .35rem 0 0;
   font-size: .78rem; color: #7d848f; }
-.who .avatar { width: 16px; height: 16px; }
+/* 20 px sits inside the line's own box (.78rem at the body's 1.6 line
+   height is ~20 px), so the avatar does not lift the row's caption. */
+.who .avatar { width: 20px; height: 20px; }
 .rate { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #9ece6a; white-space: nowrap; }
 .rate .u { color: #6b727d; font-size: .78rem; }

@@ -361,7 +361,7 @@ td.v { word-break: break-word; }
 }
 `;
 
-// The byline under the sub line: the avatar (24 px, round, only when one
+// The byline under the sub line: the avatar (32 px, round, only when one
 // travels) and the name — a link with rel="nofollow ugc noopener" when the one
 // link is set, plain otherwise. When no author travels there is no byline
 // element at all. Everything stored was accepted verbatim and is escaped on
@@ -384,7 +384,7 @@ export function anonBadge(owned) {
 function byline(row) {
   const avatar = avatarPath(row.avatar_key);
   if (!row.author_name && !row.author_link && !avatar && row.owned === 1) return "";
-  const img = avatar ? `<img class="avatar" src="${esc(avatar)}" width="24" height="24" alt="">` : "";
+  const img = avatar ? `<img class="avatar" src="${esc(avatar)}" width="32" height="32" alt="">` : "";
   // On a run a journal token owns, the name links at the owner's home
   // (/u/<handle>, TTP-127) and the external link moves there — it is not
   // printed here. Read off the run's own columns (what that upload said),

@@ -332,18 +332,40 @@ curl -fsS "$base/api/v1/runs?gpu=rtx-3090&limit=100" >"$work/mixed3090.json" && 
   die "filtering by rtx-3090 missed the mixed rig"
 curl -fsS "$base/api/v1/runs?gpu=rtx-a6000&sort=oldest&limit=100" >"$work/mixeda6000.json" && grep -q 'mixedrig000000000000' "$work/mixeda6000.json" ||
   die "filtering by rtx-a6000 missed the mixed rig"
-# The hero under its own GPU: read off list.json, never hardcoded — and when
-# that is one of the rig's cards the mixed rig rides along with it. The hero
-# is this run's newest row, so page 1 has it.
-hero_gpu="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(((r.get("gpu_id") or "") for r in d["runs"] if r["id"]==sys.argv[2]), ""))' "$work/list.json" "$id")"
-[ -n "$hero_gpu" ] || die "the hero row carries no gpu_id in list.json"
-curl -fsS "$base/api/v1/runs?gpu=$hero_gpu" >"$work/fetched" && grep -q "\"id\":\"$id\"" "$work/fetched" ||
-  die "filtering by $hero_gpu dropped the hero"
-case "$hero_gpu" in
-rtx-a6000) grep -q 'mixedrig000000000000' "$work/mixeda6000.json" || die "filtering by $hero_gpu missed the mixed rig" ;;
-rtx-3090) grep -q 'mixedrig000000000000' "$work/mixed3090.json" || die "filtering by $hero_gpu missed the mixed rig" ;;
-*) printf 'note: the hero runs on %s, outside the mixed rig; mixed reach is asserted above\n' "$hero_gpu" ;;
-esac
+# The hero under its own GPUs: read off list.json, never hardcoded — and when
+# one of them is a card of the rig above, the mixed rig rides along with it.
+# The hero is this run's newest row, so page 1 has it.
+#
+# Read from gpu_ids, not gpu_id (lead, 2026-09-21). The old line took
+# gpu_id and died when it was empty, which asserts that the hero runs on one
+# kind of card — a property nobody wants to hold, and 0007_gpu_ids.sql says
+# so in as many words: "a mixed rig keeps it empty and was reachable by no
+# GPU at all. gpu_ids is the membership axis beside it." The hero became a
+# mixed rig (rtx-3090 + rtx-a6000) and the gate failed on a correct row.
+#
+# This is not the old assertion loosened. It is stronger: every member id
+# must reach the hero, where before one shared id had to. A single-kind rig
+# is the one-element case of it, and search.js's own filter is membership
+# (json_each over gpu_ids), so the gate now tests the axis the service
+# actually filters on. FAIL-first, 2026-09-21: with the json_each predicate
+# in search.js:307 replaced by `runs.gpu_id = ?`, this block dies at
+# "filtering by rtx-3090 dropped the hero" — the old line passed that same
+# sabotage whenever the hero was single-kind.
+hero_gpus="$(python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+r=next((r for r in d["runs"] if r["id"]==sys.argv[2]), None) or {}
+ids=r.get("gpu_ids") or ([r["gpu_id"]] if r.get("gpu_id") else [])
+print(" ".join(ids))' "$work/list.json" "$id")"
+[ -n "$hero_gpus" ] || die "the hero row carries no gpu_ids and no gpu_id in list.json"
+for hero_gpu in $hero_gpus; do
+  curl -fsS "$base/api/v1/runs?gpu=$hero_gpu" >"$work/fetched" && grep -q "\"id\":\"$id\"" "$work/fetched" ||
+    die "filtering by $hero_gpu dropped the hero"
+  case "$hero_gpu" in
+  rtx-a6000) grep -q 'mixedrig000000000000' "$work/mixeda6000.json" || die "filtering by $hero_gpu missed the mixed rig" ;;
+  rtx-3090) grep -q 'mixedrig000000000000' "$work/mixed3090.json" || die "filtering by $hero_gpu missed the mixed rig" ;;
+  *) printf 'note: the hero runs on %s, outside the mixed rig; mixed reach is asserted above\n' "$hero_gpu" ;;
+  esac
+done
 # The dropdown lists both member ids, and the mixed row wears two GPU chips.
 # Same old-row reason: the chips are read off an oldest-first page, where the
 # rig is first. The dropdown counts the whole population on any page.

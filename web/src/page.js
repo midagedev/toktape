@@ -101,9 +101,9 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #1b1f26;
 /* The author beside a run: a small round avatar — the page's own ring
    colour — and the name under the sub line. The row's .who line reuses
    .avatar at its own size (search.js). */
-.avatar { width: 24px; height: 24px; border-radius: 50%; flex: none;
+.avatar { width: 32px; height: 32px; border-radius: 50%; flex: none;
   border: 1px solid #1b1f26; vertical-align: middle; }
-.byline { display: flex; align-items: center; gap: .45rem; margin: -.75rem 0 1.5rem;
+.byline { display: flex; align-items: center; gap: .55rem; margin: -.75rem 0 1.5rem;
   font-size: .875rem; color: #7d848f; }
 /* The lab-note: plain paragraphs, no markdown, no autolinking — what was
    typed is what is read, wrapped to the prose width. */
@@ -111,13 +111,17 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #1b1f26;
   border: 1px solid #2a3038; border-radius: 999px; color: #6b727d; cursor: help; }
 .note { max-width: 40rem; color: #b9bec7; }
 .note p { margin: 0 0 .8rem; }
-/* A user home (TTP-127): the profile at 64 px, the name, the one link, the
+/* A user home (TTP-127): the profile at 96 px, the name, the one link, the
    bio as paragraphs, then the count and the rows in the front page's row
    format. */
-.uhead { display: flex; gap: 1rem; align-items: center; margin: 0 0 .5rem; }
-/* The home's avatar at 64 px: scoped to the header, so the 24 px byline
-   and 16 px row avatars elsewhere keep their size. */
-.uhead .avatar { width: 64px; height: 64px; }
+.uhead { display: flex; gap: 1.25rem; align-items: center; margin: 0 0 .5rem; }
+/* The home's avatar at 96 px: scoped to the header, so the 32 px byline
+   and 20 px row avatars elsewhere keep their size. 128 px is the ceiling,
+   and it is a fact about the stored image, not taste: the upload keeps
+   avatars at most 256×256 (internal/publish/avatar.go, MaxAvatarWidth/
+   MaxAvatarHeight), so past 128 px a 2× display is upsampling and the
+   circle goes soft. Raising this past 128 means raising those first. */
+.uhead .avatar { width: 96px; height: 96px; }
 .uhead h1 { margin: 0; }
 .ulink { margin: 0 0 1.5rem; font-size: .875rem; }
 `;
