@@ -64,7 +64,7 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 
 	gpusAtEnd := lastGPUs(samples)
 	r.narrowPlacement(gpusAtEnd)
-	contention := r.contention(samples)
+	contention := r.contention(samples, gpusAtEnd)
 
 	summary := tape.RunSummary{
 		ID:             runID(startedAt, r.model.FileName),
@@ -483,17 +483,39 @@ func pluralDevices(n int) string {
 // process, and summing would report it as four and make a quiet host look
 // four times as contended as it is.
 //
+// And it is counted only on the devices this run's weights are actually on
+// (TTP-153, 2026-09-21). Take 20260920-201746: a 281 MB process appeared on
+// the idle 3090 for about half a second at t=44.5 of 45 s, a card the server
+// held nothing on, and the whole run came back machine_contended. The reading
+// was real; the verdict was not about this run. What "contended" claims is
+// that something else was competing for what this run needed, and a device
+// holding none of its weights is not that.
+//
+// gpusInPlay is the same owner narrowPlacement asks, and its nil is the same
+// tri-state: nil means no device reported ProcBytes at all, so the server's
+// process was never identified and nothing can be localised. Then every
+// device counts, which is the conservative reading — a contention we cannot
+// place is not a contention we can dismiss.
+//
+// Nothing is lost by scoping the summary: the per-sample readings keep every
+// device's own OtherProcs (tape.GPUSample.OtherProcs), so a run whose
+// neighbour card was busy still carries the evidence for anyone who looks.
+//
 // Witnesses (TTP-36) are readings too: their load averages count toward the
 // peak, a run that has any is judged even with no load and no GPU backend,
 // and gpu.Witnessed adds their IO-pressure and llama-process reasons.
-func (r *run) contention(samples []tape.RunSample) tape.ContentionInfo {
+func (r *run) contention(samples []tape.RunSample, gpusAtEnd []tape.GPUSample) tape.ContentionInfo {
 	var load float64
 	other := 0
+	inPlay := gpusInPlay(gpusAtEnd)
 	for _, s := range samples {
 		if s.LoadAvg1 > load {
 			load = s.LoadAvg1
 		}
 		for _, g := range s.GPUs {
+			if inPlay != nil && !slices.Contains(inPlay, g.Index) {
+				continue
+			}
 			if g.OtherProcs > other {
 				other = g.OtherProcs
 			}
