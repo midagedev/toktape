@@ -24,6 +24,13 @@ base="http://127.0.0.1:$port"
 work="$(mktemp -d)"
 dev_pid=""
 
+# Before anything is built or started: is the port ours to take? A gate that
+# starts a server and then waits for /healthz is asking two questions and
+# trusting one answer, and on 2026-09-21 an orphaned workerd held 8787 for two
+# hours while this gate reported a missing row that was really there (TTP-175).
+# The guard is first so the failure costs a second, not a minute of builds.
+GATE_HINT="web/check.sh" ./require-free-port.sh "$port" "the Worker gate"
+
 cleanup() {
   # The pid we started, never a pgrep pattern: a pattern matches the shell
   # that is searching for it and the wait never ends.
@@ -69,8 +76,12 @@ npx wrangler dev --port "$port" --inspector-port 0 \
   >"$work/dev.log" 2>&1 &
 dev_pid=$!
 for _ in $(seq 1 60); do
-  if curl -fsS "$base/healthz" >/dev/null 2>&1; then break; fi
+  # Liveness first, readiness second. The other order asks "is anyone there"
+  # before "is my server still alive", and a stranger on the port answers the
+  # first question for a server that already died (TTP-175). The port guard
+  # above makes a stranger unlikely; this makes it detectable.
   kill -0 "$dev_pid" 2>/dev/null || { cat "$work/dev.log"; die "wrangler dev exited"; }
+  if curl -fsS "$base/healthz" >/dev/null 2>&1; then break; fi
   sleep 1
 done
 curl -fsS "$base/healthz" >"$work/fetched" && grep -q '"live":true' "$work/fetched" ||

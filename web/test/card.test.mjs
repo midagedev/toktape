@@ -10,7 +10,8 @@
 // order the edit path set, and the size and signature refusals — without
 // writing anything to a service.
 //
-// Run: node --test test/   (from web/)
+// Run: node --test test/*.test.mjs   (from web/; a bare test/
+// directory is resolved as a module by node 24 and does not run)
 
 import assert from "node:assert/strict";
 import test from "node:test";
