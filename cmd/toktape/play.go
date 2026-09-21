@@ -198,7 +198,10 @@ func (p *player) View() string {
 	w, h := p.size()
 	m, clip := playModel(p.tp, p.wall, p.speed)
 	m.Theme = p.theme
-	m.TapePath = p.path
+	// TapePath stays empty, so the footer reads "run complete": p.path is the
+	// file being replayed, and "tape saved <path>" is a claim about where the
+	// recording wrote, which a replay never watched (TTP-133, 2026-09-21).
+	// Same reasoning as cmd/toktape/render.go, at length there.
 	m.Grid = p.grid
 	m.Page = p.page
 	return tui.View(m, clip, w, h)

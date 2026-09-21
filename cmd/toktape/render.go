@@ -224,9 +224,21 @@ func runRender(c *cli, args []string) int {
 	if err != nil {
 		return c.usagef("toktape: %v", err)
 	}
-	// The footer the clip's card ends on is the path this tape came from, the
-	// same one `record` printed when it saved the run.
-	opts.TapePath = tildePath(tapePath)
+	// No TapePath, so the footer reads "run complete" (render.Options.TapePath).
+	//
+	// It used to be tildePath(tapePath), the file being replayed, and the
+	// comment here said that was "the same one `record` printed when it saved
+	// the run". It is not: rendering assets/hero.tape printed "tape saved
+	// assets/hero.tape" for a run that was written to ~/.toktape/runs. The
+	// word "saved" is a claim about where the RECORDING wrote, and a replay
+	// did not watch it write (TTP-133, 2026-09-21).
+	//
+	// Deriving "~/.toktape/runs/<id>.tape" from the record instead would be
+	// the same violation wearing a default: record takes --out
+	// (cmd/toktape/record.go:169), so that directory is where runs usually go,
+	// not where this one went. The tape does not carry its own save path, so
+	// on a replay the honest answer is the one the renderer already has for an
+	// unsaved run.
 
 	// Say how long the clip will be, and out of what, before spending a
 	// minute rendering it. The arithmetic is in renderUsage; this is the same

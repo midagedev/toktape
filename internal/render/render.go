@@ -105,6 +105,14 @@ type Options struct {
 	// TapePath is printed in the answer pane's footer ("✓ tape saved <path>")
 	// once the run is done. Empty prints "run complete", which is what an
 	// unsaved run shows.
+	//
+	// It is the path a caller WATCHED the run be written to, and nothing else
+	// (TTP-133, 2026-09-21). "saved" is a claim about the recording, so a
+	// replay has no business filling it: the file it is reading is not
+	// evidence of where the run was written, and neither is the default runs
+	// directory, because record takes --out. A tape does not carry its own
+	// save path. The two replay commands leave this empty for that reason;
+	// cmd/toktape/tui.go fills it because it just watched saveRun.
 	TapePath string
 	// ColdOpen puts the shell prompt, the command being typed and the attach
 	// in front of the TUI (OpenHold). Off, the clip opens on the live screen
