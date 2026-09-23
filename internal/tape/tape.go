@@ -136,6 +136,13 @@ type RunSummary struct {
 	// own windows, never the gaps between them.
 	Rounds   int            `json:"rounds,omitempty"`
 	PerRound []RoundSummary `json:"per_round,omitempty"`
+	// Mode is what kind of run this tape is (2026-09-24). "" is a benchmark
+	// run from `record`: prompts toktape chose or a prompts file, comparable
+	// with other runs of the same set. ModeChat is a `toktape chat` session:
+	// every round is one turn a person typed, the history grows turn by
+	// turn, and the prompts are that person's own words. A chat tape is
+	// never comparable with a benchmark tape and is never shared by default.
+	Mode string `json:"mode,omitempty"`
 	// SpecNMax are the speculative.n_max values of a `record --spec-n-max`
 	// sweep, in the order they ran (TTP-35, 2026-09-13). Each value runs the
 	// whole prompt set, so Rounds = len(SpecNMax) x prompts, and BySpecNMax
@@ -1496,6 +1503,11 @@ func (p PromptRecord) EndedOnCap() bool {
 const (
 	EndpointChat       = "chat"       // /v1/chat/completions, the template applied by the server
 	EndpointCompletion = "completion" // /completion, the prompt sent verbatim
+)
+
+// Values of RunSummary.Mode.
+const (
+	ModeChat = "chat" // a `toktape chat` session
 )
 
 // Message is one chat message.
