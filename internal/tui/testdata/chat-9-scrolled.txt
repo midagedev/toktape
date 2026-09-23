@@ -1,0 +1,36 @@
+┌─ toktape chat · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────┐
+│                                                                                       │ THIS TURN ─────────────── #4 │
+│ ▌ What's the fastest way to count the lines in a 40 GB log file?                      │          █   █ ▄▀▀▀▄   ▄▀▀▀▄ │
+│                                                                                       │          █   █ █   █   █   █ │
+│   Use `wc -l` — it streams the file and never holds it in memory, so the only limit   │          ▀▀▀▀█ █   █   ▀▀▀▀█ │
+│   is how fast the disk reads:                                                         │              █ █   █       █ │
+│                                                                                       │              ▀ ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
+│   ```sh                                                                               │                 decode tok/s │
+│   wc -l /var/log/big.log                                                              │ ttft                  102 ms │
+│   # 812345678 /var/log/big.log                                                        │ tokens                   109 │
+│   ```                                                                                 │ prefill            850 tok/s │
+│                                                                                       │ cache reuse       96% of 636 │
+│   On an NVMe drive that is a few seconds per 10 GB. If the file is compressed, pipe   │ context            745 / 16k │
+│   it: `zstd -dc big.log.zst | wc -l`.                                                 │                              │
+│   44.1 tok/s · ttft 210 ms · 97 tok · cache 0% of 58                                  │ SESSION ──────────────────── │
+│                                                                                       │ turns        4 tok       376 │
+│ ▌ Show me the same thing in Go, reading in chunks.                                    │ by turn                 ███▇ │
+│                                                                                       │ mean              42.5 tok/s │
+│   Count the newline bytes in fixed-size chunks; a 1 MiB buffer keeps the syscalls     │                              │
+│   rare:                                                                               │ MACHINE ──────────────────── │
+│                                                                                       │ CPU  1%  0.2 cores  load 3.1 │
+│   ```go                                                                               │                              │
+│   func countLines(r io.Reader) (int, error) {                                         │                              │
+│       buf := make([]byte, 1<<20)                                                      │ ▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│       n := 0                                                                          │ GPU0 ▆▆▆▆▆▆  22.5G   4% 68°C │
+│       for {                                                                           │ GPU1 ▆▆▆▆▆▆  21.5G   4% 64°C │
+│           c, err := r.Read(buf)                                                       │ ▇▇▆▆▆▇▇▆▆                    │
+│           n += bytes.Count(buf[:c], []byte{'\n'})                                     │ █████████                    │
+│           if err == io.EOF {                                                          │ █████████▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│               return n, nil                                                           │                              │
+│ ───────────────────────────────── ↓ 22 more · pgdn ────────────────────────────────── │                              │
+├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
+│ › ▍ type a message                                                                                                   │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ ● ready                                     enter send · alt+enter newline · pgup/pgdn scroll · /help · ctrl+c leave │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

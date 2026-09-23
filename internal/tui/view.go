@@ -192,9 +192,16 @@ func (r titleRole) style(th Theme) style {
 // six-cell highlight travels along once every four seconds. The shimmer is the
 // only motion in the chrome; everything else up there is static by design.
 func topBorder(m Model, th Theme, t time.Duration, inner int) string {
+	return titleBorder(th, t, inner, titleSegments(m))
+}
+
+// titleBorder is topBorder for any title: the chat screen draws the same bar
+// with a title of its own (chatview.go), and one shimmer is one thing to keep
+// right.
+func titleBorder(th Theme, t time.Duration, inner int, segs []titleSeg) string {
 	l := newLine(th, inner)
 	l.add(th.dim, "─ ")
-	for _, seg := range titleSegments(m) {
+	for _, seg := range segs {
 		if l.left() <= 1 {
 			break
 		}

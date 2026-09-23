@@ -337,6 +337,9 @@ func usageFor(verb string) string {
 	if verb == "reindex" {
 		return reindexUsage
 	}
+	if verb == "chat" {
+		return chatUsage
+	}
 	return usageText
 }
 

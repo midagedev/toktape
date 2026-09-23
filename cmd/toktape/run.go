@@ -41,6 +41,7 @@ const usageText = `toktape — the black-box tape for local LLM serving
 Usage:
   toktape [flags]                 record a run (the default verb)
   toktape record [flags]          the same, spelled out
+  toktape chat [flags]            talk to the server, every answer timed and saved
   toktape card <tape> [flags]     re-render a card from a run file
   toktape play <tape> [--speed N] [--grid CxR]  replay a run on the live screen
   toktape render [tape] [flags]   render a run as a GIF, mp4, asciicast or frames
@@ -182,6 +183,8 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		return exitOK
 	case "record":
 		return runRecord(ctx, c, rest)
+	case "chat":
+		return runChat(ctx, c, rest)
 	case "card":
 		return runCard(c, rest)
 	case "play":
@@ -213,7 +216,7 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 // verbs are the commands Run dispatches on. The root verb is "record", so
 // `toktape` and `toktape --url ...` both record.
 var verbs = map[string]bool{
-	"record": true, "card": true, "play": true, "render": true,
+	"record": true, "chat": true, "card": true, "play": true, "render": true,
 	"ls": true, "log": true, "compare": true, "publish": true, "runs": true, "show": true, "reindex": true, "profile": true, "version": true,
 }
 

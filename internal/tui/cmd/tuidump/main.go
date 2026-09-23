@@ -16,6 +16,12 @@
 // code-formatting defect was invisible on the example, whose answers are all
 // prose, and was found on a real rig's tape by a throwaway program; a real
 // recording is now one flag away from the same frames.
+//
+// -chat dumps the chat screen instead (TTP-184, 2026-09-24): the scripted
+// session of tui.ExampleChatStates, one frame per state the screen can be in —
+// measuring, prefill, a code answer streaming, a thought, four turns, the
+// context-full notice, the 90-column layout, /help and a scrolled transcript.
+// -png rasterises them through render.TextImage, since no tape holds them.
 package main
 
 import (
@@ -52,7 +58,18 @@ func main() {
 	rounds := flag.Int("rounds", 0, "sequential prompt rounds (2..3) instead of one; 0 = the single-round example")
 	pngOut := flag.Bool("png", false, "also write each frame as a PNG, rasterised the way the clip renderer draws it")
 	tapeIn := flag.String("tape", "", "dump a recorded run file instead of the example tape; without -at, frames at a quarter, half and three quarters of its run and at its end")
+	chat := flag.Bool("chat", false, "dump the chat screen's scripted states instead of the record screen")
 	flag.Parse()
+
+	if *chat {
+		if err := os.MkdirAll(*out, 0o755); err != nil {
+			fail(err)
+		}
+		if dumpChat(*out, *pngOut) > 0 {
+			os.Exit(1)
+		}
+		return
+	}
 
 	grid, err := tui.ParseGrid(*gridSpec)
 	if err != nil {
@@ -188,6 +205,42 @@ func main() {
 	if bad > 0 {
 		os.Exit(1)
 	}
+}
+
+// dumpChat writes every example chat state as .txt, .ansi and, with -png, a
+// still. Each state carries its own size, so -w and -h do not apply.
+func dumpChat(out string, withPNG bool) int {
+	bad := 0
+	for _, st := range tui.ExampleChatStates() {
+		plain := tui.ChatView(st.Model(tui.PlainTheme()), st.At, st.W, st.H)
+		colour := tui.ChatView(st.Model(tui.ColourTheme()), st.At, st.W, st.H)
+		base := filepath.Join(out, fmt.Sprintf("chat-%dx%d-%s", st.W, st.H, st.Name))
+		write(base+".txt", plain)
+		write(base+".ansi", colour)
+		if withPNG {
+			img, err := render.TextImage(colour, st.W, st.H)
+			if err != nil {
+				fail(err)
+			}
+			f, err := os.Create(base + ".png")
+			if err != nil {
+				fail(err)
+			}
+			if err := png.Encode(f, img); err != nil {
+				f.Close()
+				fail(err)
+			}
+			if err := f.Close(); err != nil {
+				fail(err)
+			}
+		}
+		bad += check(base+".txt", plain, st.W, st.H)
+		if card.StripANSI(colour) != plain {
+			fmt.Printf("FAIL %s.ansi: stripping the palette does not reproduce the plain frame\n", base)
+			bad++
+		}
+	}
+	return bad
 }
 
 // parseOffsets reads the -at list. Each name carries the millisecond so two

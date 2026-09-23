@@ -335,8 +335,14 @@ func TestHelpAgentsTopic(t *testing.T) {
 // Two verbs that only read are what it buys, one Usage line each, and their
 // flags live behind `help runs` / `help show` the way render's do, so the
 // scannable text pays nothing per flag. 122 keeps two lines of headroom.
+//
+// It was 122 until `chat` (TTP-184, 2026-09-24), and the text was 122: the
+// headroom had been spent since. FAIL-first: the one Usage line for chat made
+// it 123 and failed the old budget before this raise. One line is all the
+// verb buys; its keys and flags live behind `help chat`, as render's do. 124
+// keeps one line of headroom.
 func TestHelpStaysScannable(t *testing.T) {
-	const maxLines = 122
+	const maxLines = 124
 	if n := strings.Count(usageText, "\n"); n > maxLines {
 		t.Errorf("--help is %d lines, over the %d-line budget; move detail into a help topic", n, maxLines)
 	}
