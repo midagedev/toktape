@@ -117,6 +117,9 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		Sampling:  samplingOf(recs),
 		GPUsAtEnd: gpusAtEnd,
 		Warnings:  r.warnings,
+		// A chat session's tape says so (2026-09-24); "" on every
+		// benchmark run, so their tapes are byte-identical to before.
+		Mode: r.mode,
 	}
 	summary.Server.Build, summary.Server.Commit = r.build, r.commit
 	// The user's word about the engine, kept only where the server did not

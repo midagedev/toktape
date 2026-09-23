@@ -219,43 +219,14 @@ func (r *run) streamRounds(ctx context.Context, rounds [][]server.StreamRequest)
 			}
 			break
 		}
-		st.beginRound(k)
 		base := k * n
-		for i := range reqs {
-			st.beginStream(base + i)
-			st.notify(Event{
-				Kind:      EventStreamStarted,
-				Stream:    i,
-				Round:     k,
-				Rounds:    len(rounds),
-				RoundName: r.opts.Rounds[k].Name,
-				SpecNMax:  specNMaxOf(reqs[i].Params),
-				Streams:   n,
-				MaxTokens: reqs[i].SentMaxTokens(),
-			})
-		}
-		r.observe(sinceOrigin(origin), k+1, witnessStart)
-		// server.RunConcurrent stamps StartedAt against its own call, so a
-		// later round's records are shifted by how long after round 0 it
-		// began: StartedAt is since the run start, never the round start.
-		var offset time.Duration
-		if k == 0 {
+		name := r.opts.Rounds[k].Name
+		got, err := r.sendRound(runCtx, st, k, reqs, len(rounds), name, &origin, func() context.Context {
 			stopSampling = r.startSampling(ctx, st)
 			origin = time.Now()
 			runCtx, clk = r.startClock(ctx, st, origin)
-		} else {
-			offset = time.Since(origin)
-		}
-		got, err := server.RunConcurrent(runCtx, r.client, reqs, func(i int) server.StreamHooks {
-			return st.hooks(base + i)
+			return runCtx
 		})
-		r.observe(time.Since(origin), k+1, witnessEnd)
-		name := r.opts.Rounds[k].Name
-		for i := range got {
-			got[i].Round = k
-			got[i].StartedAt += offset
-			got[i].Prompt.Name = name
-		}
 		// Before the round is judged: a round every one of whose streams the
 		// clock cut is a round that answered, not one that failed.
 		if at, live := clk.cut(); at > 0 && base <= len(live) {
@@ -291,6 +262,67 @@ func (r *run) streamRounds(ctx context.Context, rounds [][]server.StreamRequest)
 	}
 	st.applyDeltas(recs)
 	return recs, st, nil
+}
+
+// sendRound sends round k — its requests all at once — and returns their
+// records stamped with the round, its name and their start since the run's
+// origin. It is the one owner of a round's send for both callers: a
+// benchmark run's streamRounds, and a chat session's Send, whose every turn
+// is a round of one stream (2026-09-24).
+//
+// The run-wide stream index of request i is k*st.perRound+i (state doc). The
+// state is grown to hold it — a no-op for a benchmark run, which sized it up
+// front, and how a session's state grows by one stream per turn. rounds is
+// the run's round count for EventStreamStarted, 0 when it is open-ended.
+//
+// origin is the instant server.RunConcurrent's StartedAt is stamped against
+// for round 0. On round 0 it is still zero, and first is called between the
+// round's announcement and its first request: it starts whatever the caller
+// starts with the run (the sampler, the clock), sets *origin, and returns the
+// context the streams run under. A later round sends under ctx, and its
+// records are shifted by how long after round 0 it began: StartedAt is since
+// the run's start, never the round's.
+func (r *run) sendRound(ctx context.Context, st *state, k int, reqs []server.StreamRequest, rounds int, name string,
+	origin *time.Time, first func() context.Context) ([]tape.RequestRecord, error) {
+	n := st.perRound
+	base := k * n
+	st.grow(base + len(reqs))
+	st.beginRound(k)
+	for i := range reqs {
+		st.beginStream(base + i)
+		st.notify(Event{
+			Kind:      EventStreamStarted,
+			Stream:    i,
+			Round:     k,
+			Rounds:    rounds,
+			RoundName: name,
+			SpecNMax:  specNMaxOf(reqs[i].Params),
+			Streams:   n,
+			MaxTokens: reqs[i].SentMaxTokens(),
+		})
+	}
+	r.observe(sinceOrigin(*origin), k+1, witnessStart)
+	var offset time.Duration
+	if origin.IsZero() {
+		ctx = first()
+	} else {
+		offset = time.Since(*origin)
+	}
+	got, err := server.RunConcurrent(ctx, r.client, reqs, func(i int) server.StreamHooks {
+		// The engine-fingerprint latch rides every run stream, as it does in
+		// a single-round run (stream, TTP-169): a run that calibrated
+		// nothing learns what served it from its own streams.
+		h := st.hooks(base + i)
+		h.OnFingerprint = r.noteFingerprint
+		return h
+	})
+	r.observe(time.Since(*origin), k+1, witnessEnd)
+	for i := range got {
+		got[i].Round = k
+		got[i].StartedAt += offset
+		got[i].Prompt.Name = name
+	}
+	return got, err
 }
 
 // beginRound marks where round k's tokens start in the fault timeline.

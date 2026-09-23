@@ -320,7 +320,7 @@ type Event struct {
 	// multi-round run it is the streams of one round, never streams × rounds.
 	Streams int
 	// Round is the 0-based prompt round the event belongs to (TTP-31). It is
-	// always 0 in a single-round run.
+	// always 0 in a single-round run, and the turn in a chat session.
 	Round int
 	// Rounds, RoundName and SpecNMax are filled for EventStreamStarted in a
 	// multi-round run: how many rounds the run sends, the name of this one,
@@ -328,6 +328,15 @@ type Event struct {
 	// recorder fills them because it owns the plan — a --spec-n-max sweep is
 	// expanded into rounds only after the server's argv is read — so a caller
 	// never counts rounds from the Options it passed in (TTP-35).
+	//
+	// In a chat session (Session, 2026-09-24) every turn is a round of one
+	// stream: Round is the 0-based turn, Stream is 0, Streams is 1, and
+	// Rounds is 0, which means open-ended — the session does not know how
+	// many turns the person will type. A single-round benchmark run leaves
+	// it 0 as well (it has no rounds to count), so 0 alone does not say
+	// which: the EventAttached summary's Mode does (tape.ModeChat), and a
+	// multi-round run always sends its count, never 0. RoundName is "" for a
+	// turn.
 	Rounds    int
 	RoundName string
 	SpecNMax  int

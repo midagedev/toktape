@@ -107,6 +107,10 @@ type run struct {
 	// type, because run already has a probe method — the attach gate.
 	// It is reduced into the summary whole; the run's requests never see it.
 	prefill *tape.ProbeSummary
+	// mode is RunSummary.Mode: "" for a benchmark run, tape.ModeChat for a
+	// chat session (2026-09-24). Stamped on the attached summary and the
+	// reduced one, so a screen knows what it is drawing from the first event.
+	mode string
 }
 
 // Record performs one run end to end: attach, collect the static picture,
@@ -118,10 +122,8 @@ type run struct {
 // one of them — it is a run, and the tape says the clock ended it (TTP-76).
 func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	opts = opts.normalize()
-	switch opts.EngineKind {
-	case "", "auto", "llama", "openai":
-	default:
-		return nil, fmt.Errorf("recorder: --engine-kind %q: use auto, llama or openai", opts.EngineKind)
+	if err := checkEngineKind(opts.EngineKind); err != nil {
+		return nil, err
 	}
 	// The one place the "what may end this generation" table is read, and
 	// before anything is built from the options: the resolved cap is what
@@ -208,6 +210,17 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	return t, nil
 }
 
+// checkEngineKind refuses an --engine-kind the attach gate does not know,
+// for Record and a chat session's Open alike.
+func checkEngineKind(kind string) error {
+	switch kind {
+	case "", "auto", "llama", "openai":
+		return nil
+	default:
+		return fmt.Errorf("recorder: --engine-kind %q: use auto, llama or openai", kind)
+	}
+}
+
 // warn records a caveat the card prints verbatim and reports it to the
 // progress callback.
 func (r *run) warn(format string, args ...any) {
@@ -250,6 +263,7 @@ func (r *run) emitAttached() {
 		// stream's progress against its token cap needs to know when the
 		// budget, not the cap, is what the run will end on.
 		Limit: r.limit,
+		Mode:  r.mode,
 	}
 	s.Server.Build, s.Server.Commit = r.build, r.commit
 	if r.kind == tape.ServerOpenAI {
@@ -1151,7 +1165,19 @@ func (r *run) collectTemplate(ctx context.Context, reqs []server.StreamRequest) 
 	if len(reqs) == 0 {
 		return
 	}
-	failed, templated := 0, 0
+	failed, templated := r.renderPrompts(ctx, reqs)
+	if failed > 0 {
+		r.warnTemplateFailures(failed, templated)
+	}
+	r.describeTemplate(&reqs[0])
+}
+
+// renderPrompts fetches the rendered prompt of every request that has a
+// template, and counts the ones it asked for and the ones that failed. It
+// is collectTemplate's fetch alone, shared with a chat session, which
+// renders every turn's whole conversation but describes only the first
+// (2026-09-24). A caller on a ServerOpenAI server never gets here.
+func (r *run) renderPrompts(ctx context.Context, reqs []server.StreamRequest) (failed, templated int) {
 	for i := range reqs {
 		// A raw /completion request has no template to apply (TTP-55): its
 		// prompt is already what the model sees, and asking the server to
@@ -1168,19 +1194,28 @@ func (r *run) collectTemplate(ctx context.Context, reqs []server.StreamRequest) 
 		}
 		reqs[i].RenderedPrompt = rendered
 	}
-	if failed > 0 {
-		r.warn("/apply-template failed for %d/%d streams, prompt unknown", failed, templated)
-	}
-	first := reqs[0].RenderedPrompt
+	return failed, templated
+}
+
+// warnTemplateFailures is the one sentence for prompts the template route
+// would not render, whichever caller counted them.
+func (r *run) warnTemplateFailures(failed, templated int) {
+	r.warn("/apply-template failed for %d/%d streams, prompt unknown", failed, templated)
+}
+
+// describeTemplate fills the run's TemplateInfo from the request it
+// describes: the first stream of a benchmark run, the first turn of a chat.
+func (r *run) describeTemplate(q *server.StreamRequest) {
+	first := q.RenderedPrompt
 	if first != "" {
 		sum := sha256.Sum256([]byte(first))
 		r.template.RenderedPromptSHA256 = hex.EncodeToString(sum[:])
 		r.template.RenderedHasThinkClose = strings.Contains(first, "</think>")
 	}
-	if v, ok := reqs[0].Params["reasoning_effort"].(string); ok {
+	if v, ok := q.Params["reasoning_effort"].(string); ok {
 		r.template.ReasoningEffort = v
 	}
-	if kw, ok := reqs[0].Params["chat_template_kwargs"].(map[string]any); ok && len(kw) > 0 {
+	if kw, ok := q.Params["chat_template_kwargs"].(map[string]any); ok && len(kw) > 0 {
 		r.template.TemplateKwargs = make(map[string]string, len(kw))
 		for k, v := range kw {
 			r.template.TemplateKwargs[k] = fmt.Sprint(v)

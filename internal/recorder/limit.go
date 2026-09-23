@@ -161,6 +161,30 @@ func (o Options) limit() tape.LimitSummary {
 	return out
 }
 
+// chatLimit is the table's answer for a chat session (`toktape chat`,
+// 2026-09-24), and the reason it is not a sixth row of limit: a chat has no
+// clock at all, whatever was typed. The clock exists to make a run the length
+// of a clip; a person reading an answer is not a clip, and a budget that cut
+// the third turn of a conversation mid-sentence would be the tool overruling
+// the only reader there is. So For is 0 and MinTokens is 0 — NoClock's row —
+// and Open refuses a For > 0 rather than dropping it silently.
+//
+// The cap is the user's own when they named one, and otherwise 0 here: there
+// is no single cap on a chat tape, because each turn is capped by the room
+// the conversation has left in the slot (Session.answerCap), and that room
+// shrinks turn by turn. Every record carries the cap its turn was sent with
+// in PromptRecord.MaxTokens. DefaultMaxTokens is deliberately absent: it is
+// a runaway guard sized against DefaultFor's clock, and a chat answer that
+// stopped at 8000 tokens because a benchmark default said so would be an
+// answer cut for a reason that does not apply to it.
+func (o Options) chatLimit() tape.LimitSummary {
+	out := tape.LimitSummary{MaxTokensNamed: o.MaxTokens > 0}
+	if o.MaxTokens > 0 {
+		out.MaxTokens = o.MaxTokens
+	}
+	return out
+}
+
 // limitOf is the run's limit as the tape records it: what was asked for,
 // when the clock actually cut, and what the streams' own finish words say
 // ended them (TTP-135). They are one struct because a reader needs the whole

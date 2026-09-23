@@ -144,6 +144,37 @@ func (st *state) hooks(i int) server.StreamHooks {
 	}
 }
 
+// grow makes room for n run-wide streams. A benchmark run sizes its state up
+// front, so for it this is a no-op; a chat session cannot know how many turns
+// it will send, and grows the state by one stream per turn (2026-09-24). It
+// runs under the mutex because the sampler's goroutine reads the state
+// between turns.
+func (st *state) grow(n int) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for len(st.perStream) < n {
+		st.perStream = append(st.perStream, nil)
+		st.firstIdx = append(st.firstIdx, -1)
+		st.started = append(st.started, false)
+		st.ended = append(st.ended, false)
+	}
+}
+
+// relatch discards the major faults the server took since the last token,
+// so the next token's delta is the next turn's own (2026-09-24). A chat
+// session calls it before every turn after the first: between two turns a
+// person was reading, the server may have served somebody else, and those
+// faults would otherwise land on the next turn's first token and read as its
+// prompt phase. The same rule as the gap in the rates — idle time enters no
+// figure — applied to the one series that is not reduced per round.
+func (st *state) relatch() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.sampler != nil {
+		_, _ = st.sampler.MajDelta()
+	}
+}
+
 // beginStream marks stream g live. It is called as the request goes out, so
 // that a stream which has not been sent yet — a later round's — never holds
 // the clock's floor open (TTP-76).
