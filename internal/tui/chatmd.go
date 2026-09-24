@@ -18,8 +18,10 @@ import (
 //   - a "- ", "* " or "+ " item draws "• " at the same indent, and a wrapped
 //     item's continuation hangs under its text, not under the bullet;
 //   - "**bold**" draws bold, the markers gone;
-//   - a numbered item and an inline `code` span stay as they are (the span is
-//     already styled by highlight.go).
+//   - a numbered item keeps its number as written, and a wrapped one hangs
+//     under its text like a bullet's;
+//   - an inline `code` span stays as it is (it is already styled by
+//     highlight.go).
 //
 // It must hold while the answer streams. A marker is recognised only once it
 // is complete — the space after "-" or "###", the character after a closing
@@ -136,28 +138,64 @@ func (md *chatMD) line(cells []wrapCell, raw string, base, w int, complete bool,
 			prefix = append(prefix, wrapCell{' ', cells[k].src})
 		}
 		prefix = append(prefix, wrapCell{bulletGlyph, rest[0].src}, wrapCell{' ', rest[1].src})
-		pw := cellsWidth(prefix)
-		content := md.inline(trimCells(rest[2:]), base, complete)
-		if w-pw < bulletMinText {
-			// Too narrow to hang: the bullet stays, the text wraps under it.
-			return wrapParagraph(append(prefix, content...), w)
+		return hangItem(prefix, md.inline(trimCells(rest[2:]), base, complete), w)
+	}
+
+	// A numbered item, at any indent: its number stays as written and the
+	// text hangs after "N. " the way a bullet's does (look round 3,
+	// 2026-09-24: a wrapped "1." item continued under its number).
+	if n := orderedMarker(rest); n > 0 {
+		ind = min(ind, w/2)
+		prefix := make([]wrapCell, 0, ind+n)
+		for k := 0; k < ind; k++ {
+			prefix = append(prefix, wrapCell{' ', cells[k].src})
 		}
-		lines := wrapParagraph(content, w-pw)
-		for i, wl := range lines {
-			lead := prefix
-			if i > 0 {
-				lead = make([]wrapCell, pw)
-				for k := range lead {
-					lead[k] = wrapCell{' ', -1}
-				}
-			}
-			pl := cellLine(lead)
-			lines[i] = wrappedLine{text: pl.text + wl.text, src: append(pl.src, wl.src...)}
-		}
-		return lines
+		prefix = append(prefix, rest[:n]...)
+		return hangItem(prefix, md.inline(trimCells(rest[n:]), base, complete), w)
 	}
 
 	return wrapParagraph(md.inline(cells, base, complete), w)
+}
+
+// hangItem wraps a list item's content after its marker prefix, every row
+// after the first indented by the prefix's width so the text lines up under
+// the text.
+func hangItem(prefix, content []wrapCell, w int) []wrappedLine {
+	pw := cellsWidth(prefix)
+	if w-pw < bulletMinText {
+		// Too narrow to hang: the marker stays, the text wraps under it.
+		return wrapParagraph(append(prefix, content...), w)
+	}
+	lines := wrapParagraph(content, w-pw)
+	for i, wl := range lines {
+		lead := prefix
+		if i > 0 {
+			lead = make([]wrapCell, pw)
+			for k := range lead {
+				lead[k] = wrapCell{' ', -1}
+			}
+		}
+		pl := cellLine(lead)
+		lines[i] = wrappedLine{text: pl.text + wl.text, src: append(pl.src, wl.src...)}
+	}
+	return lines
+}
+
+// orderedMarker is the length of the "N. " or "N) " that opens a numbered
+// item — one to nine digits, the dot or parenthesis, a space — or 0 when
+// cells do not open one. The space is what makes it one, so "1.5" is text.
+func orderedMarker(cells []wrapCell) int {
+	d := 0
+	for d < len(cells) && d < 10 && cells[d].r >= '0' && cells[d].r <= '9' {
+		d++
+	}
+	if d == 0 || d > 9 || d+1 >= len(cells) {
+		return 0
+	}
+	if r := cells[d].r; (r != '.' && r != ')') || cells[d+1].r != ' ' {
+		return 0
+	}
+	return d + 2
 }
 
 // bulletGlyph is what a list item's marker draws as.

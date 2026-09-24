@@ -572,3 +572,109 @@ func TestChatMachineCollapsesOnlyWhenNothingObserved(t *testing.T) {
 		})
 	}
 }
+
+// TestChatMarkdownNumberedHangsUnderItsText (look round 3, 2026-09-24): a
+// wrapped numbered item hangs under its text the way a bullet does — the width
+// of "N. " — and its number stays as written.
+func TestChatMarkdownNumberedHangsUnderItsText(t *testing.T) {
+	cases := []struct {
+		line   string
+		marker string // the item's marker, drawn as written
+		pw     int    // the columns before the item's text
+	}{
+		{"1. 한국어 항목: 큰 파일은 한 번에 읽지 말고 1 MiB 버퍼로 나눠 읽으면 메모리를 거의 쓰지 않고", "1. ", 3},
+		{"10. plain words that wrap more than once when the column is only this narrow", "10. ", 4},
+		{"  3) nested words that wrap more than once when the column is only this narrow", "  3) ", 5},
+	}
+	for _, c := range cases {
+		for _, w := range []int{21, 30, 47} {
+			md := newChatMD(mdStream([]string{c.line}, true))
+			lines := md.wrap(c.line, 0, w)
+			if len(lines) < 2 {
+				t.Fatalf("%q at %d: %d rows, the case must wrap", c.line, w, len(lines))
+			}
+			if !strings.HasPrefix(lines[0].text, c.marker) {
+				t.Errorf("%q at %d: first row %q does not open with %q", c.line, w, lines[0].text, c.marker)
+			}
+			for i, wl := range lines {
+				if cw := width(wl.text); cw > w {
+					t.Errorf("%q at %d: row %d is %d columns: %q", c.line, w, i, cw, wl.text)
+				}
+				if i == 0 {
+					continue
+				}
+				rs := []rune(wl.text)
+				for k := 0; k < c.pw; k++ {
+					if rs[k] != ' ' || wl.src[k] != -1 {
+						t.Fatalf("%q at %d: row %d %q does not hang %d wrapper columns", c.line, w, i, wl.text, c.pw)
+					}
+				}
+				if rs[c.pw] == ' ' {
+					t.Errorf("%q at %d: row %d %q hangs deeper than the text", c.line, w, i, wl.text)
+				}
+			}
+		}
+	}
+}
+
+// TestChatMarkdownNumberedNeverFlickers (look round 3, 2026-09-24): fed one
+// rune at a time, a finished numbered line draws exactly as it will at the
+// end, and the line being written, once its continuation hangs, keeps hanging.
+// "1.5" and "2.x" are not items and never hang.
+func TestChatMarkdownNumberedNeverFlickers(t *testing.T) {
+	const text = "1. first item whose words wrap under the text\n10. tenth item whose words wrap under the text\n  2) nested item whose words wrap too\n1.5 is a number and wraps like a paragraph\n2.x is not an item either, wrapping"
+	var pieces []string
+	for _, r := range text {
+		pieces = append(pieces, string(r))
+	}
+	pws := []int{3, 4, 5, 0, 0}
+	const w = 24
+	hung := func(rows []mdRow, pw int) bool {
+		if pw == 0 || len(rows) < 2 {
+			return false
+		}
+		for _, r := range rows[1:] {
+			if !strings.HasPrefix(r.text, strings.Repeat(" ", pw)) {
+				return false
+			}
+		}
+		return true
+	}
+	final, _ := mdSourceLines(mdStream(pieces, true), w)
+	for line, pw := range pws {
+		if got := hung(final[line], pw); got != (pw > 0) {
+			t.Errorf("finished line %d %q: hung=%v, want %v", line, final[line], got, pw > 0)
+		}
+	}
+	wasHung := map[int]bool{}
+	for k := 1; k <= len(pieces); k++ {
+		s := mdStream(pieces[:k], k == len(pieces))
+		got, _ := mdSourceLines(s, w)
+		complete := strings.Count(s.Text, "\n")
+		if s.Done {
+			complete++
+		}
+		for line, rows := range got {
+			if line < complete {
+				if !reflect.DeepEqual(rows, final[line]) {
+					t.Fatalf("prefix %d: whole line %d draws %q, at the end %q", k, line, rows, final[line])
+				}
+				continue
+			}
+			pw := pws[line]
+			if pw == 0 {
+				for _, r := range rows[1:] {
+					if strings.HasPrefix(r.text, " ") {
+						t.Fatalf("prefix %d: line %d is not an item and hangs: %q", k, line, rows)
+					}
+				}
+				continue
+			}
+			now := hung(rows, pw)
+			if wasHung[line] && !now && len(rows) >= 2 {
+				t.Fatalf("prefix %d (%q): line %d stopped hanging: %q", k, pieces[k-1], line, rows)
+			}
+			wasHung[line] = wasHung[line] || now
+		}
+	}
+}

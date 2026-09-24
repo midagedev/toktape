@@ -273,13 +273,23 @@ func titleSegments(m Model) []titleSeg {
 }
 
 // roundLabel is "round 2/6 sql-2", or "round 2/6" for a round the prompts
-// file did not name.
+// file did not name. A chat tape's rounds are its turns and say so.
 func roundLabel(m Model) string {
-	label := fmt.Sprintf("round %d/%d", m.Round+1, m.Rounds)
+	label := fmt.Sprintf("%s %d/%d", roundNoun(m), m.Round+1, m.Rounds)
 	if m.RoundName != "" {
 		label += " " + m.RoundName
 	}
 	return label
+}
+
+// roundNoun is what the record screen calls one round: "turn" on a chat
+// tape, where each round is one exchange the person typed, "round" otherwise.
+// Every round wording the replay shows goes through it.
+func roundNoun(m Model) string {
+	if m.Summary.IsChat() {
+		return "turn"
+	}
+	return "round"
 }
 
 // engineKind is the engine's name as the title prints it: "?" for an engine

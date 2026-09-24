@@ -10,7 +10,7 @@
 │                                                                                       │ SESSION ──────────────────── │
 │                                                                                       │ turns                      0 │
 │                                                                                       │ tokens                     0 │
-│                                                                                       │ by turn                      │
+│                                                                                       │ by turn                    ? │
 │                                                                                       │ mean                       ? │
 │                   attached to DeepSeek-R1-Distill-Llama-70B-Q4_K_M                    │                              │
 │                                                                                       │ MACHINE ──────────────────── │

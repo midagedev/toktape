@@ -15,7 +15,7 @@
 │                                                                                       │ SESSION ──────────────────── │
 │                                                                                       │ turns                      1 │
 │                                                                                       │ tokens                    80 │
-│                                                                                       │ by turn                      │
+│                                                                                       │ by turn                    ? │
 │                                                                                       │ mean                       ? │
 │                                                                                       │                              │
 │                                                                                       │ MACHINE ──────────────────── │

@@ -806,11 +806,17 @@ func buildChatPane(m ChatModel, th Theme, t time.Duration, cw int, big bool, gra
 		kvRow(th, cw, "turns", strconv.Itoa(len(m.Turns())), th.text),
 		kvRow(th, cw, "tokens", fmtCount(m.sessionTokens()), th.text),
 	)
-	{
+	// Until a turn has finished there is no bar to draw, and a label with
+	// nothing after it reads as a row that failed to render: it shows the
+	// unknown mark where the first bar will stand, so the row is there from
+	// the start and nothing moves when the bar comes (look round 3, 2026-09-24).
+	if bars := m.sessionBars(); len(bars) == 0 {
+		out = append(out, kvRow(th, cw, "by turn", unknown, th.dim))
+	} else {
 		l := newLine(th, cw)
 		l.add(th.dim, "by turn")
 		l.space(1)
-		turnBars(l, th, m.sessionBars(), l.left())
+		turnBars(l, th, bars, l.left())
 		out = append(out, l.String())
 	}
 	mean := unknown
@@ -911,8 +917,9 @@ func chatStatusLine(m ChatModel, th Theme, t time.Duration, cw int) string {
 		return l.String()
 	}
 	rates := m.sessionRates()
-	l.add(th.text, strconv.Itoa(len(m.Turns())))
-	l.add(th.dim, " turns")
+	n := len(m.Turns())
+	l.add(th.text, strconv.Itoa(n))
+	l.add(th.dim, plural(n, " turn", " turns"))
 	if bars := m.sessionBars(); len(bars) > 0 && l.left() > 6 {
 		l.space(1)
 		turnBars(l, th, bars, min(l.left()-1, turnBarsWidth(len(bars), chatStatusBarsMax)))
@@ -930,6 +937,14 @@ func chatStatusLine(m ChatModel, th Theme, t time.Duration, cw int) string {
 	}
 	put(parts)
 	return l.String()
+}
+
+// plural is one when n is 1 and many otherwise: "1 turn", "2 turns".
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // chatFooter is the session's state on the left and the keys that act on it

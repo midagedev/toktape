@@ -13,18 +13,18 @@
 │     쓰지 않고 디스크 속도로 끝납니다.                                                  │
 │                                                                                        │
 │   1. Try `wc -l` first.                                                                │
-│   2. Reach for parallel only when one core is the limit.                               │
+│   2. Reach for parallel only when one core is the limit: it splits the file by byte    │
+│      range, so each job reads its own part once.                                       │
 │                                                                                        │
 │   sh                                                                                   │
 │   # **not bold**: a comment                                                            │
 │   wc -l big.log                                                                        │
 │                                                                                        │
 │   Bottom line: `wc -l` is usually enough.                                              │
-│   44.1 tok/s · ttft 120 ms · 146 tok · cache 0% of 40                                  │
-│                                                                                        │
+│   44.1 tok/s · ttft 120 ms · 169 tok · cache 0% of 40                                  │
 │                                                                                        │
 │   ──────────────────────────────────────────────────────────────────────────────────── │
-│   1 turns ████ · mean 44.1 tok/s · 146 tok · context 186 / 16k                         │
+│   1 turn ████ · mean 44.1 tok/s · 169 tok · context 209 / 16k                          │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │ › ▍ type a message                                                                     │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
