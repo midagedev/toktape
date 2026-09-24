@@ -729,7 +729,8 @@ const maxRoundsListed = 8
 // line keeps the name, because which prompt came back is its whole point.
 // A round too short to be a prefill measurement is not given a
 // figure; the line counts it, so a missing round is explained rather than
-// silently dropped. A round with no prompt timings is on neither line.
+// silently dropped. A round with no prompt timings is on neither line. On a
+// chat the prefill line is chatPrefillLines': a turn number, not a length.
 func roundsLines(s *tape.RunSummary) []string {
 	if s.Rounds <= 1 {
 		return nil
@@ -770,6 +771,9 @@ func roundsLines(s *tape.RunSummary) []string {
 		case r.rate <= 0:
 		case r.short:
 			short++
+		case IsChat(s):
+			prefill = append(prefill, fmt.Sprintf("%s %s (%s tok)",
+				roundLabel(p, pos[p.SpecNMax]), formatRateUnit(r.rate), promptLength(r.prompt)))
 		default:
 			prefill = append(prefill, promptLength(r.prompt)+" "+formatRate(r.rate))
 		}
@@ -777,7 +781,11 @@ func roundsLines(s *tape.RunSummary) []string {
 	if len(parts) > 0 {
 		lines = append(lines, wrapJoin(parts, "  ·  ", avail)...)
 	}
-	lines = append(lines, roundPrefillLines(prefill, short, RoundsNoun(s, short), avail)...)
+	if IsChat(s) {
+		lines = append(lines, chatPrefillLines(prefill, short, RoundsNoun(s, short), avail)...)
+	} else {
+		lines = append(lines, roundPrefillLines(prefill, short, RoundsNoun(s, short), avail)...)
+	}
 	if len(cached) > 0 {
 		cached[0] = "cache " + cached[0]
 		lines = append(lines, wrapJoin(cached, "  ·  ", avail)...)
@@ -872,6 +880,30 @@ func roundPrefillLines(prefill []string, short int, noun string, avail int) []st
 	}
 	parts[0] = "prefill " + parts[0]
 	return wrapJoin(parts, " · ", avail)
+}
+
+// chatPrefillLines is roundPrefillLines on a chat (2026-09-24): "prefill 2
+// 1032 tok/s (285 tok)", each measured turn named by its number the way the
+// decode line above it names it, with its own unit and its prompt size.
+//
+// A chat is not a sweep. Its prompts are whatever the person typed plus the
+// conversation so far, so the length that keys a benchmark's line is not the
+// axis anyone compares along, and on a chat it read as two bare numbers
+// ("prefill 285 1032 tok/s"). The turn number is what ties the figure to the
+// answer on screen; the size stays beside it because a prefill rate means
+// nothing without it. The entries are joined the way the decode line joins
+// its turns. The short count is roundPrefillLines', with no rate (TTP-65).
+func chatPrefillLines(prefill []string, short int, noun string, avail int) []string {
+	if len(prefill) == 0 && short == 0 {
+		return nil
+	}
+	parts := append([]string(nil), prefill...)
+	if short > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s under %d tokens, not measured",
+			short, noun, MinPrefillPromptTokens))
+	}
+	parts[0] = "prefill " + parts[0]
+	return wrapJoin(parts, "  ·  ", avail)
 }
 
 // roundCachePart is one round of the cache line: "4 repo-again 97% hit of 16k,

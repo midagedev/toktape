@@ -1,5 +1,4 @@
 ┌─ toktape chat · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 ─────────────┐
-│                                                                                        │
 │ ▌ Sum it up as a list, please.                                                         │
 │                                                                                        │
 │   Counting lines                                                                       │
@@ -20,11 +19,12 @@
 │   # **not bold**: a comment                                                            │
 │   wc -l big.log                                                                        │
 │                                                                                        │
-│   Bottom line: `wc -l` is usually enough.                                              │
-│   44.1 tok/s · ttft 120 ms · 169 tok · cache 0% of 40                                  │
-│                                                                                        │
 │   ──────────────────────────────────────────────────────────────────────────────────── │
-│   1 turn ████ · mean 44.1 tok/s · 169 tok · context 209 / 16k                          │
+│                                                                                        │
+│   Bottom line: `wc -l` is usually enough.                                              │
+│   44.1 tok/s · ttft 120 ms · 172 tok · cache 0% of 40                                  │
+│   ──────────────────────────────────────────────────────────────────────────────────── │
+│   1 turn ████ · mean 44.1 tok/s · 172 tok · context 212 / 16k                          │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │ › ▍ type a message                                                                     │
 ├────────────────────────────────────────────────────────────────────────────────────────┤

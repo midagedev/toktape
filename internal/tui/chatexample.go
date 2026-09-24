@@ -106,11 +106,11 @@ var chatExampleMoreTurns = []chatExampleTurn{
 // local model answers "as a list" (look round 2, 2026-09-24: a live Qwen3-1.7B
 // answer showed "### Explanation:" and "- " verbatim): a heading, bullets with
 // a nested one and a wrapped Korean one, a numbered list with a wrapped item,
-// bold, inline code, and a code block whose "#" and "**" are code and must
-// stay as written.
+// bold, inline code, a code block whose "#" and "**" are code and must stay
+// as written, and a "---" break before the last line.
 var chatExampleMarkdownTurn = chatExampleTurn{
 	user:   "Sum it up as a list, please.",
-	answer: "### Counting lines\n\nThree tools cover it:\n\n- `wc -l` for a plain count, at **disk speed**.\n- `grep -c -F` when only matching lines count.\n  - `-F` skips the regex engine.\n* 한국어 항목: 큰 파일은 한 번에 읽지 말고 1 MiB 버퍼로 나눠 읽으면 메모리를 거의 쓰지 않고 디스크 속도로 끝납니다.\n\n1. Try `wc -l` first.\n2. Reach for **parallel** only when one core is the limit: it splits the file by byte range, so each job reads its own part once.\n\n```sh\n# **not bold**: a comment\nwc -l big.log\n```\n\n**Bottom line:** `wc -l` is usually enough.",
+	answer: "### Counting lines\n\nThree tools cover it:\n\n- `wc -l` for a plain count, at **disk speed**.\n- `grep -c -F` when only matching lines count.\n  - `-F` skips the regex engine.\n* 한국어 항목: 큰 파일은 한 번에 읽지 말고 1 MiB 버퍼로 나눠 읽으면 메모리를 거의 쓰지 않고 디스크 속도로 끝납니다.\n\n1. Try `wc -l` first.\n2. Reach for **parallel** only when one core is the limit: it splits the file by byte range, so each job reads its own part once.\n\n```sh\n# **not bold**: a comment\nwc -l big.log\n```\n\n---\n\n**Bottom line:** `wc -l` is usually enough.",
 	typeAt: 4 * time.Second, ttft: 120 * time.Millisecond, rate: 44.1, promptN: 40,
 }
 

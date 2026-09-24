@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -675,6 +676,61 @@ func TestChatMarkdownNumberedNeverFlickers(t *testing.T) {
 				t.Fatalf("prefix %d (%q): line %d stopped hanging: %q", k, pieces[k-1], line, rows)
 			}
 			wasHung[line] = wasHung[line] || now
+		}
+	}
+}
+
+// TestChatMarkdownThematicBreak (2026-09-24): an answer line that is only a
+// thematic break — three or more "-", "*" or "_", up to three spaces before
+// and any after — draws as a rule of "─" across the answer's width, every
+// rune of it dim. It is decided only once the line is whole, so "--" and a
+// "---" still waiting for its newline draw as written; inside a fence it is
+// code.
+func TestChatMarkdownThematicBreak(t *testing.T) {
+	const w = 30
+	rule := strings.Repeat("─", w)
+	for _, line := range []string{"---", "***", "___", "  ---  ", "-----", "   ***"} {
+		text := "above\n" + line + "\nbelow"
+		s := mdStream([]string{text}, true)
+		md := newChatMD(s)
+		var got []string
+		for _, bl := range streamTextLinesWith(s, w, md.wrap) {
+			got = append(got, bl.text)
+			if bl.text == rule {
+				for _, o := range bl.src {
+					if !md.isRule(o) {
+						t.Errorf("%q: rule rune at source %d is not dim", line, o)
+					}
+				}
+			}
+		}
+		if want := []string{"above", rule, "below"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("%q draws %q, want %q", line, got, want)
+		}
+	}
+
+	// Not breaks: too short, a mix, text after, indented four, in a fence.
+	for _, text := range []string{"--", "-*-", "---x", "    ---", "```\n---\n```", "- - x"} {
+		s := mdStream([]string{text}, true)
+		for _, bl := range streamTextLinesWith(s, w, newChatMD(s).wrap) {
+			if strings.Contains(bl.text, "─") {
+				t.Errorf("%q drew a rule: %q", text, bl.text)
+			}
+		}
+	}
+
+	// Streaming: the break is written a rune at a time; until its newline
+	// arrives it draws as the dashes so far, and after it the rule.
+	full := "above\n---\nbelow"
+	for k := 1; k <= len(full); k++ {
+		s := mdStream([]string{full[:k]}, false)
+		var got []string
+		for _, bl := range streamTextLinesWith(s, w, newChatMD(s).wrap) {
+			got = append(got, bl.text)
+		}
+		ruled := slices.Contains(got, rule)
+		if want := k > len("above\n---"); ruled != want {
+			t.Errorf("prefix %q: rule drawn %v, want %v (%q)", full[:k], ruled, want, got)
 		}
 	}
 }

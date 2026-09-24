@@ -151,3 +151,63 @@ func TestChatExplainNamesTurns(t *testing.T) {
 func TestChatCardGolden(t *testing.T) {
 	golden(t, "chat-e2e.txt", []byte(Text(&readChatFixture(t).Summary)))
 }
+
+// chatStoppedFixture is a second real chat (2026-09-24): turn 1 was stopped
+// with ctrl+c after 241 tokens and its prompt was too short to be a prefill
+// measurement; turn 2 was answered with a 285-token prompt, which was.
+const chatStoppedFixture = "testdata/chat-e2e-stopped.toktape"
+
+// chatRow is the Chat row of s's text card, trailing spaces trimmed.
+func chatRow(t *testing.T, s *tape.RunSummary) []string {
+	t.Helper()
+	var row []string
+	keep := false
+	for _, line := range strings.Split(Text(s), "\n") {
+		body := strings.TrimSuffix(strings.TrimPrefix(line, "│ "), " │")
+		switch {
+		case strings.HasPrefix(body, RoundsLabel(s)+" "):
+			keep = true
+		case keep && !strings.HasPrefix(body, strings.Repeat(" ", speedLabelW)):
+			keep = false
+		}
+		if keep {
+			row = append(row, strings.TrimRight(body, " "))
+		}
+	}
+	return row
+}
+
+// TestChatPrefillNamesTheTurn (2026-09-24): a chat's per-turn prefill line
+// names each measured turn by its number, as the decode line above it does,
+// and keeps its prompt size. The benchmark line labels a round by its prompt
+// length ("4k 129 · 16k 104 tok/s"), the axis a prefill sweep compares along;
+// on a chat that read as two bare numbers, "prefill 285 1032 tok/s". The
+// turns too short to measure are still only counted, with no rate (TTP-65).
+func TestChatPrefillNamesTheTurn(t *testing.T) {
+	tp, err := tape.Read(chatStoppedFixture)
+	if err != nil {
+		t.Fatalf("read %s: %v", chatStoppedFixture, err)
+	}
+	if !tp.Summary.IsChat() {
+		t.Fatalf("%s is not a chat tape", chatStoppedFixture)
+	}
+	got := chatRow(t, &tp.Summary)
+	want := []string{
+		"Chat          2 turns · 82.6 tok/s median (81.5–83.7)",
+		"              1 83.7 tok/s  ·  2 81.5 tok/s",
+		"              prefill 2 1032 tok/s (285 tok)",
+		"              1 turn under 100 tokens, not measured",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("the chat row:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestChatStoppedCardGolden pins the whole card of the stopped-turn chat.
+func TestChatStoppedCardGolden(t *testing.T) {
+	tp, err := tape.Read(chatStoppedFixture)
+	if err != nil {
+		t.Fatalf("read %s: %v", chatStoppedFixture, err)
+	}
+	golden(t, "chat-e2e-stopped.txt", []byte(Text(&tp.Summary)))
+}

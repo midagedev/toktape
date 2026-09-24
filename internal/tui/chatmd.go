@@ -21,7 +21,11 @@ import (
 //   - a numbered item keeps its number as written, and a wrapped one hangs
 //     under its text like a bullet's;
 //   - an inline `code` span stays as it is (it is already styled by
-//     highlight.go).
+//     highlight.go);
+//   - a thematic break ("---", "***" or "___", three or more, alone on its
+//     line) draws as a dim rule across the answer, the way the screen's own
+//     rules are drawn — decided only once its newline has arrived, since
+//     "--" may still become "---" or "--x".
 //
 // It must hold while the answer streams. A marker is recognised only once it
 // is complete — the space after "-" or "###", the character after a closing
@@ -35,6 +39,9 @@ import (
 type chatMD struct {
 	// strong is, per rune of the stream's text, whether it draws bold.
 	strong []bool
+	// rule is, per rune, whether it is a thematic break's, drawn as a dim
+	// rule rather than as text.
+	rule []bool
 	// total is the rune count of the stream's text, so a run knows whether
 	// its last line is the one still being written.
 	total int
@@ -55,14 +62,21 @@ func (md *chatMD) isStrong(o int) bool {
 	return o >= 0 && o < len(md.strong) && md.strong[o]
 }
 
-func (md *chatMD) mark(o int) {
+func (md *chatMD) mark(o int) { markAt(&md.strong, o) }
+
+// isRule reports whether the rune at stream offset o is a thematic break's.
+func (md *chatMD) isRule(o int) bool {
+	return o >= 0 && o < len(md.rule) && md.rule[o]
+}
+
+func markAt(set *[]bool, o int) {
 	if o < 0 {
 		return
 	}
-	for len(md.strong) <= o {
-		md.strong = append(md.strong, false)
+	for len(*set) <= o {
+		*set = append(*set, false)
 	}
-	md.strong[o] = true
+	(*set)[o] = true
 }
 
 // wrap is an answerWrapper: wrapSource, line by line, with each line read as
@@ -117,6 +131,14 @@ func (md *chatMD) line(cells []wrapCell, raw string, base, w int, complete bool,
 	}
 	rest := cells[ind:]
 
+	// A thematic break: up to three spaces of indent, then one of "-", "*",
+	// "_" three or more times, then only spaces. Only a complete line is one
+	// — "---" may yet be "---x" — and it is read before the bullet, as
+	// CommonMark reads it, so "***" is never a bullet or a bold marker.
+	if complete && ind <= 3 && thematicBreak(rest) {
+		return md.ruleLine(rest, base, w)
+	}
+
 	// A heading: up to three spaces of indent, one to six hashes, a space.
 	if ind <= 3 {
 		if n := atxLevel(rest); n > 0 {
@@ -156,6 +178,46 @@ func (md *chatMD) line(cells []wrapCell, raw string, base, w int, complete bool,
 
 	return wrapParagraph(md.inline(cells, base, complete), w)
 }
+
+// thematicBreak reports whether cells, the indent already taken off, are a
+// thematic break's: three or more of one of "-", "*", "_", then spaces.
+// Spaces between the marks, which CommonMark also allows ("- - -"), are left
+// out: a "- " is a bullet while the line streams, and a bullet that turned
+// into a rule at its newline would be a line that changed style twice.
+func thematicBreak(cells []wrapCell) bool {
+	cells = trimCells(cells)
+	if len(cells) < 3 {
+		return false
+	}
+	c := cells[0].r
+	if c != '-' && c != '*' && c != '_' {
+		return false
+	}
+	for _, x := range cells {
+		if x.r != c {
+			return false
+		}
+	}
+	return true
+}
+
+// ruleLine is a thematic break drawn: w cells of "─", marked as the rule's
+// so paintBody draws them dim. Each cell's source is a mark of the break, the
+// last one repeated past its end, so the row belongs to its source line.
+func (md *chatMD) ruleLine(marks []wrapCell, base, w int) []wrappedLine {
+	marks = trimCells(marks)
+	cells := make([]wrapCell, w)
+	for k := range cells {
+		cells[k] = wrapCell{ruleGlyph, marks[min(k, len(marks)-1)].src}
+	}
+	for _, c := range marks {
+		markAt(&md.rule, base+c.src)
+	}
+	return []wrappedLine{cellLine(cells)}
+}
+
+// ruleGlyph is what a thematic break draws, the screen's own rule.
+const ruleGlyph = '─'
 
 // hangItem wraps a list item's content after its marker prefix, every row
 // after the first indented by the prefix's width so the text lines up under
@@ -302,8 +364,17 @@ func (md *chatMD) inline(cells []wrapCell, base int, complete bool) []wrapCell {
 }
 
 // paintBody adds one body line's segments to l, each in its bodyStyle and in
-// bold where the markdown made its runes strong.
+// bold where the markdown made its runes strong. A thematic break's rule is
+// the chrome's dim whatever its age, as the screen's own rules are, and it
+// runs to the line's end rather than stopping at the wrap width: the two
+// columns the wrap keeps back for the cursor would leave it just short of the
+// status rule under the transcript, which reads as a misdrawn line (self-check,
+// 2026-09-24).
 func (md *chatMD) paintBody(l *lineBuf, th Theme, bl bodyLine, segs []bodySeg) {
+	if len(bl.src) > 0 && md.isRule(bl.src[0]) {
+		l.add(th.dim, repeat(ruleGlyph, l.left()))
+		return
+	}
 	j := 0 // the drawn rune's index into bl.src
 	for _, sg := range segs {
 		st := bodyStyle(th, bl, sg.band, sg.class)

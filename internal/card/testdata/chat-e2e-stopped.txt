@@ -1,0 +1,31 @@
+┌──────────────────────────────────────────────────────────────────────┐
+│ toktape dev                        20260924-092938-qwen3-1-7b-q4-k-m │
+├──────────────────────────────────────────────────────────────────────┤
+│ MODEL    Qwen3-1.7B-Q4_K_M.gguf · Q4_K_M · 1.2 GiB                   │
+│ ENGINE   llama-server b10964 (b29c606e2) · macos 27.0                │
+│ RIG      ? · Apple M1 Pro · 32 GB                                    │
+├──────────────────────────────────────────────────────────────────────┤
+│ Decode        82.6 tok/s · ≈ 91 GB/s                                 │
+│ Prefill       774 tok/s · 158 prompt tokens · TTFT 237 ms            │
+│               probe 995 tok/s on one stream · 106 ms fixed           │
+│ Context       8192 (158 in / 141 out)                                │
+│ Prefix cache  9% hit (15/158) · warm                                 │
+│ Sampling      temp default · chat                                    │
+│ Chat          2 turns · 82.6 tok/s median (81.5–83.7)                │
+│               1 83.7 tok/s  ·  2 81.5 tok/s                          │
+│               prefill 2 1032 tok/s (285 tok)                         │
+│               1 turn under 100 tokens, not measured                  │
+├──────────────────────────────────────────────────────────────────────┤
+│ MEMORY   VRAM ?                                                      │
+│          Host RSS ?                                                  │
+│          Page faults ?                                               │
+├──────────────────────────────────────────────────────────────────────┤
+│ HOST     throttled: ? · contended: ?                                 │
+├──────────────────────────────────────────────────────────────────────┤
+│ FLAGS    -fa ? -b ? -ub ? -ctk ? -ctv ?                              │
+├──────────────────────────────────────────────────────────────────────┤
+│ ! 5 caveats — pid not found: no memory, page faults or flags ·       │
+│   recorded ×3 · no_proc_view                                         │
+├──────────────────────────────────────────────────────────────────────┤
+│                toktape · github.com/midagedev/toktape                │
+└──────────────────────────────────────────────────────────────────────┘
