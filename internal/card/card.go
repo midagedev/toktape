@@ -642,6 +642,40 @@ func dropEmpty(parts ...string) []string {
 	return out
 }
 
+// IsChat reports whether s is a `toktape chat` session (tape.ModeChat): every
+// round a turn a person typed. It is the one question every chat wording on
+// the card asks, so the text card, the PNG and the caveats cannot disagree
+// about which tape they are looking at.
+func IsChat(s *tape.RunSummary) bool {
+	return s.IsChat()
+}
+
+// RoundsLabel is the name of the row that lists a run's rounds: "Prompts" on
+// a benchmark, where each round is a prompt toktape or a prompts file sent,
+// and "Chat" on a chat, where each is a turn (2026-09-24).
+func RoundsLabel(s *tape.RunSummary) string {
+	if IsChat(s) {
+		return "Chat"
+	}
+	return "Prompts"
+}
+
+// RoundsNoun counts n of a run's prompts: "prompts" on a benchmark, "turns"
+// on a chat, singular when n is 1. The rounds row's head keeps its own
+// "rounds" on a benchmark (a round there can be several streams of one
+// prompt); on a chat a round, a prompt and a turn are the same thing, so all
+// three places say "turns".
+func RoundsNoun(s *tape.RunSummary, n int) string {
+	noun := "prompt"
+	if IsChat(s) {
+		noun = "turn"
+	}
+	if n != 1 {
+		noun += "s"
+	}
+	return noun
+}
+
 // maxRoundsListed is how many rounds the Prompts row names before it says how
 // many more there were. Eight is four lines at two a line: a prompts file of a
 // hundred lines must not turn the card into a table.
@@ -701,7 +735,11 @@ func roundsLines(s *tape.RunSummary) []string {
 		return nil
 	}
 	avail := innerWidth - speedLabelW
-	head := []string{fmt.Sprintf("%d rounds", s.Rounds)}
+	count := fmt.Sprintf("%d rounds", s.Rounds)
+	if IsChat(s) {
+		count = fmt.Sprintf("%d %s", s.Rounds, RoundsNoun(s, s.Rounds))
+	}
+	head := []string{count}
 	if sp := s.Spread; sp != nil {
 		if r := sp.PerStreamPredictedPerSecond; r.Median > 0 {
 			head = append(head, fmt.Sprintf("%s median (%s–%s)",
@@ -739,12 +777,12 @@ func roundsLines(s *tape.RunSummary) []string {
 	if len(parts) > 0 {
 		lines = append(lines, wrapJoin(parts, "  ·  ", avail)...)
 	}
-	lines = append(lines, roundPrefillLines(prefill, short, avail)...)
+	lines = append(lines, roundPrefillLines(prefill, short, RoundsNoun(s, short), avail)...)
 	if len(cached) > 0 {
 		cached[0] = "cache " + cached[0]
 		lines = append(lines, wrapJoin(cached, "  ·  ", avail)...)
 	}
-	return labelled("Prompts", speedLabelW, lines)
+	return labelled(RoundsLabel(s), speedLabelW, lines)
 }
 
 // roundPrompt is what the Prompts row may say about one round's prompt,
@@ -820,7 +858,7 @@ func roundsCarryPrompt(per []tape.RoundSummary) bool {
 // one wrapJoin break away from the figure it qualifies, which is why the run's
 // Prefill row joins its qualification to the count and why this line does not
 // print the rate at all.
-func roundPrefillLines(prefill []string, short, avail int) []string {
+func roundPrefillLines(prefill []string, short int, noun string, avail int) []string {
 	if len(prefill) == 0 && short == 0 {
 		return nil
 	}
@@ -829,10 +867,6 @@ func roundPrefillLines(prefill []string, short, avail int) []string {
 		parts[len(parts)-1] += " tok/s"
 	}
 	if short > 0 {
-		noun := "prompts"
-		if short == 1 {
-			noun = "prompt"
-		}
 		parts = append(parts, fmt.Sprintf("%d %s under %d tokens, not measured",
 			short, noun, MinPrefillPromptTokens))
 	}
@@ -1718,7 +1752,16 @@ func answerCutWarning(s *tape.RunSummary) string {
 	// --think-budget is chat-only: it caps the template's thinking, and a
 	// raw /completion prompt has none for it to cap (samplingOptions rejects
 	// the pair). Advising it there would be a flag the next run errors on.
-	if s.Sampling.Endpoint == tape.EndpointCompletion {
+	//
+	// A chat has no clock to lengthen — `toktape chat` refuses --for — so the
+	// thinking cap is its one lever, and on a raw prompt it has none to name
+	// (2026-09-24).
+	switch completion := s.Sampling.Endpoint == tape.EndpointCompletion; {
+	case IsChat(s) && completion:
+		return head + " — the default budget did not hold the thinking"
+	case IsChat(s):
+		return head + " — the default budget did not hold the thinking; try --think-budget"
+	case completion:
 		return head + " — the default budget did not hold the thinking; try --for"
 	}
 	return head + " — the default budget did not hold the thinking; try --for or --think-budget"

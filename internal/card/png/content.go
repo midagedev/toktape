@@ -412,8 +412,8 @@ func roundsString(s *tape.RunSummary) string {
 	if r.Median <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s median of %d prompts · %s–%s tok/s",
-		formatRate(r.Median), s.Rounds, formatRate(r.Min), formatRate(r.Max))
+	return fmt.Sprintf("%s median of %d %s · %s–%s tok/s",
+		formatRate(r.Median), s.Rounds, card.RoundsNoun(s, s.Rounds), formatRate(r.Min), formatRate(r.Max))
 }
 
 // sweepString is the PNG's form of the text card's Draft sweep row, reduced to

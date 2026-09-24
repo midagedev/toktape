@@ -28,6 +28,9 @@ func Text(r Report) string {
 	b.WriteString("toktape compare\n")
 	b.WriteString("  A  " + trunc(r.IDA, Width-5) + "\n")
 	b.WriteString("  B  " + trunc(r.IDB, Width-5) + "\n")
+	for _, n := range r.Notes {
+		b.WriteString(trunc("  ! "+n, Width) + "\n")
+	}
 	b.WriteString(rule() + "\n")
 
 	b.WriteString(row("metric", "A", "B", "Δ") + "\n")

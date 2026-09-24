@@ -72,8 +72,15 @@ func serverArgvHeading(srv tape.ServerInfo) string {
 // the generation. An option whose value was not observed is left off rather
 // than guessed, so the worst case is a bare "toktape" — which is also the
 // command that produced a zero-config run, and so is never wrong.
+//
+// A chat is rebuilt as `toktape chat`: the conversation is not replayable
+// from flags, but the attachment and the named cap are, and every record-only
+// flag (--sessions, --for) is one chat refuses (2026-09-24).
 func recordCommand(s *tape.RunSummary) string {
 	parts := []string{"toktape"}
+	if IsChat(s) {
+		parts = append(parts, "chat")
+	}
 	if u := strings.TrimSpace(s.Server.URL); u != "" {
 		parts = append(parts, "--url", u)
 	}
@@ -95,6 +102,12 @@ func recordCommand(s *tape.RunSummary) string {
 	// reproduced is the same one — Concurrency's meaning never changed, only
 	// the flag's name. The cap stays spelled --n-predict, never -n, because
 	// the long form reads the same in every version.
+	if IsChat(s) {
+		if s.Limit.MaxTokensNamed && s.Limit.MaxTokens > 0 {
+			parts = append(parts, "--n-predict", strconv.Itoa(s.Limit.MaxTokens))
+		}
+		return strings.Join(parts, " ")
+	}
 	if s.Concurrency > 1 {
 		parts = append(parts, "--sessions", strconv.Itoa(s.Concurrency))
 	}

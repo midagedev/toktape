@@ -84,7 +84,7 @@ func Streams(t *tape.Tape) []Stream {
 			Reasoning:    r.Prompt.Reasoning,
 			ReasoningN:   r.Prompt.ReasoningN,
 			Completion:   r.Prompt.Completion,
-			Ended:        ended(r),
+			Ended:        ended(r, t.Summary.Mode),
 			FinishReason: r.Prompt.FinishReason,
 			Cut:          r.Prompt.Cut,
 			Error:        r.Error,
@@ -111,15 +111,15 @@ func Streams(t *tape.Tape) []Stream {
 }
 
 // ended is the stream's end label. Precedence is exact: the error first,
-// then the clock (PromptRecord.Cut's own comment says a reader asks Cut
+// then the cut (PromptRecord.Cut's own comment says a reader asks Cut
 // first and FinishReason second), then the server's finish word, and "?"
 // when nothing was observed — never a default invented here.
-func ended(r tape.RequestRecord) string {
+func ended(r tape.RequestRecord, mode string) string {
 	if r.Error != "" {
 		return "failed: " + r.Error
 	}
 	if r.Prompt.Cut {
-		return "clock cut"
+		return CutLabel(mode)
 	}
 	// The limit words are read as the pair, not as the word (lead,
 	// 2026-09-19). "limit" and "length" are both a limit, but four upstream
@@ -149,4 +149,17 @@ func ended(r tape.RequestRecord) string {
 	default:
 		return r.Prompt.FinishReason
 	}
+}
+
+// CutLabel is what a Cut record is called on a tape of the given
+// RunSummary.Mode. The mark is one field with two authors: on a benchmark the
+// run's clock ended the stream, and on a chat (tape.ModeChat) the person did,
+// with ctrl+c — the recorder reuses the clock's mark for it
+// (internal/recorder/session.go), so the label is where the two part
+// (2026-09-24). Every renderer that names a cut asks here.
+func CutLabel(mode string) string {
+	if mode == tape.ModeChat {
+		return "stopped"
+	}
+	return "clock cut"
 }

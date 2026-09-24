@@ -39,7 +39,14 @@ type Result struct {
 //
 // The caller is expected to have written tp's tape file already, so a rebuild
 // triggered here includes tp.
+//
+// A chat tape is not appended, and nil is returned: its run is a
+// conversation, never compared with the benchmarks this table exists to
+// settle (tape.RunSummary.Mode), and saving one is not an error to warn of.
 func Append(dir string, tp *tape.Tape) error {
+	if !Holds(tp) {
+		return nil
+	}
 	path := filepath.Join(dir, FileName)
 	head, err := readHeader(path)
 	switch {
@@ -78,6 +85,16 @@ func Append(dir string, tp *tape.Tape) error {
 	return nil
 }
 
+// Holds reports whether a tape belongs in the ledger. It is the one gate for
+// both doors a row comes in by — Append and Rebuild, which Append itself falls
+// back to and `toktape log --rebuild` calls — so a run kept out of one cannot
+// come back through the other. A chat (tape.ModeChat) is kept out
+// (2026-09-24): its prompts are a person's conversation, not a set another
+// run can repeat, and the ledger is the table runs are compared in.
+func Holds(tp *tape.Tape) bool {
+	return tp != nil && !tp.Summary.IsChat()
+}
+
 // Rebuild regenerates the ledger in dir from every tape it holds and writes
 // it atomically (temp file + rename), so a reader either sees the old file or
 // the whole new one.
@@ -108,6 +125,9 @@ func Rebuild(dir string) (Result, error) {
 			// Counted, never silently dropped: a ledger that quietly shrinks
 			// is worse than one that says a tape stopped loading.
 			res.Unreadable = append(res.Unreadable, name)
+			continue
+		}
+		if !Holds(tp) {
 			continue
 		}
 		b.WriteString(Encode(FromTape(tp)))

@@ -25,6 +25,10 @@ func runCompare(c *cli, args []string) int {
 	if err != nil {
 		return c.usagef("toktape: %v", err)
 	}
-	fmt.Fprint(c.stdout, compare.Text(compare.Diff(&a.Summary, &b.Summary)))
+	r, err := compare.Tapes(a, b)
+	if err != nil {
+		return c.usagef("toktape compare: %v", err)
+	}
+	fmt.Fprint(c.stdout, compare.Text(r))
 	return exitOK
 }

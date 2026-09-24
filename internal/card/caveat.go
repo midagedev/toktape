@@ -870,9 +870,17 @@ func Caveats(s *tape.RunSummary) []Caveat {
 		// (cmd/toktape/record.go declares it, repeatable). --for is
 		// deliberately absent: the model stopped on its own finish, the clock
 		// did not cut it.
+		//
+		// A chat's prompts are what the person typed and `toktape chat`
+		// refuses --prompt, so there the way out is the asking itself
+		// (2026-09-24).
+		way := "a longer answer needs a prompt that asks for one (--prompt), or a model that is not terse"
+		if IsChat(s) {
+			way = "ask for a longer answer, or use a model that is not terse"
+		}
 		add(CodeShortGeneration, SeverityFigure, fmt.Sprintf(
-			"short generation: %s tokens is a sample, not a decode rate (under %d) — a longer answer needs a prompt that asks for one (--prompt), or a model that is not terse",
-			formatInt(s.Timings.PredictedN), tape.MinDecodeTokens))
+			"short generation: %s tokens is a sample, not a decode rate (under %d) — %s",
+			formatInt(s.Timings.PredictedN), tape.MinDecodeTokens, way))
 	}
 	if shortStream(s) && !tokensUncounted(s) {
 		add(CodeShortStream, SeverityFigure, shortStreamText(s))

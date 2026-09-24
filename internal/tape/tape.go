@@ -1510,6 +1510,14 @@ const (
 	ModeChat = "chat" // a `toktape chat` session
 )
 
+// IsChat reports whether the run is a `toktape chat` session. It is the one
+// predicate every reader asks — the card's wording, the ledger's gate and
+// publishing's refusal — so they cannot disagree about which tapes hold a
+// person's conversation.
+func (s *RunSummary) IsChat() bool {
+	return s != nil && s.Mode == ModeChat
+}
+
 // Message is one chat message.
 type Message struct {
 	Role    string `json:"role"`

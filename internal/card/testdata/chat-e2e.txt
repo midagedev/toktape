@@ -1,0 +1,34 @@
+┌──────────────────────────────────────────────────────────────────────┐
+│ toktape dev                        20260924-085340-qwen3-1-7b-q4-k-m │
+├──────────────────────────────────────────────────────────────────────┤
+│ MODEL    Qwen3-1.7B-Q4_K_M.gguf · Q4_K_M · 1.2 GiB                   │
+│ ENGINE   llama-server b10964 (b29c606e2) · macos 27.0                │
+│ RIG      ? · Apple M1 Pro · 32 GB                                    │
+├──────────────────────────────────────────────────────────────────────┤
+│ Sample        83.8 tok/s · ≈ 92 GB/s                                 │
+│ Prefill       391 tok/s                                              │
+│               31 prompt tokens — not a prefill measurement           │
+│               TTFT 143 ms                                            │
+│               probe 981 tok/s on one stream · 196 ms fixed           │
+│ Context       8192 (31 in / 14 out)                                  │
+│ Prefix cache  29% hit (9/31) · warm                                  │
+│ Sampling      temp default · chat                                    │
+│ Chat          2 turns · 83.8 tok/s median (81.9–85.6)                │
+│               1 85.6 tok/s  ·  2 81.9 tok/s                          │
+│               prefill 2 turns under 100 tokens, not measured         │
+├──────────────────────────────────────────────────────────────────────┤
+│ MEMORY   VRAM ?                                                      │
+│          Host RSS ?                                                  │
+│          Page faults ?                                               │
+├──────────────────────────────────────────────────────────────────────┤
+│ HOST     throttled: ? · contended: ?                                 │
+├──────────────────────────────────────────────────────────────────────┤
+│ FLAGS    -fa ? -b ? -ub ? -ctk ? -ctv ?                              │
+├──────────────────────────────────────────────────────────────────────┤
+│ ! 8 caveats — short generation: 14 tokens is a sample, not a decode  │
+│   rate (under 32) — ask for a longer answer, or use a model that is  │
+│   not terse · short_prompt_for_prefill ·                             │
+│   client_disagrees_with_server · recorded ×4 · no_proc_view          │
+├──────────────────────────────────────────────────────────────────────┤
+│                toktape · github.com/midagedev/toktape                │
+└──────────────────────────────────────────────────────────────────────┘

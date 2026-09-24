@@ -32,6 +32,9 @@ type publishFlags struct {
 	edit      *string
 	del       *string
 	token     *string
+	// conversation is --include-conversation: a chat tape travels only
+	// when the upload names this.
+	conversation *bool
 }
 
 // declarePublishFlags registers the publish verb's flags on fs.
@@ -57,6 +60,10 @@ func declarePublishFlags(fs *flag.FlagSet) *publishFlags {
 		edit:      fs.String("edit", "", "change a run you own instead of uploading: the run id or its /r/<id> link"),
 		del:       fs.String("delete", "", "take a published run down: the run id or its /r/<id> link"),
 		token:     fs.String("token", "", "a token to present as typed, to whatever --url names (with --delete: the run's delete token)"),
+		// A flag of its own, not --with-text: a chat tape's text is what a
+		// person typed, and the machine-wide publish_text says nothing about
+		// that. The name says what leaves.
+		conversation: fs.Bool("include-conversation", false, "publish a chat tape, the conversation's text included"),
 	}
 }
 
@@ -135,6 +142,20 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 	if err != nil {
 		return c.usagef("toktape: %v", err)
 	}
+	// Before the dry run and the first-publish question: a chat is refused
+	// here, whatever else was typed, so the flag is the only way through —
+	// --yes and --with-text answer different questions (2026-09-24).
+	// publish.Client.Upload asks the same predicate again.
+	switch chat := publish.HoldsConversation(tp); {
+	case chat && !*f.conversation:
+		return c.usagef("toktape publish: %s is a chat tape and holds the conversation's text; --include-conversation publishes it anyway", files[0])
+	case !chat && *f.conversation:
+		return c.usagef("toktape publish: --include-conversation is for a chat tape, and %s is not a chat", files[0])
+	case *f.conversation && *f.noText:
+		// The flag's name promises the conversation goes; --no-text would
+		// send the tape without it.
+		return c.usagef("toktape publish: --include-conversation and --no-text say opposite things")
+	}
 
 	note, err := noteText(f)
 	if err != nil {
@@ -171,7 +192,8 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 		}
 	}
 
-	opts := publish.Options{Text: textPolicy(f, cfg), Private: *f.private, Author: author, Title: title, Note: note, Bio: bio}
+	opts := publish.Options{Text: textPolicy(f, cfg), Private: *f.private, Author: author, Title: title, Note: note, Bio: bio,
+		IncludeConversation: *f.conversation}
 	view := publish.PublicView(tp, opts.Text)
 	idx := publish.IndexOf(view)
 	preview := publish.Preview(view, idx, opts)

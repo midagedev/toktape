@@ -15,6 +15,7 @@
 package compare
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -55,6 +56,65 @@ type Report struct {
 	Flags []Change
 	// Meta are the model, quantisation and build differences.
 	Meta []Change
+	// Notes qualify the whole comparison, one sentence each, printed under
+	// the header before any figure (Tapes fills them; Diff has only the
+	// summaries and leaves them empty).
+	Notes []string
+}
+
+// Tapes is Diff for two recorded runs, with what only the records can say.
+//
+// A chat (tape.ModeChat) and a benchmark are not comparable, in either order:
+// a chat's prompts are a person's conversation, growing turn by turn, and a
+// benchmark's are a set the next run repeats (2026-09-24). That is an error,
+// not a note, because every figure in the table would be over different
+// text. Two chats compare, and a note says so when their first turns differ:
+// the rates are then over two different conversations.
+func Tapes(a, b *tape.Tape) (Report, error) {
+	if a == nil {
+		a = &tape.Tape{}
+	}
+	if b == nil {
+		b = &tape.Tape{}
+	}
+	ca, cb := card.IsChat(&a.Summary), card.IsChat(&b.Summary)
+	if ca != cb {
+		chat, bench := "A", "B"
+		if cb {
+			chat, bench = "B", "A"
+		}
+		return Report{}, fmt.Errorf("%s is a chat and %s a benchmark run, so they are not comparable: a chat's prompts are a conversation, not a set another run repeats", chat, bench)
+	}
+	r := Diff(&a.Summary, &b.Summary)
+	if ca && !sameOpening(a, b) {
+		r.Notes = append(r.Notes, "different conversations: the rates are over different text")
+	}
+	return r, nil
+}
+
+// sameOpening reports whether two chats opened with the same messages: the
+// first turn's prompt, which every later turn carries as its history. An
+// empty first turn on either side is not the same opening — nothing observed
+// is not a match.
+func sameOpening(a, b *tape.Tape) bool {
+	first := func(t *tape.Tape) []tape.Message {
+		for _, r := range t.Requests {
+			if r.Round == 0 {
+				return r.Prompt.Messages
+			}
+		}
+		return nil
+	}
+	ma, mb := first(a), first(b)
+	if len(ma) == 0 || len(ma) != len(mb) {
+		return false
+	}
+	for i := range ma {
+		if ma[i] != mb[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Diff compares two run summaries. A nil summary is treated as an
@@ -186,6 +246,15 @@ func medianRateRow(a, b *tape.RunSummary) Row {
 	return row
 }
 
+// roundsLabel names the rounds count: a chat's rounds are its turns. Only
+// two chats reach here as a chat pair (Tapes refuses a mixed one).
+func roundsLabel(a, b *tape.RunSummary) string {
+	if card.IsChat(a) && card.IsChat(b) {
+		return "turns"
+	}
+	return "prompts"
+}
+
 // promptsCount is the number of prompt rounds a run sent. A run recorded
 // without a prompts file sent one (Rounds 0 and 1 are both a single round).
 func promptsCount(s *tape.RunSummary) string {
@@ -304,7 +373,7 @@ func metaChanges(a, b *tape.RunSummary) []Change {
 		{"streams", itoa(a.Concurrency), itoa(b.Concurrency)},
 		// How many prompts the figures are over (TTP-31): a rate that moved
 		// between one prompt and eight is a different measurement.
-		{"prompts", promptsCount(a), promptsCount(b)},
+		{roundsLabel(a, b), promptsCount(a), promptsCount(b)},
 	}
 	var out []Change
 	for _, f := range fields {

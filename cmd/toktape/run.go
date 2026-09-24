@@ -112,6 +112,7 @@ Publish flags:
   --no-text, --with-text  with or without the prompts and the generated text,
                         over publish_text in ~/.toktape/config.toml
   --yes                 take the first-publish warning as read
+  --include-conversation  publish a chat tape, the conversation's text in it
   --url URL             the service to publish to (default: the service in
                         config.toml, else https://tape.midagedev.com)
   --delete <id|url>     take a published run down (saved token, --token, config)

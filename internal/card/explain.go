@@ -127,9 +127,13 @@ func ExplainCaveats(s *tape.RunSummary) string {
 	// the rest.
 	if s.Rounds > 1 && roundsCarryPrompt(s.PerRound) {
 		pos := map[int]int{}
+		word := "round "
+		if IsChat(s) {
+			word = "turn "
+		}
 		for _, p := range s.PerRound {
 			pos[p.SpecNMax]++
-			fmt.Fprintf(&b, "  %-28s %s\n", "round "+roundLabel(p, pos[p.SpecNMax]), explainRoundPrompt(p))
+			fmt.Fprintf(&b, "  %-28s %s\n", word+roundLabel(p, pos[p.SpecNMax]), explainRoundPrompt(p))
 		}
 	}
 	if len(fired) == 0 {

@@ -46,12 +46,19 @@ func runLs(c *cli, args []string) int {
 			continue
 		}
 		s := tp.Summary
+		// N is the run's shape. A chat's is always one stream, and what a
+		// reader needs from the row is that it is a conversation, kept out
+		// of `toktape log` and not comparable with the rows around it.
+		n := fmt.Sprintf("%d", s.Concurrency)
+		if card.IsChat(&s) {
+			n = "chat"
+		}
 		rows = append(rows, []string{
 			s.ID,
 			modelLabel(s),
 			orUnknown(s.Model.Quant),
 			formatRate(summaryRate(s)),
-			fmt.Sprintf("%d", s.Concurrency),
+			n,
 			tape.Stamp(s.StartedAt),
 		})
 	}
