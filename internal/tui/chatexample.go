@@ -102,6 +102,17 @@ var chatExampleMoreTurns = []chatExampleTurn{
 	},
 }
 
+// chatExampleMarkdownTurn is an answer written in markdown, the way a small
+// local model answers "as a list" (look round 2, 2026-09-24: a live Qwen3-1.7B
+// answer showed "### Explanation:" and "- " verbatim): a heading, bullets with
+// a nested one and a wrapped Korean one, a numbered list, bold, inline code,
+// and a code block whose "#" and "**" are code and must stay as written.
+var chatExampleMarkdownTurn = chatExampleTurn{
+	user:   "Sum it up as a list, please.",
+	answer: "### Counting lines\n\nThree tools cover it:\n\n- `wc -l` for a plain count, at **disk speed**.\n- `grep -c -F` when only matching lines count.\n  - `-F` skips the regex engine.\n* 한국어 항목: 큰 파일은 한 번에 읽지 말고 1 MiB 버퍼로 나눠 읽으면 메모리를 거의 쓰지 않고 디스크 속도로 끝납니다.\n\n1. Try `wc -l` first.\n2. Reach for **parallel** only when one core is the limit.\n\n```sh\n# **not bold**: a comment\nwc -l big.log\n```\n\n**Bottom line:** `wc -l` is usually enough.",
+	typeAt: 4 * time.Second, ttft: 120 * time.Millisecond, rate: 44.1, promptN: 40,
+}
+
 // chatExampleTwelveEnd is an instant after the twelfth turn has finished.
 const chatExampleTwelveEnd = 97 * time.Second
 
@@ -167,20 +178,39 @@ type chatExampleStep struct {
 	do func(ChatModel) ChatModel
 }
 
-// chatExampleScript is the whole session, in time order. full adds a fifth
-// message the server's context cannot take; many carries it on to twelve
-// turns instead.
-func chatExampleScript(full, many bool) []chatExampleStep {
+// chatExampleOpts picks a variant of the example session.
+type chatExampleOpts struct {
+	// full adds a fifth message the server's context cannot take.
+	full bool
+	// many carries the session on to twelve turns instead.
+	many bool
+	// noHost is a box the host picture is not available on — macOS, or a
+	// server that is not local: no GPU is listed and the samples carry no
+	// figure at all (look round 2, 2026-09-24).
+	noHost bool
+	// markdown is a one-turn session whose answer is chatExampleMarkdownTurn.
+	markdown bool
+}
+
+// chatExampleScript is the whole session, in time order.
+func chatExampleScript(o chatExampleOpts) []chatExampleStep {
+	full, many := o.full, o.many
 	turns := chatExampleTurns
 	sampleEnd := 60 * time.Second
 	if many {
 		turns = append(append([]chatExampleTurn(nil), chatExampleTurns...), chatExampleMoreTurns...)
 		sampleEnd = chatExampleTwelveEnd
 	}
+	if o.markdown {
+		turns = []chatExampleTurn{chatExampleMarkdownTurn}
+	}
 	ref := ExampleTapeN(1)
 	sum := ref.Summary
 	if sum.Server.CtxSize == 0 {
 		sum.Server.CtxSize = 8192
+	}
+	if o.noHost {
+		sum.Host.GPUs, sum.GPUsAtEnd = nil, nil
 	}
 	var steps []chatExampleStep
 	add := func(at time.Duration, do func(ChatModel) ChatModel) {
@@ -224,6 +254,11 @@ func chatExampleScript(full, many bool) []chatExampleStep {
 		}
 		sm := base
 		sm.T = at
+		if o.noHost {
+			// The sampler still ticks; it has nothing to read.
+			add(at, observe(Event{Kind: EventSample, T: at, Stream: -1, Sample: tape.RunSample{T: at}}))
+			continue
+		}
 		sm.GPUs = append([]tape.GPUSample(nil), base.GPUs...)
 		util, cores := 4.0, 0.2
 		if working {
@@ -323,13 +358,13 @@ func chatExampleScript(full, many bool) []chatExampleStep {
 // ExampleChatAt is the example session as it stood at clip time at. full
 // scripts the context-full ending.
 func ExampleChatAt(at time.Duration, th Theme, full bool) ChatModel {
-	return exampleChatAt(at, th, full, false)
+	return exampleChatAt(at, th, chatExampleOpts{full: full})
 }
 
-// exampleChatAt is ExampleChatAt with the twelve-turn session as a choice.
-func exampleChatAt(at time.Duration, th Theme, full, many bool) ChatModel {
+// exampleChatAt is ExampleChatAt with every variant of the session a choice.
+func exampleChatAt(at time.Duration, th Theme, o chatExampleOpts) ChatModel {
 	m := NewChatModel(th)
-	for _, s := range chatExampleScript(full, many) {
+	for _, s := range chatExampleScript(o) {
 		if s.at > at {
 			break
 		}
@@ -346,6 +381,10 @@ type ExampleChatState struct {
 	Full bool
 	// Many carries the session on to twelve turns, one of them stopped.
 	Many bool
+	// NoHost is the session on a box with no host picture (macOS).
+	NoHost bool
+	// Markdown is the one-turn session whose answer is in markdown.
+	Markdown bool
 	// Keys are pressed after the script, at At: a help request, a scroll.
 	Keys []ChatKey
 }
@@ -369,12 +408,27 @@ func ExampleChatStates() []ExampleChatState {
 		{Name: "9-scrolled", At: 45 * time.Second, W: 120, H: 36, Keys: []ChatKey{{Name: "pgup"}}},
 		{Name: "10-twelve-turns", At: chatExampleTwelveEnd, W: 120, H: 36, Many: true},
 		{Name: "11-twelve-narrow", At: chatExampleTwelveEnd, W: 90, H: 32, Many: true},
+		{Name: "12-no-host", At: 45 * time.Second, W: 120, H: 36, NoHost: true},
+		{Name: "13-markdown", At: chatExampleMarkdownEnd, W: 120, H: 36, Markdown: true},
+		// Mid-answer, the write head on the wrapped Korean bullet's hang.
+		{Name: "14-markdown-streaming", At: chatExampleMarkdownAt(78), W: 120, H: 36, Markdown: true},
+		{Name: "15-markdown-narrow", At: chatExampleMarkdownEnd, W: 90, H: 32, Markdown: true},
 	}
+}
+
+// chatExampleMarkdownEnd is an instant after the markdown turn has finished.
+const chatExampleMarkdownEnd = 12 * time.Second
+
+// chatExampleMarkdownAt is the instant just after the markdown turn's k-th
+// token has landed.
+func chatExampleMarkdownAt(k int) time.Duration {
+	tr := chatExampleMarkdownTurn
+	return tr.sentAt() + tr.ttft + time.Duration(float64(k)/tr.rate*float64(time.Second)) + 40*time.Millisecond
 }
 
 // Model builds the state's model under th.
 func (s ExampleChatState) Model(th Theme) ChatModel {
-	m := exampleChatAt(s.At, th, s.Full, s.Many)
+	m := exampleChatAt(s.At, th, chatExampleOpts{full: s.Full, many: s.Many, noHost: s.NoHost, markdown: s.Markdown})
 	for _, k := range s.Keys {
 		m, _ = m.HandleKey(k, s.At, s.W, s.H)
 	}

@@ -1,0 +1,36 @@
+┌─ toktape chat · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────┐
+│                                                                                       │ THIS TURN ────────── #1 live │
+│ ▌ Sum it up as a list, please.                                                        │          █   █ █   █     ▄█  │
+│                                                                                       │          █   █ █   █      █  │
+│   Counting lines                                                                      │          ▀▀▀▀█ ▀▀▀▀█      █  │
+│                                                                                       │              █     █      █  │
+│   Three tools cover it:                                                               │              ▀     ▀ ▀ ▀▀▀▀▀ │
+│                                                                                       │                 decode tok/s │
+│   • `wc -l` for a plain count, at disk speed.                                         │ ttft                  120 ms │
+│   • `grep -c -F` when only matching lines count.                                      │ tokens                    80 │
+│     • `-F` skips the regex engine.                                                    │ prefill                    ? │
+│   • 한국어 항목: 큰 파일은 한 번에 읽지 말고 1 MiB 버퍼로 나눠 읽으면 메모리를 거의   │ cache reuse                ? │
+│     쓰지▍                                                                             │ context                    ? │
+│                                                                                       │                              │
+│                                                                                       │ SESSION ──────────────────── │
+│                                                                                       │ turns                      1 │
+│                                                                                       │ tokens                    80 │
+│                                                                                       │ by turn                      │
+│                                                                                       │ mean                       ? │
+│                                                                                       │                              │
+│                                                                                       │ MACHINE ──────────────────── │
+│                                                                                       │ CPU  3%  1.1 cores  load 3.1 │
+│                                                                                       │                              │
+│                                                                                       │                              │
+│                                                                                       │  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂ │
+│                                                                                       │ GPU0 ▆▆▆▆▆▆  22.5G  95% 68°C │
+│                                                                                       │ GPU1 ▆▆▆▆▆▆  21.5G  95% 64°C │
+│                                                                                       │                     ▆▇▇▆▆▆▇▇ │
+│                                                                                       │                     ████████ │
+│                                                                                       │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂████████ │
+│                                                                                       │                              │
+├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
+│ › ▍ the next message can be typed while this one answers                                                             │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ ◐ answering · 80 tok                                                                  ctrl+c stop · pgup/pgdn scroll │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

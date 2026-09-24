@@ -1,0 +1,36 @@
+┌─ toktape chat · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 ───────────────────────────────────────────┐
+│   func countLines(r io.Reader) (int, error) {                                         │ THIS TURN ─────────────── #4 │
+│       buf := make([]byte, 1<<20)                                                      │          █   █ ▄▀▀▀▄   ▄▀▀▀▄ │
+│       n := 0                                                                          │          █   █ █   █   █   █ │
+│       for {                                                                           │          ▀▀▀▀█ █   █   ▀▀▀▀█ │
+│           c, err := r.Read(buf)                                                       │              █ █   █       █ │
+│           n += bytes.Count(buf[:c], []byte{'\n'})                                     │              ▀ ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
+│           if err == io.EOF {                                                          │                 decode tok/s │
+│               return n, nil                                                           │ ttft                  102 ms │
+│           }                                                                           │ tokens                   109 │
+│           if err != nil {                                                             │ prefill            850 tok/s │
+│               return n, err                                                           │ cache reuse       96% of 636 │
+│           }                                                                           │ context            745 / 16k │
+│       }                                                                               │                              │
+│   }                                                                                   │ SESSION ──────────────────── │
+│                                                                                       │ turns                      4 │
+│   This runs at memory bandwidth, so on a warm page cache it matches `wc -l`.          │ tokens                   376 │
+│   43.2 tok/s · ttft 95 ms · 141 tok · cache 90% of 217                                │ by turn  ████ ████ ████ ▇▇▇▇ │
+│                                                                                       │ mean              42.5 tok/s │
+│ ▌ 고마워! 한국어로 짧게 요약해 줄래?                                                  │                              │
+│                                                                                       │ MACHINE ──────────────────── │
+│   요약하면: 큰 파일의 줄 수는 `wc -l`로 세는 것이 가장 빠르고, Go에서는 1 MiB         │ no /proc view of the server  │
+│   버퍼로 읽으면서 줄바꿈 바이트만 세면 같은 속도가 나옵니다.                          │                              │
+│   41.8 tok/s · ttft 88 ms · 29 tok · cache 94% of 519                                 │                              │
+│                                                                                       │                              │
+│ ▌ Does the thinking of a reasoning model count toward tok/s?                          │                              │
+│                                                                                       │                              │
+│   ▸ thought · 60 tok                                                                  │                              │
+│   Yes. The server counts a thinking token exactly like an answer token, so the rate   │                              │
+│   covers both — toktape shows the thought dim and folds it once the answer starts.    │                              │
+│   40.9 tok/s · ttft 102 ms · 109 tok · cache 96% of 636                               │                              │
+├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
+│ › ▍ type a message                                                                                                   │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ ● ready                                     enter send · alt+enter newline · pgup/pgdn scroll · /help · ctrl+c leave │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

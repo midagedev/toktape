@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -293,5 +294,281 @@ func TestTurnBars(t *testing.T) {
 	turnBars(l, th, []turnBar{{rate: 30}, {rate: 30, stopped: true}}, 9)
 	if s := l.String(); !strings.Contains(s, th.paint(th.dim, "████")) || !strings.Contains(s, th.paint(th.accentMuted, "████")) {
 		t.Errorf("a stopped turn is not the dim one: %q", s)
+	}
+}
+
+// mdStream is a stream of the given token texts, an answer throughout.
+func mdStream(pieces []string, done bool) Stream {
+	var s Stream
+	for i, p := range pieces {
+		s.Tokens = append(s.Tokens, Token{T: time.Duration(i) * time.Millisecond, Text: p})
+		s.Text += p
+	}
+	s.Done = done
+	return s
+}
+
+// mdRow is one drawn row of an answer as the markdown pass leaves it: the
+// text, and which of its runes draw strong.
+type mdRow struct {
+	text   string
+	strong string // one byte per drawn rune: 'B' strong, '.' not
+}
+
+// mdSourceLines draws s through the chat's markdown pass at width w and
+// groups the rows by the source line (the count of newlines before the row's
+// first source rune) they came from. Rows the wrapper wrote whole — a blank
+// line — belong to no source line and are left out.
+func mdSourceLines(s Stream, w int) (map[int][]mdRow, *chatMD) {
+	md := newChatMD(s)
+	text := []rune(s.Text)
+	out := map[int][]mdRow{}
+	for _, bl := range streamTextLinesWith(s, w, md.wrap) {
+		first := -1
+		var mask strings.Builder
+		for _, o := range bl.src {
+			if first < 0 && o >= 0 {
+				first = o
+			}
+			if md.isStrong(o) {
+				mask.WriteByte('B')
+			} else {
+				mask.WriteByte('.')
+			}
+		}
+		if first < 0 {
+			continue
+		}
+		line := strings.Count(string(text[:first]), "\n")
+		out[line] = append(out[line], mdRow{text: bl.text, strong: mask.String()})
+	}
+	return out, md
+}
+
+// TestChatMarkdownNeverFlickersBack (look round 2, 2026-09-24): the answer is
+// fed a token at a time — the example's tokens, and then one rune at a time,
+// which splits every marker — and at every prefix
+//
+//   - a source line whose newline has arrived draws exactly as it will at the
+//     end: it may have flipped to styled while it was the line being written,
+//     never after;
+//   - the line being written only ever gains style: once it has a bullet or a
+//     strong rune, every later prefix still has one;
+//   - a rune that drew strong and is still drawn stays strong.
+func TestChatMarkdownNeverFlickersBack(t *testing.T) {
+	answer := chatExampleMarkdownTurn.answer
+	runesOf := func(text string) []string {
+		var out []string
+		for _, r := range text {
+			out = append(out, string(r))
+		}
+		return out
+	}
+	// The cases a marker is not yet decided in: a "**" that becomes "***", a
+	// "**" inside a code span that has not closed yet, a hash run that is not
+	// a heading, a dash that is not a bullet.
+	const tricky = "**b*** and **c** then `x **y** z` end\n##tag\n-- not\n#### Deep **one**\n  + nested **two** end\n**Bottom line:** done"
+	for name, pieces := range map[string][]string{
+		"tokens": chatExampleTokens(answer),
+		"runes":  runesOf(answer),
+		"tricky": runesOf(tricky),
+	} {
+		t.Run(name, func(t *testing.T) {
+			const w = 60
+			final, _ := mdSourceLines(mdStream(pieces, true), w)
+			styled := map[int]bool{}
+			var wasStrong []bool
+			for k := 1; k <= len(pieces); k++ {
+				s := mdStream(pieces[:k], k == len(pieces))
+				got, md := mdSourceLines(s, w)
+				complete := strings.Count(s.Text, "\n")
+				if s.Done {
+					complete++
+				}
+				for line, rows := range got {
+					if line < complete {
+						if !reflect.DeepEqual(rows, final[line]) {
+							t.Fatalf("prefix %d: whole line %d draws %q, at the end %q", k, line, rows, final[line])
+						}
+						continue
+					}
+					now := false
+					for _, r := range rows {
+						if strings.ContainsRune(r.text, bulletGlyph) || strings.Contains(r.strong, "B") {
+							now = true
+						}
+					}
+					if styled[line] && !now {
+						t.Fatalf("prefix %d (%q): line %d lost its style: %q", k, pieces[k-1], line, rows)
+					}
+					styled[line] = styled[line] || now
+				}
+				// A marker drawn while its pair was open is gone once it
+				// closes; that is the one flip. A rune still drawn keeps its
+				// weight.
+				drawn := map[int]bool{}
+				for _, bl := range streamTextLinesWith(s, w, newChatMD(s).wrap) {
+					for _, o := range bl.src {
+						drawn[o] = true
+					}
+				}
+				for o, was := range wasStrong {
+					if was && drawn[o] && !md.isStrong(o) {
+						t.Fatalf("prefix %d: rune %d was strong and is not", k, o)
+					}
+				}
+				wasStrong = append(wasStrong[:0], md.strong...)
+			}
+			// And the pass did something: the heading, a bullet and a bold
+			// word all drew styled at the end.
+			var all strings.Builder
+			all.WriteString("\n")
+			for _, rows := range final {
+				for _, r := range rows {
+					all.WriteString(r.text + "\n")
+				}
+			}
+			if name == "tricky" {
+				want := []string{"**b*** and c then `x **y** z` end", "##tag", "-- not", "Deep one", "  • nested two end", "Bottom line: done"}
+				var got []string
+				for line := 0; line < len(final); line++ {
+					for _, r := range final[line] {
+						got = append(got, r.text)
+					}
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("the finished answer draws %q, want %q", got, want)
+				}
+				return
+			}
+			for _, want := range []string{"Counting lines", "• `wc -l`", "\n  • `-F`", "at disk speed."} {
+				if !strings.Contains(all.String(), want) {
+					t.Errorf("the finished answer has no %q:\n%s", want, all.String())
+				}
+			}
+			if strings.Contains(all.String(), "###") || strings.Contains(all.String(), "- `wc") {
+				t.Errorf("markers left in the finished answer:\n%s", all.String())
+			}
+		})
+	}
+}
+
+// TestChatMarkdownBulletHangsUnderItsText: a wrapped item's continuation rows
+// start at the column its text starts at — under the text, not the bullet —
+// with Korean's two-column runes counted as two, and no row is wider than
+// the column.
+func TestChatMarkdownBulletHangsUnderItsText(t *testing.T) {
+	cases := []struct {
+		line string
+		pw   int // the columns before the item's text
+	}{
+		{"- 한국어 항목: 큰 파일은 한 번에 읽지 말고 1 MiB 버퍼로 나눠 읽으면 메모리를 거의 쓰지 않고", 2},
+		{"  * 한국어 항목: 큰 파일은 한 번에 읽지 말고 1 MiB 버퍼로 나눠 읽으면 메모리를 거의 쓰지 않고", 4},
+		{"+ plain words that wrap more than once when the column is only this narrow", 2},
+	}
+	for _, c := range cases {
+		for _, w := range []int{21, 30, 47} {
+			md := newChatMD(mdStream([]string{c.line}, true))
+			lines := md.wrap(c.line, 0, w)
+			if len(lines) < 2 {
+				t.Fatalf("%q at %d: %d rows, the case must wrap", c.line, w, len(lines))
+			}
+			first := []rune(lines[0].text)
+			if string(first[c.pw-2:c.pw]) != "• " || strings.TrimLeft(string(first[:c.pw-2]), " ") != "" {
+				t.Errorf("%q at %d: first row %q does not open with its bullet at column %d", c.line, w, lines[0].text, c.pw-2)
+			}
+			for i, wl := range lines {
+				if cw := width(wl.text); cw > w {
+					t.Errorf("%q at %d: row %d is %d columns: %q", c.line, w, i, cw, wl.text)
+				}
+				if i == 0 {
+					continue
+				}
+				rs := []rune(wl.text)
+				for k := 0; k < c.pw; k++ {
+					if rs[k] != ' ' || wl.src[k] != -1 {
+						t.Fatalf("%q at %d: row %d %q does not hang %d wrapper columns", c.line, w, i, wl.text, c.pw)
+					}
+				}
+				if rs[c.pw] == ' ' {
+					t.Errorf("%q at %d: row %d %q hangs deeper than the text", c.line, w, i, wl.text)
+				}
+			}
+		}
+	}
+}
+
+// TestChatMarkdownLeavesCodeAlone: inside a fenced block and inside an inline
+// code span a "#", a "- " and a "**" are code, drawn as written and never
+// strong; the same markers outside them are markdown.
+func TestChatMarkdownLeavesCodeAlone(t *testing.T) {
+	text := "```sh\n# **not bold**\n- not a bullet\n```\nsee `a**b**c` and **yes**"
+	s := mdStream([]string{text}, true)
+	md := newChatMD(s)
+	lines := streamTextLinesWith(s, 60, md.wrap)
+	var got []string
+	for _, bl := range lines {
+		got = append(got, bl.text)
+	}
+	want := []string{"```sh", "# **not bold**", "- not a bullet", "```", "see `a**b**c` and yes"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("drawn %q, want %q", got, want)
+	}
+	end := strings.Index(text, "\nsee")
+	for o := 0; o < len([]rune(text)); o++ {
+		inCode := o < len([]rune(text[:end]))
+		span := strings.Index(text, "`a**b**c`")
+		inSpan := o >= len([]rune(text[:span])) && o < len([]rune(text[:span+len("`a**b**c`")]))
+		if (inCode || inSpan) && md.isStrong(o) {
+			t.Errorf("rune %d (%q) is code and drew strong", o, string([]rune(text)[o]))
+		}
+	}
+	yes := len([]rune(text)) - len("yes**")
+	if !md.isStrong(yes) {
+		t.Error("the **yes** outside the code did not draw strong")
+	}
+}
+
+// TestChatMachineCollapsesOnlyWhenNothingObserved (look round 2,
+// 2026-09-24): the MACHINE block is its header and one dim line only when not
+// one host figure has been observed; a single figure keeps the rows, with "?"
+// where the others are missing.
+func TestChatMachineCollapsesOnlyWhenNothingObserved(t *testing.T) {
+	empty := tape.RunSample{T: time.Second}
+	cases := []struct {
+		name    string
+		samples []tape.RunSample
+		gpus    bool
+		want    string
+	}{
+		{"no sample yet", nil, false, "read while a turn runs"},
+		{"samples carry nothing", []tape.RunSample{empty, {T: 2 * time.Second}}, false, "no /proc view of the server"},
+		{"load only", []tape.RunSample{empty, {T: 2 * time.Second, LoadAvg1: 0.4}}, false, ""},
+		{"cpu time only", []tape.RunSample{{T: time.Second, Mem: tape.MemSample{CPUSeconds: 3}}}, false, ""},
+		{"rss only", []tape.RunSample{{T: time.Second, Mem: tape.MemSample{RSSBytes: 1 << 30}}}, false, ""},
+		{"a gpu sample", []tape.RunSample{{T: time.Second, GPUs: []tape.GPUSample{{Index: 0}}}}, false, ""},
+		{"a listed gpu, no sample", nil, true, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := ExampleChatAt(chatExampleOpened, PlainTheme(), false)
+			m.Machine.Samples = c.samples
+			m.Machine.Summary.Host.GPUs = nil
+			m.Machine.Summary.GPUsAtEnd = nil
+			if c.gpus {
+				m.Machine.Summary.Host.GPUs = ExampleTapeN(1).Summary.Host.GPUs
+			}
+			if got := hostUnobserved(m.Machine); got != c.want {
+				t.Fatalf("hostUnobserved = %q, want %q", got, c.want)
+			}
+			frame := ChatView(m, chatExampleOpened, 120, 36)
+			hasCPU := strings.Contains(frame, "CPU ")
+			if c.want == "" && !hasCPU {
+				t.Errorf("a figure was observed and the rows are gone:\n%s", frame)
+			}
+			if c.want != "" && (hasCPU || !strings.Contains(frame, c.want)) {
+				t.Errorf("nothing was observed and the block is not collapsed to %q:\n%s", c.want, frame)
+			}
+		})
 	}
 }

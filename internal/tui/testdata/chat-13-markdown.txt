@@ -1,0 +1,36 @@
+┌─ toktape chat · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────┐
+│                                                                                       │ THIS TURN ─────────────── #1 │
+│ ▌ Sum it up as a list, please.                                                        │          █   █ █   █     ▄█  │
+│                                                                                       │          █   █ █   █      █  │
+│   Counting lines                                                                      │          ▀▀▀▀█ ▀▀▀▀█      █  │
+│                                                                                       │              █     █      █  │
+│   Three tools cover it:                                                               │              ▀     ▀ ▀ ▀▀▀▀▀ │
+│                                                                                       │                 decode tok/s │
+│   • `wc -l` for a plain count, at disk speed.                                         │ ttft                  120 ms │
+│   • `grep -c -F` when only matching lines count.                                      │ tokens                   146 │
+│     • `-F` skips the regex engine.                                                    │ prefill            850 tok/s │
+│   • 한국어 항목: 큰 파일은 한 번에 읽지 말고 1 MiB 버퍼로 나눠 읽으면 메모리를 거의   │ cache reuse         0% of 40 │
+│     쓰지 않고 디스크 속도로 끝납니다.                                                 │ context            186 / 16k │
+│                                                                                       │                              │
+│   1. Try `wc -l` first.                                                               │ SESSION ──────────────────── │
+│   2. Reach for parallel only when one core is the limit.                              │ turns                      1 │
+│                                                                                       │ tokens                   146 │
+│   sh                                                                                  │ by turn                 ████ │
+│   # **not bold**: a comment                                                           │ mean              44.1 tok/s │
+│   wc -l big.log                                                                       │                              │
+│                                                                                       │ MACHINE ──────────────────── │
+│   Bottom line: `wc -l` is usually enough.                                             │ CPU  1%  0.2 cores  load 3.1 │
+│   44.1 tok/s · ttft 120 ms · 146 tok · cache 0% of 40                                 │                              │
+│                                                                                       │                              │
+│                                                                                       │ ▁▂▂▂▂▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│                                                                                       │ GPU0 ▆▆▆▆▆▆  22.5G   4% 68°C │
+│                                                                                       │ GPU1 ▆▆▆▆▆▆  21.5G   4% 64°C │
+│                                                                                       │  ▆▇▇▆▆▆▇▇▆▆▆▇▇▆              │
+│                                                                                       │  ██████████████              │
+│                                                                                       │ ▂██████████████▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│                                                                                       │                              │
+├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
+│ › ▍ type a message                                                                                                   │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ ● ready                                     enter send · alt+enter newline · pgup/pgdn scroll · /help · ctrl+c leave │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

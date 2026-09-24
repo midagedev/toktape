@@ -1,0 +1,32 @@
+┌─ toktape chat · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 ─────────────┐
+│                                                                                        │
+│ ▌ Sum it up as a list, please.                                                         │
+│                                                                                        │
+│   Counting lines                                                                       │
+│                                                                                        │
+│   Three tools cover it:                                                                │
+│                                                                                        │
+│   • `wc -l` for a plain count, at disk speed.                                          │
+│   • `grep -c -F` when only matching lines count.                                       │
+│     • `-F` skips the regex engine.                                                     │
+│   • 한국어 항목: 큰 파일은 한 번에 읽지 말고 1 MiB 버퍼로 나눠 읽으면 메모리를 거의    │
+│     쓰지 않고 디스크 속도로 끝납니다.                                                  │
+│                                                                                        │
+│   1. Try `wc -l` first.                                                                │
+│   2. Reach for parallel only when one core is the limit.                               │
+│                                                                                        │
+│   sh                                                                                   │
+│   # **not bold**: a comment                                                            │
+│   wc -l big.log                                                                        │
+│                                                                                        │
+│   Bottom line: `wc -l` is usually enough.                                              │
+│   44.1 tok/s · ttft 120 ms · 146 tok · cache 0% of 40                                  │
+│                                                                                        │
+│                                                                                        │
+│   ──────────────────────────────────────────────────────────────────────────────────── │
+│   1 turns ████ · mean 44.1 tok/s · 146 tok · context 186 / 16k                         │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ › ▍ type a message                                                                     │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ ● ready       enter send · alt+enter newline · pgup/pgdn scroll · /help · ctrl+c leave │
+└────────────────────────────────────────────────────────────────────────────────────────┘

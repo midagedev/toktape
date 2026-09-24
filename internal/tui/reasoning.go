@@ -82,6 +82,17 @@ type bodySeg struct {
 // exactly as it did before any of this existed, which is why no frame of a
 // non-thinking model moves.
 func streamTextLines(s Stream, w int) []bodyLine {
+	return streamTextLinesWith(s, w, nil)
+}
+
+// answerWrapper wraps one answer run the way wrapSource does — its lines'
+// offsets into the run, -1 for a rune the wrapper wrote — given where the run
+// starts in the stream's text. The chat screen's markdown is one (chatmd.go).
+type answerWrapper func(text string, base, w int) []wrappedLine
+
+// streamTextLinesWith is streamTextLines with the answer runs wrapped by
+// wrapAnswer; nil is wrapSource, which is what the record screen draws.
+func streamTextLinesWith(s Stream, w int, wrapAnswer answerWrapper) []bodyLine {
 	runs := textRuns(s)
 	if len(runs) == 0 {
 		return nil
@@ -106,7 +117,13 @@ func streamTextLines(s Stream, w int) []bodyLine {
 		} else {
 			sawAnswer = true
 		}
-		for _, wl := range wrapSource(r.text, w) {
+		var wls []wrappedLine
+		if wrapAnswer != nil && !r.reasoning {
+			wls = wrapAnswer(r.text, base, w)
+		} else {
+			wls = wrapSource(r.text, w)
+		}
+		for _, wl := range wls {
 			for k, o := range wl.src {
 				if o >= 0 {
 					wl.src[k] = o + base

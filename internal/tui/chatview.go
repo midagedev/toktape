@@ -380,7 +380,10 @@ func answerLines(th Theme, t time.Duration, tr *ChatTurn, cw int) []string {
 	}
 	// Two columns held back, as streamBody does, so the cursor never forces a
 	// re-wrap when it appears at the end of the last line.
-	lines := streamTextLines(s, aw-2)
+	// Read as markdown (chatmd.go): headings, bullets and bold draw as what
+	// they mean, not as the characters that mark them.
+	md := newChatMD(s)
+	lines := streamTextLinesWith(s, aw-2, md.wrap)
 	bands := bodyBands(s, lines, t)
 	lastIsText := false
 	inFence := false
@@ -402,15 +405,22 @@ func answerLines(th Theme, t time.Duration, tr *ChatTurn, cw int) []string {
 			}
 			l.add(th.dim, lang)
 		} else {
-			for _, sg := range bands[i] {
-				l.add(bodyStyle(th, bl, sg.band, sg.class), sg.text)
-			}
+			md.paintBody(l, th, bl, bands[i])
 		}
 		out = append(out, l.String())
 		lastIsText = !bl.marker
 	}
 	if !s.Done && lastIsText && len(out) > 0 {
-		out[len(out)-1] = appendCursor(th, t, out[len(out)-1], cw, true)
+		last := out[len(out)-1]
+		if strings.TrimSpace(card.StripANSI(last)) == "" {
+			// A line the answer has only just started — the newline between a
+			// list and what follows it — holds the cursor at the answer's edge,
+			// not at the user's bar where trimming the line would leave it
+			// (look round 2, 2026-09-24).
+			out[len(out)-1] = strings.Repeat(" ", answerIndent) + appendCursor(th, t, "", cw-answerIndent, true)
+		} else {
+			out[len(out)-1] = appendCursor(th, t, last, cw, true)
+		}
 	}
 	return out
 }
@@ -815,9 +825,43 @@ func buildChatPane(m ChatModel, th Theme, t time.Duration, cw int, big bool, gra
 
 	if m.Attached || len(m.Machine.Samples) > 0 {
 		section("MACHINE", "")
-		out = append(out, resourceRows(m.Machine, th, t, cw, graphH)...)
+		if note := hostUnobserved(m.Machine); note != "" {
+			out = append(out, newLine(th, cw).addTrunc(th.dim, note).String())
+		} else {
+			out = append(out, resourceRows(m.Machine, th, t, cw, graphH)...)
+		}
 	}
 	return out
+}
+
+// hostUnobserved says why the MACHINE block has nothing to show, or "" when
+// it has something (look round 2, 2026-09-24).
+//
+// Where the host picture is not available — macOS has no /proc and no GPU
+// telemetry, a remote server has no local process — the block drew "CPU  ?  ?
+// cores  load ?" over an empty column: three unknowns that each look like a
+// reading that failed. When not one host figure has been observed, the block
+// is its header and one dim line saying why, in the card's words for the same
+// fact (card.CodeNoProcView: "no /proc view of the server"). One figure is
+// enough to keep the rows, with "?" only where a figure is missing: the
+// honesty of each "?" is not in question, only a block made of nothing else.
+//
+// Before the first turn nothing has been sampled yet on any box — the sampler
+// starts with the first turn — so the line says when the reading comes rather
+// than that it never will.
+func hostUnobserved(m Model) string {
+	if len(m.Summary.Host.GPUs) > 0 || len(m.Summary.GPUsAtEnd) > 0 {
+		return ""
+	}
+	for _, sm := range m.Samples {
+		if sm.Mem.CPUSeconds > 0 || sm.Mem.RSSBytes > 0 || sm.LoadAvg1 > 0 || len(sm.GPUs) > 0 {
+			return ""
+		}
+	}
+	if len(m.Samples) == 0 {
+		return "read while a turn runs"
+	}
+	return "no /proc view of the server"
 }
 
 // chatStatusRule parts the folded status row from the transcript above it: a
