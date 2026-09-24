@@ -280,3 +280,18 @@ func TestExampleArgvParsesToItsFlags(t *testing.T) {
 		t.Errorf("a bare command line produced fa = %q, want unset", f.FlashAttn)
 	}
 }
+
+// TestReproduceChatTapeLine: a chat tape holds the conversation, so the
+// Markdown card does not invite readers to attach it; it says what is in it.
+func TestReproduceChatTapeLine(t *testing.T) {
+	s := ExampleConcurrent()
+	s.Mode = tape.ModeChat
+	got := Reproduce(s)
+	if strings.Contains(got, "anyone can") {
+		t.Errorf("a chat card invites sharing its tape:\n%s", got)
+	}
+	want := "Tape: `" + s.ID + tape.Ext + "` (it holds the conversation's text)\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("a chat card's tape line is not %q:\n%s", want, got)
+	}
+}

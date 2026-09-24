@@ -397,3 +397,34 @@ func TestNoDraftGolden(t *testing.T) {
 		}
 	}
 }
+
+// TestDiffUnknownSideHasNoDelta: a figure one side never observed prints "?",
+// and a change against "?" is no change at all — the old rule printed -100%
+// because only A's zero was checked. A zero that is a real measurement (the
+// page-fault rate) still carries its delta.
+func TestDiffUnknownSideHasNoDelta(t *testing.T) {
+	a := card.Example()
+	b := card.Example()
+	b.GPUsAtEnd = nil
+	b.Memory.AtEnd.RSSBytes = 0
+	b.Timings.TTFTMs = 0
+	b.Timings.PromptPerSecond = 0
+	b.Timings.PredictedPerSecond = 0
+	b.Memory.MajFaultsPerToken = 0
+	if a.Memory.MajFaultsPerToken == 0 {
+		a.Memory.MajFaultsPerToken = 2
+	}
+	for _, pair := range [][2]*tape.RunSummary{{a, b}, {b, a}} {
+		for _, m := range compare.Diff(pair[0], pair[1]).Metrics {
+			unknown := m.A == "?" || m.B == "?"
+			if unknown && m.HasDelta {
+				t.Errorf("%s: %q → %q carries a delta of %.1f%%", m.Label, m.A, m.B, m.DeltaPct)
+			}
+		}
+	}
+	for _, m := range compare.Diff(a, b).Metrics {
+		if m.Label == "maj faults/token" && !m.HasDelta {
+			t.Errorf("maj faults/token: a measured zero lost its delta")
+		}
+	}
+}

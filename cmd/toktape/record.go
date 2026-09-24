@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -589,9 +590,10 @@ func shareHint(outDir string, tp *tape.Tape, a artifacts) string {
 // previousTape is the newest earlier run of the same model in outDir, or "".
 //
 // Run IDs are <date>-<time>-<model slug>, so the same model sorts together and
-// lexical order is chronological order. Only the names are read: opening every
-// tape in a directory to answer one hint line would make a finished run wait
-// on disk it does not need.
+// lexical order is chronological order. The names choose the candidates; a
+// candidate is opened only to rule out a chat tape (compare refuses a chat
+// against a benchmark, so naming one would print a command that exits 1),
+// newest first, so the usual case opens one file.
 func previousTape(outDir string, tp *tape.Tape) string {
 	slug := tape.SlugFromModel(tp.Summary.Model.FileName)
 	if slug == "" {
@@ -606,7 +608,7 @@ func previousTape(outDir string, tp *tape.Tape) string {
 		matches = append(matches, legacy...)
 	}
 	current := filepath.Join(outDir, tp.Summary.ID+tape.Ext)
-	best := ""
+	var earlier []string
 	for _, m := range matches {
 		if m == current {
 			continue
@@ -614,11 +616,19 @@ func previousTape(outDir string, tp *tape.Tape) string {
 		if filepath.Base(m) > filepath.Base(current) {
 			continue // a run from the future is not a previous run
 		}
-		if best == "" || filepath.Base(m) > filepath.Base(best) {
-			best = m
-		}
+		earlier = append(earlier, m)
 	}
-	return best
+	sort.Slice(earlier, func(i, j int) bool {
+		return filepath.Base(earlier[i]) > filepath.Base(earlier[j])
+	})
+	for _, m := range earlier {
+		prev, err := tape.Read(m)
+		if err != nil || prev.Summary.IsChat() {
+			continue
+		}
+		return m
+	}
+	return ""
 }
 
 // waitBudget turns the --wait flag into Options.WaitForModel. An explicit

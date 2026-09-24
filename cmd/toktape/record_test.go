@@ -879,3 +879,27 @@ func TestHeaderLineOpenAI(t *testing.T) {
 		t.Errorf("headerLine = %q, want ? for the unreported build", got)
 	}
 }
+
+// TestPreviousTapeSkipsChat: a chat tape of the same model is never the run a
+// benchmark is compared with — compare refuses that pair, so a hint naming it
+// would be a command that exits 1.
+func TestPreviousTapeSkipsChat(t *testing.T) {
+	dir := t.TempDir()
+	const fileName = "Qwen3.5-35B-A3B-UD-Q4_K_M.gguf"
+	slug := tape.SlugFromModel(fileName)
+	tp := &tape.Tape{Schema: tape.SchemaVersion, Summary: tape.RunSummary{
+		ID:    "20260913-120000-" + slug,
+		Model: tape.ModelInfo{FileName: fileName},
+	}}
+
+	writeTape(t, dir, &tape.RunSummary{ID: "20260913-110000-" + slug, Mode: tape.ModeChat})
+	if got := previousTape(dir, tp); got != "" {
+		t.Errorf("with only a chat before it, previousTape = %q, want none", got)
+	}
+
+	bench := writeTape(t, dir, &tape.RunSummary{ID: "20260913-100000-" + slug})
+	writeTape(t, dir, &tape.RunSummary{ID: "20260913-113000-" + slug, Mode: tape.ModeChat})
+	if got := previousTape(dir, tp); got != bench {
+		t.Errorf("previousTape = %q, want the benchmark %q behind the chats", got, bench)
+	}
+}

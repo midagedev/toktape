@@ -265,9 +265,13 @@ func promptsCount(s *tape.RunSummary) string {
 }
 
 // numRow renders one numeric metric and computes the relative change.
+//
+// A side the formatter prints as "?" was never observed, so there is nothing
+// to change from or to: no delta, not -100% (a formatter whose zero is a real
+// measurement, like the page-fault rate, never prints "?" and keeps it).
 func numRow(label string, a, b float64, f func(float64) string) Row {
 	row := Row{Label: label, A: f(a), B: f(b)}
-	if a != 0 {
+	if a != 0 && row.A != "?" && row.B != "?" {
 		row.DeltaPct = (b - a) / a * 100
 		row.HasDelta = true
 	}

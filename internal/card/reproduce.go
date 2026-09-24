@@ -48,7 +48,11 @@ func Reproduce(s *tape.RunSummary) string {
 			strings.TrimSpace(s.Server.EngineClaim), strings.TrimSpace(s.Server.EngineClaim))
 	}
 
-	if s.ID != "" {
+	// A chat tape carries what the person typed and what came back, so the
+	// card names that instead of inviting readers to pass the file around.
+	if s.ID != "" && s.IsChat() {
+		fmt.Fprintf(&b, "Tape: `%s` (it holds the conversation's text)\n", s.ID+tape.Ext)
+	} else if s.ID != "" {
 		fmt.Fprintf(&b, "Tape: `%s` (attach it and anyone can `toktape play` it)\n", s.ID+tape.Ext)
 	}
 	b.WriteString("</details>\n")

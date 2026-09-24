@@ -327,3 +327,12 @@ func TestChatNeedsATerminal(t *testing.T) {
 		t.Errorf("exit %d: %s", code, stderr)
 	}
 }
+
+// TestChatUsagePublishRule: the help says what publish does with a chat tape
+// — it refuses one unless --include-conversation is given — not only that
+// nothing leaves the machine by itself.
+func TestChatUsagePublishRule(t *testing.T) {
+	if !strings.Contains(chatUsage, "--include-conversation") {
+		t.Errorf("chat usage does not name --include-conversation:\n%s", chatUsage)
+	}
+}

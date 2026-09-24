@@ -57,7 +57,7 @@ Flags (as record's):
   --quiet               no closing lines on stderr
 
   A chat tape holds the conversation's text. It stays on this machine;
-  nothing is published unless you run toktape publish on it yourself.
+  toktape publish refuses it unless you add --include-conversation.
 `
 
 // chatSession is what the verb needs of a recorder.Session. It is an
