@@ -1,0 +1,36 @@
+┌─ toktape chat · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────┐
+│   --block 1G grep -c ERROR | paste -sd+ | bc`. It scales until the disk is the        │ THIS TURN ────────────── #12 │
+│   limit.                                                                              │          ▀▀▀▀▄ ▄▀▀▀▄   █   █ │
+│   36.9 tok/s · ttft 97 ms · 52 tok · cache 99% of 887                                 │              █     █   █   █ │
+│                                                                                       │           ▀▀▀█ ▄▀▀▀▀   ▀▀▀▀█ │
+│ ▌ Explain how --pipepart finds the line boundaries, in detail.                        │              █ █           █ │
+│                                                                                       │          ▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀ │
+│   GNU parallel opens the file once and computes a                                     │                 decode tok/s │
+│   stopped · 16 tok                                                                    │ ttft                  103 ms │
+│                                                                                       │ tokens                    33 │
+│ ▌ Short version please.                                                               │ prefill            850 tok/s │
+│                                                                                       │ cache reuse      99% of 1.1k │
+│   Each block starts at the next newline after its offset, so no line is cut in two.   │ context           1.1k / 16k │
+│   34.8 tok/s · ttft 104 ms · 25 tok · cache 99% of 988                                │                              │
+│                                                                                       │ SESSION ──────────────────── │
+│ ▌ Would mmap beat read here?                                                          │ turns                     12 │
+│                                                                                       │ tokens                   627 │
+│   Rarely. For one sequential pass the kernel's readahead already streams at disk      │ by turn  █ █ █ ▇ ▇ ▇ ▇ ▄ ▆ ▆ │
+│   speed; mmap mostly adds page faults.                                                │ mean              37.0 tok/s │
+│   21.4 tok/s · ttft 310 ms · 35 tok · cache 99% of 1.0k                               │                              │
+│                                                                                       │ MACHINE ──────────────────── │
+│ ▌ Thanks, that's all.                                                                 │ CPU  1%  0.2 cores  load 3.1 │
+│                                                                                       │                              │
+│   You're welcome — the whole session is on the tape.                                  │                              │
+│   33.9 tok/s · ttft 101 ms · 15 tok · cache 99% of 1.0k                               │ ▁▁▁▁▁▁▁▁▁▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│                                                                                       │ GPU0 ▆▆▆▆▆▆  22.5G   4% 68°C │
+│ ▌ One last thing: which is fastest overall?                                           │ GPU1 ▆▆▆▆▆▆  21.5G   4% 64°C │
+│                                                                                       │          ▆▆▆▇▇               │
+│   `wc -l` for a plain count, `grep -c -F` for a pattern, and `parallel --pipepart`    │          █████               │
+│   once one core is the limit.                                                         │ ▂▂▂▂▂▂▂▂▂█████▂▂▂▂▂▂▂▂▂▂▂▂▂▂ │
+│   32.4 tok/s · ttft 103 ms · 33 tok · cache 99% of 1.1k                               │                              │
+├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
+│ › ▍ type a message                                                                                                   │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ ● ready                                     enter send · alt+enter newline · pgup/pgdn scroll · /help · ctrl+c leave │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

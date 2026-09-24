@@ -267,3 +267,31 @@ func TestChatTooSmall(t *testing.T) {
 		t.Error("the chat quoted the record screen's minimum")
 	}
 }
+
+// TestTurnBars: the by-turn chart is one bar per turn with a gap between
+// bars, newest at the right; an answered turn is never below the lowest step,
+// a turn with no rate is an empty column, a stopped turn is drawn dim, and
+// with more turns than fit the oldest go (look round 1, 2026-09-24).
+func TestTurnBars(t *testing.T) {
+	th := ColourTheme()
+	draw := func(bars []turnBar, w int) string {
+		l := newLine(PlainTheme(), w)
+		turnBars(l, PlainTheme(), bars, w)
+		return l.String()
+	}
+	if got := draw([]turnBar{{rate: 40}, {rate: 1}, {rate: 0}, {rate: 20}}, 19); got != "████ ▁▁▁▁      ▄▄▄▄" {
+		t.Errorf("four turns in 19 cells: %q", got)
+	}
+	many := make([]turnBar, 12)
+	for i := range many {
+		many[i] = turnBar{rate: float64(i + 1)}
+	}
+	if got := draw(many, 9); got != "▅ ▆ ▇ ▇ █" {
+		t.Errorf("twelve turns in 9 cells, want the last five: %q", got)
+	}
+	l := newLine(th, 9)
+	turnBars(l, th, []turnBar{{rate: 30}, {rate: 30, stopped: true}}, 9)
+	if s := l.String(); !strings.Contains(s, th.paint(th.dim, "████")) || !strings.Contains(s, th.paint(th.accentMuted, "████")) {
+		t.Errorf("a stopped turn is not the dim one: %q", s)
+	}
+}

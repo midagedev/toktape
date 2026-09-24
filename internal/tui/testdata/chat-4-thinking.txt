@@ -1,33 +1,33 @@
 ┌─ toktape chat · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────┐
-│   func countLines(r io.Reader) (int, error) {                                         │ THIS TURN ────────── #4 live │
-│       buf := make([]byte, 1<<20)                                                      │          █   █ ▄▀▀▀▄   ▄▀▀▀▄ │
-│       n := 0                                                                          │          █   █ █   █   █   █ │
-│       for {                                                                           │          ▀▀▀▀█ █   █   ▀▀▀▀█ │
-│           c, err := r.Read(buf)                                                       │              █ █   █       █ │
-│           n += bytes.Count(buf[:c], []byte{'\n'})                                     │              ▀ ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
-│           if err == io.EOF {                                                          │                 decode tok/s │
-│               return n, nil                                                           │ ttft                  102 ms │
-│           }                                                                           │ tokens                    29 │
-│           if err != nil {                                                             │ prefill                    ? │
-│               return n, err                                                           │ cache reuse                ? │
-│           }                                                                           │ context                    ? │
-│       }                                                                               │                              │
-│   }                                                                                   │ SESSION ──────────────────── │
-│   ```                                                                                 │ turns        4 tok       296 │
-│                                                                                       │ by turn                  ███ │
-│   This runs at memory bandwidth, so on a warm page cache it matches `wc -l`.          │ mean              43.0 tok/s │
-│   43.2 tok/s · ttft 95 ms · 141 tok · cache 90% of 217                                │                              │
-│                                                                                       │ MACHINE ──────────────────── │
-│ ▌ 고마워! 한국어로 짧게 요약해 줄래?                                                  │ CPU  3%  1.1 cores  load 3.1 │
+│   go                                                                                  │ THIS TURN ────────── #4 live │
+│   func countLines(r io.Reader) (int, error) {                                         │          █   █ ▄▀▀▀▄   ▄▀▀▀▄ │
+│       buf := make([]byte, 1<<20)                                                      │          █   █ █   █   █   █ │
+│       n := 0                                                                          │          ▀▀▀▀█ █   █   ▀▀▀▀█ │
+│       for {                                                                           │              █ █   █       █ │
+│           c, err := r.Read(buf)                                                       │              ▀ ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
+│           n += bytes.Count(buf[:c], []byte{'\n'})                                     │                 decode tok/s │
+│           if err == io.EOF {                                                          │ ttft                  102 ms │
+│               return n, nil                                                           │ tokens                    29 │
+│           }                                                                           │ prefill                    ? │
+│           if err != nil {                                                             │ cache reuse                ? │
+│               return n, err                                                           │ context                    ? │
+│           }                                                                           │                              │
+│       }                                                                               │ SESSION ──────────────────── │
+│   }                                                                                   │ turns                      4 │
+│                                                                                       │ tokens                   296 │
+│   This runs at memory bandwidth, so on a warm page cache it matches `wc -l`.          │ by turn       ████ ████ ████ │
+│   43.2 tok/s · ttft 95 ms · 141 tok · cache 90% of 217                                │ mean              43.0 tok/s │
 │                                                                                       │                              │
+│ ▌ 고마워! 한국어로 짧게 요약해 줄래?                                                  │ MACHINE ──────────────────── │
+│                                                                                       │ CPU  3%  1.1 cores  load 3.1 │
 │   요약하면: 큰 파일의 줄 수는 `wc -l`로 세는 것이 가장 빠르고, Go에서는 1 MiB         │                              │
-│   버퍼로 읽으면서 줄바꿈 바이트만 세면 같은 속도가 나옵니다.                          │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂ │
-│   41.8 tok/s · ttft 88 ms · 29 tok · cache 94% of 519                                 │ GPU0 ▆▆▆▆▆▆  22.5G  94% 68°C │
-│                                                                                       │ GPU1 ▆▆▆▆▆▆  21.5G  94% 64°C │
-│ ▌ Does the thinking of a reasoning model count toward tok/s?                          │                         ▆▆▆▇ │
-│                                                                                       │                         ████ │
-│   ◑ thinking · 29 tok                                                                 │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂████ │
-│   The user asks whether reasoning tokens count in the decode rate. llama-server       │                              │
+│   버퍼로 읽으면서 줄바꿈 바이트만 세면 같은 속도가 나옵니다.                          │                              │
+│   41.8 tok/s · ttft 88 ms · 29 tok · cache 94% of 519                                 │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂ │
+│                                                                                       │ GPU0 ▆▆▆▆▆▆  22.5G  94% 68°C │
+│ ▌ Does the thinking of a reasoning model count toward tok/s?                          │ GPU1 ▆▆▆▆▆▆  21.5G  94% 64°C │
+│                                                                                       │                         ▆▆▆▇ │
+│   ◑ thinking · 29 tok                                                                 │                         ████ │
+│   The user asks whether reasoning tokens count in the decode rate. llama-server       │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂████ │
 │   counts reasoning_c▍                                                                 │                              │
 ├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
 │ › ▍ the next message can be typed while this one answers                                                             │

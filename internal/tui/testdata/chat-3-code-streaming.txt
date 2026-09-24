@@ -1,9 +1,9 @@
 ┌─ toktape chat · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ─────────────────────────────┐
-│                                                                                       │ THIS TURN ────────── #2 live │
-│   ```sh                                                                               │          █   █ ▀▀▀▀▄   ▄▀▀▀▄ │
-│   wc -l /var/log/big.log                                                              │          █   █     █       █ │
-│   # 812345678 /var/log/big.log                                                        │          ▀▀▀▀█  ▀▀▀█   ▄▀▀▀▀ │
-│   ```                                                                                 │              █     █   █     │
+│   is how fast the disk reads:                                                         │ THIS TURN ────────── #2 live │
+│                                                                                       │          █   █ ▀▀▀▀▄   ▄▀▀▀▄ │
+│   sh                                                                                  │          █   █     █       █ │
+│   wc -l /var/log/big.log                                                              │          ▀▀▀▀█  ▀▀▀█   ▄▀▀▀▀ │
+│   # 812345678 /var/log/big.log                                                        │              █     █   █     │
 │                                                                                       │              ▀ ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
 │   On an NVMe drive that is a few seconds per 10 GB. If the file is compressed, pipe   │                 decode tok/s │
 │   it: `zstd -dc big.log.zst | wc -l`.                                                 │ ttft                   95 ms │
@@ -13,21 +13,21 @@
 │                                                                                       │ context                    ? │
 │   Count the newline bytes in fixed-size chunks; a 1 MiB buffer keeps the syscalls     │                              │
 │   rare:                                                                               │ SESSION ──────────────────── │
-│                                                                                       │ turns        2 tok       210 │
-│   ```go                                                                               │ by turn                    █ │
-│   func countLines(r io.Reader) (int, error) {                                         │ mean              44.1 tok/s │
-│       buf := make([]byte, 1<<20)                                                      │                              │
-│       n := 0                                                                          │ MACHINE ──────────────────── │
-│       for {                                                                           │ CPU  3%  1.1 cores  load 3.1 │
-│           c, err := r.Read(buf)                                                       │                              │
+│                                                                                       │ turns                      2 │
+│   go                                                                                  │ tokens                   210 │
+│   func countLines(r io.Reader) (int, error) {                                         │ by turn                 ████ │
+│       buf := make([]byte, 1<<20)                                                      │ mean              44.1 tok/s │
+│       n := 0                                                                          │                              │
+│       for {                                                                           │ MACHINE ──────────────────── │
+│           c, err := r.Read(buf)                                                       │ CPU  3%  1.1 cores  load 3.1 │
 │           n += bytes.Count(buf[:c], []byte{'\n'})                                     │                              │
-│           if err == io.EOF {                                                          │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▂▂ │
-│               return n, nil                                                           │ GPU0 ▆▆▆▆▆▆  22.5G  94% 68°C │
-│           }                                                                           │ GPU1 ▆▆▆▆▆▆  21.5G  94% 64°C │
-│           if err != nil {                                                             │                  ▇▇▆▆▆▇▇▆▆▆▇ │
-│               return n, err                                                           │                  ███████████ │
-│           }                                                                           │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂███████████ │
-│       }                                                                               │                              │
+│           if err == io.EOF {                                                          │                              │
+│               return n, nil                                                           │ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▂▂▂▂▂▂▂▂▂▂▂ │
+│           }                                                                           │ GPU0 ▆▆▆▆▆▆  22.5G  94% 68°C │
+│           if err != nil {                                                             │ GPU1 ▆▆▆▆▆▆  21.5G  94% 64°C │
+│               return n, err                                                           │                  ▇▇▆▆▆▇▇▆▆▆▇ │
+│           }                                                                           │                  ███████████ │
+│       }                                                                               │ ▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂███████████ │
 │   }▍                                                                                  │                              │
 ├───────────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┤
 │ › ▍ the next message can be typed while this one answers                                                             │

@@ -1,0 +1,32 @@
+┌─ toktape chat · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 ─────────────┐
+│   GNU parallel opens the file once and computes a                                      │
+│   stopped · 16 tok                                                                     │
+│                                                                                        │
+│ ▌ Short version please.                                                                │
+│                                                                                        │
+│   Each block starts at the next newline after its offset, so no line is cut in two.    │
+│   34.8 tok/s · ttft 104 ms · 25 tok · cache 99% of 988                                 │
+│                                                                                        │
+│ ▌ Would mmap beat read here?                                                           │
+│                                                                                        │
+│   Rarely. For one sequential pass the kernel's readahead already streams at disk       │
+│   speed; mmap mostly adds page faults.                                                 │
+│   21.4 tok/s · ttft 310 ms · 35 tok · cache 99% of 1.0k                                │
+│                                                                                        │
+│ ▌ Thanks, that's all.                                                                  │
+│                                                                                        │
+│   You're welcome — the whole session is on the tape.                                   │
+│   33.9 tok/s · ttft 101 ms · 15 tok · cache 99% of 1.0k                                │
+│                                                                                        │
+│ ▌ One last thing: which is fastest overall?                                            │
+│                                                                                        │
+│   `wc -l` for a plain count, `grep -c -F` for a pattern, and `parallel --pipepart`     │
+│   once one core is the limit.                                                          │
+│   32.4 tok/s · ttft 103 ms · 33 tok · cache 99% of 1.1k                                │
+│   ──────────────────────────────────────────────────────────────────────────────────── │
+│   12 turns █ █ ▇ ▇ ▇ ▄ ▇ ▇ · mean 37.0 tok/s · 627 tok · context 1.1k / 16k            │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ › ▍ type a message                                                                     │
+├────────────────────────────────────────────────────────────────────────────────────────┤
+│ ● ready       enter send · alt+enter newline · pgup/pgdn scroll · /help · ctrl+c leave │
+└────────────────────────────────────────────────────────────────────────────────────────┘

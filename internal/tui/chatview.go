@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -75,7 +76,8 @@ func chatLayout(m ChatModel, w, h int) chatGeom {
 	g.bodyH = h - chatChromeH - g.inRows
 	g.transH = g.bodyH
 	if !g.split {
-		g.transH--
+		// The status row and the dim rule that parts it from the transcript.
+		g.transH -= 2
 		g.statusInset = true
 	}
 	return g
@@ -96,7 +98,7 @@ func ChatView(m ChatModel, t time.Duration, w, h int) string {
 	if g.split {
 		right = chatPane(m, th, t, g.paneW-2, g.bodyH)
 	} else {
-		trans = append(trans, chatStatusLine(m, th, t, g.cw))
+		trans = append(trans, chatStatusRule(th, g.cw), chatStatusLine(m, th, t, g.cw))
 	}
 
 	lines := make([]string, 0, h)
@@ -381,11 +383,28 @@ func answerLines(th Theme, t time.Duration, tr *ChatTurn, cw int) []string {
 	lines := streamTextLines(s, aw-2)
 	bands := bodyBands(s, lines, t)
 	lastIsText := false
+	inFence := false
 	for i, bl := range lines {
 		l := newLine(th, cw)
 		l.space(answerIndent)
-		for _, sg := range bands[i] {
-			l.add(bodyStyle(th, bl, sg.band, sg.class), sg.text)
+		if isFenceRow(bl, bands[i]) {
+			// A fence is markup, not text the reader wants: the opening one
+			// becomes its language, dim, and the closing one goes — the blank
+			// row after the block already ends it (look round 1, 2026-09-24).
+			// The record screen keeps its fences; its tiles are not this.
+			inFence = !inFence
+			if !inFence {
+				continue
+			}
+			lang, _ := fenceLine(bl.text)
+			if lang == "" {
+				lang = "code"
+			}
+			l.add(th.dim, lang)
+		} else {
+			for _, sg := range bands[i] {
+				l.add(bodyStyle(th, bl, sg.band, sg.class), sg.text)
+			}
 		}
 		out = append(out, l.String())
 		lastIsText = !bl.marker
@@ -394,6 +413,24 @@ func answerLines(th Theme, t time.Duration, tr *ChatTurn, cw int) []string {
 		out[len(out)-1] = appendCursor(th, t, out[len(out)-1], cw, true)
 	}
 	return out
+}
+
+// isFenceRow says whether a drawn body line is a code fence of the answer: a
+// line the fence classifier marked whole, not a ``` inside a thought or inside
+// a code block's own text.
+func isFenceRow(bl bodyLine, segs []bodySeg) bool {
+	if bl.marker || bl.reasoning || len(segs) == 0 {
+		return false
+	}
+	if _, ok := fenceLine(bl.text); !ok {
+		return false
+	}
+	for _, sg := range segs {
+		if sg.class != classFence && strings.TrimSpace(sg.text) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // answerOnly is s with its reasoning tokens left out, for a turn whose thought
@@ -567,6 +604,105 @@ func (m ChatModel) sessionRates() []float64 {
 	return out
 }
 
+// turnBar is one finished turn's column in the by-turn chart: its decode
+// rate (0 when none was observed) and whether ctrl+c cut it short.
+type turnBar struct {
+	rate    float64
+	stopped bool
+}
+
+// sessionBars is every finished turn, oldest first, for the by-turn chart.
+// Unlike sessionRates it keeps the stopped and the failed turns, so the chart
+// has one column per turn the reader can count in the transcript; a failed
+// turn has no rate and draws as an empty column.
+func (m ChatModel) sessionBars() []turnBar {
+	var out []turnBar
+	for _, tr := range m.Turns() {
+		if !tr.Answer.Done {
+			continue
+		}
+		b := turnBar{stopped: tr.Cancelled}
+		if tr.Answer.Err == "" {
+			b.rate = turnFigures(tr, 0).rateV
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+// turnBarMax is the widest one turn's bar gets. Four turns fill the pane's
+// value area; wider, one or two turns drew as a slab that read as a single
+// measure rather than a series.
+const turnBarMax = 4
+
+// chatStatusBarsMax is the most cells the folded status row spends on the
+// chart, so the figures after it keep their room.
+const chatStatusBarsMax = 16
+
+// turnBarGeom is how n bars sit in w cells: each bw wide, gap cells apart,
+// and how many of them (the most recent) fit. The gap is kept even when it
+// costs the oldest turns their column: bars that touch merge back into the
+// one block this chart replaced.
+func turnBarGeom(n, w int) (bw, gap, k int) {
+	if n <= 0 || w <= 0 {
+		return 0, 0, 0
+	}
+	if w > 1 {
+		gap = 1
+	}
+	bw = min(max(1, (w+gap)/n-gap), turnBarMax)
+	k = min(n, (w+gap)/(bw+gap))
+	return bw, gap, k
+}
+
+// turnBarsWidth is the cells n bars take when given at most w.
+func turnBarsWidth(n, w int) int {
+	bw, gap, k := turnBarGeom(n, w)
+	if k == 0 {
+		return 0
+	}
+	return k*bw + (k-1)*gap
+}
+
+// turnBars draws the by-turn chart right-aligned in w cells of l: one bar per
+// turn, newest at the right, the most recent that fit. A bar's height is its
+// decode rate over the tallest shown, from zero, so the heights compare
+// honestly; any answered turn is at least the lowest step so a slow one is
+// still there. A stopped turn is drawn dim, and a turn with no rate is an
+// empty column rather than a bar pretending to be a zero (2026-09-24, look
+// round 1: four turns drew as one solid block through Sparkline, which is a
+// per-sample line with no room between samples).
+func turnBars(l *lineBuf, th Theme, bars []turnBar, w int) {
+	w = min(w, l.left())
+	bw, gap, k := turnBarGeom(len(bars), w)
+	if k == 0 {
+		l.space(max(0, w))
+		return
+	}
+	bars = bars[len(bars)-k:]
+	top := 0.0
+	for _, b := range bars {
+		top = max(top, b.rate)
+	}
+	l.space(w - (k*bw + (k-1)*gap))
+	for i, b := range bars {
+		if i > 0 {
+			l.space(gap)
+		}
+		if b.rate <= 0 || top <= 0 {
+			l.space(bw)
+			continue
+		}
+		lv := int(math.Round(b.rate / top * float64(len(sparkRunes))))
+		lv = min(max(lv, 1), len(sparkRunes))
+		st := th.accentMuted
+		if b.stopped {
+			st = th.dim
+		}
+		l.add(st, strings.Repeat(string(sparkRunes[lv-1]), bw))
+	}
+}
+
 // sessionTokens is every generated token of the session, finished turns by the
 // recorder's count.
 func (m ChatModel) sessionTokens() int {
@@ -654,14 +790,17 @@ func buildChatPane(m ChatModel, th Theme, t time.Duration, cw int, big bool, gra
 
 	section("SESSION", "")
 	rates := m.sessionRates()
-	out = append(out, pairRow(th, cw, "turns", strconv.Itoa(len(m.Turns())), "tok", fmtCount(m.sessionTokens())))
+	// One pair per row, as THIS TURN's (2026-09-24, look round 1: the two
+	// pairs shared a row and "tok" floated between them).
+	out = append(out,
+		kvRow(th, cw, "turns", strconv.Itoa(len(m.Turns())), th.text),
+		kvRow(th, cw, "tokens", fmtCount(m.sessionTokens()), th.text),
+	)
 	{
 		l := newLine(th, cw)
 		l.add(th.dim, "by turn")
-		sw := l.left() - 1
-		cells := Sparkline(rates, sw, 0)
-		l.space(l.left() - len(cells))
-		writeCells(l, th, cells, cellPalette{base: th.accentMuted, warn: th.accentMuted, bad: th.accentMuted})
+		l.space(1)
+		turnBars(l, th, m.sessionBars(), l.left())
 		out = append(out, l.String())
 	}
 	mean := unknown
@@ -681,6 +820,17 @@ func buildChatPane(m ChatModel, th Theme, t time.Duration, cw int, big bool, gra
 	return out
 }
 
+// chatStatusRule parts the folded status row from the transcript above it: a
+// dim rule from the answers' edge, the same thin line the wide layout's column
+// divider is, so the figures read as their own region and not as one more
+// line of the last answer (look round 1, 2026-09-24).
+func chatStatusRule(th Theme, cw int) string {
+	l := newLine(th, cw)
+	l.space(answerIndent)
+	l.add(th.dim, repeat('─', l.left()))
+	return l.String()
+}
+
 // chatStatusLine is the figures column folded into one row, for a screen too
 // narrow for the column. While a turn is in flight it is that turn — the live
 // rate, its latency, its size; between turns the last turn's figures are
@@ -689,9 +839,12 @@ func buildChatPane(m ChatModel, th Theme, t time.Duration, cw int, big bool, gra
 // whole from the right as the room runs out, never cut.
 func chatStatusLine(m ChatModel, th Theme, t time.Duration, cw int) string {
 	l := newLine(th, cw)
+	// It hangs from the answers' edge, not the user's bar: it is figures, and
+	// figures in the transcript are the answers' (look round 1, 2026-09-24).
+	l.space(answerIndent)
 	tr := m.currentTurn()
 	if tr == nil {
-		l.add(th.dim, "no turns yet · the figures of each answer appear under it")
+		l.addTrunc(th.dim, "no turns yet · the figures of each answer appear under it")
 		return l.String()
 	}
 	type part struct {
@@ -716,10 +869,11 @@ func chatStatusLine(m ChatModel, th Theme, t time.Duration, cw int) string {
 	rates := m.sessionRates()
 	l.add(th.text, strconv.Itoa(len(m.Turns())))
 	l.add(th.dim, " turns")
-	if len(rates) > 0 && l.left() > 6 {
+	if bars := m.sessionBars(); len(bars) > 0 && l.left() > 6 {
 		l.space(1)
-		cells := Sparkline(rates, min(l.left()-1, 16), 0)
-		writeCells(l, th, cells, cellPalette{base: th.accentMuted, warn: th.accentMuted, bad: th.accentMuted})
+		turnBars(l, th, bars, min(l.left()-1, turnBarsWidth(len(bars), chatStatusBarsMax)))
+	}
+	if len(rates) > 0 {
 		sum := 0.0
 		for _, r := range rates {
 			sum += r

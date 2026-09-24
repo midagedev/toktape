@@ -20,7 +20,8 @@
 // -chat dumps the chat screen instead (TTP-184, 2026-09-24): the scripted
 // session of tui.ExampleChatStates, one frame per state the screen can be in —
 // measuring, prefill, a code answer streaming, a thought, four turns, the
-// context-full notice, the 90-column layout, /help and a scrolled transcript.
+// context-full notice, the 90-column layout, /help, a scrolled transcript,
+// and a twelve-turn session with a stopped turn at both widths.
 // -png rasterises them through render.TextImage, since no tape holds them.
 package main
 

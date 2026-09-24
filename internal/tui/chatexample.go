@@ -27,6 +27,9 @@ type chatExampleTurn struct {
 	rate      float64 // decode tok/s
 	promptN   int     // prompt tokens the server evaluated
 	cacheN    int     // prompt tokens the prefix cache held
+	// stopAt, when above zero, is the token ctrl+c lands after: the turn
+	// ends cancelled with that much of its answer.
+	stopAt int
 }
 
 var chatExampleTurns = []chatExampleTurn{
@@ -53,6 +56,55 @@ var chatExampleTurns = []chatExampleTurn{
 	},
 }
 
+// chatExampleMoreTurns carry the session on to twelve turns, for the frame the
+// by-turn chart is judged on (look round 1, 2026-09-24): rates that drift down
+// as the context fills, one slow turn, and one the user stopped.
+var chatExampleMoreTurns = []chatExampleTurn{
+	{
+		user:   "And with ripgrep?",
+		answer: "`rg -c ''` counts lines too, but on one big file `wc -l` is already at disk speed; rg only wins when you search as you count.",
+		typeAt: 46 * time.Second, ttft: 90 * time.Millisecond, rate: 39.6, promptN: 14, cacheN: 745,
+	},
+	{
+		user:   "What about only the lines that contain ERROR?",
+		answer: "`grep -c -F ERROR big.log` prints how many lines match; `-F` takes the pattern literally and skips the regex engine.",
+		typeAt: 53 * time.Second, ttft: 92 * time.Millisecond, rate: 38.2, promptN: 16, cacheN: 812,
+	},
+	{
+		user:   "Can that run on every core?",
+		answer: "Split on line boundaries and count each part: `parallel --pipepart -a big.log --block 1G grep -c ERROR | paste -sd+ | bc`. It scales until the disk is the limit.",
+		typeAt: 60 * time.Second, ttft: 97 * time.Millisecond, rate: 36.9, promptN: 13, cacheN: 874,
+	},
+	{
+		user:   "Explain how --pipepart finds the line boundaries, in detail.",
+		answer: "GNU parallel opens the file once and computes a block size, then for every block it seeks to the block's nominal start offset and scans forward to the first newline after it, so that each worker receives whole lines only and nothing is counted twice.",
+		typeAt: 67 * time.Second, ttft: 99 * time.Millisecond, rate: 36.1, promptN: 17, cacheN: 945, stopAt: 16,
+	},
+	{
+		user:   "Short version please.",
+		answer: "Each block starts at the next newline after its offset, so no line is cut in two.",
+		typeAt: 73 * time.Second, ttft: 104 * time.Millisecond, rate: 34.8, promptN: 9, cacheN: 979,
+	},
+	{
+		user:   "Would mmap beat read here?",
+		answer: "Rarely. For one sequential pass the kernel's readahead already streams at disk speed; mmap mostly adds page faults.",
+		typeAt: 79 * time.Second, ttft: 310 * time.Millisecond, rate: 21.4, promptN: 11, cacheN: 1004,
+	},
+	{
+		user:   "Thanks, that's all.",
+		answer: "You're welcome — the whole session is on the tape.",
+		typeAt: 86 * time.Second, ttft: 101 * time.Millisecond, rate: 33.9, promptN: 8, cacheN: 1041,
+	},
+	{
+		user:   "One last thing: which is fastest overall?",
+		answer: "`wc -l` for a plain count, `grep -c -F` for a pattern, and `parallel --pipepart` once one core is the limit.",
+		typeAt: 91 * time.Second, ttft: 103 * time.Millisecond, rate: 32.4, promptN: 12, cacheN: 1063,
+	},
+}
+
+// chatExampleTwelveEnd is an instant after the twelfth turn has finished.
+const chatExampleTwelveEnd = 97 * time.Second
+
 // Instants of the example session worth a frame.
 const (
 	chatExampleOpened = 3 * time.Second
@@ -64,6 +116,18 @@ const (
 // chatExampleSentAt is when turn i's Enter is pressed.
 func chatExampleSentAt(i int) time.Duration {
 	return chatExampleTurns[i].typeAt + chatExampleTypeDur
+}
+
+// sentAt is when this turn's Enter is pressed.
+func (tr chatExampleTurn) sentAt() time.Duration { return tr.typeAt + chatExampleTypeDur }
+
+// tokenCount is how many tokens the turn streams before it ends.
+func (tr chatExampleTurn) tokenCount() int {
+	n := len(chatExampleTokens(tr.reasoning)) + len(chatExampleTokens(tr.answer))
+	if tr.stopAt > 0 {
+		n = min(n, tr.stopAt)
+	}
+	return n
 }
 
 // chatExampleTokens splits text into the pieces a tokenizer would stream: a
@@ -104,8 +168,15 @@ type chatExampleStep struct {
 }
 
 // chatExampleScript is the whole session, in time order. full adds a fifth
-// message the server's context cannot take.
-func chatExampleScript(full bool) []chatExampleStep {
+// message the server's context cannot take; many carries it on to twelve
+// turns instead.
+func chatExampleScript(full, many bool) []chatExampleStep {
+	turns := chatExampleTurns
+	sampleEnd := 60 * time.Second
+	if many {
+		turns = append(append([]chatExampleTurn(nil), chatExampleTurns...), chatExampleMoreTurns...)
+		sampleEnd = chatExampleTwelveEnd
+	}
 	ref := ExampleTapeN(1)
 	sum := ref.Summary
 	if sum.Server.CtxSize == 0 {
@@ -137,14 +208,14 @@ func chatExampleScript(full bool) []chatExampleStep {
 	// Host samples every quarter second: the GPU works while a turn decodes
 	// and idles between turns, the way a chat actually loads a box.
 	var busy [][2]time.Duration
-	for i, tr := range chatExampleTurns {
-		start := chatExampleSentAt(i)
-		n := len(chatExampleTokens(tr.reasoning)) + len(chatExampleTokens(tr.answer))
+	for _, tr := range turns {
+		start := tr.sentAt()
+		n := tr.tokenCount()
 		busy = append(busy, [2]time.Duration{start, start + tr.ttft + time.Duration(float64(n)/tr.rate*float64(time.Second))})
 	}
 	base := ref.Samples[0]
 	cpu := 100.0
-	for at := 500 * time.Millisecond; at <= 60*time.Second; at += 250 * time.Millisecond {
+	for at := 500 * time.Millisecond; at <= sampleEnd; at += 250 * time.Millisecond {
 		working := false
 		for _, b := range busy {
 			if at >= b[0] && at <= b[1] {
@@ -166,7 +237,7 @@ func chatExampleScript(full bool) []chatExampleStep {
 		add(at, observe(Event{Kind: EventSample, T: at, Stream: -1, Sample: sm}))
 	}
 
-	for i, tr := range chatExampleTurns {
+	for i, tr := range turns {
 		// Type the message a few runes at a time, then send it.
 		runes := []rune(tr.user)
 		const chunks = 6
@@ -175,7 +246,7 @@ func chatExampleScript(full bool) []chatExampleStep {
 			part := append([]rune(nil), runes[lo:hi]...)
 			add(tr.typeAt+time.Duration(c)*chatExampleTypeDur/chunks, key(ChatKey{Runes: part}))
 		}
-		sent := chatExampleSentAt(i)
+		sent := tr.sentAt()
 		add(sent, func(m ChatModel) ChatModel {
 			m, _ = m.HandleKey(ChatKey{Name: "enter"}, sent, 120, 36)
 			return m
@@ -187,6 +258,9 @@ func chatExampleScript(full bool) []chatExampleStep {
 		k := 0
 		emit := func(text string, reasoning bool) {
 			for _, piece := range chatExampleTokens(text) {
+				if tr.stopAt > 0 && k >= tr.stopAt {
+					return
+				}
 				rel := tr.ttft + time.Duration(float64(k)/tr.rate*float64(time.Second))
 				tk := tape.TokenEvent{T: rel, Index: k, Text: piece, Reasoning: reasoning}
 				rec.Tokens = append(rec.Tokens, tk)
@@ -210,9 +284,16 @@ func chatExampleScript(full bool) []chatExampleStep {
 			rec.Cache.HitRatio = float64(tr.cacheN) / float64(rec.Cache.PromptTotal)
 		}
 		done := sent + last + 20*time.Millisecond
+		stopped := tr.stopAt > 0
+		if stopped {
+			// ctrl+c lands just after the last token; a server cut off
+			// mid-answer reports no timings, so the rate is the client's.
+			add(sent+last+5*time.Millisecond, key(ChatKey{Name: "ctrl+c"}))
+			rec.Timings.PredictedPerSecond = 0
+		}
 		recCopy := rec
 		add(done, func(m ChatModel) ChatModel {
-			return m.Apply(ChatEvent{Kind: ChatTurnDone, T: done, Record: &recCopy})
+			return m.Apply(ChatEvent{Kind: ChatTurnDone, T: done, Record: &recCopy, Cancelled: stopped})
 		})
 	}
 
@@ -242,8 +323,13 @@ func chatExampleScript(full bool) []chatExampleStep {
 // ExampleChatAt is the example session as it stood at clip time at. full
 // scripts the context-full ending.
 func ExampleChatAt(at time.Duration, th Theme, full bool) ChatModel {
+	return exampleChatAt(at, th, full, false)
+}
+
+// exampleChatAt is ExampleChatAt with the twelve-turn session as a choice.
+func exampleChatAt(at time.Duration, th Theme, full, many bool) ChatModel {
 	m := NewChatModel(th)
-	for _, s := range chatExampleScript(full) {
+	for _, s := range chatExampleScript(full, many) {
 		if s.at > at {
 			break
 		}
@@ -258,6 +344,8 @@ type ExampleChatState struct {
 	At   time.Duration
 	W, H int
 	Full bool
+	// Many carries the session on to twelve turns, one of them stopped.
+	Many bool
 	// Keys are pressed after the script, at At: a help request, a scroll.
 	Keys []ChatKey
 }
@@ -279,12 +367,14 @@ func ExampleChatStates() []ExampleChatState {
 		{Name: "8-help", At: 45 * time.Second, W: 120, H: 36,
 			Keys: []ChatKey{{Runes: []rune("/help")}, {Name: "enter"}, {Runes: []rune("/foo")}, {Name: "enter"}}},
 		{Name: "9-scrolled", At: 45 * time.Second, W: 120, H: 36, Keys: []ChatKey{{Name: "pgup"}}},
+		{Name: "10-twelve-turns", At: chatExampleTwelveEnd, W: 120, H: 36, Many: true},
+		{Name: "11-twelve-narrow", At: chatExampleTwelveEnd, W: 90, H: 32, Many: true},
 	}
 }
 
 // Model builds the state's model under th.
 func (s ExampleChatState) Model(th Theme) ChatModel {
-	m := ExampleChatAt(s.At, th, s.Full)
+	m := exampleChatAt(s.At, th, s.Full, s.Many)
 	for _, k := range s.Keys {
 		m, _ = m.HandleKey(k, s.At, s.W, s.H)
 	}

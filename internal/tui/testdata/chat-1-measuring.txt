@@ -8,21 +8,21 @@
 │                                                                                       │ context                    ? │
 │                                                                                       │                              │
 │                                                                                       │ SESSION ──────────────────── │
-│                                                                                       │ turns        0 tok         0 │
+│                                                                                       │ turns                      0 │
+│                                                                                       │ tokens                     0 │
 │                                                                                       │ by turn                      │
 │                                                                                       │ mean                       ? │
-│                                                                                       │                              │
-│                   attached to DeepSeek-R1-Distill-Llama-70B-Q4_K_M                    │ MACHINE ──────────────────── │
-│                                                                                       │ CPU  1%  0.2 cores  load 3.1 │
-│                          ◑ measuring this server's prefill…                           │                              │
+│                   attached to DeepSeek-R1-Distill-Llama-70B-Q4_K_M                    │                              │
+│                                                                                       │ MACHINE ──────────────────── │
+│                          ◑ measuring this server's prefill…                           │ CPU  1%  0.2 cores  load 3.1 │
 │                    a short probe runs once, before the first turn                     │                              │
+│                                                                                       │                              │
 │                                                                                       │                         ▁▁▁▁ │
 │                                                                                       │ GPU0 ▆▆▆▆▆▆  22.5G   4% 68°C │
 │                                                                                       │ GPU1 ▆▆▆▆▆▆  21.5G   4% 64°C │
 │                                                                                       │                              │
 │                                                                                       │                              │
 │                                                                                       │                        ▂▂▂▂▂ │
-│                                                                                       │                              │
 │                                                                                       │                              │
 │                                                                                       │                              │
 │                                                                                       │                              │

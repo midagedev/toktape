@@ -7,7 +7,6 @@
 │           }                                                                            │
 │       }                                                                                │
 │   }                                                                                    │
-│   ```                                                                                  │
 │                                                                                        │
 │   This runs at memory bandwidth, so on a warm page cache it matches `wc -l`.           │
 │   43.2 tok/s · ttft 95 ms · 141 tok · cache 90% of 217                                 │
@@ -24,7 +23,8 @@
 │   Yes. The server counts a thinking token exactly like an answer token, so the rate    │
 │   covers both — toktape shows the thought dim and folds it once the answer starts.     │
 │   40.9 tok/s · ttft 102 ms · 109 tok · cache 96% of 636                                │
-│ 4 turns ███▇ · mean 42.5 tok/s · 376 tok · context 745 / 16k                           │
+│   ──────────────────────────────────────────────────────────────────────────────────── │
+│   4 turns ███ ███ ███ ▇▇▇ · mean 42.5 tok/s · 376 tok · context 745 / 16k              │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
 │ › ▍ type a message                                                                     │
 ├────────────────────────────────────────────────────────────────────────────────────────┤
