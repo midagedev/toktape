@@ -102,55 +102,33 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **The card stops saying things it did not see.** The thread through this
-    release is one defect wearing different clothes: something toktape never
-    observed was printed as if it had been observed and found empty.
+    **`toktape chat`.** Talk to the server you already run the way you would
+    in a chat app, and every answer is timed as it streams: the rate, TTFT,
+    prefill, how much of the conversation the prefix cache reused, and how full
+    the context is. `/exit` saves the tape and prints the card, whose rounds
+    row now reads `Chat 2 turns`.
 
-    **Thinking models get a rate.** Measured on Ollama 0.34.2 with qwen3:1.7b:
-    the server counted 48 tokens and the client parsed none, because the
-    thinking text arrives under `reasoning` where vLLM and exl3-serve send
-    `reasoning_content`. No calibration, no cap, `Sample ?`. Both spellings are
-    read now, and the same run prints `Decode 60.5 tok/s`. The tape also
-    records how many tokens the client actually saw, so the next unknown
-    dialect raises a caveat (`tokens_unseen`) instead of a blank card.
+    **A conversation is measured, not benchmarked.** One stream; the whole
+    history is sent every turn and never salted or trimmed — when it no longer
+    fits, the session says so and keeps what it has. There is no clock, and an
+    answer is capped only by `--n-predict` or by the room left in the slot. The
+    minutes spent reading and typing between turns enter no rate: the turns
+    reduce through the same per-round windows a prompts file uses. ctrl+c stops
+    the answer in flight and keeps the session and the partial turn.
 
-    **The clock waits when cutting would destroy the run.** On a server that
-    counts tokens only in a closing `usage` message, a stream the clock cancels
-    sends no count at all. Six runs on one Mac against Ollama: every answer cap
-    was over budget, and the three that produced a card were the three where
-    the model happened to stop early. The cap is now priced below the slowest
-    run measured, prefill is reserved even when it could not be calibrated, and
-    on these servers the cut is held back — bounded at half the budget again —
-    for live streams to end on their own. llama.cpp runs take the identical
-    path as before. The tape says the allowance was there.
+    **A chat tape stays with the person who typed it.** It holds their words,
+    so it is kept out of the experiment log, `compare` refuses to set it
+    against a benchmark, and `publish` refuses it unless
+    `--include-conversation` says the words are meant to go. The tape schema
+    gains `summary.mode` ("chat"); benchmark tapes are byte-identical.
 
-    **A Mac states its own hardware.** `RIG ? · ? · ?` is now
-    `RIG ? · Apple M1 Pro · 32 GB`, with the macOS version beside the engine.
-    And a machine whose GPU inventory was never read (no `nvidia-smi`) is no
-    longer described as a machine without GPUs: the placement line says where
-    the layers went is unknown, rather than claiming they all ran on the CPU
-    while Metal was holding them. Unified memory still has no word of its own
-    on the card; that is the next piece of work.
+    **The screen reads answers as Markdown.** Headings, bold, bullets and
+    numbered items that hang under their text, rules, and highlighted code
+    blocks, all stable while they stream; Korean and other wide text keeps its
+    columns. Below 100 columns the live figures fold into one status row.
 
-    **Two caveats stopped crying wolf.** `conditions changed` fired on both
-    recorded runs that did real work, because a machine warms up when it
-    decodes for a minute. A temperature rise is now printed only beside a clock cap that
-    moved — it is the cap's explanation, not a finding. A fall is printed on its
-    own: a machine cooler at the end than at the start was already warm when
-    the run began. And `contended` no longer counts a process on a GPU holding
-    none of the server's weights.
+    `compare` no longer prints `-100%` when one side was never observed.
 
-    **An empty server is told what to type.** Ollama with nothing pulled —
-    every reader's first five minutes — answered `model is required` and was
-    told to check its slot count. It is now told `ollama pull`. That row, and
-    a fake Ollama that can actually lose the race the real one loses, are in
-    the first-run matrix (21 rows).
-
-    `toktape render` and `toktape play` no longer print `tape saved: <path>`
-    for a path they never wrote. `--explain` is gated to have a reading for
-    every caveat the card can raise. README: what Windows actually does,
-    measured on one, and simplified and traditional Chinese, each written on
-    its own.
   footer: |
     ## Install
 

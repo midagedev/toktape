@@ -5,6 +5,7 @@
 | verb | what it does | example |
 | --- | --- | --- |
 | `record` | attach and record a run; the default verb | `toktape --sessions 4 --for 30s` |
+| `chat` | talk to the server; every answer timed, `/exit` saves the tape and prints the card | `toktape chat` |
 | `card` | re-render a card from a tape | `toktape card <tape> -o png` |
 | `play` | replay a run on the live screen | `toktape play <tape> --speed 4` |
 | `render` | render a run as GIF, mp4, asciicast or PNG frames | `toktape render <tape> --mp4 clip.mp4` |
@@ -25,6 +26,15 @@ cap that also applies (naming it turns the clock off). `--sessions` past
 eight needs `--max-sessions` naming the same number; `--prompt` (repeatable)
 or `--prompts` (a JSONL file, one round per line) replace the built-in set;
 `--spec-n-max 3,5` runs the set once per speculative `n_max` into one tape.
+
+`toktape chat` is the same attach with a conversation instead of the built-in
+set: one stream, the history sent whole every turn, no clock, and an answer
+capped only by `--n-predict` or by the room left in the slot. Enter sends,
+alt+enter is a new line, ctrl+c stops the answer in flight and keeps the
+session, and `/exit` (or ctrl+d on an empty line) saves. The time spent typing
+between turns enters no rate. A chat tape holds the conversation's text: it
+stays out of `log`, `compare` will not set it against a benchmark, and
+`publish` refuses it unless `--include-conversation` is given.
 
 How the request is shaped moves the number as much as the server's flags:
 greedy against the server's default sampling against thinking left on is an
