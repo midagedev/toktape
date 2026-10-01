@@ -123,6 +123,10 @@ func sampleKey(s viewSample) string {
 // its offset, never the viewer's day). The old lines were generated in Seoul
 // and failed on the UTC CI box, because the modal called StartedAt.Local().
 // Only card frames moved; every non-modal frame kept its hash.
+// 2026-10-02: the eight *-live lines (sweep-live and hero-live, mid-run samples
+// at 120x36 and 156x38) were regenerated when the live aggregate headline
+// took the record's window definition (decodeRateAt). Only the headline
+// figure glyphs moved; card frames and every other line kept their hash.
 func TestViewFramesPinned(t *testing.T) {
 	sweep, hero := loadViewTapes(t)
 	samples := viewSamples(sweep, hero)

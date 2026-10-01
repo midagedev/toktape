@@ -1,8 +1,8 @@
 ┌─ toktape · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────┐
-│ stream 1/8               answer │ stream 2/8               answer │          ▀▀▀▀█ ▄▀▀▀▄   ▄▀▀▀▄ │
-│ 9.1 tok/s  ttft 630 ms          │ 9.1 tok/s  ttft 690 ms          │              █     █   █   █ │
-│ every single one of those       │ 된다. 팔십 레이어짜리 칠십억    │             ▄▀ ▄▀▀▀▀   █▀▀▀█ │
-│ bytes is read again for every   │ 단위 모델이 만 육천 토큰을      │            █   █       █   █ │
+│ stream 1/8               answer │ stream 2/8               answer │          ▀▀▀▀█   ▄█    ▄▀▀▀▄ │
+│ 9.1 tok/s  ttft 630 ms          │ 9.1 tok/s  ttft 690 ms          │              █    █        █ │
+│ every single one of those       │ 된다. 팔십 레이어짜리 칠십억    │             ▄▀    █    ▄▀▀▀▀ │
+│ bytes is read again for every   │ 단위 모델이 만 육천 토큰을      │            █      █    █     │
 │ token you generate. That one    │ 잡으면 반정밀도로는 오          │            ▀   ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
 │ sentence explains▍              │ 기가바이트가 넘고,▍             │                 decode tok/s │
 ├─────────────────────────────────┼─────────────────────────────────┤                              │

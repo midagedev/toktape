@@ -1,8 +1,8 @@
 ┌─ toktape · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────────────────────────┐
-│ stream 1/8                                answer │ stream 2/8                                 answer │               ▀▀▀▀█ ▄▀▀▀▄   ▄▀▀▀▄ │
-│ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 630 ms · 104/320    │ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 690 ms · 103/320     │                   █     █   █   █ │
-│                                                  │ 컨텍스트를 네 배로 늘리면 갑자기 자리가           │                  ▄▀ ▄▀▀▀▀   █▀▀▀█ │
-│ Nothing in there is clever, and that is          │ 모자란다. 계산은 어렵지 않다. 레이어 수에 키와    │                 █   █       █   █ │
+│ stream 1/8                                answer │ stream 2/8                                 answer │               ▀▀▀▀█   ▄█    ▄▀▀▀▄ │
+│ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 630 ms · 104/320    │ 9.1 tok/s  ▇▇█▇██▇▇▇██▇ ttft 690 ms · 103/320     │                   █    █        █ │
+│                                                  │ 컨텍스트를 네 배로 늘리면 갑자기 자리가           │                  ▄▀    █    ▄▀▀▀▀ │
+│ Nothing in there is clever, and that is          │ 모자란다. 계산은 어렵지 않다. 레이어 수에 키와    │                 █      █    █     │
 │ exactly the point. A dense seventy billion       │ 값 두 벌을 곱하고, 거기에 KV 헤드가 차지하는      │                 ▀   ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
 │ parameter model at Q4_K_M is about forty two     │ 채널 수와 컨텍스트 토큰 수를 곱한 다음, 원소      │                      decode tok/s │
 │ gigabytes of weights, and every single one of    │ 하나가 몇 바이트인지를 곱하면 된다. 팔십          │                                   │

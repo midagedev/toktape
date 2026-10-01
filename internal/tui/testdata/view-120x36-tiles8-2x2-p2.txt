@@ -1,8 +1,8 @@
 ┌─ toktape · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────┐
-│ stream 5/8                         answer │ stream 6/8                         answer │          ▀▀▀▀█ ▄▀▀▀▄   ▄▀▀▀▄ │
-│ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │              █     █   █   █ │
-│ 번 더 돌려 보는 것이다. 두 번째 실행이    │ source of half the confusion about        │             ▄▀ ▄▀▀▀▀   █▀▀▀█ │
-│ 크게 빨라지면 첫 실행이 차가웠던          │ quality. In the common mixed schemes      │            █   █       █   █ │
+│ stream 5/8                         answer │ stream 6/8                         answer │          ▀▀▀▀█   ▄█    ▄▀▀▀▄ │
+│ 9.1 tok/s  █▇███▇▇█ ttft 870 ms · 102/320 │ 9.1 tok/s  █▇███▇▇█ ttft 930 ms · 101/320 │              █    █        █ │
+│ 번 더 돌려 보는 것이다. 두 번째 실행이    │ source of half the confusion about        │             ▄▀    █    ▄▀▀▀▀ │
+│ 크게 빨라지면 첫 실행이 차가웠던          │ quality. In the common mixed schemes      │            █      █    █     │
 │ 것이고, 그러면 페이지 캐시 이야기만       │ the file is built tensor by tensor, and   │            ▀   ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
 │ 하면 끝난다. 여기서 토큰당 메이저 폴트    │ different tensors get different           │                 decode tok/s │
 │ 값을 같이 보게 하면 추측이 측정으로       │ treatment. The attention projections      │                              │

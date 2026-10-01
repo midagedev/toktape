@@ -1,9 +1,9 @@
 ┌─ toktape · DeepSeek-R1-Distill-Llama-70B-Q4_K_M · llama-server b3650 · 2× RTX 3090 ──────────────────────────────────┐
-│ stream 1/4                         answer │ stream 2/4                         answer │          █▀▀▀▀ ▄▀▀▀▄   ▄▀▀▀▄ │
-│ 12.5 tok/s ▇▇███▇▇█ ttft 630 ms · 143/320 │ 12.5 tok/s ▇▇███▇▇█ ttft 690 ms · 142/320 │          █     █   █   █   █ │
-│                                           │ 수에 키와 값 두 벌을 곱하고, 거기에 KV    │          ▀▀▀▀▄ █   █   █   █ │
-│ Nothing in there is clever, and that is   │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │              █ █   █   █   █ │
-│ exactly the point. A dense seventy        │ 수를 곱한 다음, 원소 하나가 몇            │          ▀▀▀▀▀ ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
+│ stream 1/4                         answer │ stream 2/4                         answer │          █   █ ▄▀▀▀▄   █▀▀▀▀ │
+│ 12.5 tok/s ▇▇███▇▇█ ttft 630 ms · 143/320 │ 12.5 tok/s ▇▇███▇▇█ ttft 690 ms · 142/320 │          █   █ █   █   █     │
+│                                           │ 수에 키와 값 두 벌을 곱하고, 거기에 KV    │          ▀▀▀▀█ ▀▀▀▀█   ▀▀▀▀▄ │
+│ Nothing in there is clever, and that is   │ 헤드가 차지하는 채널 수와 컨텍스트 토큰   │              █     █       █ │
+│ exactly the point. A dense seventy        │ 수를 곱한 다음, 원소 하나가 몇            │              ▀ ▀▀▀▀▀ ▀ ▀▀▀▀▀ │
 │ billion parameter model at Q4_K_M is      │ 바이트인지를 곱하면 된다. 팔십            │                 decode tok/s │
 │ about forty two gigabytes of weights,     │ 레이어짜리 칠십억 단위 모델이 만 육천     │                              │
 │ and every single one of those bytes is    │ 토큰을 잡으면 반정밀도로는 오             │ SPEED ────────────────────── │

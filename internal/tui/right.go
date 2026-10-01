@@ -350,7 +350,10 @@ func majFaultsPerToken(m Model) float64 {
 }
 
 // decodeRates returns the aggregate decode rate as of clip time t and the
-// per-stream mean under it, eased between token arrivals.
+// per-stream mean, eased between token arrivals. The aggregate is the
+// record's definition, all tokens over the run's window (decodeRateAt); the
+// per-stream mean is the mean of each stream's own rate (perStreamRateAt) and
+// is not derived from the aggregate.
 //
 // The decode rate is a step function of token arrivals, so the tween needs no
 // stored "previous value": the previous figure is the same reduction over one
@@ -365,11 +368,8 @@ func majFaultsPerToken(m Model) float64 {
 func decodeRates(m Model, t time.Duration) (agg, perStream float64) {
 	prevAgg, curAgg, since := m.decodeRateAt(t)
 	agg = ease(prevAgg, curAgg, since, t)
-	n := len(m.Streams)
-	if n < 1 {
-		n = 1
-	}
-	perStream = agg / float64(n)
+	prevPer, curPer, perSince := m.perStreamRateAt(t)
+	perStream = ease(prevPer, curPer, perSince, t)
 	if m.Done {
 		if r := m.Summary.Aggregate.PerStreamPredictedPerSecond; r > 0 {
 			perStream = r

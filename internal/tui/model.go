@@ -535,14 +535,57 @@ func (m Model) activeStream() int {
 //
 // The rate is a step function of token arrivals, so the tween between the two
 // figures needs no stored "previous value": the previous value is the same
-// reduction over one token fewer. Counting only tokens after each stream's
-// first one keeps the prefill out of the decode figure (handover lesson 1).
+// reduction over one token fewer.
+//
+// With one stream it is that stream's rate. With several it is the definition
+// the record uses (server.Aggregate, internal/server/concurrent.go:200-202;
+// vLLM, SGLang and GenAI-Perf agree): the tokens seen over the window from
+// the earliest first token of any stream to the newest token of any stream.
+// Summing each stream's own rate instead kept a finished stream adding its
+// rate to the headline until the run ended, so it fell at completion.
+// The count is n_i-1 per stream, the decode intervals: a stream's first token
+// is the end of its prefill, not a decode token (handover lesson 1). The
+// record's TotalPredictedN counts it, so the live figure sits k/window under
+// the record (k = streams, e.g. 4/18.6 s ≈ 0.2 tok/s on 145.8). That is the
+// price of no start spike: counting first tokens over a window that opens at
+// the earliest of them put the headline in the thousands when two streams'
+// first tokens landed a millisecond apart. A rounds run
+// shows one round at a time (ModelAt), so the window is that round's and the
+// idle gap between rounds is never in it, as in recorder.reduceRounds.
 func (m Model) decodeRateAt(t time.Duration) (prev, cur float64, since time.Duration) {
-	type acc struct {
-		n     int
-		first time.Duration
-		last  time.Duration
+	newest := m.newestTokenAt(t)
+	if newest < 0 {
+		return 0, 0, 0
 	}
+	if !m.multiStream() {
+		return m.streamRateSum(newest - time.Nanosecond), m.streamRateSum(newest), newest
+	}
+	return m.windowRate(newest - time.Nanosecond), m.windowRate(newest), newest
+}
+
+// perStreamRateAt is the mean of the streams' own cumulative rates, eased the
+// same way: each stream's (n-1) intervals over first-to-newest token, as
+// llama.cpp's own web UI shows it. Finished streams keep their rate.
+func (m Model) perStreamRateAt(t time.Duration) (prev, cur float64, since time.Duration) {
+	newest := m.newestTokenAt(t)
+	if newest < 0 {
+		return 0, 0, 0
+	}
+	n := float64(len(m.Streams))
+	if n < 1 {
+		n = 1
+	}
+	return m.streamRateSum(newest-time.Nanosecond) / n, m.streamRateSum(newest) / n, newest
+}
+
+// multiStream reports whether the headline is an aggregate over streams.
+func (m Model) multiStream() bool {
+	return m.Summary.Concurrency > 1 || len(m.Streams) > 1
+}
+
+// newestTokenAt is the arrival time of the newest token at or before t, -1
+// when there is none.
+func (m Model) newestTokenAt(t time.Duration) time.Duration {
 	newest := time.Duration(-1)
 	for _, s := range m.Streams {
 		for _, tk := range s.Tokens {
@@ -554,33 +597,64 @@ func (m Model) decodeRateAt(t time.Duration) (prev, cur float64, since time.Dura
 			}
 		}
 	}
-	rate := func(cut time.Duration) float64 {
-		var total float64
-		for _, s := range m.Streams {
-			var a acc
-			for _, tk := range s.Tokens {
-				if tk.T > cut {
-					break
+	return newest
+}
+
+// windowRate is the record's aggregate over tokens with T <= cut: the decode
+// intervals (n_i-1 per stream) over earliest first token to newest token. 0
+// until the window has width and an interval exists.
+func (m Model) windowRate(cut time.Duration) float64 {
+	var (
+		n           int
+		first, last = time.Duration(-1), time.Duration(-1)
+	)
+	for _, s := range m.Streams {
+		for i, tk := range s.Tokens {
+			if tk.T > cut {
+				break
+			}
+			if i == 0 {
+				if first < 0 || tk.T < first {
+					first = tk.T
 				}
-				if a.n == 0 {
-					a.first = tk.T
-				}
-				a.last = tk.T
-				a.n++
+			} else {
+				n++
 			}
-			if a.n < 2 {
-				continue
+			if tk.T > last {
+				last = tk.T
 			}
-			win := a.last - a.first
-			if win <= 0 {
-				continue
-			}
-			total += float64(a.n-1) / win.Seconds()
 		}
-		return total
 	}
-	if newest < 0 {
-		return 0, 0, 0
+	if n < 1 || last-first <= 0 {
+		return 0
 	}
-	return rate(newest - time.Nanosecond), rate(newest), newest
+	return float64(n) / (last - first).Seconds()
+}
+
+// streamRateSum is the sum over streams of (n-1)/(last-first) for the tokens
+// with T <= cut. Counting only tokens after a stream's first keeps the prefill
+// out of the figure (handover lesson 1).
+func (m Model) streamRateSum(cut time.Duration) float64 {
+	var total float64
+	for _, s := range m.Streams {
+		var (
+			n           int
+			first, last time.Duration
+		)
+		for _, tk := range s.Tokens {
+			if tk.T > cut {
+				break
+			}
+			if n == 0 {
+				first = tk.T
+			}
+			last = tk.T
+			n++
+		}
+		if n < 2 || last-first <= 0 {
+			continue
+		}
+		total += float64(n-1) / (last - first).Seconds()
+	}
+	return total
 }
