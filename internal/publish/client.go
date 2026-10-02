@@ -156,6 +156,12 @@ type Options struct {
 // Options.IncludeConversation.
 var ErrConversation = errors.New("publish: this is a chat tape and it holds the conversation's text; nothing was sent")
 
+// ErrDecision is Upload's refusal of a decision-model tape (TTP-192): the
+// hub's index, search and page read decode figures a decision run does not
+// have, and a row with none of them would read as a broken benchmark. It goes
+// when the hub learns the mode (TTP-187).
+var ErrDecision = errors.New("publish: this is a decision-model tape and the hub cannot show one yet; nothing was sent")
+
 // HoldsConversation reports whether t is a chat session, whose prompts are
 // what a person typed rather than a set toktape or a prompts file chose. It
 // is the one predicate publishing asks: the verb refuses early with it, and
@@ -194,6 +200,9 @@ func (c *Client) Upload(ctx context.Context, view *tape.Tape, idx Index, opts Op
 	}
 	if HoldsConversation(view) && !opts.IncludeConversation {
 		return nil, ErrConversation
+	}
+	if view.Summary.IsDecision() {
+		return nil, ErrDecision
 	}
 	body, contentType, err := uploadBody(view, idx, opts, c.Token)
 	if err != nil {

@@ -77,6 +77,12 @@ func Tapes(a, b *tape.Tape) (Report, error) {
 	if b == nil {
 		b = &tape.Tape{}
 	}
+	// A decision-model run has no token figure for the table to put beside
+	// another run's (TTP-192), and two of them compare on latency, which
+	// this table does not have yet.
+	if a.Summary.IsDecision() || b.Summary.IsDecision() {
+		return Report{}, fmt.Errorf("a decision-model run is not comparable here: it has no decode or prefill stream, only request latencies")
+	}
 	ca, cb := card.IsChat(&a.Summary), card.IsChat(&b.Summary)
 	if ca != cb {
 		chat, bench := "A", "B"

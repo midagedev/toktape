@@ -53,6 +53,9 @@ func runLs(c *cli, args []string) int {
 		if card.IsChat(&s) {
 			n = "chat"
 		}
+		if s.IsDecision() {
+			n = "decision"
+		}
 		rows = append(rows, []string{
 			s.ID,
 			modelLabel(s),

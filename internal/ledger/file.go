@@ -90,9 +90,11 @@ func Append(dir string, tp *tape.Tape) error {
 // back to and `toktape log --rebuild` calls — so a run kept out of one cannot
 // come back through the other. A chat (tape.ModeChat) is kept out
 // (2026-09-24): its prompts are a person's conversation, not a set another
-// run can repeat, and the ledger is the table runs are compared in.
+// run can repeat, and the ledger is the table runs are compared in. A
+// decision-model run (tape.ModeDecision, TTP-192) is kept out too: every
+// column of the ledger is a token figure it does not have.
 func Holds(tp *tape.Tape) bool {
-	return tp != nil && !tp.Summary.IsChat()
+	return tp != nil && !tp.Summary.IsChat() && !tp.Summary.IsDecision()
 }
 
 // Rebuild regenerates the ledger in dir from every tape it holds and writes

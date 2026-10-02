@@ -623,7 +623,7 @@ func previousTape(outDir string, tp *tape.Tape) string {
 	})
 	for _, m := range earlier {
 		prev, err := tape.Read(m)
-		if err != nil || prev.Summary.IsChat() {
+		if err != nil || prev.Summary.IsChat() || prev.Summary.IsDecision() {
 			continue
 		}
 		return m

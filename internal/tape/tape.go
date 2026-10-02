@@ -92,6 +92,9 @@ type Tape struct {
 	// len(Requests) == Summary.Concurrency. A single-stream run has one.
 	Requests []RequestRecord `json:"requests"`
 	Samples  []RunSample     `json:"samples"`
+	// Decisions are the requests of a decision-model run (ModeDecision,
+	// decision.go), in send order. Requests is empty on such a tape.
+	Decisions []DecisionRecord `json:"decisions,omitempty"`
 }
 
 // RequestRecord is one stream: its prompt, every token, and its own timings.
@@ -138,11 +141,16 @@ type RunSummary struct {
 	PerRound []RoundSummary `json:"per_round,omitempty"`
 	// Mode is what kind of run this tape is (2026-09-24). "" is a benchmark
 	// run from `record`: prompts toktape chose or a prompts file, comparable
-	// with other runs of the same set. ModeChat is a `toktape chat` session:
+	// with other runs of the same set. ModeDecision (decision.go) is a
+	// `toktape decide` run of a decision model. ModeChat is a `toktape chat` session:
 	// every round is one turn a person typed, the history grows turn by
 	// turn, and the prompts are that person's own words. A chat tape is
 	// never comparable with a benchmark tape and is never shared by default.
 	Mode string `json:"mode,omitempty"`
+	// Decision is a decision-model run's summary (ModeDecision, TTP-192),
+	// nil on every other tape. On a decision tape the token figures
+	// (Timings, Aggregate) are empty: nothing was generated.
+	Decision *DecisionSummary `json:"decision,omitempty"`
 	// SpecNMax are the speculative.n_max values of a `record --spec-n-max`
 	// sweep, in the order they ran (TTP-35, 2026-09-13). Each value runs the
 	// whole prompt set, so Rounds = len(SpecNMax) x prompts, and BySpecNMax
