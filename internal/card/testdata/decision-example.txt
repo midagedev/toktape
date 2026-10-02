@@ -1,0 +1,22 @@
+┌──────────────────────────────────────────────────────────────────────┐
+│ toktape example                    20261002-140000-clef-flash-q4-k-m │
+├──────────────────────────────────────────────────────────────────────┤
+│ MODEL    Cloudflare_clef-flash-Q4_K_M.gguf · q4_K · 5.2 GiB          │
+│ ENGINE   bloomery 0.1.0 (example) · linux                            │
+│ RIG      RTX A6000 48G · AMD Ryzen Threadripper PRO 5975WX 32-Cores  │
+│          252 GB                                                      │
+├──────────────────────────────────────────────────────────────────────┤
+│ Decision      37.6 ms p50 · warm · engine                            │
+│ Cold          640 ms · first request                                 │
+│ Short         37.4 ms p50 · 7 cases under 1,000 tok                  │
+│ Long          417 ms p50 · 4,386 tok                                 │
+│ p95           417 ms · whole suite                                   │
+│ Prefill       5.2k tok/s · median per request                        │
+│ Throughput    11.7 req/s · c1                                        │
+│ Requests      168 · 8 cases × 21 passes · 0 errors                   │
+├──────────────────────────────────────────────────────────────────────┤
+│ SYNTHETIC example for TTP-192 screen and card work: every figure is  │
+│ invented by tools/decision-example/gen.py.                           │
+├──────────────────────────────────────────────────────────────────────┤
+│                toktape · github.com/midagedev/toktape                │
+└──────────────────────────────────────────────────────────────────────┘

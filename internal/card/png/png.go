@@ -49,7 +49,13 @@ func renderCanvas(s *tape.RunSummary) (*canvas, error) {
 	defer fs.Close()
 
 	c := newCanvas(fs)
-	c.draw(s)
+	// A decision run has no token stream: decision.go draws its card
+	// (TTP-192, 2026-10-02).
+	if s.IsDecision() {
+		c.drawDecision(s)
+	} else {
+		c.draw(s)
+	}
 	return c, nil
 }
 

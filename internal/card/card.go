@@ -37,6 +37,11 @@ func Text(s *tape.RunSummary) string {
 	if s == nil {
 		s = &tape.RunSummary{}
 	}
+	// A decision run has no token stream, so none of what follows applies to
+	// it (TTP-192, 2026-10-02): decision.go owns its card.
+	if s.IsDecision() {
+		return decisionText(s)
+	}
 
 	sections := [][]string{
 		{headerLine(s)},
@@ -76,6 +81,11 @@ func Text(s *tape.RunSummary) string {
 // the thread is already using, then the provenance that answers "paste your
 // command" before anyone asks it.
 func Markdown(s *tape.RunSummary) string {
+	// The llama-bench table and the Reproduce block are about a token stream;
+	// a decision run pastes as its card alone.
+	if s.IsDecision() {
+		return "```text\n" + Text(s) + "```\n"
+	}
 	return "```text\n" + Text(s) + "```\n\n" + LlamaBenchTable(s) + "\n" + Reproduce(s)
 }
 
@@ -111,6 +121,10 @@ func JSON(s *tape.RunSummary) ([]byte, error) {
 		s = &tape.RunSummary{}
 	}
 	doc := jsonCard{RunSummary: *s, Caveats: Caveats(s)}
+	if s.IsDecision() {
+		// The token-stream caveats are about a stream this run never had.
+		doc.Caveats = DecisionCard(s).Caveats
+	}
 	if doc.Caveats == nil {
 		// An empty array, never null: "this run has no caveats" is the answer
 		// the field exists to give, and a consumer should not have to tell
