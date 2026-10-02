@@ -65,7 +65,10 @@ type Index struct {
 	RAMBytes  int64    `json:"ram_bytes,omitempty"`
 	HostClass string   `json:"host_class,omitempty"`
 
-	// What it did.
+	// What it did. Mode is the summary's own (tape.ModeChat,
+	// tape.ModeDecision), absent for a benchmark (TTP-187): a reader that
+	// shows a rate must know first whether the row has one.
+	Mode          string  `json:"mode,omitempty"`
 	Sessions      int     `json:"sessions,omitempty"`
 	PromptSet     string  `json:"prompt_set,omitempty"`
 	DecodePerSec  float64 `json:"decode_per_sec,omitempty"`
@@ -99,6 +102,15 @@ type Index struct {
 	ActiveParams  int64   `json:"active_params,omitempty"`
 	NExperts      int     `json:"n_experts,omitempty"`
 	NExpertsUsed  int     `json:"n_experts_used,omitempty"`
+
+	// A decision run's figures (TTP-192), copied from DecisionSummary and
+	// present only on a decision row, which has no decode, prefill or TTFT
+	// above. Every latency is the client's, send to the last byte, as on
+	// the card; EngineP50 is the engine's own prompt + head beside it.
+	DecisionP50Ms       float64 `json:"decision_p50_ms,omitempty"`
+	DecisionEngineP50Ms float64 `json:"decision_engine_p50_ms,omitempty"`
+	DecisionColdMs      float64 `json:"decision_cold_ms,omitempty"`
+	DecisionReqPerSec   float64 `json:"decision_req_per_sec,omitempty"`
 
 	// How much to trust it. The card's caveats travel with the row: a search
 	// result that drops them is a leaderboard with the sorting removed.
@@ -175,6 +187,17 @@ func IndexOf(t *tape.Tape) Index {
 		if id != "" {
 			idx.GPUIDs = append(idx.GPUIDs, id)
 		}
+	}
+
+	idx.Mode = s.Mode
+	if d := s.Decision; s.IsDecision() && d != nil {
+		// No stream count: the burst lanes are requests in flight, and a
+		// "1 stream" chip would file this row beside the token runs.
+		idx.Sessions = 0
+		idx.DecisionP50Ms = d.WarmP50Ms
+		idx.DecisionEngineP50Ms = d.EngineWarmP50Ms
+		idx.DecisionColdMs = d.ColdMs
+		idx.DecisionReqPerSec = d.RequestsPerSecond
 	}
 
 	// The rate choice is the one the rest of the repo already makes: above

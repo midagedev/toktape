@@ -146,9 +146,6 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 	// here, whatever else was typed, so the flag is the only way through —
 	// --yes and --with-text answer different questions (2026-09-24).
 	// publish.Client.Upload asks the same predicate again.
-	if tp.Summary.IsDecision() {
-		return c.usagef("toktape publish: %s is a decision-model tape, and the hub cannot show one yet (TTP-192); share the clip or the card instead", files[0])
-	}
 	switch chat := publish.HoldsConversation(tp); {
 	case chat && !*f.conversation:
 		return c.usagef("toktape publish: %s is a chat tape and holds the conversation's text; --include-conversation publishes it anyway", files[0])
