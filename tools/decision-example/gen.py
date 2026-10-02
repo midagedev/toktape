@@ -122,6 +122,7 @@ pp = statistics.median([r['input_tokens'] / (r['server']['prompt_ms'] / 1000) fo
 dec = {'endpoint': '/v1/systemone', 'model': 'clef-flash', 'suite': 'suite.jsonl',
        'suite_sha': hashlib.sha256(raw).hexdigest(), 'cases': len(rows), 'repeats': REPEATS + 1,
        'concurrency': 1, 'requests': len(records), 'errors': 0, 'timing_source': 'server',
+       'engine_warm_p50_ms': round(statistics.median([r['server']['prompt_ms'] + r['server']['head_ms'] for r in records[1:]]), 3),
        'cold_ms': lat(records[0]), 'warm_p50_ms': round(statistics.median(warm), 3),
        'warm_p95_ms': round(q[94], 3), 'warm_mean_ms': round(statistics.mean(warm), 3),
        'input_tokens_min': min(INPUT_TOKENS.values()), 'input_tokens_max': max(INPUT_TOKENS.values()),

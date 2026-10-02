@@ -50,14 +50,18 @@ const (
 )
 
 // Values of DecisionSummary.TimingSource.
+//
+// Every latency figure on a decision tape is the client's wall clock, send to
+// the last byte of the response (2026-10-02): that is what an agent waiting on
+// the answer pays, network and JSON included, and it is the figure a reader
+// can reproduce with curl. The engine's own time is a breakdown beside it,
+// never a replacement.
 const (
-	// DecisionTimingClient: every latency is the client's wall clock, send
-	// to the last byte of the response — end to end, network and JSON
-	// included. The card says "client, end to end".
+	// DecisionTimingClient: the engine reported no timing of its own.
 	DecisionTimingClient = "client"
-	// DecisionTimingServer: the engine reported its own prompt timing on
-	// every answered request (DecisionRecord.Server), and the engine-side
-	// figures are the record; the client latency stays the check.
+	// DecisionTimingServer: every answered request carried the engine's
+	// timing (DecisionRecord.Server), so EngineWarmP50Ms exists beside the
+	// client figures and the two can be checked against each other.
 	DecisionTimingServer = "server"
 )
 
@@ -184,6 +188,11 @@ type DecisionSummary struct {
 
 	// ColdMs is the first request's latency. Every Warm figure is over the
 	// answered requests after it, both phases.
+	// EngineWarmP50Ms is the p50 over warm requests of the engine's own
+	// PromptMs + HeadMs, 0 unless TimingSource is server. The gap to
+	// WarmP50Ms is HTTP and JSON.
+	EngineWarmP50Ms float64 `json:"engine_warm_p50_ms,omitempty"`
+
 	ColdMs     float64 `json:"cold_ms,omitempty"`
 	WarmP50Ms  float64 `json:"warm_p50_ms,omitempty"`
 	WarmP95Ms  float64 `json:"warm_p95_ms,omitempty"`
@@ -198,9 +207,9 @@ type DecisionSummary struct {
 
 	InputTokensMin int `json:"input_tokens_min,omitempty"`
 	InputTokensMax int `json:"input_tokens_max,omitempty"`
-	// PrefillPerSecond is the median over warm requests of
-	// input_tokens / latency: an end-to-end figure on a client-timed run,
-	// the engine's prompt_n / prompt_ms on a server-timed one.
+	// PrefillPerSecond is the median over warm requests of the engine's
+	// prompt_n / prompt_ms on a server-timed run, and of input_tokens /
+	// client latency on a client-timed one (an end-to-end lower bound).
 	PrefillPerSecond float64 `json:"prefill_per_second,omitempty"`
 	// RequestsPerSecond is the burst phase's answered requests over its
 	// window, first SentAt to last AnsweredAt. 0 without a burst phase.
