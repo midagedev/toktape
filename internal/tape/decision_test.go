@@ -53,3 +53,27 @@ func TestDecisionRoundTrip(t *testing.T) {
 		t.Error("IsDecision true for a chat or a nil summary")
 	}
 }
+
+// TestDecisionExampleReads pins the synthetic fixture the screen and card
+// tracks draw against (tools/decision-example/gen.py): it decodes, it is a
+// decision tape with no token stream, and the request order of the criteria
+// survived (route-01 lists billing before technical).
+func TestDecisionExampleReads(t *testing.T) {
+	tp, err := Read("testdata/decision-example.tape")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tp.Summary.IsDecision() || tp.Summary.Decision == nil || len(tp.Requests) != 0 {
+		t.Fatalf("not a decision tape: mode %q, %d token streams", tp.Summary.Mode, len(tp.Requests))
+	}
+	if n := len(tp.Decisions); n != tp.Summary.Decision.Requests || n == 0 {
+		t.Fatalf("%d records, summary says %d", n, tp.Summary.Decision.Requests)
+	}
+	d := tp.Decisions[0]
+	if d.CaseID != "route-01" || d.Questions[0].Options[0].Key != "billing" || d.Answers[0].Probabilities[0].Key != "billing" {
+		t.Errorf("first record %s, first option %q / prob %q: request order lost", d.CaseID, d.Questions[0].Options[0].Key, d.Answers[0].Probabilities[0].Key)
+	}
+	if d.Server == nil || d.Server.HeadMs == 0 || d.Latency() <= 0 {
+		t.Errorf("engine timing or latency missing: %+v %v", d.Server, d.Latency())
+	}
+}
