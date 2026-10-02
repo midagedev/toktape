@@ -116,6 +116,8 @@ per_case = []
 for row in rows:
     c = row_id(row); xs = [lat(r) for r in records[1:] if r['case_id'] == c]
     per_case.append({'case_id': c, 'input_tokens': INPUT_TOKENS[c], 'warm_p50_ms': round(statistics.median(xs), 3), 'answered': len(xs) + (1 if c == records[0]['case_id'] else 0)})
+short = [lat(r) for r in records[1:] if r['input_tokens'] < 1000]
+long_ = [lat(r) for r in records[1:] if r['input_tokens'] >= 1000]
 pp = statistics.median([r['input_tokens'] / (r['server']['prompt_ms'] / 1000) for r in records[1:]])
 dec = {'endpoint': '/v1/systemone', 'model': 'clef-flash', 'suite': 'suite.jsonl',
        'suite_sha': hashlib.sha256(raw).hexdigest(), 'cases': len(rows), 'repeats': REPEATS + 1,
@@ -123,6 +125,7 @@ dec = {'endpoint': '/v1/systemone', 'model': 'clef-flash', 'suite': 'suite.jsonl
        'cold_ms': lat(records[0]), 'warm_p50_ms': round(statistics.median(warm), 3),
        'warm_p95_ms': round(q[94], 3), 'warm_mean_ms': round(statistics.mean(warm), 3),
        'input_tokens_min': min(INPUT_TOKENS.values()), 'input_tokens_max': max(INPUT_TOKENS.values()),
+       'short_warm_p50_ms': round(statistics.median(short), 3), 'long_warm_p50_ms': round(statistics.median(long_), 3),
        'prefill_per_second': round(pp, 1),
        'requests_per_second': round(len(burst) / ((burst[-1]['answered_at'] - burst[0]['sent_at']) / 1e9), 2),
        'per_case': per_case}
@@ -141,4 +144,4 @@ tape = {'schema': 1, 'summary': summary, 'requests': [], 'samples': [], 'decisio
 with gzip.GzipFile(out_path, 'wb', mtime=0) as f:
     f.write(json.dumps(tape, ensure_ascii=False).encode())
 print(f"{out_path}: {len(records)} requests, cold {dec['cold_ms']} ms, warm p50 {dec['warm_p50_ms']} ms, "
-      f"p95 {dec['warm_p95_ms']}, {dec['requests_per_second']} req/s, run {t/1e9:.1f} s")
+      f"p95 {dec['warm_p95_ms']}, short {dec['short_warm_p50_ms']}, long {dec['long_warm_p50_ms']}, {dec['requests_per_second']} req/s, run {t/1e9:.1f} s")

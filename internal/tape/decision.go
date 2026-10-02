@@ -189,6 +189,13 @@ type DecisionSummary struct {
 	WarmP95Ms  float64 `json:"warm_p95_ms,omitempty"`
 	WarmMeanMs float64 `json:"warm_mean_ms,omitempty"`
 
+	// ShortWarmP50Ms and LongWarmP50Ms split the warm requests at
+	// DecisionLongPromptTokens input tokens: one long case dominates a
+	// whole-suite p95, so the card shows the two apart. 0 when that side has
+	// no warm request.
+	ShortWarmP50Ms float64 `json:"short_warm_p50_ms,omitempty"`
+	LongWarmP50Ms  float64 `json:"long_warm_p50_ms,omitempty"`
+
 	InputTokensMin int `json:"input_tokens_min,omitempty"`
 	InputTokensMax int `json:"input_tokens_max,omitempty"`
 	// PrefillPerSecond is the median over warm requests of
@@ -207,6 +214,9 @@ type DecisionSummary struct {
 	// none was given. The card prints no correctness row without it.
 	Reference *DecisionAgreement `json:"reference,omitempty"`
 }
+
+// DecisionLongPromptTokens is where a request counts as a long prompt.
+const DecisionLongPromptTokens = 1000
 
 // DecisionCaseSummary is one suite row's figures.
 type DecisionCaseSummary struct {
