@@ -124,10 +124,12 @@ release:
     the latest answers on screen under the per-case table. The card, text and
     PNG, leads with the warm p50.
 
-    A decision tape has no token stream, so `publish`, `compare` and the
-    experiment log refuse it for now. The tape schema gains `summary.mode`
-    "decision", `decisions` and `summary.decision`; token tapes are
-    byte-identical.
+    `publish` takes a decision tape: the hub row, page and preview lead with
+    its warm p50 instead of a token rate, and the index gains `mode` and the
+    `decision_*` figures. `compare` and the experiment log still refuse one,
+    since there is no token rate to set beside it. The tape schema gains
+    `summary.mode` "decision", `decisions` and `summary.decision`; token
+    tapes are byte-identical.
 
     With several streams, the live headline is now the window the record
     uses, so it no longer spikes at the start and then falls.
