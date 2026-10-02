@@ -42,6 +42,7 @@ Usage:
   toktape [flags]                 record a run (the default verb)
   toktape record [flags]          the same, spelled out
   toktape chat [flags]            talk to the server, every answer timed and saved
+  toktape decide [flags]          time a decision model (POST /v1/systemone)
   toktape card <tape> [flags]     re-render a card from a run file
   toktape play <tape> [--speed N] [--grid CxR]  replay a run on the live screen
   toktape render [tape] [flags]   render a run as a GIF, mp4, asciicast or frames
