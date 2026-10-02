@@ -111,6 +111,28 @@ printf 'published %s\n' "$url"
 # works until somebody clicks it.
 curl -fsS "$url" -o /dev/null || die "the receipt's own link does not open: $url"
 
+say "a decision run"
+# A decision tape (TTP-192) publishes, and every surface that printed a
+# token rate prints its latency instead: the page's figures and preview
+# title, the listing row, and the API's copy of the columns. The receipt
+# alone would pass with "? tok/s" all over the page.
+"$work/toktape" publish "$repo/internal/tape/testdata/decision-example.tape" --url "$base" --yes \
+  >"$work/receipt-dec" 2>"$work/publish-dec.err" ||
+  { cat "$work/publish-dec.err"; die "a decision publish failed"; }
+dec_id="$(tr -d '\r\n' <"$work/receipt-dec")"
+dec_id="${dec_id##*/}"
+[ -n "$dec_id" ] || die "the decision receipt carried no link"
+curl -fsS "$base/r/$dec_id" >"$work/dec.html"
+grep -q '<div class="k">decision p50</div>' "$work/dec.html" || die "the decision page has no decision p50 figure"
+grep -q 'ms p50 decision' "$work/dec.html" || die "the decision page's preview title does not lead with its p50"
+grep -q 'tok/s' "$work/dec.html" && { grep -o '.\{60\}tok/s.\{20\}' "$work/dec.html"; die "the decision page prints a token rate"; }
+curl -fsS "$base/" >"$work/dec-list.html"
+grep -q 'decision model' "$work/dec-list.html" || die "the listing does not mark the decision row"
+grep -q 'ms p50</span>' "$work/dec-list.html" || die "the listing row shows no decision p50"
+curl -fsS "$base/api/v1/runs" >"$work/dec-list.json"
+grep -q '"mode":"decision"' "$work/dec-list.json" || die "the API row carries no mode"
+grep -q '"decision_p50_ms":' "$work/dec-list.json" || die "the API row carries no decision p50"
+
 say "the page-view counter"
 # One beacon per HTML page, the sentence that discloses it on the same page,
 # and neither on anything that is not a page (src/analytics.js). Counted, not

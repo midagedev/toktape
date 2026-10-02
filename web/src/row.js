@@ -65,6 +65,13 @@ export const INDEX_COLUMNS = [
   "quant_bits",
   "prefill_per_sec",
   "ttft_p50_ms",
+  // The mode and a decision run's figures (TTP-187, TTP-192): copies, like
+  // everything above. A decision row has none of the token figures.
+  "mode",
+  "decision_p50_ms",
+  "decision_engine_p50_ms",
+  "decision_cold_ms",
+  "decision_req_per_sec",
 ];
 
 export function columnValues(idx) {
@@ -130,6 +137,11 @@ export function columnValues(idx) {
     num(idx.quant_bits),
     num(idx.prefill_per_sec),
     num(idx.ttft_p50_ms),
+    str(idx.mode),
+    num(idx.decision_p50_ms),
+    num(idx.decision_engine_p50_ms),
+    num(idx.decision_cold_ms),
+    num(idx.decision_req_per_sec),
   ];
 }
 

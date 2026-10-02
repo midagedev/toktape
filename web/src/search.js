@@ -44,6 +44,7 @@ const SELECT = `SELECT id, created_at, recorded_at, model_id, model_raw, repo,
     offload, draft_model, draft_accept, throttled, cold, power_w, power_limit_w,
     file_bytes, active_params, n_experts, n_experts_used, params, moe,
     quant_bits, prefill_per_sec, ttft_p50_ms,
+    mode, decision_p50_ms, decision_engine_p50_ms, decision_cold_ms, decision_req_per_sec,
     tape_ext, card_key, author_name, author_link, avatar_key,
     title, note, owner_token, owner_token IS NOT NULL AS owned
   FROM runs`;
@@ -618,8 +619,12 @@ export function apiRow(r) {
       "quant_bits",
       "prefill_per_sec",
       "ttft_p50_ms",
+      "decision_p50_ms",
+      "decision_engine_p50_ms",
+      "decision_cold_ms",
+      "decision_req_per_sec",
     ]),
-    ...copyStr(r, ["fa", "kv_cache", "batch", "ubatch", "ngl", "offload", "draft_model"]),
+    ...copyStr(r, ["fa", "kv_cache", "batch", "ubatch", "ngl", "offload", "draft_model", "mode"]),
     ...(r.throttled === 1 ? { throttled: true } : {}),
     ...(r.cold === 1 ? { cold: true } : {}),
     ...(r.moe === 1 ? { moe: true } : {}),
@@ -661,6 +666,9 @@ export function resultRow(r, url) {
   // version rides inside the engine chip (a rate without its build is
   // half-read) while the link still narrows on the engine alone.
   const facts = [
+    // A decision run says so first (TTP-192): its figure is a latency, and a
+    // reader scanning rates must not take it for one.
+    { shown: r.mode === "decision" ? "decision model" : null, param: null, value: null },
     { shown: r.engine_kind, suffix: r.engine_version || null, param: "engine", value: r.engine_kind },
     { shown: r.quant_raw || r.quant_id, param: r.quant_id ? "quant" : null, value: r.quant_id },
     // The figures (TTP-130), after the quant chip in contract order. Each
@@ -692,9 +700,7 @@ export function resultRow(r, url) {
      }<pre class="screen"></pre></a>
   <div class="rowhead">
     <a class="name" href="/r/${esc(r.id)}">${esc(r.title || model)}</a>
-    <span class="rates"><span class="rate num">${fmt(r.decode_per_sec)}<span class="u"> tok/s</span></span>${
-      r.prefill_per_sec ? `<span class="rate sub num">prefill ${fmt(r.prefill_per_sec)}<span class="u"> tok/s</span></span>` : ""
-    }</span>
+    <span class="rates">${rates(r)}</span>
   </div>
   ${r.title ? `<div class="model">${esc(model)}</div>` : ""}
   <div class="facts">${facts.filter((f) => f.shown).map((f) => chip(f, url)).join("")}${caveatChip(r)}</div>
@@ -822,6 +828,22 @@ function parseGpuIds(v) {
 // current URL's params and sets just this one, so chips accumulate instead
 // of replacing each other; a chip whose filter is already active renders as
 // plain text, so the active narrowing is visible in the rows.
+// The row's figures. A decision run (TTP-192) has no token rate: its figure
+// is the warm p50, send to last byte, with the engine's own time beside it
+// when the engine sent one — the card's two hero numbers, in its order.
+function rates(r) {
+  if (r.mode === "decision") {
+    return `<span class="rate num">${fmt(r.decision_p50_ms)}<span class="u"> ms p50</span></span>${
+      r.decision_engine_p50_ms
+        ? `<span class="rate sub num">engine ${fmt(r.decision_engine_p50_ms)}<span class="u"> ms</span></span>`
+        : ""
+    }`;
+  }
+  return `<span class="rate num">${fmt(r.decode_per_sec)}<span class="u"> tok/s</span></span>${
+    r.prefill_per_sec ? `<span class="rate sub num">prefill ${fmt(r.prefill_per_sec)}<span class="u"> tok/s</span></span>` : ""
+  }`;
+}
+
 function chip(f, url) {
   const cls = f.dim ? "fact dim" : "fact";
   const inner = esc(f.shown) + (f.suffix ? `<span class="v">${esc(f.suffix)}</span>` : "");

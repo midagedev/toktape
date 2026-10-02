@@ -145,7 +145,11 @@ function runPage(row, idx, base) {
     ["engine", [idx.engine_kind, idx.engine_version].filter(Boolean).join(" ") || "?"],
     ["host", [idx.os, idx.host_class].filter(Boolean).join(" · ") || "?"],
     ["gpus", idx.gpus_raw && idx.gpus_raw.length ? idx.gpus_raw.join(" / ") : "—"],
-    ["streams", idx.sessions ? String(idx.sessions) : "?"],
+    isDecision(idx)
+      ? ["mode", `decision model · POST /v1/systemone${
+          idx.decision_req_per_sec ? ` · ${fmt(idx.decision_req_per_sec)} req/s back to back` : ""
+        }`]
+      : ["streams", idx.sessions ? String(idx.sessions) : "?"],
     ["workload", workloadRow(idx)],
     ["context", contextRow(idx)],
     ["config", configRow(idx)],
@@ -159,11 +163,19 @@ function runPage(row, idx, base) {
     ["recorded", idx.recorded_at ? String(idx.recorded_at).replace(/\.\d+/, "") : "?"],
     ["toktape", idx.toktape_version || "?"],
   ];
-  const figures = [
-    ["decode", idx.decode_per_sec, "tok/s"],
-    ["prefill", idx.prefill_per_sec, "tok/s"],
-    ["ttft p50", idx.ttft_p50_ms, "ms"],
-  ];
+  // A decision run (TTP-192) has no token figure; its figures are the
+  // card's, every latency send to last byte on the client's clock.
+  const figures = isDecision(idx)
+    ? [
+        ["decision p50", idx.decision_p50_ms, "ms"],
+        ["engine p50", idx.decision_engine_p50_ms, "ms"],
+        ["cold", idx.decision_cold_ms, "ms"],
+      ]
+    : [
+        ["decode", idx.decode_per_sec, "tok/s"],
+        ["prefill", idx.prefill_per_sec, "tok/s"],
+        ["ttft p50", idx.ttft_p50_ms, "ms"],
+      ];
 
   const pageURL = `${base}/r/${row.id}`;
   // When the note's title is set it becomes the h1 and the model name moves
@@ -433,7 +445,9 @@ function caveatBlock(idx) {
 // the figure stays first.
 function shareTitle(idx, fallback, noteTitle) {
   const parts = [];
-  if (idx.decode_per_sec) parts.push(`${fmt(idx.decode_per_sec)} tok/s`);
+  if (isDecision(idx)) {
+    if (idx.decision_p50_ms) parts.push(`${fmt(idx.decision_p50_ms)} ms p50 decision`);
+  } else if (idx.decode_per_sec) parts.push(`${fmt(idx.decode_per_sec)} tok/s`);
   // The file name stands in when the model never normalised, without its
   // extension: ".gguf" is not part of what the run measured.
   const name = idx.model_id || String(idx.model_raw || fallback).replace(/\.gguf$/i, "");
@@ -458,6 +472,11 @@ function shareDescription(idx, row) {
   const engine = [idx.engine_kind, idx.engine_version].filter(Boolean).join(" ");
   if (engine) parts.push(`with ${engine}`);
   const figures = [];
+  if (isDecision(idx)) {
+    if (idx.decision_engine_p50_ms) figures.push(`engine p50 ${fmt(idx.decision_engine_p50_ms)} ms`);
+    if (idx.decision_cold_ms) figures.push(`cold ${fmt(idx.decision_cold_ms)} ms`);
+    if (idx.decision_req_per_sec) figures.push(`${fmt(idx.decision_req_per_sec)} req/s`);
+  }
   if (idx.prefill_per_sec) figures.push(`prefill ${fmt(idx.prefill_per_sec)} tok/s`);
   if (idx.ttft_p50_ms) figures.push(`ttft p50 ${fmt(idx.ttft_p50_ms)} ms`);
   if (idx.caveat_count) figures.push(`${idx.caveat_count} caveat${idx.caveat_count === 1 ? "" : "s"}`);
@@ -475,9 +494,17 @@ function gpuNames(raw) {
   return names.join(" / ");
 }
 
+// The index's own word for the mode (TTP-187); a row without it is a
+// benchmark.
+function isDecision(idx) {
+  return idx.mode === "decision";
+}
+
 function summaryLine(idx) {
   const parts = [];
-  if (idx.decode_per_sec) parts.push(`${fmt(idx.decode_per_sec)} tok/s decode`);
+  if (isDecision(idx)) {
+    if (idx.decision_p50_ms) parts.push(`${fmt(idx.decision_p50_ms)} ms p50 decision`);
+  } else if (idx.decode_per_sec) parts.push(`${fmt(idx.decode_per_sec)} tok/s decode`);
   if (idx.sessions) parts.push(`${idx.sessions} stream${idx.sessions === 1 ? "" : "s"}`);
   if (idx.quant_raw) parts.push(idx.quant_raw);
   if (idx.gpu_id) parts.push(idx.gpu_count > 1 ? `${idx.gpu_count}× ${idx.gpu_id}` : idx.gpu_id);
