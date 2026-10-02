@@ -542,9 +542,15 @@ func scoreRows(th Theme, e float64, q tape.DecisionQuestion, a *tape.DecisionAns
 	if text == "" && top >= 0 {
 		text = a.Probabilities[top].Key
 	}
+	// The figure is the expected level index, not a probability, and the
+	// word says so: a bare "0.06" beside a choice tile's "0.92" read as a
+	// 6% answer (lead review, 2026-10-02).
+	const word = "score "
 	rowA.add(th.accentBold, "● ")
-	rowA.addTrunc(th.accentBold, truncate(text, max(1, iw-3-width(val))))
-	rightAligned(rowA, th, th.accentBold, val)
+	rowA.addTrunc(th.accentBold, truncate(text, max(1, iw-3-width(word+val))))
+	rowA.gapTo(width(word + val))
+	rowA.add(th.dim, word)
+	rowA.add(th.accentBold, val)
 
 	levels := []rune("▁▂▃▄▅▆▇█")
 	b := rowB
