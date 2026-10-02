@@ -85,8 +85,14 @@ func recordCommand(s *tape.RunSummary) string {
 	if IsChat(s) {
 		parts = append(parts, "chat")
 	}
+	if s.IsDecision() {
+		parts = append(parts, "decide")
+	}
 	if u := strings.TrimSpace(s.Server.URL); u != "" {
 		parts = append(parts, "--url", u)
+	}
+	if s.IsDecision() {
+		return strings.Join(append(parts, decideArgs(s.Decision)...), " ")
 	}
 	// A generic OpenAI-compatible run re-attaches only in its own mode
 	// (TTP-99): without the flag the next invocation would try /props first,
@@ -116,6 +122,31 @@ func recordCommand(s *tape.RunSummary) string {
 		parts = append(parts, "--sessions", strconv.Itoa(s.Concurrency))
 	}
 	return strings.Join(append(parts, limitArgs(s)...), " ")
+}
+
+// decideArgs re-asks for a decision run (TTP-192, 2026-10-02): the suite and
+// the reference by the file names the tape keeps (the files themselves are
+// the reader's to supply), and the passes. Repeats counts the paced pass,
+// so the back-to-back passes --repeat asks for are one fewer; the default
+// (20) and one lane are left off, as --sessions 1 is above.
+func decideArgs(d *tape.DecisionSummary) []string {
+	if d == nil {
+		return nil
+	}
+	var a []string
+	if d.Suite != "" {
+		a = append(a, "--suite", d.Suite)
+	}
+	if d.Reference != nil && d.Reference.File != "" {
+		a = append(a, "--reference", d.Reference.File)
+	}
+	if n := d.Repeats - 1; d.Repeats > 0 && n != 20 {
+		a = append(a, "--repeat", strconv.Itoa(n))
+	}
+	if d.Concurrency > 1 {
+		a = append(a, "-c", strconv.Itoa(d.Concurrency))
+	}
+	return a
 }
 
 // limitArgs is how the rebuilt command re-asks for what ended the generation.

@@ -295,3 +295,26 @@ func TestReproduceChatTapeLine(t *testing.T) {
 		t.Errorf("a chat card's tape line is not %q:\n%s", want, got)
 	}
 }
+
+// A decision run reproduces as `toktape decide` with its suite, reference
+// and passes (2026-10-02): the token command it printed before, "toktape
+// --url :8091", records a different kind of run against an endpoint a
+// decision server may not have.
+func TestReproduceDecisionRun(t *testing.T) {
+	s := &tape.RunSummary{
+		Mode:   tape.ModeDecision,
+		Server: tape.ServerInfo{URL: "http://127.0.0.1:8091"},
+		Decision: &tape.DecisionSummary{
+			Suite: "suite-ko.jsonl", Repeats: 9, Concurrency: 1,
+			Reference: &tape.DecisionAgreement{File: "reference-ko.jsonl"},
+		},
+	}
+	want := "toktape decide --url http://127.0.0.1:8091 --suite suite-ko.jsonl --reference reference-ko.jsonl --repeat 8"
+	if got := recordCommand(s); got != want {
+		t.Errorf("recordCommand = %q\nwant %q", got, want)
+	}
+	s.Decision = &tape.DecisionSummary{Repeats: 21, Concurrency: 4}
+	if got, want := recordCommand(s), "toktape decide --url http://127.0.0.1:8091 -c 4"; got != want {
+		t.Errorf("defaults: %q, want %q", got, want)
+	}
+}
