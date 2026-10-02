@@ -48,6 +48,9 @@ func View(m Model, t time.Duration, w, h int) string {
 	if w < MinWidth || h < MinHeight {
 		return tooSmall(w, h)
 	}
+	if m.Summary.IsDecision() && m.Err == "" {
+		return decisionView(m, t, w, h)
+	}
 	th := m.Theme
 	inner := w - 2
 	bodyH := h - chromeH

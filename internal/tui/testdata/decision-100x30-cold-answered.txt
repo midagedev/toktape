@@ -1,0 +1,30 @@
+┌─ toktape · Cloudflare_clef-flash-Q4_K_M · bloomery 0.1.0 (example) · RTX A6000 ──────────────────┐
+│                                                                                █▀▀▀▀ ▀▀▀▀█ █▀▀▀▀ │
+│ POST /v1/systemone                                                             █         █ █     │
+│ prefill only · no tokens generated                                             ▀▀▀▀▄    ▄▀ ▀▀▀▀▄ │
+│ 1 of 168 requests answered                                                         █   █       █ │
+│                                                                                ▀▀▀▀▀   ▀   ▀▀▀▀▀ │
+│                                                                                          cold ms │
+│                                                                                                  │
+│ route-01  Our checkout started returning errors and orders are blocked.   input 214 tok · 640 ms │
+│ ╭─ department · choice ──────╮  ╭─ urgency · score ──────────╮  ╭─ outage · noul ────────────╮   │
+│ │ ▶ technical           0.81 │  │ ● Today               1.67 │  │ ✓ YES               p 0.82 │   │
+│ │ ██████████▋██ billing 0.09 │  │ ▁▁ ▁▁ ▇▇  Can wait → Today │  │ █████████████████████▎░░░░ │   │
+│ ╰────────────────────────────╯  ╰────────────────────────────╯  ╰────────────────────────────╯   │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ request latency                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘

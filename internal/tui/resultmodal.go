@@ -30,6 +30,9 @@ import (
 // The two figures and nothing else wear the accent, which is the emphasis
 // contract the rest of the screen follows.
 func resultModal(m Model, th Theme, boxW int) []string {
+	if m.Summary.IsDecision() {
+		return decisionModal(m, th, boxW)
+	}
 	inner := boxW - 4
 	s := m.Summary
 	var rows []string

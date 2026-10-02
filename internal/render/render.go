@@ -246,6 +246,17 @@ func RunEnd(tp *tape.Tape) time.Duration {
 		return 0
 	}
 	var end time.Duration
+	if tp.Summary.IsDecision() {
+		// A decision run has no tokens: it ends when its last answer is in, or
+		// when the last request that failed was sent (TTP-192).
+		for _, r := range tp.Decisions {
+			end = max(end, r.AnsweredAt)
+			if r.Error != "" {
+				end = max(end, r.SentAt)
+			}
+		}
+		return end
+	}
 	for _, req := range tp.Requests {
 		if n := len(req.Tokens); n > 0 {
 			if e := req.StartedAt + req.Tokens[n-1].T; e > end {
@@ -268,6 +279,14 @@ func FirstToken(tp *tape.Tape) time.Duration {
 		return 0
 	}
 	first := time.Duration(0)
+	if tp.Summary.IsDecision() {
+		for _, r := range tp.Decisions {
+			if first == 0 || r.SentAt < first {
+				first = r.SentAt
+			}
+		}
+		return first
+	}
 	for _, req := range tp.Requests {
 		if len(req.Tokens) == 0 {
 			continue

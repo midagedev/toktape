@@ -172,6 +172,10 @@ type Model struct {
 	// tape shows the page the model names and the same (m, t) always draws
 	// the same frame.
 	Page int
+
+	// Decisions are a decision run's requests sent by At (TTP-192), empty on
+	// every other tape. The view asks of each whether its answer is in by t.
+	Decisions []tape.DecisionRecord
 }
 
 // ModelAt builds the state of tp as of clip time at: every token, sample and
@@ -187,6 +191,10 @@ func ModelAt(tp *tape.Tape, at time.Duration) Model {
 	m.Summary = tp.Summary
 	m.PID = tp.Summary.Server.PID
 	m.RunStart, m.runStarted = firstRequestAt(tp)
+	if tp.Summary.IsDecision() {
+		decisionModel(&m, tp, at)
+		return m
+	}
 
 	// A rounds run is drawn one round at a time: the round active at `at`,
 	// and only its requests become tiles (TTP-38). A single-round tape takes
