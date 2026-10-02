@@ -212,6 +212,18 @@ func TestProbeEngineReadsBothSpellings(t *testing.T) {
 			`{"engine":"bloomery"}`, `{"data":[{"id":"clef.gguf"}]}`,
 			EngineIdentity{Kind: "bloomery", ModelFile: "clef.gguf"},
 		},
+		// bloomery's own /props (2026-10-02) names the file as "model" and
+		// answers /v1/models with 404; the card printed MODEL "?" from it.
+		"model file name": {
+			`{"engine":"bloomery","build":"abff79a5-dirty","model":"clef-flash-Q4_K_M.gguf","quant":"Q4_K_M","head":"joint_head.safetensors"}`, ``,
+			EngineIdentity{Kind: "bloomery", Build: "abff79a5-dirty", ModelFile: "clef-flash-Q4_K_M.gguf", Quant: "Q4_K_M"},
+		},
+		// llama-server's own "model" is not this: an object there leaves the
+		// file name to model_path.
+		"model object": {
+			`{"model":{"x":1},"model_path":"/x/y.gguf"}`, ``,
+			EngineIdentity{ModelPath: "/x/y.gguf", ModelFile: "y.gguf"},
+		},
 		"nothing said": {`{}`, `{"data":[]}`, EngineIdentity{}},
 	}
 	for name, c := range cases {

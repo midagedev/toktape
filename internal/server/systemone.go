@@ -464,6 +464,7 @@ func fillIdentity(id *EngineIdentity, body []byte) {
 		Build     string          `json:"build"`
 		BuildInfo string          `json:"build_info"`
 		ModelPath string          `json:"model_path"`
+		Model     json.RawMessage `json:"model"`
 		Quant     string          `json:"quant"`
 	}
 	if json.Unmarshal(body, &p) != nil {
@@ -496,6 +497,13 @@ func fillIdentity(id *EngineIdentity, body []byte) {
 	if p.ModelPath != "" {
 		id.ModelPath = p.ModelPath
 		id.ModelFile = filepath.Base(p.ModelPath)
+		return
+	}
+	// bloomery names the file alone, as a string "model"; any other
+	// spelling of that key (an object) says nothing about the file.
+	var file string
+	if json.Unmarshal(p.Model, &file) == nil && strings.TrimSpace(file) != "" {
+		id.ModelFile = filepath.Base(strings.TrimSpace(file))
 	}
 }
 
