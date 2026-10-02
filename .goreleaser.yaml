@@ -102,32 +102,35 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **`toktape chat`.** Talk to the server you already run the way you would
-    in a chat app, and every answer is timed as it streams: the rate, TTFT,
-    prefill, how much of the conversation the prefix cache reused, and how full
-    the context is. `/exit` saves the tape and prints the card, whose rounds
-    row now reads `Chat 2 turns`.
+    **`toktape decide`.** Records a decision model: a prefill-only classifier
+    that answers typed questions with one probability per option, served at
+    `POST /v1/systemone` (Cloudflare Clef). Nothing is generated, so nothing is
+    a token rate. A suite of requests goes out one at a time with a pause
+    between them, so a replay shows each answer arrive, then back to back for
+    `--repeat` passes with `-c` in flight.
 
-    **A conversation is measured, not benchmarked.** One stream; the whole
-    history is sent every turn and never salted or trimmed — when it no longer
-    fits, the session says so and keeps what it has. There is no clock, and an
-    answer is capped only by `--n-predict` or by the room left in the slot. The
-    minutes spent reading and typing between turns enter no rate: the turns
-    reduce through the same per-round windows a prompts file uses. ctrl+c stops
-    the answer in flight and keeps the session and the partial turn.
+    **Every latency is the client's clock, send to the last byte.** That is
+    what an agent waiting on the answer pays, and what curl reproduces. The
+    first request is cold and is reported apart; the warm p50 is split at
+    1,000 input tokens into short and long, because one long case owns a
+    whole-suite p95. When the engine sends its own `timings`, the card shows
+    its prompt + head p50 beside the end-to-end one, never in place of it.
+    `--reference` compares the answers with the official model's: the largest
+    probability gap, how many top options flipped, and the Brier delta.
 
-    **A chat tape stays with the person who typed it.** It holds their words,
-    so it is kept out of the experiment log, `compare` refuses to set it
-    against a benchmark, and `publish` refuses it unless
-    `--include-conversation` says the words are meant to go. The tape schema
-    gains `summary.mode` ("chat"); benchmark tapes are byte-identical.
+    **The screen draws the answers.** Each question is a tile: a choice as
+    bars over its options, a score as its level, a yes/no as p(true). The
+    paced pass shows each case with its answer; the back-to-back passes keep
+    the latest answers on screen under the per-case table. The card, text and
+    PNG, leads with the warm p50.
 
-    **The screen reads answers as Markdown.** Headings, bold, bullets and
-    numbered items that hang under their text, rules, and highlighted code
-    blocks, all stable while they stream; Korean and other wide text keeps its
-    columns. Below 100 columns the live figures fold into one status row.
+    A decision tape has no token stream, so `publish`, `compare` and the
+    experiment log refuse it for now. The tape schema gains `summary.mode`
+    "decision", `decisions` and `summary.decision`; token tapes are
+    byte-identical.
 
-    `compare` no longer prints `-100%` when one side was never observed.
+    With several streams, the live headline is now the window the record
+    uses, so it no longer spikes at the start and then falls.
 
   footer: |
     ## Install
