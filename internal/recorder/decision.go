@@ -514,7 +514,7 @@ func reduceDecision(recs []tape.DecisionRecord, cases []suiteCase, concurrency i
 	}
 	var (
 		warm, shortMs, longMs []float64
-		prefill               []float64
+		prefill, engine       []float64
 		perCase               = map[string][]float64{}
 		answered              = map[string]int{}
 		caseTokens            = map[string]int{}
@@ -578,6 +578,9 @@ func reduceDecision(recs []tape.DecisionRecord, cases []suiteCase, concurrency i
 			continue
 		}
 		if s.TimingSource == tape.DecisionTimingServer {
+			// The engine's own time is a breakdown beside the client
+			// latency, never the record (internal/tape/decision.go).
+			engine = append(engine, r.Server.PromptMs+r.Server.HeadMs)
 			if r.Server.PromptMs > 0 && r.Server.PromptN > 0 {
 				prefill = append(prefill, float64(r.Server.PromptN)/(r.Server.PromptMs/1000))
 			}
@@ -588,6 +591,7 @@ func reduceDecision(recs []tape.DecisionRecord, cases []suiteCase, concurrency i
 	s.WarmP50Ms, s.WarmP95Ms, s.WarmMeanMs = quantile(warm, 0.5), quantile(warm, 0.95), mean(warm)
 	s.ShortWarmP50Ms, s.LongWarmP50Ms = quantile(shortMs, 0.5), quantile(longMs, 0.5)
 	s.PrefillPerSecond = quantile(prefill, 0.5)
+	s.EngineWarmP50Ms = quantile(engine, 0.5)
 	if burstAnswered > 0 && burstEnd > burstSent {
 		s.RequestsPerSecond = float64(burstAnswered) / (burstEnd - burstSent).Seconds()
 	}

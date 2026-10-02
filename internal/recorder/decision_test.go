@@ -422,6 +422,8 @@ func TestReduceDecisionFigures(t *testing.T) {
 	// prefill: tokens / (prompt_ms/1000) per warm request, median.
 	// 4000/0.398=10050.25, 200/0.028=7142.86, 200/0.038=5263.16, 4000/0.408=9803.92, 200/0.048=4166.67
 	near("prefill", s.PrefillPerSecond, 7142.857142857143)
+	// engine = prompt_ms + head_ms = latency - 0.5 per warm request: 399.5 29.5 39.5 409.5 49.5.
+	near("engine p50", s.EngineWarmP50Ms, 49.5)
 	// 4 burst requests answered, window = last AnsweredAt (3650) - first SentAt (3000).
 	near("req/s", s.RequestsPerSecond, 4/0.650)
 	if s.TimingSource != tape.DecisionTimingServer || s.Repeats != 2 || s.Errors != 0 || s.InputTokensMin != 200 || s.InputTokensMax != 4000 || s.Model != "m" {
@@ -441,6 +443,7 @@ func TestReduceDecisionFigures(t *testing.T) {
 	}
 	// 4000/0.4=10000, 200/0.03=6666.7, 200/0.04=5000, 4000/0.41=9756.1, 200/0.05=4000
 	near("client prefill", s.PrefillPerSecond, 6666.666666666667)
+	near("client engine p50", s.EngineWarmP50Ms, 0) // no engine figure without every answer timed
 
 	// Two models: no single model to name.
 	recs[1].Model = "other"
