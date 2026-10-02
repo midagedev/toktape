@@ -340,6 +340,9 @@ func usageFor(verb string) string {
 	if verb == "chat" {
 		return chatUsage
 	}
+	if verb == "decide" {
+		return decideUsage
+	}
 	return usageText
 }
 

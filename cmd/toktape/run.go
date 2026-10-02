@@ -186,6 +186,8 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		return runRecord(ctx, c, rest)
 	case "chat":
 		return runChat(ctx, c, rest)
+	case "decide":
+		return runDecide(ctx, c, rest)
 	case "card":
 		return runCard(c, rest)
 	case "play":
@@ -217,7 +219,7 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 // verbs are the commands Run dispatches on. The root verb is "record", so
 // `toktape` and `toktape --url ...` both record.
 var verbs = map[string]bool{
-	"record": true, "chat": true, "card": true, "play": true, "render": true,
+	"record": true, "chat": true, "decide": true, "card": true, "play": true, "render": true,
 	"ls": true, "log": true, "compare": true, "publish": true, "runs": true, "show": true, "reindex": true, "profile": true, "version": true,
 }
 
