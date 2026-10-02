@@ -1,10 +1,10 @@
 ┌─ toktape · Cloudflare_clef-flash-Q4_K_M · bloomery 0.1.0 (example) · RTX A6000 ──────────────────┐
-│                                                                              ▀▀▀▀▄ ▀▀▀▀█   ▄▀▀▀▀ │
-│ POST /v1/systemone                                                               █     █   █     │
-│ prefill only · no tokens generated                                            ▀▀▀█    ▄▀   █▀▀▀▄ │
-│ 15 of 168 requests answered                                                      █   █     █   █ │
-│                                                                              ▀▀▀▀▀   ▀   ▀ ▀▀▀▀▀ │
-│                                                                                    p50 ms · warm │
+│                                                                           ▀▀▀▀▄ ▀▀▀▀█   ▄▀▀▀▀    │
+│ POST /v1/systemone                                                            █     █   █        │
+│ prefill only · no tokens generated                                         ▀▀▀█    ▄▀   █▀▀▀▄    │
+│ 15 of 168 requests answered                                                   █   █     █   █    │
+│                                                                           ▀▀▀▀▀   ▀   ▀ ▀▀▀▀▀ ms │
+│                                                                          p50 · warm · end to end │
 │                                                                                                  │
 │ case           input  latency              p50    n   LAST REQUESTS ──────────────────────────── │
 │ route-01         214  ▂                   37.3    1                               ▂▂▂▂▂▂█▂▂▂▂▂▂▂ │
@@ -16,14 +16,14 @@
 │ sentiment-07     158  ▂▂                  37.4    2                                              │
 │ long-08        4,386  █                    419    1                                              │
 │                                                                                                  │
-│ 15/168 requests · p95 419 ms · 26.0 req/s                                                        │
+│ 15/168 requests · p95 419 ms · ? req/s                                                           │
 │                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
-│                                                                                                  │
+│ LATEST ANSWERS ───────────────────────────────────────────────────────────────────────────────── │
+│ sentiment-07  The new release is fast, but the installer crashed twice…  input 158 tok · 37.4 ms │
+│ ╭─ sentiment · choice ───────╮  ╭─ bug_report · noul ────────╮                                   │
+│ │ ▶ mixed               0.92 │  │ ✓ YES               p 0.83 │                                   │
+│ │ ████████████ positive 0.05 │  │ █████████████████████▌░░░░ │                                   │
+│ ╰────────────────────────────╯  ╰────────────────────────────╯                                   │
 │                                                                                                  │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ request latency                                                    ▏▏▏▏▏▏█▏▏▏▏▏▏▏  p50 37.6 ms   │

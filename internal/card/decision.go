@@ -24,8 +24,10 @@ import (
 //     request pays for everything that was not yet resident;
 //   - short and long prompts are two rows: one 4.4k-token case dominates a
 //     whole-suite p95, and a median over both describes neither;
-//   - the timing word is printed beside the hero: an engine's own prompt
-//     timing and a client's wall clock are not the same claim;
+//   - the timing word is printed beside the hero: every figure is the client's
+//     send-to-last-byte time ("end to end", 2026-10-02: what an agent pays and
+//     what curl reproduces), and the engine's own prompt + head time is a row
+//     of its own, never the hero;
 //   - no figure that is not on the tape — Cloudflare's published "Clef-flash
 //     median 38.8 ms" carries no hardware and no prompt length, so it is never
 //     printed beside ours.
@@ -34,6 +36,7 @@ import (
 // (no long prompt in the suite, no cache hit) leaves a gap in the layout
 // rather than a "?".
 const (
+	DecisionRowEngine     = "engine"
 	DecisionRowCold       = "cold"
 	DecisionRowShort      = "short"
 	DecisionRowLong       = "long"
@@ -45,32 +48,33 @@ const (
 	DecisionRowReference  = "reference"
 )
 
-// CodeDecisionClientTiming is the one caveat a decision card raises: the
-// latencies are the client's wall clock, so the network and the JSON are in
-// every one of them. No token-stream caveat applies to a decision tape.
-const CodeDecisionClientTiming = "decision_client_timing"
-
 // DecisionView is the decision card as strings.
 type DecisionView struct {
 	Hero DecisionHero
-	// Rows are in card order. Cache and Reference are present only when the
-	// tape has something to say; Short and Long only when the suite has a
+	// Rows are in card order. Engine, Cache and Reference are present only when
+	// the tape has something to say; Short and Long only when the suite has a
 	// prompt on that side or a figure for it.
-	Rows    []DecisionRow
+	Rows []DecisionRow
+	// Caveats is empty on a decision card: the one it had (client timing)
+	// became the words "end to end" beside the hero. The field stays so the
+	// JSON document keeps its shape.
 	Caveats []Caveat
 	// Note is RunSummary.Note, verbatim: the example tape says SYNTHETIC and
 	// the card must show it.
 	Note string
 }
 
-// DecisionHero is the card's one lit figure: "37.6 ms p50 · warm · engine".
-// The percentile and the phase are fixed words, not fields: the figure is the
-// warm median or it is nothing.
+// DecisionHero is the card's one lit figure: "37.6 ms p50 · warm · end to end".
+// The percentile, the phase and the clock are fixed words, not fields: the
+// figure is the warm median of the client's send-to-last-byte time or it is
+// nothing.
 type DecisionHero struct {
-	Value  string // "37.6", or "?"
-	Unit   string // "ms", empty when Value is "?"
-	Timing string // "engine" | "client, end to end" | "timing ?"
+	Value string // "37.6", or "?"
+	Unit  string // "ms", empty when Value is "?"
 }
+
+// DecisionHeroCaption is the line under the hero figure on every surface.
+const DecisionHeroCaption = "p50 · warm · end to end"
 
 // DecisionRow is one labelled row. Parts[0] is the figure; the rest qualify it.
 type DecisionRow struct {
@@ -126,9 +130,8 @@ func DecisionCard(s *tape.RunSummary) DecisionView {
 
 	v := DecisionView{Note: strings.TrimSpace(s.Note)}
 	v.Hero = DecisionHero{
-		Value:  decisionMsNumber(d.WarmP50Ms),
-		Unit:   "ms",
-		Timing: decisionTimingWord(d.TimingSource),
+		Value: decisionMsNumber(d.WarmP50Ms),
+		Unit:  "ms",
 	}
 	if v.Hero.Value == unknown {
 		v.Hero.Unit = ""
@@ -139,6 +142,12 @@ func DecisionCard(s *tape.RunSummary) DecisionView {
 		v.Rows = append(v.Rows, DecisionRow{Key: key, Label: label, Parts: dropEmpty(parts...)})
 	}
 
+	// The engine's own prompt + head time, a breakdown of the hero and not a
+	// second hero (2026-10-02): present only when every answered request
+	// carried it.
+	if d.EngineWarmP50Ms > 0 {
+		row(DecisionRowEngine, "Engine", decisionMs(d.EngineWarmP50Ms)+" p50", "prompt + head")
+	}
 	row(DecisionRowCold, "Cold", decisionMs(d.ColdMs), "first request")
 	if d.ShortWarmP50Ms > 0 || len(short) > 0 {
 		detail := ""
@@ -178,22 +187,7 @@ func DecisionCard(s *tape.RunSummary) DecisionView {
 			"vs "+orUnknown(r.File))
 	}
 
-	v.Caveats = decisionCaveats(d)
 	return v
-}
-
-// decisionCaveats is the decision card's caveat list. JSON() prints it in
-// place of the token-stream caveats, which are about a stream this run never
-// had (no /proc view, no decode window).
-func decisionCaveats(d tape.DecisionSummary) []Caveat {
-	if d.TimingSource != tape.DecisionTimingClient {
-		return nil
-	}
-	return []Caveat{{
-		Code:     CodeDecisionClientTiming,
-		Severity: SeverityRun,
-		Text:     "client timing: network and JSON are inside every latency",
-	}}
 }
 
 // decisionText renders the text card for a decision run: the token card's
@@ -202,7 +196,7 @@ func decisionCaveats(d tape.DecisionSummary) []Caveat {
 func decisionText(s *tape.RunSummary) string {
 	v := DecisionCard(s)
 
-	rows := field("Decision", speedLabelW, " · ", v.Hero.Line(), "warm", v.Hero.Timing)
+	rows := field("Decision", speedLabelW, " · ", v.Hero.Line(), "warm", "end to end")
 	for _, r := range v.Rows {
 		rows = append(rows, field(r.Label, speedLabelW, " · ", r.Parts...)...)
 	}
@@ -276,17 +270,6 @@ func splitCases(per []tape.DecisionCaseSummary) (short, long []tape.DecisionCase
 		}
 	}
 	return short, long
-}
-
-// decisionTimingWord names whose clock the latencies are.
-func decisionTimingWord(src string) string {
-	switch src {
-	case tape.DecisionTimingServer:
-		return "engine"
-	case tape.DecisionTimingClient:
-		return "client, end to end"
-	}
-	return "timing " + unknown
 }
 
 // decisionMsNumber is a latency without its unit: one decimal below 100, an

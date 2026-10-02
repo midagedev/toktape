@@ -1,10 +1,10 @@
 ┌─ toktape · Cloudflare_clef-flash-Q4_K_M · bloomery 0.1.0 (example) · RTX A6000 ──────────────────────────────────────┐
-│                                                                                                  ▀▀▀▀▄ ▀▀▀▀█   ▄▀▀▀▄ │
-│ POST /v1/systemone                                                                                   █     █       █ │
-│ prefill only · no tokens generated                                                                ▀▀▀█    ▄▀   ▄▀▀▀▀ │
-│ 7 of 168 requests answered                                                                           █   █     █     │
-│                                                                                                  ▀▀▀▀▀   ▀   ▀ ▀▀▀▀▀ │
-│                                                                                                        p50 ms · warm │
+│                                                                                               ▀▀▀▀▄ ▀▀▀▀█   ▄▀▀▀▄    │
+│ POST /v1/systemone                                                                                █     █       █    │
+│ prefill only · no tokens generated                                                             ▀▀▀█    ▄▀   ▄▀▀▀▀    │
+│ 7 of 168 requests answered                                                                        █   █     █        │
+│                                                                                               ▀▀▀▀▀   ▀   ▀ ▀▀▀▀▀ ms │
+│                                                                                              p50 · warm · end to end │
 │                                                                                                                      │
 │                                                                                                                      │
 │ review-05  pr: {title: Fix off-by-one in pagination, files_changed: 1, lines_added: 2, lin…  input 203 tok · 38.9 ms │

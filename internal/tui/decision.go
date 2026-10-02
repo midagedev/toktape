@@ -31,6 +31,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -43,6 +44,13 @@ const (
 	// of the body whatever the case has, so a two-question case leaves a
 	// third of its band empty rather than stretching its tiles.
 	maxTilesPerCase = 3
+
+	// burstRateSettle is how much of the burst window must have passed before
+	// the footer shows a request rate.
+	burstRateSettle = 2 * time.Second
+	// latestTick is how often the burst's LATEST ANSWERS blocks change: a block
+	// is readable for half a second, never a 40 ms flicker.
+	latestTick = 500 * time.Millisecond
 
 	// tableW is the burst table's columns: case, input, latency, p50, n.
 	tableCase, tableTok, tableSpark, tableP50, tableN = 12, 6, 16, 6, 3
@@ -269,12 +277,12 @@ func decisionHero(m Model, t time.Duration) (fig, label string) {
 	}
 	cur, warm, ok := heroAt(m.Decisions, t)
 	if !ok {
-		return unknown, "ms"
+		return unknown, ""
 	}
 	prev, _, _ := heroAt(m.Decisions, last-1)
-	label = "cold ms"
+	label = "cold · first request"
 	if warm {
-		label = "p50 ms · warm"
+		label = card.DecisionHeroCaption
 	}
 	return fmtLat(ease(prev, cur, last, t)), label
 }
@@ -296,14 +304,27 @@ func decisionHeroRows(m Model, th Theme, t time.Duration, bw int) []string {
 	if d := m.Summary.Decision; d != nil && d.Requests > 0 {
 		info = append(info, fmt.Sprintf("%d of %d requests answered", answered, d.Requests))
 	}
+	// While the end card is up the modal's figure is the one lit thing on the
+	// screen (lead, 2026-10-02): the token screen leaves its hero lit behind the
+	// modal, which here made two accent figures of the same size compete, so the
+	// hero steps back to dim for as long as the card is shown.
+	figSt := th.accentBold
+	if m.Mode == ModeCard {
+		figSt = th.dim
+	}
+	// The unit sits dim beside the bottom row, the modal's own arrangement.
+	const unit = " ms"
 	out := make([]string, 0, bigRows+2)
 	for k, row := range glyphs {
 		l := newLine(th, bw)
 		if k >= 1 && k-1 < len(info) {
 			l.add(th.dim, info[k-1])
 		}
-		l.gapTo(width(row))
-		l.add(th.accentBold, row)
+		l.gapTo(width(row) + width(unit))
+		l.add(figSt, row)
+		if k == bigRows-1 && fig != unknown {
+			l.add(th.dim, unit)
+		}
 		out = append(out, l.String())
 	}
 	l := newLine(th, bw)
@@ -682,7 +703,10 @@ func burstFigures(m Model, t time.Duration) (answered int, p95ms, rps float64) {
 			first = r.SentAt
 		}
 	}
-	if n > 0 && lastAns > first {
+	// The rate prints "?" until the burst window so far is long enough to be a
+	// rate: over the first half second the same count read 26 req/s and
+	// settled at 13 (lead, 2026-10-02).
+	if n > 0 && lastAns-first >= burstRateSettle {
 		rps = float64(n) / (lastAns - first).Seconds()
 	}
 	return answered, percentile(warm, 0.95), rps
@@ -716,7 +740,94 @@ func decisionBurst(m Model, th Theme, t time.Duration, bw, room int) []string {
 		}
 		out = append(out, l+"   "+r)
 	}
+	// Not under the end card: a block half covered by the modal reads as clipped.
+	if m.Mode != ModeCard {
+		out = append(out, latestAnswers(m, th, t, bw, room-len(out))...)
+	}
 	return fitRows(out, blankRow(bw), room)
+}
+
+// sectionRow is a section title with a rule to the column's edge.
+func sectionRow(th Theme, cw int, title string) string {
+	l := newLine(th, cw)
+	l.add(th.dim, title)
+	l.space(1)
+	l.add(th.dim, repeat('─', l.left()))
+	return l.String()
+}
+
+// latestAnswers is the burst's lower half (2026-10-02): the newest answered
+// burst requests as the showcase's own case blocks, so the half of the screen
+// under the table is a place to read an actual question and answer instead of
+// empty. At ~40 ms a request no block could be read as they land, so the
+// content steps on a clock of its own: tick = floor((t - first burst send) /
+// latestTick), the newest block is the latest request answered by the start of
+// the tick, and the block above it is the one that was newest a tick before
+// (of another case, when that one is the same). A
+// tick's blocks are static (drawn settled, not re-eased), and everything is a
+// function of t alone.
+//
+// It takes the two blocks if they fit in room, else one, else nothing: a
+// block is never drawn clipped.
+func latestAnswers(m Model, th Theme, t time.Duration, bw, room int) []string {
+	const chrome = 2 // the blank row before the title, and the title
+	n := 2
+	for n > 0 && room < chrome+n*caseBlockH-1 {
+		n--
+	}
+	if n == 0 {
+		return nil
+	}
+	var answered []tape.DecisionRecord
+	first := time.Duration(-1)
+	for _, r := range m.Decisions {
+		if r.Phase != tape.DecisionPhaseBurst {
+			continue
+		}
+		if first < 0 || r.SentAt < first {
+			first = r.SentAt
+		}
+		if r.Error == "" && r.AnsweredAt > 0 {
+			answered = append(answered, r)
+		}
+	}
+	sort.SliceStable(answered, func(i, j int) bool { return answered[i].AnsweredAt < answered[j].AnsweredAt })
+	// newestBy is the latest request answered at or before at, -1 when none.
+	newestBy := func(at time.Duration) int {
+		return sort.Search(len(answered), func(i int) bool { return answered[i].AnsweredAt > at }) - 1
+	}
+	tick := int((t - first) / latestTick)
+	cur := newestBy(first + time.Duration(tick)*latestTick)
+	prev := newestBy(first + time.Duration(tick-1)*latestTick)
+	if prev < 0 {
+		prev = cur - 1 // the first ticks: the answer before the newest
+	}
+	// A pass over the suite is about one tick, so the two newest blocks are
+	// often the same case a pass apart, which reads as a stalled screen: the
+	// upper block steps back to the nearest answer of another case.
+	for cur >= 0 && prev >= 0 && answered[prev].CaseID == answered[cur].CaseID {
+		prev--
+	}
+	blank := blankRow(bw)
+	rows := []string{blank, sectionRow(th, bw, "LATEST ANSWERS")}
+	// Slots top to bottom, the newest last; a slot with no request yet (the
+	// first ticks of the burst) stays blank so the rows below never move.
+	slots := [][]string{fitRows(nil, blank, caseBlockH-1), fitRows(nil, blank, caseBlockH-1)}
+	for k, i := range []int{prev, cur} {
+		if i < 0 {
+			continue
+		}
+		r := answered[i]
+		// Drawn at the instant the answer has fully eased in, whatever t is.
+		slots[k] = caseBlock(m, th, r.AnsweredAt+easeDur, r, bw)[:caseBlockH-1]
+	}
+	for k, b := range slots[2-n:] {
+		if k > 0 {
+			rows = append(rows, blank)
+		}
+		rows = append(rows, b...)
+	}
+	return rows
 }
 
 // burstSide is the burst's right column: the last requests' latencies as a
@@ -726,13 +837,7 @@ func burstSide(m Model, th Theme, t time.Duration, cw int) []string {
 	if cw < 24 {
 		return nil
 	}
-	section := func(title string) string {
-		l := newLine(th, cw)
-		l.add(th.dim, title)
-		l.space(1)
-		l.add(th.dim, repeat('─', l.left()))
-		return l.String()
-	}
+	section := func(title string) string { return sectionRow(th, cw, title) }
 	var lat []float64
 	var short, long []float64
 	longTok := 0

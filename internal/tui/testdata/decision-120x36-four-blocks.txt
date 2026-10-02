@@ -1,10 +1,10 @@
 ┌─ toktape · Cloudflare_clef-flash-Q4_K_M · bloomery 0.1.0 (example) · RTX A6000 ──────────────────────────────────────┐
-│                                                                                                  ▀▀▀▀▄ ▀▀▀▀█   ▄▀▀▀▄ │
-│ POST /v1/systemone                                                                                   █     █       █ │
-│ prefill only · no tokens generated                                                                ▀▀▀█    ▄▀   ▄▀▀▀▀ │
-│ 6 of 168 requests answered                                                                           █   █     █     │
-│                                                                                                  ▀▀▀▀▀   ▀   ▀ ▀▀▀▀▀ │
-│                                                                                                        p50 ms · warm │
+│                                                                                               ▀▀▀▀▄ ▀▀▀▀█   ▄▀▀▀▄    │
+│ POST /v1/systemone                                                                                █     █       █    │
+│ prefill only · no tokens generated                                                             ▀▀▀█    ▄▀   ▄▀▀▀▀    │
+│ 6 of 168 requests answered                                                                        █   █     █        │
+│                                                                                               ▀▀▀▀▀   ▀   ▀ ▀▀▀▀▀ ms │
+│                                                                                              p50 · warm · end to end │
 │                                                                                                                      │
 │                                                                                                                      │
 │ tool-03  User: what's the weather in Seoul tomorrow? Tools available: web_search, calculat…  input 176 tok · 37.9 ms │

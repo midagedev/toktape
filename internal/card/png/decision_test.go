@@ -28,11 +28,13 @@ func decisionExample(t *testing.T) *tape.RunSummary {
 	return &tp.Summary
 }
 
-// fullDecision is the example with every optional row and a client clock.
+// fullDecision is the example with every optional row and no engine figure:
+// the right hero column is COLD.
 func fullDecision(t *testing.T) *tape.RunSummary {
 	s := *decisionExample(t)
 	d := *s.Decision
 	d.TimingSource = tape.DecisionTimingClient
+	d.EngineWarmP50Ms = 0
 	d.CacheHits = 12
 	d.Reference = &tape.DecisionAgreement{File: "official-bf16.json", Questions: 40, MaxAbsDeltaP: 0.012, TopFlips: 1, BrierDelta: 0.0004}
 	s.Decision = &d
@@ -59,8 +61,10 @@ func TestDecisionCardIsNotTheTokenCard(t *testing.T) {
 		"hero.left.eyebrow":  "DECISION",
 		"hero.left.number":   "37.6",
 		"hero.left.unit":     "ms",
-		"hero.right.eyebrow": "COLD",
-		"hero.right.number":  "640",
+		"hero.right.eyebrow": "ENGINE",
+		"hero.right.number":  "36.1",
+		"hero.right.unit":    "ms",
+		"hero.right.sub1":    "prompt + head · engine-reported",
 		"stat.short.value":   "37.4",
 		"stat.long.value":    "417",
 		"stat.p95.value":     "417",
@@ -70,8 +74,13 @@ func TestDecisionCardIsNotTheTokenCard(t *testing.T) {
 			t.Errorf("%s = %q, want %q", id, got, want)
 		}
 	}
-	if got := markText(t, c, "hero.left.sub1"); !strings.Contains(got, "engine") {
-		t.Errorf("hero sub1 = %q, want the timing word engine", got)
+	if got := markText(t, c, "hero.left.sub1"); got != "p50 · warm · end to end" {
+		t.Errorf("hero sub1 = %q, want the end-to-end caption", got)
+	}
+	// Cold is never dropped for the engine breakdown: with ENGINE on the
+	// right it is the first thing on the left column's detail line.
+	if got := markText(t, c, "hero.left.sub2"); !strings.HasPrefix(got, "cold 640 ms first request") {
+		t.Errorf("hero sub2 = %q, want cold 640 ms first request first", got)
 	}
 	for _, m := range c.marks {
 		if strings.Contains(strings.ToLower(m.Text), "decode") || strings.Contains(m.Text, "38.8") {
@@ -176,9 +185,35 @@ func TestDecisionInsideTheContentBox(t *testing.T) {
 	}
 }
 
-// TestDecisionClientTimedCard: a client-timed tape says so beside the figure
-// and in the strip; Cache and Reference appear only when the tape has them.
-func TestDecisionClientTimedCard(t *testing.T) {
+// TestDecisionEngineColumnOnlyWithEngineFigure (2026-10-02): the right hero
+// column is ENGINE only when the tape carries the engine's own time, COLD
+// otherwise, and the caption says "end to end" either way. FAIL-first: the old
+// card drew COLD always and worded the caption "engine" or "client, end to
+// end" by the timing source.
+func TestDecisionEngineColumnOnlyWithEngineFigure(t *testing.T) {
+	c, err := renderCanvas(fullDecision(t))
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	for id, want := range map[string]string{
+		"hero.left.sub1":     "p50 · warm · end to end",
+		"hero.right.eyebrow": "COLD",
+		"hero.right.number":  "640",
+	} {
+		if got := markText(t, c, id); got != want {
+			t.Errorf("%s = %q, want %q", id, got, want)
+		}
+	}
+	for _, m := range c.marks {
+		if strings.Contains(m.Text, "network and JSON") || strings.Contains(strings.ToLower(m.Text), "engine") {
+			t.Errorf("%s = %q: a client-only tape names the engine or carries the old caveat", m.ID, m.Text)
+		}
+	}
+}
+
+// TestDecisionOptionalLines: Cache and Reference appear only when the tape has
+// them.
+func TestDecisionOptionalLines(t *testing.T) {
 	c, _ := renderCanvas(decisionExample(t))
 	if _, ok := c.markByID("stat.extra.cache"); ok {
 		t.Error("a cache line without a cache hit")
@@ -186,27 +221,45 @@ func TestDecisionClientTimedCard(t *testing.T) {
 	if _, ok := c.markByID("stat.extra.reference"); ok {
 		t.Error("a reference line without a reference file")
 	}
-	for _, m := range c.marks {
-		if strings.Contains(m.Text, "network and JSON") {
-			t.Errorf("%s: an engine-timed tape carries the client-timing caveat", m.ID)
-		}
-	}
-
 	c, err := renderCanvas(fullDecision(t))
 	if err != nil {
 		t.Fatalf("renderCanvas: %v", err)
-	}
-	if got := markText(t, c, "hero.left.sub1"); !strings.Contains(got, "client, end to end") {
-		t.Errorf("hero sub1 = %q, want the client timing word", got)
-	}
-	if got := markText(t, c, "strip.line0"); !strings.Contains(got, "network and JSON are inside every latency") {
-		t.Errorf("strip line 0 = %q, want the client-timing caveat", got)
 	}
 	if got := markText(t, c, "stat.extra.cache"); !strings.Contains(got, "12 hits") {
 		t.Errorf("cache line = %q", got)
 	}
 	if got := markText(t, c, "stat.extra.reference"); !strings.Contains(got, "0.012") || !strings.Contains(got, "official-bf16.json") {
 		t.Errorf("reference line = %q", got)
+	}
+}
+
+// TestDecisionOneSlot: one slot is "1 slot".
+func TestDecisionOneSlot(t *testing.T) {
+	c, err := renderCanvas(decisionExample(t))
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	for _, m := range c.marks {
+		if strings.Contains(m.Text, "1 slots") {
+			t.Errorf("%s = %q", m.ID, m.Text)
+		}
+	}
+	found := false
+	for _, m := range c.marks {
+		found = found || strings.Contains(m.Text, "1 slot")
+	}
+	if !found {
+		t.Error("the engine line does not say 1 slot")
+	}
+	s := *decisionExample(t)
+	s.Server.NSlots = 4
+	c, _ = renderCanvas(&s)
+	found = false
+	for _, m := range c.marks {
+		found = found || strings.Contains(m.Text, "4 slots")
+	}
+	if !found {
+		t.Error("the engine line does not say 4 slots")
 	}
 }
 

@@ -225,7 +225,7 @@ func TestDecisionCardRows(t *testing.T) {
 	m.Mode = ModeCard
 	m.CardAge = GleamSweep
 	frame := card.StripANSI(View(m, 27*time.Second, 120, 36))
-	for _, want := range []string{"p50 · warm · engine", "cold", "640 ms", "short p50", "long p50", "4,386 tok", "p95",
+	for _, want := range []string{"p50 · warm · end to end", "engine", "36.1 ms · prompt + head", "cold", "640 ms", "short p50", "long p50", "4,386 tok", "p95",
 		"prefill", "5,228 tok/s", "throughput", "11.7 req/s · c1", "requests", "168 · errors 0", "SYNTHETIC"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("card lacks %q:\n%s", want, frame)
@@ -236,16 +236,175 @@ func TestDecisionCardRows(t *testing.T) {
 			t.Errorf("card prints %q without the figure", not)
 		}
 	}
-	tp.Summary.Decision.TimingSource = tape.DecisionTimingClient
 	tp.Summary.Decision.CacheHits = 3
 	tp.Summary.Decision.Reference = &tape.DecisionAgreement{File: "ref.json", MaxAbsDeltaP: 0.012, TopFlips: 0}
 	m = decisionModelAt(t, tp, 27*time.Second)
 	m.Mode, m.CardAge = ModeCard, GleamSweep
 	frame = card.StripANSI(View(m, 27*time.Second, 120, 36))
-	for _, want := range []string{"client, end to end", "cache hits", "vs ref.json: max |Δp| 0.012 · 0 flips"} {
+	for _, want := range []string{"cache hits", "vs ref.json: max |Δp| 0.012 · 0 flips"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("card lacks %q:\n%s", want, frame)
 		}
+	}
+}
+
+// TestDecisionCardTimingWords (2026-10-02): the caption says "end to end"
+// whoever timed the engine, and the engine row exists only when the tape has
+// the engine's figure. FAIL-first: the old card said "engine" on a
+// server-timed tape, "client, end to end" on a client one, and had no engine
+// row.
+func TestDecisionCardTimingWords(t *testing.T) {
+	tp := decisionTape(t)
+	tp.Summary.Decision.TimingSource = tape.DecisionTimingClient
+	tp.Summary.Decision.EngineWarmP50Ms = 0
+	m := decisionModelAt(t, tp, 27*time.Second)
+	m.Mode, m.CardAge = ModeCard, GleamSweep
+	frame := card.StripANSI(View(m, 27*time.Second, 120, 36))
+	if !strings.Contains(frame, "p50 · warm · end to end") {
+		t.Errorf("a client-timed card does not say end to end:\n%s", frame)
+	}
+	for _, bad := range []string{"engine ", "prompt + head", "client, end to end"} {
+		if strings.Contains(frame, bad) {
+			t.Errorf("a card without an engine figure prints %q:\n%s", bad, frame)
+		}
+	}
+}
+
+// burstStart is the first burst request's send time.
+func burstStart(tp *tape.Tape) time.Duration {
+	for _, r := range tp.Decisions {
+		if r.Phase == tape.DecisionPhaseBurst {
+			return r.SentAt
+		}
+	}
+	return 0
+}
+
+// latestSection is the frame's LATEST ANSWERS rows, ANSI stripped, from the
+// title down to the footer divider, "" when the frame has no such section.
+func latestSection(frame string) string {
+	rows := strings.Split(card.StripANSI(frame), "\n")
+	var out []string
+	in := false
+	for _, r := range rows {
+		if strings.Contains(r, "LATEST ANSWERS") {
+			in = true
+		}
+		if in && strings.HasPrefix(r, "├") {
+			break
+		}
+		if in {
+			out = append(out, r)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// TestDecisionLatestAnswers (2026-10-02): the burst's lower half is a feed of
+// whole case blocks that changes at most every 500 ms. FAIL-first: the old
+// burst screen had no such section (the lower half was empty).
+func TestDecisionLatestAnswers(t *testing.T) {
+	tp := decisionTape(t)
+	b0 := burstStart(tp)
+	frameAt := func(at time.Duration, w, h int) string {
+		return View(decisionModelAt(t, tp, at), at, w, h)
+	}
+	// Whole blocks: every header has its tile rows, and the counts are what
+	// fits: two at 120x36, one at 100x30.
+	for _, c := range []struct{ w, h, blocks int }{{120, 36, 2}, {100, 30, 1}} {
+		sec := latestSection(frameAt(b0+8*time.Second, c.w, c.h))
+		if sec == "" {
+			t.Fatalf("%dx%d: no LATEST ANSWERS section", c.w, c.h)
+		}
+		if got := strings.Count(sec, " tok · "); got != c.blocks {
+			t.Errorf("%dx%d: %d block headers, want %d\n%s", c.w, c.h, got, c.blocks, sec)
+		}
+		if tops, bottoms := strings.Count(sec, "╭"), strings.Count(sec, "╰"); tops == 0 || tops != bottoms {
+			t.Errorf("%dx%d: %d tile tops and %d bottoms: a block is clipped\n%s", c.w, c.h, tops, bottoms, sec)
+		}
+	}
+	// Inside one tick the section does not move; across ticks it does.
+	tick := 10
+	start := b0 + time.Duration(tick)*latestTick
+	want := latestSection(frameAt(start, 120, 36))
+	for _, off := range []time.Duration{40, 200, 333, 499} {
+		if got := latestSection(frameAt(start+off*time.Millisecond, 120, 36)); got != want {
+			t.Errorf("tick %d: the section changed %d ms in:\n%s\nvs\n%s", tick, off, want, got)
+		}
+	}
+	distinct := map[string]bool{}
+	for k := 4; k < 24; k++ {
+		distinct[latestSection(frameAt(b0+time.Duration(k)*latestTick+time.Millisecond, 120, 36))] = true
+	}
+	if len(distinct) < 10 {
+		t.Errorf("20 ticks showed only %d distinct sections", len(distinct))
+	}
+	// No flicker: scanned every 40 ms the section changes no more often than
+	// once a tick.
+	changes, prev := 0, ""
+	for at := b0 + 3*time.Second; at < b0+9*time.Second; at += 40 * time.Millisecond {
+		cur := latestSection(frameAt(at, 120, 36))
+		if prev != "" && cur != prev {
+			changes++
+		}
+		prev = cur
+	}
+	if max := 6 * int(time.Second/latestTick); changes > max {
+		t.Errorf("the section changed %d times in 6 s, want at most %d", changes, max)
+	}
+}
+
+// TestDecisionRateSettles (2026-10-02): the burst footer's req/s is "?" until
+// the burst window so far is 2 s. FAIL-first: it printed a value from the
+// first answer (26, settling at 13).
+func TestDecisionRateSettles(t *testing.T) {
+	tp := decisionTape(t)
+	b0 := burstStart(tp)
+	footer := func(at time.Duration) string {
+		for _, r := range strings.Split(card.StripANSI(View(decisionModelAt(t, tp, at), at, 120, 36)), "\n") {
+			if strings.Contains(r, "req/s") {
+				return r
+			}
+		}
+		return ""
+	}
+	if got := footer(b0 + time.Second); !strings.Contains(got, "? req/s") {
+		t.Errorf("1 s into the burst the footer reads %q, want ? req/s", got)
+	}
+	if got := footer(b0 + 5*time.Second); strings.Contains(got, "? req/s") || !strings.Contains(got, " req/s") {
+		t.Errorf("5 s into the burst the footer reads %q, want a rate", got)
+	}
+}
+
+// TestDecisionCardFigureIsTheOnlyLitOne (2026-10-02): the modal's big figure
+// wears the token modal's lead-figure style (accentBold) and is the only
+// figure on the screen in it: the hero behind the card is dim. FAIL-first: the
+// hero stayed accentBold behind the card, two lit figures of one size.
+func TestDecisionCardFigureIsTheOnlyLitOne(t *testing.T) {
+	th := ColourTheme()
+	lit := regexp.MustCompile(regexp.QuoteMeta(th.accentBold.open) + `[ ▀▄█]{3,}`)
+
+	tok := ModelAt(ExampleTapeN(4), doneAt)
+	tok.Mode, tok.Theme, tok.CardAge = ModeCard, th, GleamSweep
+	if n := len(lit.FindAllString(View(tok, doneAt, 120, 36), -1)); n == 0 {
+		t.Fatal("the token modal's lead figure is no longer accentBold: this test's reference moved")
+	}
+
+	tp := decisionTape(t)
+	m := decisionModelAt(t, tp, 27*time.Second)
+	m.Mode, m.Theme, m.CardAge = ModeCard, th, GleamSweep
+	frame := View(m, 27*time.Second, 120, 36)
+	if n := len(lit.FindAllString(frame, -1)); n != bigRows {
+		t.Errorf("%d accentBold figure rows on the end card, want %d (the modal's alone)", n, bigRows)
+	}
+	dim := regexp.MustCompile(regexp.QuoteMeta(th.dim.open) + `[ ▀▄█]{3,}`)
+	if n := len(dim.FindAllString(frame, -1)); n < bigRows {
+		t.Errorf("the hero behind the card has %d dim figure rows, want %d", n, bigRows)
+	}
+	// Live (no card) the hero is lit.
+	m.Mode = ModeLive
+	if n := len(lit.FindAllString(View(m, 27*time.Second, 120, 36), -1)); n != bigRows {
+		t.Errorf("%d accentBold figure rows on the live screen, want the hero's %d", n, bigRows)
 	}
 }
 
@@ -267,11 +426,11 @@ func TestDecisionStateLine(t *testing.T) {
 func TestDecisionHeroColdThenWarm(t *testing.T) {
 	tp := decisionTape(t)
 	at := 2300 * time.Millisecond
-	if fig, label := decisionHero(decisionModelAt(t, tp, at+easeDur), at+easeDur); label != "cold ms" || fig != "640" {
+	if fig, label := decisionHero(decisionModelAt(t, tp, at+easeDur), at+easeDur); label != "cold · first request" || fig != "640" {
 		t.Errorf("cold hero = %q %q", fig, label)
 	}
 	at = 27 * time.Second
-	if fig, label := decisionHero(decisionModelAt(t, tp, at), at); label != "p50 ms · warm" || fig != "37.6" {
+	if fig, label := decisionHero(decisionModelAt(t, tp, at), at); label != "p50 · warm · end to end" || fig != "37.6" {
 		t.Errorf("warm hero = %q %q", fig, label)
 	}
 }

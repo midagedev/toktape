@@ -41,7 +41,8 @@ func TestDecisionTextGolden(t *testing.T) {
 func TestDecisionTextIsTheDecisionCard(t *testing.T) {
 	out := Text(decisionExample(t))
 	for _, want := range []string{
-		"Decision      37.6 ms p50 · warm · engine",
+		"Decision      37.6 ms p50 · warm · end to end",
+		"Engine        36.1 ms p50 · prompt + head",
 		"Cold          640 ms · first request",
 		"Short         37.4 ms p50 · 7 cases under 1,000 tok",
 		"Long          417 ms p50 · 4,386 tok",
@@ -67,30 +68,43 @@ func TestDecisionTextIsTheDecisionCard(t *testing.T) {
 	}
 }
 
-// TestDecisionClientTimingCaveat: a client-timed tape says so beside the hero
-// and in one caveat line; an engine-timed one raises none.
-func TestDecisionClientTimingCaveat(t *testing.T) {
+// TestDecisionTimingWords (2026-10-02): every latency is the client's
+// send-to-last-byte time, so the hero says "end to end" whoever timed the
+// engine, and the engine's own prompt + head time is a row only when the tape
+// has it. FAIL-first: the old card said "engine" beside the hero on a
+// server-timed tape and "client, end to end" plus a caveat on a client-timed
+// one, and had no Engine row.
+func TestDecisionTimingWords(t *testing.T) {
 	base := decisionExample(t)
-	if strings.Contains(Text(base), "network and JSON") {
-		t.Error("an engine-timed tape prints the client-timing caveat")
-	}
-	if cs := DecisionCard(base).Caveats; len(cs) != 0 {
-		t.Errorf("engine-timed caveats = %v, want none", cs)
-	}
-
-	client := withDecision(base, func(d *tape.DecisionSummary) { d.TimingSource = tape.DecisionTimingClient })
-	out := Text(client)
-	for _, want := range []string{
-		"Decision      37.6 ms p50 · warm · client, end to end",
-		"! client timing: network and JSON are inside every latency",
-	} {
+	out := Text(base)
+	for _, want := range []string{"Decision      37.6 ms p50 · warm · end to end", "Engine        36.1 ms p50 · prompt + head"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("the client-timed card lacks %q:\n%s", want, out)
+			t.Errorf("the card lacks %q:\n%s", want, out)
 		}
 	}
-	cs := DecisionCard(client).Caveats
-	if len(cs) != 1 || cs[0].Code != CodeDecisionClientTiming {
-		t.Errorf("client-timed caveats = %v, want one %s", cs, CodeDecisionClientTiming)
+	// The engine row follows the hero row directly.
+	if i, j := strings.Index(out, "Decision "), strings.Index(out, "Engine "); i < 0 || j < i || strings.Count(out[i:j], "\n") != 1 {
+		t.Errorf("the engine row is not right after the hero row:\n%s", out)
+	}
+
+	client := withDecision(base, func(d *tape.DecisionSummary) {
+		d.TimingSource = tape.DecisionTimingClient
+		d.EngineWarmP50Ms = 0
+	})
+	out = Text(client)
+	if !strings.Contains(out, "Decision      37.6 ms p50 · warm · end to end") {
+		t.Errorf("a client-timed card does not say end to end:\n%s", out)
+	}
+	for _, bad := range []string{"Engine", "prompt + head", "network and JSON", "client, end to end"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("a client-timed card prints %q:\n%s", bad, out)
+		}
+	}
+	if _, ok := DecisionCard(client).Row(DecisionRowEngine); ok {
+		t.Error("an engine row without an engine figure")
+	}
+	if cs := DecisionCard(base).Caveats; len(cs) != 0 {
+		t.Errorf("caveats = %v, want none", cs)
 	}
 }
 
@@ -133,7 +147,7 @@ func TestDecisionOptionalRows(t *testing.T) {
 func TestDecisionUnknownPrintsQuestionMark(t *testing.T) {
 	s := &tape.RunSummary{Mode: tape.ModeDecision}
 	out := Text(s)
-	if !strings.Contains(out, "Decision      ? · warm · timing ?") {
+	if !strings.Contains(out, "Decision      ? · warm · end to end") {
 		t.Errorf("an empty decision tape's hero:\n%s", out)
 	}
 	if !strings.Contains(out, "Cold          ? · first request") {

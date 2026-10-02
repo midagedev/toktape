@@ -6,7 +6,8 @@
 │ RIG      RTX A6000 48G · AMD Ryzen Threadripper PRO 5975WX 32-Cores  │
 │          252 GB                                                      │
 ├──────────────────────────────────────────────────────────────────────┤
-│ Decision      37.6 ms p50 · warm · engine                            │
+│ Decision      37.6 ms p50 · warm · end to end                        │
+│ Engine        36.1 ms p50 · prompt + head                            │
 │ Cold          640 ms · first request                                 │
 │ Short         37.4 ms p50 · 7 cases under 1,000 tok                  │
 │ Long          417 ms p50 · 4,386 tok                                 │

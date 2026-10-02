@@ -43,10 +43,6 @@ func decisionModal(m Model, th Theme, boxW int) []string {
 		rows = append(rows, th.paint(th.dim, "│")+" "+pad(s, inner)+" "+th.paint(th.dim, "│"))
 	}
 
-	timing := "client, end to end"
-	if d.TimingSource == tape.DecisionTimingServer {
-		timing = "engine"
-	}
 	fig := bigFigure(fmtLat(d.WarmP50Ms))
 	p := float64(m.CardAge) / float64(GleamSweep)
 	line("")
@@ -72,7 +68,7 @@ func decisionModal(m Model, th Theme, boxW int) []string {
 	}
 	l := newLine(th, inner)
 	l.space(2)
-	l.addTrunc(th.dim, "p50 · warm · "+timing)
+	l.addTrunc(th.dim, card.DecisionHeroCaption)
 	line(l.String())
 	line("")
 
@@ -105,7 +101,13 @@ func decisionModal(m Model, th Theme, boxW int) []string {
 		thr = strconv.FormatFloat(d.RequestsPerSecond, 'f', 1, 64) + " req/s"
 		thr += fmt.Sprintf(" · c%d", d.Concurrency)
 	}
-	figs := []kv{
+	var figs []kv
+	// The engine's own prompt + head time, a breakdown of the figure above and
+	// never a second hero (2026-10-02): only when the tape carries it.
+	if d.EngineWarmP50Ms > 0 {
+		figs = append(figs, kv{"engine", ms(d.EngineWarmP50Ms) + " · prompt + head", th.textMid})
+	}
+	figs = append(figs, []kv{
 		{"cold", ms(d.ColdMs), th.textMid},
 		{"short p50", ms(d.ShortWarmP50Ms), th.textMid},
 		{"long p50", longVal, th.textMid},
@@ -113,7 +115,7 @@ func decisionModal(m Model, th Theme, boxW int) []string {
 		{"prefill", prefill, th.textMid},
 		{"throughput", thr, th.textMid},
 		{"requests", fmt.Sprintf("%d · errors %d", d.Requests, d.Errors), th.textMid},
-	}
+	}...)
 	if d.CacheHits > 0 {
 		figs = append(figs, kv{"cache hits", strconv.Itoa(d.CacheHits), th.warn})
 	}

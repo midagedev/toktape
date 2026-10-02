@@ -1,9 +1,9 @@
 ┌─ toktape · Cloudflare_clef-flash-Q4_K_M · bloomery 0.1.0 (example) · RTX A6000 ──────────────────────────────────────┐
-│                                                                                                  ▀▀▀▀▄ ▀▀▀▀█   ▄▀▀▀▀ │
-│ POST /v1/systemone                                                                                   █     █   █     │
-│ prefill only · no tokens generated                                                                ▀▀▀█    ▄▀   █▀▀▀▄ │
-│ 168 of 168 requests answered                                                                         █   █     █   █ │
-│                                                                                                  ▀▀▀▀▀   ▀   ▀ ▀▀▀▀▀ │
+│                                                                                               ▀▀▀▀▄ ▀▀▀▀█   ▄▀▀▀▀    │
+│ POST /v1/systemone                                                                                █     █   █        │
+│ prefill only · no tokens generated                                                             ▀▀▀█    ▄▀   █▀▀▀▄    │
+│ 168 of 168 requests answered                                                                      █   █     █   █    │
+│                                                                                               ▀▀▀▀▀   ▀   ▀ ▀▀▀▀▀ ms │
 │                ┌─ Cloudflare_clef-flash-Q4_K_M · 5.2G ────────────────────── 2026-10-02T14:00+09:00 ┐                │
 │                │                                                                                    │                │
 │                │   ▀▀▀▀▄ ▀▀▀▀█   ▄▀▀▀▀                                                              │                │
@@ -11,8 +11,9 @@
 │                │    ▀▀▀█    ▄▀   █▀▀▀▄                                                              │                │
 │                │       █   █     █   █                                                              │                │
 │                │   ▀▀▀▀▀   ▀   ▀ ▀▀▀▀▀ ms                                                           │                │
-│                │   p50 · warm · engine                                                              │                │
+│                │   p50 · warm · end to end                                                          │                │
 │                │                                                                                    │                │
+│                │   engine      36.1 ms · prompt + head                                              │                │
 │                │   cold        640 ms                                                               │                │
 │                │   short p50   37.4 ms                                                              │                │
 │                │   long p50    417 ms · 4,386 tok                                                   │                │
@@ -25,7 +26,6 @@
 │                │   bloomery 0.1.0 (example) · ctx 8192                                              │                │
 │                │   SYNTHETIC example for TTP-192 screen and card work: every figure is invented by… │                │
 │                └────────────────────────────────────────────────────────────────────────────────────┘                │
-│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

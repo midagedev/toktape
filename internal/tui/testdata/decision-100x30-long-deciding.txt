@@ -1,10 +1,10 @@
 ┌─ toktape · Cloudflare_clef-flash-Q4_K_M · bloomery 0.1.0 (example) · RTX A6000 ──────────────────┐
-│                                                                              ▀▀▀▀▄ ▀▀▀▀█   ▄▀▀▀▄ │
-│ POST /v1/systemone                                                               █     █       █ │
-│ prefill only · no tokens generated                                            ▀▀▀█    ▄▀   ▄▀▀▀▀ │
-│ 7 of 168 requests answered                                                       █   █     █     │
-│                                                                              ▀▀▀▀▀   ▀   ▀ ▀▀▀▀▀ │
-│                                                                                    p50 ms · warm │
+│                                                                           ▀▀▀▀▄ ▀▀▀▀█   ▄▀▀▀▄    │
+│ POST /v1/systemone                                                            █     █       █    │
+│ prefill only · no tokens generated                                         ▀▀▀█    ▄▀   ▄▀▀▀▀    │
+│ 7 of 168 requests answered                                                    █   █     █        │
+│                                                                           ▀▀▀▀▀   ▀   ▀ ▀▀▀▀▀ ms │
+│                                                                          p50 · warm · end to end │
 │                                                                                                  │
 │                                                                                                  │
 │ ko-06  배송이 일주일째 안 와요. 주문번호 1234입니다. 환불해 주세요.      input 172 tok · 37.2 ms │

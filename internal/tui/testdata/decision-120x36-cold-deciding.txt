@@ -1,10 +1,10 @@
 ┌─ toktape · Cloudflare_clef-flash-Q4_K_M · bloomery 0.1.0 (example) · RTX A6000 ──────────────────────────────────────┐
-│                                                                                                                ▀▀▀▀▄ │
-│ POST /v1/systemone                                                                                                 █ │
-│ prefill only · no tokens generated                                                                               ▄▀  │
+│                                                                                                             ▀▀▀▀▄    │
+│ POST /v1/systemone                                                                                              █    │
+│ prefill only · no tokens generated                                                                            ▄▀     │
 │ 0 of 168 requests answered                                                                                           │
-│                                                                                                                  ▀   │
-│                                                                                                                   ms │
+│                                                                                                               ▀      │
+│                                                                                                                      │
 │                                                                                                                      │
 │ route-01  Our checkout started returning errors and orders are blocked.                   input 214 tok · ◑ deciding │
 │ ╭─ department · choice ─────────────╮  ╭─ urgency · score ─────────────────╮  ╭─ outage · noul ───────────────────╮  │

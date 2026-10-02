@@ -14,9 +14,14 @@ import (
 // replaces what is about a token stream:
 //
 //	hero left   Decision 37.6 ms — the card's one lit figure (the Accent ramp
-//	            the decode figure wears on the token card)
-//	hero right  Cold 640 ms — in Text, never the accent: cold is reported
-//	            apart from the warm figures, at the same size
+//	            the decode figure wears on the token card), the client's
+//	            send-to-last-byte p50: "p50 · warm · end to end"
+//	hero right  Engine 36.1 ms, "prompt + head · engine-reported", in Text and
+//	            never the accent, when the tape carries the engine's own time;
+//	            Cold 640 ms otherwise. With ENGINE on the right, cold moves to
+//	            the left column's detail line (2026-10-02): it is a figure that
+//	            must stay visible on every surface, never dropped for a
+//	            breakdown
 //	mid band    short | long | p95 | prefill | throughput, one cell each, and
 //	            one line under them for the Cache and Reference rows when the
 //	            tape has them (the token card's memory band had a bar here)
@@ -93,7 +98,13 @@ func decisionEngineIdent(srv tape.ServerInfo) fallbackLine {
 		tail = append(tail, "ctx "+strconv.Itoa(srv.CtxSize))
 	}
 	if srv.NSlots > 0 {
-		tail = append(tail, strconv.Itoa(srv.NSlots)+" slots")
+		// "1 slot", not "1 slots" (the token card's content.go has the same
+		// bug and is filed separately).
+		word := " slots"
+		if srv.NSlots == 1 {
+			word = " slot"
+		}
+		tail = append(tail, strconv.Itoa(srv.NSlots)+word)
 	}
 	return fallbackLine{
 		preferred: joinParts(" · ", eng, strings.Join(tail, " · ")),
@@ -107,32 +118,68 @@ func (c *canvas) drawDecisionHero(v card.DecisionView) {
 	c.vrule("hero.split", heroSplitX, heroRuleTop, heroRuleBottom, colBorder)
 
 	requests, _ := v.Row(card.DecisionRowRequests)
+	cold, _ := v.Row(card.DecisionRowCold)
+	engine, hasEngine := v.Row(card.DecisionRowEngine)
 	left := heroCol{
 		eyebrow: "Decision",
 		number:  v.Hero.Value,
 		unit:    v.Hero.Unit,
-		sub1:    strings.Join([]string{"p50 · warm", v.Hero.Timing}, " · "),
+		sub1:    card.DecisionHeroCaption,
 	}
+	reqLine := ""
 	if len(requests.Parts) > 0 {
-		left.sub2 = strings.Join(append([]string{requests.Parts[0] + " requests"}, requests.Parts[1:]...), " · ")
+		reqLine = strings.Join(append([]string{requests.Parts[0] + " requests"}, requests.Parts[1:]...), " · ")
 	}
-	c.drawHeroCol("hero.left", left, contentL, heroSplitX-heroGutter, func(x0, x1 int) image.Image {
-		return hGradient{x0: x0, x1: x1, c0: colAccent, c1: colAccentHigh}
-	})
-
-	cold, _ := v.Row(card.DecisionRowCold)
-	right := heroCol{
-		eyebrow: "Cold",
-		number:  strings.TrimSuffix(cold.Value(), " ms"),
-		sub1:    "first request, reported apart",
-		sub2:    "not in any warm figure",
+	right := heroCol{}
+	if hasEngine {
+		// Cold rides the detail line, ahead of the request count, so a
+		// truncation takes the passes and never the cold figure.
+		coldWord := "cold " + cold.Value() + " first request"
+		left.sub2 = strings.Join(nonEmpty(coldWord, reqLine), " · ")
+		// The ladder drops the passes first, then the errors, and never cold.
+		if n := len(requests.Parts); n > 0 {
+			count := requests.Parts[0] + " requests"
+			withErrors := nonEmpty(coldWord, count)
+			if n >= 3 {
+				withErrors = append(withErrors, requests.Parts[n-1]) // "0 errors"
+			}
+			left.sub2Fallbacks = []string{
+				strings.Join(withErrors, " · "), strings.Join(nonEmpty(coldWord, count), " · "), coldWord,
+			}
+		}
+		right = heroCol{
+			eyebrow: "Engine",
+			number:  strings.Fields(engine.Value())[0], // "36.1 ms p50" -> "36.1"
+			sub1:    "prompt + head · engine-reported",
+		}
+	} else {
+		left.sub2 = reqLine
+		right = heroCol{
+			eyebrow: "Cold",
+			number:  strings.TrimSuffix(cold.Value(), " ms"),
+			sub1:    "first request, reported apart",
+			sub2:    "not in any warm figure",
+		}
 	}
 	if right.number != unknown {
 		right.unit = "ms"
 	}
+	c.drawHeroCol("hero.left", left, contentL, heroSplitX-heroGutter, func(x0, x1 int) image.Image {
+		return hGradient{x0: x0, x1: x1, c0: colAccent, c1: colAccentHigh}
+	})
 	c.drawHeroCol("hero.right", right, heroRightX, contentR, func(int, int) image.Image {
 		return solid(colText)
 	})
+}
+
+func nonEmpty(parts ...string) []string {
+	var out []string
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // drawStats draws the mid band: one cell per figure, label over value over
