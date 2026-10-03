@@ -102,37 +102,23 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **`toktape decide`.** Records a decision model: a prefill-only classifier
-    that answers typed questions with one probability per option, served at
-    `POST /v1/systemone` (Cloudflare Clef). Nothing is generated, so nothing is
-    a token rate. A suite of requests goes out one at a time with a pause
-    between them, so a replay shows each answer arrive, then back to back for
-    `--repeat` passes with `-c` in flight.
+    **The decision suite conforms.** Every question in the built-in suite
+    now carries `instructions`, which the TypeSafe schema requires on all
+    three question types. Four of the eight cases left it out and worked
+    only against toktape's own lenient parser and mock; a conforming
+    server — Cloudflare's, or llama.cpp's new `POST /v1/systemone` —
+    refused each of those requests whole, a 400 with the request's other
+    questions unasked.
 
-    **Every latency is the client's clock, send to the last byte.** That is
-    what an agent waiting on the answer pays, and what curl reproduces. The
-    first request is cold and is reported apart; the warm p50 is split at
-    1,000 input tokens into short and long, because one long case owns a
-    whole-suite p95. When the engine sends its own `timings`, the card shows
-    its prompt + head p50 beside the end-to-end one, never in place of it.
-    `--reference` compares the answers with the official model's: the largest
-    probability gap, how many top options flipped, and the Brier delta.
-
-    **The screen draws the answers.** Each question is a tile: a choice as
-    bars over its options, a score as its level, a yes/no as p(true). The
-    paced pass shows each case with its answer; the back-to-back passes keep
-    the latest answers on screen under the per-case table. The card, text and
-    PNG, leads with the warm p50.
-
-    `publish` takes a decision tape: the hub row, page and preview lead with
-    its warm p50 instead of a token rate, and the index gains `mode` and the
-    `decision_*` figures. `compare` and the experiment log still refuse one,
-    since there is no token rate to set beside it. The tape schema gains
-    `summary.mode` "decision", `decisions` and `summary.decision`; token
-    tapes are byte-identical.
-
-    With several streams, the live headline is now the window the record
-    uses, so it no longer spikes at the start and then falls.
+    **A decision run names its engine.** `/props` alone never said:
+    mainline llama-server stamps a `build_info` but no engine name, and
+    ik_llama.cpp stamps neither, so every decision card read "?" where a
+    record would have named the build. A `build_info` with no engine name
+    is now llama-server, and a `/props` that says nothing is settled by
+    the process the way a record settles it: the binary's path says
+    ik_llama.cpp, and the checkout around it names the commit, with a
+    warning saying where the commit was read from. On a host with no
+    readable `/proc` the identity stays what `/props` wrote.
 
   footer: |
     ## Install
