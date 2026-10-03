@@ -886,7 +886,14 @@ func (r *run) findPIDByURLPort() (int, error) {
 // loopbackPort is the server URL's port when the server runs on this host,
 // and an error saying why not otherwise.
 func (r *run) loopbackPort() (int, error) {
-	u, err := url.Parse(r.client.BaseURL())
+	return loopbackPortOf(r.client.BaseURL())
+}
+
+// loopbackPortOf is the port in baseURL when it names a loopback host, and an
+// error saying why not otherwise. Only a loopback URL names a process this
+// /proc can read; a port on another host names a process over there.
+func loopbackPortOf(baseURL string) (int, error) {
+	u, err := url.Parse(baseURL)
 	if err != nil {
 		return 0, err
 	}
@@ -897,7 +904,7 @@ func (r *run) loopbackPort() (int, error) {
 	}
 	port, err := strconv.Atoi(u.Port())
 	if err != nil || port <= 0 {
-		return 0, fmt.Errorf("recorder: no port in %s", r.client.BaseURL())
+		return 0, fmt.Errorf("recorder: no port in %s", baseURL)
 	}
 	return port, nil
 }

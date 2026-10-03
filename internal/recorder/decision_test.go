@@ -10,6 +10,10 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +32,9 @@ type fakeDecision struct {
 	delay   time.Duration
 	timings bool
 	cacheN  int
+	// props, when set, replaces the /props body the fake serves — an
+	// ik_llama.cpp-shaped one names neither an engine nor a build.
+	props string
 
 	mu      sync.Mutex
 	bodies  [][]byte
@@ -40,7 +47,11 @@ func (f *fakeDecision) serve(t *testing.T) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/props":
-			fmt.Fprint(w, `{"engine":"fake-systemone","build":"t1","model_path":"/m/fake-Q4_K_M.gguf","quant":"Q4_K_M"}`)
+			body := f.props
+			if body == "" {
+				body = `{"engine":"fake-systemone","build":"t1","model_path":"/m/fake-Q4_K_M.gguf","quant":"Q4_K_M"}`
+			}
+			fmt.Fprint(w, body)
 			return
 		case server.SystemOnePath:
 		default:
@@ -505,5 +516,95 @@ func TestReferenceAgreement(t *testing.T) {
 	}
 	if len(f.bodies) != n {
 		t.Error("requests were sent before the reference was checked")
+	}
+}
+
+// ikProcFixture writes under root the /proc slice a decision run reads when
+// /props named nothing: pid 42 holds the listening socket on port, and its
+// exe is a binary inside an ik_llama.cpp checkout whose HEAD is hash. The ik
+// tree sits under the same root but on the real filesystem, because the
+// commit is read from the live path the exe link names.
+func ikProcFixture(t *testing.T, root string, port int, hash string) {
+	t.Helper()
+	exe := filepath.Join(root, "ik_llama.cpp", "build", "bin", "llama-server")
+	for _, d := range []string{
+		filepath.Join(root, "proc", "net"),
+		filepath.Join(root, "proc", "42", "fd"),
+		filepath.Dir(exe),
+		filepath.Join(root, "ik_llama.cpp", ".git", "refs", "heads"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tcp := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt  uid  timeout inode\n" +
+		fmt.Sprintf("   0: 00000000000000000000000000000000:%04X 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 123456 0 0 0 0\n", port)
+	for path, data := range map[string]string{
+		filepath.Join(root, "proc", "net", "tcp"):                              tcp,
+		filepath.Join(root, "proc", "42", "cmdline"):                           "llama-server\x00-m\x00m.gguf\x00",
+		filepath.Join(root, "ik_llama.cpp", ".git", "HEAD"):                    "ref: refs/heads/master\n",
+		filepath.Join(root, "ik_llama.cpp", ".git", "refs", "heads", "master"): hash + "\n",
+		exe: "\x00",
+	} {
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{
+		filepath.Join(root, "proc", "42", "fd", "3"): "socket:[123456]",
+		filepath.Join(root, "proc", "42", "exe"):     exe,
+	} {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A decision run against a server whose /props names neither an engine nor a
+// build (ik_llama.cpp, TTP-33) still names the engine: the loopback port
+// finds the process, the binary's path says ik, and the checkout around it
+// names a commit with a warning that says where the commit was read from.
+func TestDecisionRunNamesIkLlamaFromTheProcess(t *testing.T) {
+	f := &fakeDecision{props: `{"model_path":"/home/me/models/small-Q4_K_M.gguf","total_slots":1,"n_ctx":4096}`}
+	srv := f.serve(t)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const hash = "0badc0de0badc0de0badc0de0badc0de0badc0de"
+	root := t.TempDir()
+	ikProcFixture(t, root, port, hash)
+
+	o := testOpts(srv.URL)
+	o.Suite = []byte(smallSuite)
+	o.Repeats = NoBurst
+	o.Gap = NoGap
+	o.FSRoot = root
+	tp, err := RecordDecision(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := tp.Summary.Server
+	if s.Kind != tape.ServerIKLlama {
+		t.Fatalf("engine kind = %q, want ik_llama.cpp", s.Kind)
+	}
+	if s.Commit != hash[:8] {
+		t.Fatalf("engine commit = %q, want %q read from the checkout", s.Commit, hash[:8])
+	}
+	if got := tp.Summary.Model.FileName; got != "small-Q4_K_M.gguf" {
+		t.Fatalf("model file = %q, want small-Q4_K_M.gguf", got)
+	}
+	var provenance bool
+	for _, w := range tp.Summary.Warnings {
+		if strings.Contains(w, "read from the checkout next to the binary") {
+			provenance = true
+		}
+	}
+	if !provenance {
+		t.Fatalf("no warning says where the commit came from: %v", tp.Summary.Warnings)
 	}
 }

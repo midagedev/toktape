@@ -278,3 +278,30 @@ func TestDiscoverSystemOneAcceptsAnEngineStringProps(t *testing.T) {
 		t.Error("Discover accepted a string engine; the DiscoverSystemOne premise is gone")
 	}
 }
+
+// A decision server's /props names mainline llama-server by its build_info
+// when no engine key carries a name (DetectKind's rule): ik_llama.cpp stamps
+// neither and stays for the process to name, and an engine string or object
+// is never outvoted.
+func TestFillIdentityBuildInfoNamesLlamaServer(t *testing.T) {
+	var mainline EngineIdentity
+	fillIdentity(&mainline, []byte(`{"model_path":"/m/qwen3.gguf","build_info":"b10964-b29c606e2","total_slots":1}`))
+	if mainline.Kind != tape.ServerLlamaCPP {
+		t.Fatalf("kind = %q, want %q", mainline.Kind, tape.ServerLlamaCPP)
+	}
+	if mainline.Build != "b10964" || mainline.Commit != "b29c606e2" {
+		t.Fatalf("build, commit = %q, %q; want b10964, b29c606e2", mainline.Build, mainline.Commit)
+	}
+
+	var ik EngineIdentity
+	fillIdentity(&ik, []byte(`{"model_path":"/m/m.gguf","total_slots":1,"n_ctx":4096}`))
+	if ik.Kind != "" {
+		t.Fatalf("ik /props named an engine on its own: %q", ik.Kind)
+	}
+
+	var bloomery EngineIdentity
+	fillIdentity(&bloomery, []byte(`{"engine":"bloomery","build":"1.2"}`))
+	if bloomery.Kind != "bloomery" {
+		t.Fatalf("kind = %q, want bloomery", bloomery.Kind)
+	}
+}

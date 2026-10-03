@@ -308,6 +308,7 @@ func RecordDecision(ctx context.Context, opts DecisionOptions) (*tape.Tape, erro
 	}
 
 	var warnings []string
+	refineDecisionEngine(opts, base, &id, &warnings)
 	host, hostWarns := collectDecisionHost(ctx, opts)
 	warnings = append(warnings, hostWarns...)
 	if id == (server.EngineIdentity{}) {
@@ -472,6 +473,48 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 		return true
 	case <-ctx.Done():
 		return false
+	}
+}
+
+// refineDecisionEngine reads what the local process says about the engine
+// when /props did not: ik_llama.cpp names neither an engine nor a build
+// (TTP-33, 2026-09-13), so the binary does — the loopback port names the
+// process, the process's path and argv[0] say ik, and the checkout around
+// the binary names a commit, the same reading a record does minus its flags.
+// A server that said what it is (an engine string or object) is never
+// outvoted; a remote server has no process here to read; a /proc that cannot
+// be read leaves the identity exactly as /props wrote it.
+func refineDecisionEngine(opts DecisionOptions, base string, id *server.EngineIdentity, warnings *[]string) {
+	if id.Kind.SelfDeclared() || id.Kind == tape.ServerIKLlama {
+		return
+	}
+	port, err := loopbackPortOf(base)
+	if err != nil {
+		return
+	}
+	pid, err := procmon.FindPIDByPort(opts.FSRoot, port)
+	if err != nil {
+		return
+	}
+	exe, err := procmon.Exe(opts.FSRoot, pid)
+	if err != nil {
+		exe = ""
+	}
+	argv, _ := procmon.Args(opts.FSRoot, pid)
+	id.Kind = server.RefineKind(id.Kind, exe, argv)
+	if id.Kind != tape.ServerIKLlama || id.Commit != "" || exe == "" {
+		return
+	}
+	// The checkout's HEAD is what the clone says now, not what the binary was
+	// built from (the record path's caveat, verbatim): the card prints
+	// warnings as written, so the provenance travels with the figure.
+	if c, ok := procmon.FindGitCommit("", exe); ok {
+		id.Commit = c.Hash
+		msg := fmt.Sprintf("engine commit %s read from the checkout next to the binary, not from the binary", c.Hash)
+		if procmon.BinaryOlderThanCheckout("", exe, c) {
+			msg += "; the binary is older than that commit"
+		}
+		*warnings = append(*warnings, msg)
 	}
 }
 

@@ -482,6 +482,13 @@ func fillIdentity(id *EngineIdentity, body []byte) {
 	if name = strings.TrimSpace(name); name != "" {
 		id.Kind = tape.ServerKind(strings.ToLower(name))
 	}
+	// A body that named no engine but stamps a build_info is mainline
+	// llama-server — DetectKind's rule: every mainline build stamps one, and
+	// ik_llama.cpp, which stamps neither an engine nor a build, is left for
+	// the process to name (RefineKind, TTP-33).
+	if name == "" && p.BuildInfo != "" {
+		id.Kind = tape.ServerLlamaCPP
+	}
 	switch {
 	case p.Build != "":
 		id.Build = p.Build
