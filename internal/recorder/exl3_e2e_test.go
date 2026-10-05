@@ -687,11 +687,18 @@ func TestRecordDeclaredServerPID(t *testing.T) {
 	})
 }
 
-// TestRecordTreeOnlyForEngine: the same two-process tree under a llama.cpp
-// run reads the parent alone. The tree sum is the engine's shape, not the
-// recorder's default, and a llama-server whose children exist must not have
-// them folded into its memory.
-func TestRecordTreeOnlyForEngine(t *testing.T) {
+// TestRecordTreeUnderLlamaCPP: the same two-process tree under a llama.cpp
+// run. Through 2026-09-15 the tree sum was the engine's shape alone and a
+// non-self-declared server read one pid; since 2026-10-06 (Strata: a python
+// front over a native engine child, measured with the front's figures and
+// "contended: yes") the periodic reading resolves the tree for every kind.
+// Memory and the GPU attribution are the tree's and the warning says so —
+// without claiming the faults, which a non-self-declared kind still takes
+// from one pid per token (openSampler doc).
+//
+// FAIL-first, 2026-10-06: on the pre-change recorder this run read
+// AtEnd.RSSBytes 61440000 (the parent alone) and drew no tree warning.
+func TestRecordTreeUnderLlamaCPP(t *testing.T) {
 	srv := exl3Server(t, propsJSON)
 	tp, err := recorder.Record(context.Background(), recorder.Options{
 		BaseURL:        srv.URL,
@@ -699,7 +706,7 @@ func TestRecordTreeOnlyForEngine(t *testing.T) {
 		MaxTokens:      256,
 		SampleInterval: 10 * time.Millisecond,
 		// The listener's argv names the llama model, so FindPID matches it
-		// and the child is beside it, not part of it.
+		// and the child is its descendant, part of the server.
 		FSRoot:  exl3ProcTree(t, modelPath, exl3ServerPort(t, srv)),
 		GPU:     fakeGPU(t),
 		Clock:   fixedClock{time.Date(2026, 9, 15, 21, 8, 44, 0, time.UTC)},
@@ -712,10 +719,13 @@ func TestRecordTreeOnlyForEngine(t *testing.T) {
 	if s.Server.Kind != tape.ServerLlamaCPP {
 		t.Errorf("Kind = %q, want llama.cpp from build_info", s.Server.Kind)
 	}
-	if want := int64(60000) * 1024; s.Memory.AtEnd.RSSBytes != want {
-		t.Errorf("AtEnd.RSSBytes = %d, want the parent's %d alone", s.Memory.AtEnd.RSSBytes, want)
+	if want := int64(100000) * 1024; s.Memory.AtEnd.RSSBytes != want {
+		t.Errorf("AtEnd.RSSBytes = %d, want the tree's %d", s.Memory.AtEnd.RSSBytes, want)
 	}
-	if warnsAbout(s.Warnings, "summed over") {
-		t.Errorf("a llama.cpp run drew the tree warning: %q", s.Warnings)
+	if !warnsAbout(s.Warnings, "memory and CPU summed over the server and its 1 child process") {
+		t.Errorf("Warnings lack the tree warning: %q", s.Warnings)
+	}
+	if warnsAbout(s.Warnings, "faults and CPU summed") {
+		t.Errorf("a llama.cpp run's warning claims the fault tree it does not read: %q", s.Warnings)
 	}
 }

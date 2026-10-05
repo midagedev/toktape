@@ -57,24 +57,56 @@ func writeTreePID(t *testing.T, root string, pid, ppid, rss, maj, min, utime, st
 // else. A pid that does not exist is ErrNotFound.
 func TestTreePIDs(t *testing.T) {
 	root := treeFixture(t)
-	got, err := treePIDs(root, 3000)
+	got, err := TreePIDs(root, 3000)
 	if err != nil {
-		t.Fatalf("treePIDs(3000): %v", err)
+		t.Fatalf("TreePIDs(3000): %v", err)
 	}
 	want := []int{3000, 3100, 3200}
 	if len(got) != len(want) {
-		t.Fatalf("treePIDs(3000) = %v, want %v", got, want)
+		t.Fatalf("TreePIDs(3000) = %v, want %v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("treePIDs(3000) = %v, want %v", got, want)
+			t.Fatalf("TreePIDs(3000) = %v, want %v", got, want)
 		}
 	}
-	if got, err := treePIDs(root, 3300); err != nil || len(got) != 1 || got[0] != 3300 {
-		t.Errorf("treePIDs(3300) = %v, %v; want [3300], nil", got, err)
+	if got, err := TreePIDs(root, 3300); err != nil || len(got) != 1 || got[0] != 3300 {
+		t.Errorf("TreePIDs(3300) = %v, %v; want [3300], nil", got, err)
 	}
-	if _, err := treePIDs(root, 4242); !errors.Is(err, ErrNotFound) {
-		t.Errorf("treePIDs(4242) error = %v, want ErrNotFound", err)
+	if _, err := TreePIDs(root, 4242); !errors.Is(err, ErrNotFound) {
+		t.Errorf("TreePIDs(4242) error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestReadMemPIDs: the summing half over a set TreePIDs already resolved —
+// the same sums ReadMemTree produces, without a second walk, so the memory
+// read and the GPU attribution of one sample can share one membership
+// snapshot (2026-10-06). A pid that exited since the scan is skipped while
+// the rest are still read; a set nothing answers is n 0, which the caller
+// reads as "nothing was observable", never as a figure.
+func TestReadMemPIDs(t *testing.T) {
+	root := treeFixture(t)
+	m, n := ReadMemPIDs(root, []int{3000, 3100, 3200})
+	if n != 3 {
+		t.Errorf("ReadMemPIDs n = %d, want 3", n)
+	}
+	if want := int64(120000 * 1024); m.RSSBytes != want {
+		t.Errorf("RSSBytes = %d, want %d", m.RSSBytes, want)
+	}
+	if m.MajFaults != 60 || m.MinFaults != 600 {
+		t.Errorf("faults = %d/%d, want 60/600", m.MajFaults, m.MinFaults)
+	}
+	// The child exits between the scan and the read: skipped, not fatal.
+	if err := os.RemoveAll(filepath.Join(root, "proc", "3100")); err != nil {
+		t.Fatal(err)
+	}
+	m, n = ReadMemPIDs(root, []int{3000, 3100, 3200})
+	if n != 2 || m.RSSBytes != int64(80000*1024) || m.MajFaults != 40 {
+		t.Errorf("ReadMemPIDs after exit = n %d, RSS %d, maj %d; want 2, %d, 40",
+			n, m.RSSBytes, m.MajFaults, int64(80000*1024))
+	}
+	if m, n := ReadMemPIDs(root, []int{4242}); n != 0 || m.RSSBytes != 0 {
+		t.Errorf("ReadMemPIDs(unknown) = n %d, RSS %d; want 0, 0", n, m.RSSBytes)
 	}
 }
 

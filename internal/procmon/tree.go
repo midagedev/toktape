@@ -46,8 +46,12 @@ func scanStats(fsRoot string) map[int]Stat {
 	return out
 }
 
-// treePIDs returns pid and every recursive descendant of it under fsRoot's
-// /proc, sorted ascending.
+// TreePIDs returns pid and every recursive descendant of it under fsRoot's
+// /proc, sorted ascending. It is the one owner of "the server's pids": every
+// consumer — the GPU attribution and the memory read of a sample alike —
+// resolves the set through it, so no two of them can drift apart on what
+// "ours" means (2026-10-06, Strata: a python front holding the port over a
+// native engine child that held all the VRAM).
 //
 // The scan repeats on every call, so a child that spawns or exits mid-run is
 // picked up or dropped at the next sample rather than frozen at open time
@@ -56,7 +60,7 @@ func scanStats(fsRoot string) map[int]Stat {
 //
 // Reparenting cannot create a cycle in a live tree, but the scan is over
 // user-visible state, so a seen-set bounds the walk anyway.
-func treePIDs(fsRoot string, pid int) ([]int, error) {
+func TreePIDs(fsRoot string, pid int) ([]int, error) {
 	stats := scanStats(fsRoot)
 	if stats == nil {
 		return nil, fmt.Errorf("procmon: tree: %s: no /proc under this root", fsRoot)
@@ -94,10 +98,27 @@ func treePIDs(fsRoot string, pid int) ([]int, error) {
 // A descendant that exits between discovery and read is skipped, not fatal:
 // its counters stopped at its exit either way.
 func ReadMemTree(fsRoot string, pid int) (m tape.MemSample, n int, err error) {
-	pids, err := treePIDs(fsRoot, pid)
+	pids, err := TreePIDs(fsRoot, pid)
 	if err != nil {
 		return tape.MemSample{}, 0, err
 	}
+	m, n = ReadMemPIDs(fsRoot, pids)
+	if n == 0 {
+		return tape.MemSample{}, 0, fmt.Errorf("procmon: pid %d: %w", pid, ErrNotFound)
+	}
+	return m, n, nil
+}
+
+// ReadMemPIDs is ReadMemTree's summing half over a set TreePIDs already
+// resolved: the memory picture of exactly those processes, with n naming how
+// many of them were still readable. A caller that resolves the tree once per
+// reading and attributes several figures against the same membership — the
+// memory read and the GPU attribution of one sample — sums through this, so
+// one scan decides what "ours" was for all of them.
+//
+// A pid that exited since the scan is skipped, not fatal: its counters
+// stopped at its exit either way. n is 0 only when every pid is gone.
+func ReadMemPIDs(fsRoot string, pids []int) (m tape.MemSample, n int) {
 	for _, p := range pids {
 		one, err := ReadMem(fsRoot, p)
 		if err != nil {
@@ -114,10 +135,7 @@ func ReadMemTree(fsRoot string, pid int) (m tape.MemSample, n int, err error) {
 		m.CPUSeconds += one.CPUSeconds
 		n++
 	}
-	if n == 0 {
-		return tape.MemSample{}, 0, fmt.Errorf("procmon: pid %d: %w", pid, ErrNotFound)
-	}
-	return m, n, nil
+	return m, n
 }
 
 // TreeSampler is Sampler over a parent and its children: the per-token fault

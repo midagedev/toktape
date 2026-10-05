@@ -368,13 +368,14 @@ const procBytesFloor = 256 << 20
 // weights on, or nil when the reading cannot say.
 //
 // ProcBytes is the one figure that is this server's: it is the VRAM the
-// server's PID holds, read per device, so a card carrying another process's
-// 20 GB and none of this server's is not in play. UsedBytes is deliberately
-// not consulted — another process's allocation is not this server's
-// placement, and this is the one place that distinction decides where the
-// weights are claimed to be. When no device reported ProcBytes at all the
-// server's process was never identified and the column is absent, so the
-// answer is "cannot say" (nil) rather than a guess in either direction.
+// server's process tree holds (the chosen pid plus its descendants, nvidiasmi
+// Sample doc), read per device, so a card carrying another process's 20 GB
+// and none of this server's is not in play. UsedBytes is deliberately not
+// consulted — another process's allocation is not this server's placement,
+// and this is the one place that distinction decides where the weights are
+// claimed to be. When no device reported ProcBytes at all the server's
+// process was never identified and the column is absent, so the answer is
+// "cannot say" (nil) rather than a guess in either direction.
 func gpusInPlay(gpusAtEnd []tape.GPUSample) (inPlay []int) {
 	var anyProc bool
 	for _, g := range gpusAtEnd {

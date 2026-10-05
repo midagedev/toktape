@@ -119,20 +119,29 @@ func fakeMux(t *testing.T) *http.ServeMux {
 // fakeGPU serves the two nvidia-smi queries from fixture CSVs.
 func fakeGPU(t *testing.T) gpu.Collector {
 	t.Helper()
-	read := func(name string) string {
-		b, err := os.ReadFile(filepath.Join("testdata", name))
-		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
-		}
-		return string(b)
+	b, err := os.ReadFile(filepath.Join("testdata", "nvidia-compute-apps.csv"))
+	if err != nil {
+		t.Fatalf("read nvidia-compute-apps.csv: %v", err)
+	}
+	return fakeGPUApps(t, string(b))
+}
+
+// fakeGPUApps is fakeGPU with the compute-apps rows left to the caller, over
+// the same device inventory: the attribution under test is the collector's
+// own, only the rows differ per case.
+func fakeGPUApps(t *testing.T, apps string) gpu.Collector {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "nvidia-query-gpu.csv"))
+	if err != nil {
+		t.Fatalf("read nvidia-query-gpu.csv: %v", err)
 	}
 	runner := func(ctx context.Context, args ...string) (string, error) {
 		for _, a := range args {
 			switch {
 			case strings.HasPrefix(a, "--query-compute-apps="):
-				return read("nvidia-compute-apps.csv"), nil
+				return apps, nil
 			case strings.HasPrefix(a, "--query-gpu="):
-				return read("nvidia-query-gpu.csv"), nil
+				return string(b), nil
 			}
 		}
 		return "", errors.New("unexpected nvidia-smi query")
@@ -143,6 +152,25 @@ func fakeGPU(t *testing.T) gpu.Collector {
 	}
 	t.Cleanup(c.Close)
 	return c
+}
+
+// frontChildProc is a writable copy of the /proc fixture with every process
+// but the server (1234) removed and one engine child (1235, PPid 1234)
+// added: the Strata layout (2026-10-06) — a front that holds the port over a
+// worker that does the GPU work, on an otherwise quiet host. 58720256 kB is
+// the fixture front's own VmRSS.
+func frontChildProc(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	copyTree(t, absRoot(t), root)
+	for _, pid := range []string{"777", "999", "4242", "5150"} {
+		if err := os.RemoveAll(filepath.Join(root, "proc", pid)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeExl3PID(t, root, 1235, 1234, 40000, 20, 200, 2000, 200,
+		"strata\x00--serve\x00", "")
+	return root
 }
 
 // fixedClock pins the wall-clock stamps so the run ID is deterministic.
@@ -316,6 +344,159 @@ func TestRecordEndToEnd(t *testing.T) {
 		if tokens[i] == 0 {
 			t.Errorf("progress reported no token for stream %d", i)
 		}
+	}
+}
+
+// TestRecordAttributesTheServerTree: the Strata defect end to end
+// (2026-10-06). A front (1234, found by the model path in its argv) holds the
+// port; its child (1235) is the only GPU compute process. The whole tree is
+// the server, so the child's VRAM is ProcBytes, the host is not contended,
+// and the memory figures are the tree's sum — with a warning that names what
+// was summed and, because a llama.cpp run's fault sampler still reads one pid
+// per token (openSampler doc), does not claim the faults.
+//
+// FAIL-first, 2026-10-06: on the pre-change recorder this run recorded
+// contended with "1 other GPU compute process", GPUsAtEnd[0].ProcBytes 0 and
+// AtEnd.RSSBytes the front's 60129542144.
+func TestRecordAttributesTheServerTree(t *testing.T) {
+	srv := fakeServer(t)
+	tp, err := recorder.Record(context.Background(), recorder.Options{
+		BaseURL: srv.URL,
+		// The child's row is the whole compute-apps listing: the only GPU
+		// process on the box is the server's own worker.
+		GPU:            fakeGPUApps(t, "GPU-0e4f2a1b-8c3d-4e5f-9a0b-1c2d3e4f5a6b, 1235, 22140\n"),
+		FSRoot:         frontChildProc(t),
+		SampleInterval: 10 * time.Millisecond,
+		Clock:          fixedClock{time.Date(2026, 10, 6, 7, 48, 49, 0, time.UTC)},
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	s := tp.Summary
+	if s.Server.PID != fixturePID {
+		t.Fatalf("PID = %d, want %d (the front, by the model path)", s.Server.PID, fixturePID)
+	}
+	if want := int64(22140) << 20; s.GPUsAtEnd[0].ProcBytes != want {
+		t.Errorf("GPUsAtEnd[0].ProcBytes = %d, want the child's %d", s.GPUsAtEnd[0].ProcBytes, want)
+	}
+	if s.Contention.Contended || s.Contention.OtherGPUProcs != 0 {
+		t.Errorf("Contention = %+v, want a quiet host: the child is the server's own", s.Contention)
+	}
+	if want := int64(58720256+40000) * 1024; s.Memory.AtEnd.RSSBytes != want {
+		t.Errorf("AtEnd.RSSBytes = %d, want the tree's %d", s.Memory.AtEnd.RSSBytes, want)
+	}
+	if !warnsAbout(s.Warnings, "memory and CPU summed over the server and its 1 child process") {
+		t.Errorf("Warnings lack the tree warning: %q", s.Warnings)
+	}
+	if warnsAbout(s.Warnings, "faults and CPU summed") {
+		t.Errorf("a llama.cpp run's warning claims the fault tree: %q", s.Warnings)
+	}
+}
+
+// TestRecordCountsOnlyProcessesOutsideTheTree: the same layout with a
+// grandchild deepening it — the descent is recursive, and the worker's own
+// worker is as much the server's as the worker is — and a stranger's job
+// beside it. The tree absorbs child and grandchild, and only the stranger is
+// left to count against the run.
+func TestRecordCountsOnlyProcessesOutsideTheTree(t *testing.T) {
+	srv := fakeServer(t)
+	root := frontChildProc(t)
+	writeExl3PID(t, root, 1236, 1235, 8000, 30, 300, 3000, 300, "strata-worker\x00", "")
+	tp, err := recorder.Record(context.Background(), recorder.Options{
+		BaseURL: srv.URL,
+		GPU: fakeGPUApps(t, "GPU-0e4f2a1b-8c3d-4e5f-9a0b-1c2d3e4f5a6b, 1235, 22140\n"+
+			"GPU-7d1c9b30-2a5e-4f61-b7c8-90d1e2f3a4b5, 1236, 500\n"+
+			"GPU-0e4f2a1b-8c3d-4e5f-9a0b-1c2d3e4f5a6b, 9001, 812\n"),
+		FSRoot:         root,
+		SampleInterval: 10 * time.Millisecond,
+		Clock:          fixedClock{time.Date(2026, 10, 6, 7, 48, 49, 0, time.UTC)},
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	s := tp.Summary
+	if want := int64(22140) << 20; s.GPUsAtEnd[0].ProcBytes != want {
+		t.Errorf("GPUsAtEnd[0].ProcBytes = %d, want the child's %d", s.GPUsAtEnd[0].ProcBytes, want)
+	}
+	if want := int64(500) << 20; s.GPUsAtEnd[1].ProcBytes != want {
+		t.Errorf("GPUsAtEnd[1].ProcBytes = %d, want the grandchild's %d", s.GPUsAtEnd[1].ProcBytes, want)
+	}
+	if !s.Contention.Contended || s.Contention.OtherGPUProcs != 1 {
+		t.Errorf("Contention = %+v, want contended by exactly the stranger", s.Contention)
+	}
+	if want := int64(58720256+40000+8000) * 1024; s.Memory.AtEnd.RSSBytes != want {
+		t.Errorf("AtEnd.RSSBytes = %d, want the three-process tree's %d", s.Memory.AtEnd.RSSBytes, want)
+	}
+	if !warnsAbout(s.Warnings, "memory and CPU summed over the server and its 2 child processes") {
+		t.Errorf("Warnings lack the tree warning: %q", s.Warnings)
+	}
+}
+
+// TestRecordChildExitBetweenScanAndRead: the child dies between the tree scan
+// and the nvidia-smi read — exactly the window a real exec opens. Membership
+// was resolved before the read, so the child's row is still the server's and
+// is never counted foreign; the memory read, which happens before the GPU
+// read, still sums it.
+func TestRecordChildExitBetweenScanAndRead(t *testing.T) {
+	srv := fakeServer(t)
+	root := frontChildProc(t)
+	gpuCSV, err := os.ReadFile(filepath.Join("testdata", "nvidia-query-gpu.csv"))
+	if err != nil {
+		t.Fatalf("read nvidia-query-gpu.csv: %v", err)
+	}
+	childRow := "GPU-0e4f2a1b-8c3d-4e5f-9a0b-1c2d3e4f5a6b, 1235, 22140\n"
+	var reads int
+	runner := func(ctx context.Context, args ...string) (string, error) {
+		for _, a := range args {
+			switch {
+			case strings.HasPrefix(a, "--query-compute-apps="):
+				reads++
+				if reads > 1 {
+					return "", nil // the driver has reaped the dead child by now
+				}
+				// The child exits while nvidia-smi is running: after the
+				// scan, before the rows are attributed.
+				if err := os.RemoveAll(filepath.Join(root, "proc", "1235")); err != nil {
+					t.Error(err)
+				}
+				return childRow, nil
+			case strings.HasPrefix(a, "--query-gpu="):
+				return string(gpuCSV), nil
+			}
+		}
+		return "", errors.New("unexpected nvidia-smi query")
+	}
+	c, warns := gpu.OpenWith(context.Background(), runner)
+	if c.Name() != "nvidia-smi" {
+		t.Fatalf("fake GPU backend is %q, warnings %v", c.Name(), warns)
+	}
+	t.Cleanup(c.Close)
+
+	tp, err := recorder.Record(context.Background(), recorder.Options{
+		BaseURL:        srv.URL,
+		GPU:            c,
+		FSRoot:         root,
+		SampleInterval: 10 * time.Millisecond,
+		Clock:          fixedClock{time.Date(2026, 10, 6, 7, 48, 49, 0, time.UTC)},
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	s := tp.Summary
+	if len(tp.Samples) == 0 || len(tp.Samples[0].GPUs) == 0 {
+		t.Fatal("the first sample carries no GPU reading")
+	}
+	first := tp.Samples[0]
+	if first.GPUs[0].ProcBytes != int64(22140)<<20 || first.GPUs[0].OtherProcs != 0 {
+		t.Errorf("first sample GPU0 = ProcBytes %d, OtherProcs %d; want the exited child's bytes attributed, not counted foreign",
+			first.GPUs[0].ProcBytes, first.GPUs[0].OtherProcs)
+	}
+	if want := int64(58720256+40000) * 1024; first.Mem.RSSBytes != want {
+		t.Errorf("first sample RSSBytes = %d, want the tree's %d (read before the exit)",
+			first.Mem.RSSBytes, want)
+	}
+	if s.Contention.Contended {
+		t.Errorf("Contention = %+v: a child that exited mid-read must not read as a foreign process", s.Contention)
 	}
 }
 

@@ -98,7 +98,7 @@ func TestOpenFallsBackToNull(t *testing.T) {
 			if err != nil || len(devs) != 0 {
 				t.Fatalf("Null.Devices = %v, %v; want empty, nil", devs, err)
 			}
-			samples, err := c.Sample(context.Background(), 4242)
+			samples, err := c.Sample(context.Background(), []int{4242})
 			if err != nil || len(samples) != 0 {
 				t.Fatalf("Null.Sample = %v, %v; want empty, nil", samples, err)
 			}
@@ -152,7 +152,7 @@ func TestSampleAttributesProcessesByUUID(t *testing.T) {
 	}
 	c, _ := OpenWith(context.Background(), f.run)
 	defer c.Close()
-	samples, err := c.Sample(context.Background(), 4242)
+	samples, err := c.Sample(context.Background(), []int{4242})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestSampleWithoutServerPIDAttributesNothing(t *testing.T) {
 	c, _ := OpenWith(context.Background(), f.run)
 	defer c.Close()
 	before := f.countOf("--query-compute-apps")
-	samples, err := c.Sample(context.Background(), 0)
+	samples, err := c.Sample(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,6 +230,55 @@ func TestSampleWithoutServerPIDAttributesNothing(t *testing.T) {
 	}
 }
 
+// TestSampleAttributesTheFrontsChild: the measured Strata defect (2026-10-06,
+// a python front holding the port over a native engine child). The child is
+// the only compute process on the card; with the front's tree as the server
+// its VRAM is ProcBytes and OtherProcs stays 0, where the single-pid
+// attribution counted it as "1 other GPU compute process" and flipped every
+// tape of a quiet host to machine_contended. The pids are the ones
+// internal/procmon's tree fixture uses for the same shape.
+func TestSampleAttributesTheFrontsChild(t *testing.T) {
+	f := &fakeRunner{
+		gpuOut:  fixture(t, "querygpu-2x3090.csv"),
+		appsOut: "GPU-0e4f2a1b-8c3d-4e5f-9a0b-1c2d3e4f5a6b, 3100, 23300\n",
+	}
+	c, _ := OpenWith(context.Background(), f.run)
+	defer c.Close()
+	samples, err := c.Sample(context.Background(), []int{3000, 3100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if samples[0].ProcBytes != 23300*mibI || samples[0].OtherProcs != 0 {
+		t.Errorf("GPU0 = ProcBytes %d, OtherProcs %d; want the child's %d and 0",
+			samples[0].ProcBytes, samples[0].OtherProcs, 23300*mibI)
+	}
+	if samples[1].ProcBytes != 0 || samples[1].OtherProcs != 0 {
+		t.Errorf("GPU1 = ProcBytes %d, OtherProcs %d; want 0/0, the child holds nothing there",
+			samples[1].ProcBytes, samples[1].OtherProcs)
+	}
+}
+
+// TestSampleCountsOnlyProcessesOutsideTheTree: the tree widens "ours"; it
+// must not swallow the neighbourhood. A compute process no tree pid holds is
+// still foreign and still counts toward the contention verdict.
+func TestSampleCountsOnlyProcessesOutsideTheTree(t *testing.T) {
+	f := &fakeRunner{
+		gpuOut: fixture(t, "querygpu-2x3090.csv"),
+		appsOut: "GPU-0e4f2a1b-8c3d-4e5f-9a0b-1c2d3e4f5a6b, 3100, 23300\n" +
+			"GPU-0e4f2a1b-8c3d-4e5f-9a0b-1c2d3e4f5a6b, 3300, 812\n",
+	}
+	c, _ := OpenWith(context.Background(), f.run)
+	defer c.Close()
+	samples, err := c.Sample(context.Background(), []int{3000, 3100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if samples[0].ProcBytes != 23300*mibI || samples[0].OtherProcs != 1 {
+		t.Errorf("GPU0 = ProcBytes %d, OtherProcs %d; want %d and 1 (the stranger is not ours)",
+			samples[0].ProcBytes, samples[0].OtherProcs, 23300*mibI)
+	}
+}
+
 func TestSampleSingleGPUAcceptsTwoColumnComputeApps(t *testing.T) {
 	f := &fakeRunner{
 		gpuOut:  fixture(t, "querygpu-5080.csv"),
@@ -237,7 +286,7 @@ func TestSampleSingleGPUAcceptsTwoColumnComputeApps(t *testing.T) {
 	}
 	c, _ := OpenWith(context.Background(), f.run)
 	defer c.Close()
-	samples, err := c.Sample(context.Background(), 4242)
+	samples, err := c.Sample(context.Background(), []int{4242})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +311,7 @@ func TestSampleDropsUnattributableProcessesOnMultiGPU(t *testing.T) {
 	}
 	c, _ := OpenWith(context.Background(), f.run)
 	defer c.Close()
-	samples, err := c.Sample(context.Background(), 4242)
+	samples, err := c.Sample(context.Background(), []int{4242})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +331,7 @@ func TestSampleReportsQueryErrors(t *testing.T) {
 	}
 	c, _ := OpenWith(context.Background(), f.run)
 	defer c.Close()
-	if _, err := c.Sample(context.Background(), 4242); err == nil {
+	if _, err := c.Sample(context.Background(), []int{4242}); err == nil {
 		t.Fatal("want an error when compute-apps fails")
 	} else if !strings.Contains(err.Error(), "query-compute-apps") {
 		t.Fatalf("error does not name the query: %v", err)

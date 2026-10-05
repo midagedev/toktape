@@ -28,10 +28,14 @@ import (
 type Collector interface {
 	// Devices returns the static inventory, in index order.
 	Devices(ctx context.Context) ([]tape.GPUInfo, error)
-	// Sample returns one reading per device. serverPID is the llama-server
-	// process whose VRAM is reported as GPUSample.ProcBytes; pass 0 when it
-	// is unknown, and no process is attributed to the server.
-	Sample(ctx context.Context, serverPID int) ([]tape.GPUSample, error)
+	// Sample returns one reading per device. serverPIDs is the set of
+	// processes that are the server — the chosen pid plus its descendants,
+	// which the caller resolves through procmon.TreePIDs — and a compute
+	// process in that set is the server's: its VRAM is GPUSample.ProcBytes
+	// and it never counts toward OtherProcs. Pass nil when the server process
+	// was not identified, and no process is attributed to the server. A set
+	// of one behaves exactly as the single pid always did.
+	Sample(ctx context.Context, serverPIDs []int) ([]tape.GPUSample, error)
 	// Name identifies the backend for the card ("nvidia-smi", "none").
 	Name() string
 	// Close releases the backend. Safe to call more than once.
@@ -113,7 +117,7 @@ type Null struct{}
 func (Null) Devices(context.Context) ([]tape.GPUInfo, error) { return nil, nil }
 
 // Sample returns no samples.
-func (Null) Sample(context.Context, int) ([]tape.GPUSample, error) { return nil, nil }
+func (Null) Sample(context.Context, []int) ([]tape.GPUSample, error) { return nil, nil }
 
 // Name identifies the backend.
 func (Null) Name() string { return "none" }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -101,14 +102,21 @@ func (c *smiCollector) Devices(ctx context.Context) ([]tape.GPUInfo, error) {
 }
 
 // Sample reads every device once and attributes the running compute
-// processes. ProcBytes is the VRAM held by serverPID on that device and
-// OtherProcs counts the compute processes that are not it.
+// processes. ProcBytes is the VRAM held by the server's process tree on that
+// device and OtherProcs counts the compute processes outside it.
 //
-// serverPID <= 0 means the server process was not identified. In that case
+// serverPIDs is the set the caller resolved through procmon.TreePIDs: the
+// chosen pid plus its descendants, so an engine whose port holder fronts a
+// worker process has the worker's VRAM attributed to the server instead of
+// being counted against it (2026-10-06, Strata: a python front over a native
+// engine child was the only compute process on the card, and every tape said
+// "1 other GPU compute process").
+//
+// An empty set means the server process was not identified. In that case
 // nothing is attributed to the server and OtherProcs stays 0, because
 // counting the server itself as a foreign process would flip the card's
 // contention verdict on a perfectly quiet host.
-func (c *smiCollector) Sample(ctx context.Context, serverPID int) ([]tape.GPUSample, error) {
+func (c *smiCollector) Sample(ctx context.Context, serverPIDs []int) ([]tape.GPUSample, error) {
 	rows, err := c.rows(ctx)
 	if err != nil {
 		return nil, err
@@ -136,7 +144,7 @@ func (c *smiCollector) Sample(ctx context.Context, serverPID int) ([]tape.GPUSam
 			Throttled:    r.ThrottleKnown && Throttled(r.ThrottleMask),
 		})
 	}
-	if serverPID <= 0 {
+	if len(serverPIDs) == 0 {
 		return samples, nil
 	}
 	out, err := c.run(ctx, queryComputeAppsArgs()...)
@@ -166,7 +174,7 @@ func (c *smiCollector) Sample(ctx context.Context, serverPID int) ([]tape.GPUSam
 			}
 			i = 0
 		}
-		if app.PID == serverPID {
+		if slices.Contains(serverPIDs, app.PID) {
 			samples[i].ProcBytes += app.UsedBytes
 			continue
 		}

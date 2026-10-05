@@ -12,10 +12,10 @@ import (
 // and what is under test here is what it does once something has.
 type openBackend struct{}
 
-func (openBackend) Devices(context.Context) ([]tape.GPUInfo, error)       { return nil, nil }
-func (openBackend) Sample(context.Context, int) ([]tape.GPUSample, error) { return nil, nil }
-func (openBackend) Name() string                                          { return "test" }
-func (openBackend) Close()                                                {}
+func (openBackend) Devices(context.Context) ([]tape.GPUInfo, error)         { return nil, nil }
+func (openBackend) Sample(context.Context, []int) ([]tape.GPUSample, error) { return nil, nil }
+func (openBackend) Name() string                                            { return "test" }
+func (openBackend) Close()                                                  {}
 
 // A foreign process only counts against a run on a device the run's weights
 // are on (TTP-153, 2026-09-21).

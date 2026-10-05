@@ -335,42 +335,51 @@ type sampleDeps struct {
 	gpus     gpu.Collector
 	client   *server.Client
 	pollSlot bool
-	// tree says the pid's whole process tree is the engine (2026-09-15,
-	// ExLlamaV3): the reading sums parent and children, and latches the
-	// count for the recorder's warning. Every other kind reads one pid.
-	tree bool
 }
 
 // takeSample reads the process, the devices, the load average and the slot
 // table once and appends a tape.RunSample.
 //
-// The process picture comes from procmon.ReadMem and deliberately NOT from
-// procmon.Sampler.Sample, although the Sampler holds an open handle and would
-// be the cheaper read. Sample latches the fault counters exactly as MajDelta
-// does, so every periodic reading would swallow the faults taken since the
-// previous token and hand them to nobody: the per-token deltas would sum to
-// less than the run's real major-fault count, and the sparkline — the most
-// watched number in the clip — would under-report by however often the
-// sampler happened to tick. ReadMem is stateless and returns the same
-// tape.MemSample, so the token hooks stay the only consumer of the latch and
-// sum(per-token deltas) is the whole run. ReadMemTree, the engine run's
-// variant, is stateless for the same reason.
+// The server is the chosen pid plus every recursive descendant, resolved once
+// here through procmon.TreePIDs — one scan, one membership snapshot — so the
+// memory read and the GPU attribution of one sample agree on what "ours" is
+// (2026-10-06, Strata: a python front holding the port over a native engine
+// child had the child counted as "1 other GPU compute process" and none of
+// its VRAM or RAM attributed). A tree this host cannot resolve — no /proc, a
+// pid that is gone — falls back to the chosen pid alone, which is the
+// single-pid behaviour the tree replaced: never to an empty set, which would
+// count the server itself as foreign.
 //
-// Nothing here is taken under the mutex: ReadMem, the GPU read and the /slots
-// poll touch no shared state, and an nvidia-smi exec can outlast the sample
-// interval, which would stall every token hook in the run.
+// The process picture comes from the stateless procmon.ReadMemPIDs and
+// deliberately NOT from procmon.Sampler.Sample, although the Sampler holds an
+// open handle and would be the cheaper read. Sample latches the fault
+// counters exactly as MajDelta does, so every periodic reading would swallow
+// the faults taken since the previous token and hand them to nobody: the
+// per-token deltas would sum to less than the run's real major-fault count,
+// and the sparkline — the most watched number in the clip — would under-report
+// by however often the sampler happened to tick. ReadMemPIDs returns the same
+// tape.MemSample statelessly, so the token hooks stay the only consumer of
+// the latch and sum(per-token deltas) is the whole run.
+//
+// Nothing here is taken under the mutex: the /proc reads, the GPU read and
+// the /slots poll touch no shared state, and an nvidia-smi exec can outlast
+// the sample interval, which would stall every token hook in the run.
 func (st *state) takeSample(ctx context.Context, dep sampleDeps) {
-	var mem tape.MemSample
+	var (
+		mem  tape.MemSample
+		pids []int
+	)
 	if dep.pid > 0 {
-		if dep.tree {
-			if m, n, err := procmon.ReadMemTree(dep.fsRoot, dep.pid); err == nil {
-				mem = m
-				if n > 1 {
-					st.noteTreeProcs(n)
-				}
-			}
-		} else if m, err := procmon.ReadMem(dep.fsRoot, dep.pid); err == nil {
+		if set, err := procmon.TreePIDs(dep.fsRoot, dep.pid); err == nil {
+			pids = set
+		} else {
+			pids = []int{dep.pid}
+		}
+		if m, n := procmon.ReadMemPIDs(dep.fsRoot, pids); n > 0 {
 			mem = m
+			if n > 1 {
+				st.noteTreeProcs(n)
+			}
 		}
 	}
 	st.mu.Lock()
@@ -380,7 +389,7 @@ func (st *state) takeSample(ctx context.Context, dep sampleDeps) {
 
 	var gpuSamples []tape.GPUSample
 	if dep.gpus != nil {
-		if s, err := dep.gpus.Sample(ctx, dep.pid); err == nil {
+		if s, err := dep.gpus.Sample(ctx, pids); err == nil {
 			gpuSamples = s
 		}
 	}

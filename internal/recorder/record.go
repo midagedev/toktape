@@ -1297,14 +1297,18 @@ func (r *run) stream(ctx context.Context, reqs []server.StreamRequest) ([]tape.R
 // returns the function that closes it again. The sampler is nil, and the
 // closer a no-op, when there is no /proc view.
 //
-// An engine that named itself watches the whole process tree (2026-09-15,
-// ExLlamaV3; any self-declared engine, TTP-105 2026-09-17). A tree sampler
-// over a single-process server sums exactly that one process, so it is never
-// a worse number than the single-pid sampler, only a slower one; and where
-// the pid that was found fronts the real work — a multiprocessing engine,
-// or a shim holding the port — the tree is the only sampler that sees the
-// work at all. llama-server and ik are not self-declared and keep the
-// single-process sampler byte-for-byte; that measured path does not move.
+// This is the per-token fault sampler, and an engine that named itself
+// watches the whole process tree through it (2026-09-15, ExLlamaV3; any
+// self-declared engine, TTP-105 2026-09-17). A tree sampler over a
+// single-process server sums exactly that one process, so it is never a
+// worse number than the single-pid sampler, only a slower one; and where the
+// pid that was found fronts the real work — a multiprocessing engine, or a
+// shim holding the port — the tree is the only sampler that sees the work at
+// all. llama-server and ik are not self-declared and keep the single-process
+// sampler byte-for-byte; that measured path does not move, because the
+// per-token read is the hot path and a tree scan costs a whole /proc pass
+// per token. The periodic reading attributes memory and GPU figures over the
+// tree for every kind instead (takeSample doc, 2026-10-06).
 // This does not close TTP-107: a shim's tree is still not the server's tree
 // when the server is not its child, and the fix for that is the server
 // declaring its own pid.
@@ -1353,13 +1357,17 @@ func (r *run) newFaultSampler() (procmon.FaultSampler, error) {
 	return s, nil
 }
 
-// warnTreeProcesses says, once per engine run, that its process figures are
-// sums over the engine's process tree rather than one pid (2026-09-15,
-// ExLlamaV3). It is emitted after the sampler stops — r.warn calls Progress,
-// and Options.Progress promises calls serialised with the sampler's events —
-// and only when a reading ever saw more than one process. The sentence stops
+// warnTreeProcesses says, once per run, that its process figures are sums
+// over the server's process tree rather than one pid (2026-09-15, ExLlamaV3;
+// 2026-10-06, every kind — takeSample resolves the tree for them all). It is
+// emitted after the sampler stops — r.warn calls Progress, and
+// Options.Progress promises calls serialised with the sampler's events — and
+// only when a reading ever saw more than one process. The sentence stops
 // where the honesty does: summed RSS can double-count the file pages both
-// processes map, and it does not claim otherwise.
+// processes map, and it does not claim otherwise — and the faults are named
+// only where the fault sampler watches the tree too, which is an engine that
+// named itself (openSampler doc); every other kind still reads one pid per
+// token, and its sentence must not claim those.
 func (r *run) warnTreeProcesses(st *state) {
 	if n := st.firstTreeProcs(); n > 1 {
 		// Without the pid: the sentence is printed on a card people publish,
@@ -1370,7 +1378,11 @@ func (r *run) warnTreeProcesses(st *state) {
 		if n > 2 {
 			children = fmt.Sprintf("%d child processes", n-1)
 		}
-		r.warn("memory, faults and CPU summed over the server and its %s", children)
+		what := "memory and CPU"
+		if r.kind.SelfDeclared() {
+			what = "memory, faults and CPU"
+		}
+		r.warn("%s summed over the server and its %s", what, children)
 	}
 }
 
@@ -1387,9 +1399,6 @@ func (r *run) startSampling(ctx context.Context, st *state) func() {
 		gpus:     r.gpus,
 		client:   r.client,
 		pollSlot: r.props.TotalSlots > 0,
-		// Engine runs sum the process tree (openSampler doc); every other
-		// kind reads one pid, as they always have.
-		tree: r.kind.SelfDeclared(),
 	}
 	go func() {
 		defer close(done)
