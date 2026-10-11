@@ -78,6 +78,8 @@ func TestTextGolden(t *testing.T) {
 		// TTP-178: a DGX Spark. The only golden whose RIG and MEMORY say
 		// unified, read from the GB10's name alone.
 		{"example-gb10", ExampleGB10()},
+		// TTP-208: one builtin image. The only golden carrying the Image row.
+		{"example-image", ExampleImage()},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

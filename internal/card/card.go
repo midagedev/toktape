@@ -478,6 +478,11 @@ func speedSection(s *tape.RunSummary) []string {
 	if line := probeLine(s); line != "" {
 		out = append(out, labelled("", speedLabelW, []string{line})...)
 	}
+	// A run that sent pictures says so, once, under the Prefill row it
+	// qualifies (TTP-208): the server's prompt figures include the image.
+	if parts := ImageParts(s.Images); len(parts) > 0 {
+		out = append(out, field("Image", speedLabelW, " · ", parts...)...)
+	}
 
 	if parts := draftParts(s); len(parts) > 0 {
 		out = append(out, field("Draft", speedLabelW, " · ", parts...)...)
