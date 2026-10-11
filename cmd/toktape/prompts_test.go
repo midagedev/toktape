@@ -30,7 +30,7 @@ func TestParsePromptsJSONL(t *testing.T) {
 		if r0.Name != "sql-1" || len(r0.Prompts) != 1 || r0.Prompts[0].MaxTokens != 0 {
 			t.Errorf("round 0 = %+v", r0)
 		}
-		if got := r0.Prompts[0].Messages; len(got) != 1 || got[0] != (tape.Message{Role: "user", Content: "select the top ten"}) {
+		if got := r0.Prompts[0].Messages; len(got) != 1 || got[0].Role != "user" || got[0].Content != "select the top ten" || len(got[0].Images) != 0 {
 			t.Errorf("a prompt line becomes one user message, got %+v", got)
 		}
 		r1 := rounds[1]

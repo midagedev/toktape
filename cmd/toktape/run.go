@@ -70,6 +70,7 @@ Record flags:
   --prompt TEXT         prompt to send; repeatable, cycled to fill --sessions
   --prompts FILE        a JSONL file, one round of streams per line, e.g.
                         {"name":"sql","prompt":"Write a query that ..."}
+  --image FILE          attach a png, jpeg or webp; builtin is a test image
   --spec-n-max LIST     run the prompt set once per speculative.n_max (e.g. 3,5)
   --temp N              sampling temperature (0 = greedy; unset = server default)
   --no-think            ask a reasoning model not to think (chat only)

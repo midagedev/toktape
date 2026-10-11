@@ -12,6 +12,7 @@ import (
 
 	"github.com/midagedev/toktape/internal/recorder"
 	"github.com/midagedev/toktape/internal/server"
+	"github.com/midagedev/toktape/internal/server/images"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -35,6 +36,9 @@ type promptLine struct {
 	Prompt    *string        `json:"prompt"`
 	Messages  []tape.Message `json:"messages"`
 	MaxTokens *int           `json:"max_tokens"`
+	// Images are paths, or "builtin" (TTP-208). They ride on the line's last
+	// user message; the bytes are read here and never enter the tape.
+	Images []string `json:"images"`
 }
 
 // readPromptsFile opens path and parses it with parsePromptsJSONL.
@@ -116,13 +120,35 @@ func parsePromptLine(body []byte) (recorder.Round, error) {
 			if strings.TrimSpace(m.Role) == "" {
 				return recorder.Round{}, fmt.Errorf(`message %d has no "role"`, i+1)
 			}
+			// The record's own references are not a way to send a picture:
+			// there are no bytes behind them. Pictures go in the line's "images".
+			if len(m.Images) > 0 {
+				return recorder.Round{}, fmt.Errorf(`message %d has "images"; name the pictures in the line's "images" list instead`, i+1)
+			}
 		}
 		msgs = append([]tape.Message(nil), pl.Messages...)
+	case len(pl.Images) > 0:
+		// A line of only pictures asks the fixed question, as --image alone does.
+		msgs = []tape.Message{{Role: "user", Content: images.Question}}
 	default:
 		return recorder.Round{}, errors.New(`needs "prompt" or "messages"`)
 	}
 
 	req := server.StreamRequest{Messages: msgs}
+	if len(pl.Images) > 0 {
+		imgs := make([]server.Image, 0, len(pl.Images))
+		for _, spec := range pl.Images {
+			if strings.TrimSpace(spec) == "" {
+				return recorder.Round{}, errors.New(`"images" has an empty entry`)
+			}
+			img, err := server.LoadImage(spec)
+			if err != nil {
+				return recorder.Round{}, err
+			}
+			imgs = append(imgs, img)
+		}
+		req.AttachImages(imgs...)
+	}
 	if pl.MaxTokens != nil {
 		if *pl.MaxTokens <= 0 {
 			return recorder.Round{}, fmt.Errorf(`"max_tokens" is %d; it must be a positive count`, *pl.MaxTokens)

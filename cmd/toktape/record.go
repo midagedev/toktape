@@ -18,6 +18,7 @@ import (
 	"github.com/midagedev/toktape/internal/ledger"
 	"github.com/midagedev/toktape/internal/recorder"
 	"github.com/midagedev/toktape/internal/server"
+	"github.com/midagedev/toktape/internal/server/images"
 	"github.com/midagedev/toktape/internal/tape"
 	"github.com/midagedev/toktape/internal/tui"
 )
@@ -132,6 +133,7 @@ type recordFlags struct {
 	tag            *string
 	note           *string
 	prompts        *repeatedFlag
+	imageFiles     *repeatedFlag
 	promptsFile    *string
 	specNMax       *string
 	temp           *float64
@@ -151,7 +153,7 @@ type recordFlags struct {
 
 // declareRecordFlags registers the record verb's flags on fs.
 func declareRecordFlags(fs *flag.FlagSet) *recordFlags {
-	f := &recordFlags{prompts: new(repeatedFlag), params: new(repeatedFlag)}
+	f := &recordFlags{prompts: new(repeatedFlag), imageFiles: new(repeatedFlag), params: new(repeatedFlag)}
 	f.url = fs.String("url", "", "server base URL (default: discover)")
 	// The stream count has one name and no short form; see the note above
 	// defaultMaxSessions for why.
@@ -181,6 +183,10 @@ func declareRecordFlags(fs *flag.FlagSet) *recordFlags {
 	f.tag = fs.String("tag", "", "label this run for the experiment log (e.g. ngl=40)")
 	f.note = fs.String("note", "", "a free-text note recorded with the run")
 	fs.Var(f.prompts, "prompt", "prompt to send; repeatable")
+	// The image input mode (TTP-208): a picture sent with the prompt, so a
+	// multimodal server's prefill can be measured. "builtin" is the embedded
+	// test image, which makes `toktape --image builtin` the zero-config check.
+	fs.Var(f.imageFiles, "image", "image to send with the prompt (png, jpeg, webp, or builtin); repeatable")
 	// promptsFile is the multi-prompt run (TTP-31): each JSONL line is its
 	// own round of streams, all in one tape.
 	f.promptsFile = fs.String("prompts", "", "JSONL file, one prompt per line, each sent as its own round")
@@ -251,6 +257,19 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 			msg:  fmt.Sprintf("toktape record: --for %s: a budget cannot be negative", *f.forD),
 			hint: "--for 30s aims the run at thirty seconds; --for 0 turns the clock off",
 		})
+	}
+
+	// The images are read and checked here, before anything contacts a server:
+	// a file the run cannot send is refused by name while the user is looking.
+	imgs, err := loadImages(*f.imageFiles)
+	if err != nil {
+		return c.usagef("toktape record: %v", err)
+	}
+	if len(imgs) > 0 && flagSet(fs, "prompts") {
+		return c.usagef(`toktape record: --image and --prompts are alternatives; name a line's images in the file: {"prompt":"...","images":["builtin"]}`)
+	}
+	if len(imgs) > 0 && *f.endpoint == tape.EndpointCompletion {
+		return c.usagef("toktape record: --image needs --endpoint chat; the completion endpoint sends one raw text prompt")
 	}
 
 	var rounds []recorder.Round
@@ -324,7 +343,7 @@ func runRecord(ctx context.Context, c *cli, args []string) int {
 
 	opts := recorder.Options{
 		BaseURL:      *f.url,
-		Prompts:      promptRequests(*f.prompts),
+		Prompts:      imagePrompts(promptRequests(*f.prompts), imgs),
 		Rounds:       rounds,
 		SpecNMax:     sweep,
 		Concurrency:  *f.sessions,
@@ -684,6 +703,35 @@ func promptRequests(prompts []string) []server.StreamRequest {
 		})
 	}
 	return out
+}
+
+// loadImages reads every --image value, in the order given.
+func loadImages(specs []string) ([]server.Image, error) {
+	out := make([]server.Image, 0, len(specs))
+	for _, spec := range specs {
+		img, err := server.LoadImage(spec)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, img)
+	}
+	return out, nil
+}
+
+// imagePrompts attaches the run's images to every prompt it sends. With images
+// and no --prompt the one prompt is the fixed question, so `--image builtin`
+// alone is a complete run.
+func imagePrompts(reqs []server.StreamRequest, imgs []server.Image) []server.StreamRequest {
+	if len(imgs) == 0 {
+		return reqs
+	}
+	if len(reqs) == 0 {
+		reqs = []server.StreamRequest{{Messages: []tape.Message{{Role: "user", Content: images.Question}}}}
+	}
+	for i := range reqs {
+		reqs[i].AttachImages(imgs...)
+	}
+	return reqs
 }
 
 // sampling is what the sampling flags decided: the parameters every request

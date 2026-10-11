@@ -349,7 +349,11 @@ func TestHelpStaysScannable(t *testing.T) {
 	// failed 125 before this raise. The round first kept 125 by cutting the
 	// --dry-run line that says a run is public and carries its text; that
 	// sentence is a disclosure, so the verb pays its one line here instead.
-	const maxLines = 126
+	// 2026-10-12 (TTP-208): `--image`, one flag line, made it 127 and failed
+	// 126 before this raise (checked first). The flag is how a first-time user
+	// finds the image mode at all; its detail (the prompts-file "images" key)
+	// is in docs/commands.md, so the screen pays one line.
+	const maxLines = 127
 	if n := strings.Count(usageText, "\n"); n > maxLines {
 		t.Errorf("--help is %d lines, over the %d-line budget; move detail into a help topic", n, maxLines)
 	}
