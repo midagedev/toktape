@@ -969,6 +969,42 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "$base/r/$id.json")
 code=$(curl -s -o /dev/null -w '%{http_code}' "$base/r/$id.tape")
 [ "$code" = "404" ] || die "a deleted run's record is still served (got $code)"
 
+say "share publishes the newest tapes once and prints the block"
+# TTP-206: the contributor's one command. Token-owned (the journal home), so
+# it spends nothing of the anonymous budget the next section probes. Two
+# tapes in, two links out; the second share uploads nothing and prints the
+# same links from the receipts.
+# A home of its own with the journal token: the journal home's receipts
+# point at runs the sections above made private or took down.
+mkdir -p "$work/share-runs" "$work/home-share/.toktape"
+cp "$work/home-journal/.toktape/config.toml" "$work/home-share/.toktape/config.toml"
+cp "$repo/assets/hero.tape" "$work/share-runs/hero.tape"
+cp "$repo/internal/tape/testdata/decision-example.tape" "$work/share-runs/decision-example.tape"
+HOME="$work/home-share" "$work/toktape" share -n 2 --yes --out "$work/share-runs" --url "$base" \
+  >"$work/share1.out" 2>"$work/share1.err" </dev/null ||
+  { cat "$work/share1.err"; die "share -n 2 --yes failed"; }
+[ "$(grep -c "^- \[.*\]($base/r/" "$work/share1.out")" = 2 ] ||
+  { cat "$work/share1.out"; die "share did not print two linked lines"; }
+grep -q '?' "$work/share1.out" && { cat "$work/share1.out"; die "the share block prints a ?"; }
+for u in $(grep -o "($base/r/[a-z0-9]*)" "$work/share1.out" | tr -d '()'); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "$u")
+  [ "$code" = "200" ] || { cat "$work/share1.out" "$work/share1.err"; die "a shared link does not open ($u: $code)"; }
+done
+HOME="$work/home-share" "$work/toktape" share -n 2 --yes --out "$work/share-runs" --url "$base" \
+  >"$work/share2.out" 2>"$work/share2.err" </dev/null ||
+  { cat "$work/share2.err"; die "the second share failed"; }
+diff <(grep '^- ' "$work/share1.out") <(grep '^- ' "$work/share2.out") >/dev/null ||
+  { cat "$work/share2.out"; die "the second share's block differs from the first"; }
+grep -qi 'already published' "$work/share2.err" ||
+  { cat "$work/share2.err"; die "the second share does not say the tapes were already published"; }
+# No terminal and no --yes: refused, nothing uploaded. A fresh home has no
+# receipts, so the newest tape counts as new there.
+mkdir -p "$work/home-share-pipe"
+if HOME="$work/home-share-pipe" "$work/toktape" share --out "$work/share-runs" --url "$base" \
+  >"$work/share3.out" 2>"$work/share3.err" </dev/null; then
+  die "share uploaded from a pipe without --yes"
+fi
+
 say "the anonymous limit"
 # Six a minute; the seventh is refused.
 #

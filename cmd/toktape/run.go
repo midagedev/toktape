@@ -50,6 +50,7 @@ Usage:
   toktape log [--out DIR]         the experiment ledger of every run
   toktape compare <a> <b>         diff two runs
   toktape publish <tape> [flags]  upload a run and print its link
+  toktape share [flags]           publish the newest run, print a block to paste
   toktape runs [flags]            list published runs on the service
   toktape show <id|url> [flags]   read one published run
   toktape reindex <id|url>... [flags]  rewrite published rows from their tapes
@@ -211,6 +212,8 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 		return runReindex(ctx, c, rest)
 	case "profile":
 		return runProfile(c, rest)
+	case "share":
+		return runShare(ctx, c, rest)
 	default:
 		c.json = jsonRequested(args)
 		return c.usageTextf(usageText, "toktape: unknown command %q", verb)
@@ -221,7 +224,7 @@ func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
 // `toktape` and `toktape --url ...` both record.
 var verbs = map[string]bool{
 	"record": true, "chat": true, "decide": true, "card": true, "play": true, "render": true,
-	"ls": true, "log": true, "compare": true, "publish": true, "runs": true, "show": true, "reindex": true, "profile": true, "version": true,
+	"ls": true, "log": true, "compare": true, "publish": true, "runs": true, "show": true, "reindex": true, "profile": true, "share": true, "version": true,
 }
 
 // splitVerb picks the verb out of the argument list.

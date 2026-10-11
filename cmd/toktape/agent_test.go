@@ -345,7 +345,11 @@ func TestHelpStaysScannable(t *testing.T) {
 	// 2026-10-02 (TTP-192): `toktape decide` is a verb of its own, and its
 	// one Usage line made the screen 125, which failed 124 before this raise.
 	// Its flags live behind `help decide`, as chat's do.
-	const maxLines = 125
+	// 2026-10-11 (TTP-206): `toktape share`, one Usage line, made it 126 and
+	// failed 125 before this raise. The round first kept 125 by cutting the
+	// --dry-run line that says a run is public and carries its text; that
+	// sentence is a disclosure, so the verb pays its one line here instead.
+	const maxLines = 126
 	if n := strings.Count(usageText, "\n"); n > maxLines {
 		t.Errorf("--help is %d lines, over the %d-line budget; move detail into a help topic", n, maxLines)
 	}

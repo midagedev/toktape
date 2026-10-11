@@ -192,3 +192,32 @@ func TestReceiptsFileShape(t *testing.T) {
 		t.Errorf("store = %+v, want one run stamped after the Remember", rf.Runs)
 	}
 }
+
+// TestReceiptsRememberTheTapeHash (TTP-206): the hash round-trips through
+// Saved, an owned entry carries no key and EntryFor never offers it, and the
+// old two-argument Remember still writes an entry without a hash.
+func TestReceiptsRememberTheTapeHash(t *testing.T) {
+	dir := t.TempDir()
+	if err := RememberTape(dir, Receipt{ID: "a1", URL: "https://t.example/r/a1", DeleteToken: "dt_a"}, "https://t.example", "abc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RememberOwned(dir, Receipt{ID: "o1", URL: "https://t.example/r/o1"}, "https://t.example", "def"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Remember(dir, Receipt{ID: "old", DeleteToken: "dt_o"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Saved(dir)
+	if err != nil || len(got) != 3 {
+		t.Fatalf("Saved = %+v, %v", got, err)
+	}
+	if got[0].TapeSHA256 != "abc" || got[1].TapeSHA256 != "def" || got[2].TapeSHA256 != "" || got[1].URL != "https://t.example/r/o1" {
+		t.Errorf("Saved = %+v", got)
+	}
+	if _, tok, ok := EntryFor(dir, "o1"); ok || tok != "" {
+		t.Error("EntryFor offered a key for a token-owned entry")
+	}
+	if err := RememberOwned(dir, Receipt{ID: "o2"}, "", ""); err == nil {
+		t.Error("RememberOwned accepted an entry with no hash")
+	}
+}

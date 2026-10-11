@@ -66,7 +66,13 @@ func TestRecipeBlockParses(t *testing.T) {
 			}
 		}
 	}
-	if lines < 5 {
-		t.Errorf("the recipe has %d toktape lines, want at least 5", lines)
+	// 2026-10-11 (TTP-206): 5 became 3. The recipe used to carry profile,
+	// decide, record, publish --dry-run and publish; `toktape share` replaced
+	// the profile and publish steps, so decide, record and share are the three
+	// lines left. FAIL-first: the old floor of 5 fails on the new recipe
+	// ("the recipe has 3 toktape lines, want at least 5"). 3 still catches a
+	// recipe whose lines stopped being found at all.
+	if lines < 3 {
+		t.Errorf("the recipe has %d toktape lines, want at least 3", lines)
 	}
 }

@@ -37,6 +37,15 @@ type savedReceipt struct {
 	// rather than any resident setting. Empty is an entry written before
 	// services were recorded and means the default service.
 	Service string `json:"service,omitempty"`
+	// TapeSHA256 is the sha256 of the tape file that was uploaded, hex
+	// (TTP-206): `toktape share` skips a tape this machine already put up,
+	// and the hash is how it knows the file. Empty is an entry from before
+	// the field existed; such an entry cannot be matched to a file.
+	TapeSHA256 string `json:"tape_sha256,omitempty"`
+	// Owned marks a token-owned upload (TTP-206). It has no delete token —
+	// its owner deletes it with the journal token — so the entry exists only
+	// to say "this file is up", and nothing here can take the run down.
+	Owned bool `json:"owned,omitempty"`
 }
 
 // receiptsFile is the whole store's shape.
@@ -110,17 +119,58 @@ func saveReceipts(dir string, rf receiptsFile) error {
 // after the upload was accepted, so a failure to remember is reported by the
 // caller as a warning and never unwinds the publish.
 func Remember(dir string, r Receipt, service string) error {
+	return RememberTape(dir, r, service, "")
+}
+
+// RememberTape is Remember with the sha256 of the tape file that was
+// uploaded, so a later `toktape share` can tell the file is already up.
+func RememberTape(dir string, r Receipt, service, tapeSHA256 string) error {
 	if r.ID == "" || r.DeleteToken == "" {
 		return fmt.Errorf("publish: nothing to remember without an id and a delete token")
 	}
+	return remember(dir, savedReceipt{ID: r.ID, URL: r.URL, DeleteToken: r.DeleteToken, Service: service, TapeSHA256: tapeSHA256, PublishedAt: time.Now().UTC()})
+}
+
+// RememberOwned records a token-owned upload: no delete token, only the
+// fact that this file is up at this link. EntryFor never returns it.
+func RememberOwned(dir string, r Receipt, service, tapeSHA256 string) error {
+	if r.ID == "" || tapeSHA256 == "" {
+		return fmt.Errorf("publish: nothing to remember without an id and a tape hash")
+	}
+	return remember(dir, savedReceipt{ID: r.ID, URL: r.URL, Service: service, TapeSHA256: tapeSHA256, Owned: true, PublishedAt: time.Now().UTC()})
+}
+
+// SavedRun is one remembered upload without its key, for the callers that
+// only need to know what is up and where.
+type SavedRun struct {
+	ID         string
+	URL        string
+	Service    string // "" is the default service
+	TapeSHA256 string // "" for an entry from before the hash was recorded
+}
+
+// Saved lists every remembered upload, keys left out. A corrupt store is an
+// error: a caller that treated it as empty would publish everything again.
+func Saved(dir string) ([]SavedRun, error) {
+	rf, err := loadReceipts(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SavedRun, 0, len(rf.Runs))
+	for _, r := range rf.Runs {
+		out = append(out, SavedRun{ID: r.ID, URL: r.URL, Service: r.Service, TapeSHA256: r.TapeSHA256})
+	}
+	return out, nil
+}
+
+func remember(dir string, entry savedReceipt) error {
 	rf, err := loadReceipts(dir)
 	if err != nil {
 		return err
 	}
-	entry := savedReceipt{ID: r.ID, URL: r.URL, DeleteToken: r.DeleteToken, Service: service, PublishedAt: time.Now().UTC()}
 	replaced := false
 	for i := range rf.Runs {
-		if rf.Runs[i].ID == r.ID {
+		if rf.Runs[i].ID == entry.ID {
 			rf.Runs[i] = entry
 			replaced = true
 			break

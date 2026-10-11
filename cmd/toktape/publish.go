@@ -235,19 +235,27 @@ func runPublish(ctx context.Context, c *cli, args []string) int {
 	// where it was issued.
 	var tokenErr error
 	if receipt.DeleteToken != "" {
-		tokenErr = rememberDeleteToken(receipt, svc.BaseURL)
+		tokenErr = rememberDeleteToken(receipt, svc.BaseURL, tapeHash(files[0]))
+	}
+	// A token-owned upload has no key to file; its hash and link are
+	// remembered so `toktape share` does not publish the file again. A
+	// failure to write that is not worth a line here: nothing is lost but
+	// a skip (TTP-206).
+	if receipt.DeleteToken == "" && svc.Token != "" {
+		_ = rememberUpload(receipt, svc, tapeHash(files[0]))
 	}
 	return c.publishReceipt(receipt, tokenErr)
 }
 
 // rememberDeleteToken files an anonymous upload's delete token and service
-// under ~/.toktape/published.json (publish.Remember).
-func rememberDeleteToken(r *publish.Receipt, service string) error {
+// under ~/.toktape/published.json (publish.RememberTape), with the hash of
+// the tape file so `toktape share` knows the file is up (TTP-206).
+func rememberDeleteToken(r *publish.Receipt, service, tapeSHA string) error {
 	dir, err := config.Dir()
 	if err != nil {
 		return err
 	}
-	return publish.Remember(dir, *r, service)
+	return publish.RememberTape(dir, *r, service, tapeSHA)
 }
 
 // runPublishDelete takes one published run down. The service is the one that
@@ -512,8 +520,16 @@ func (c *cli) publishReceipt(r *publish.Receipt, tokenErr error) int {
 		return exitOK
 	}
 	fmt.Fprintln(c.stdout, r.URL)
+	c.sayDeleteToken(r, tokenErr)
+	return exitOK
+}
+
+// sayDeleteToken tells an anonymous upload's delete token on stderr, with
+// where it was saved or the warning that it was not. A token-owned upload has
+// none and says nothing. `toktape share` says the same words per tape.
+func (c *cli) sayDeleteToken(r *publish.Receipt, tokenErr error) {
 	if r.DeleteToken == "" {
-		return exitOK
+		return
 	}
 	// Printed once, and now also saved (2026-09-20). The old comment here
 	// argued against storing: keeping the token would be "a record nobody
@@ -524,11 +540,10 @@ func (c *cli) publishReceipt(r *publish.Receipt, tokenErr error) int {
 	if tokenErr == nil {
 		fmt.Fprintf(c.stderr, "\nDelete token: %s\nSaved to %s; `toktape publish --delete %s` takes the run down.\n",
 			r.DeleteToken, tildePath(publish.ReceiptsPath(mustConfigDir())), r.ID)
-		return exitOK
+		return
 	}
 	fmt.Fprintf(c.stderr, "\nDelete token: %s\nWarning: could not save it for `toktape publish --delete`: %v.\nThis is the only key to that upload — keep it or lose the ability to take the run down.\n",
 		r.DeleteToken, tokenErr)
-	return exitOK
 }
 
 // mustConfigDir is the config directory for display. The publish that got

@@ -64,6 +64,9 @@ var verbOutputs = map[string][]outputFormat{
 	// delete token. The ledger formats would have to invent a row for
 	// something that is not a measurement, so it takes json alone.
 	"publish": {outputJSON, outputJSONL},
+	// share's product is a paste block; -o json is the same facts as one
+	// array of {file, url, skipped, error}, one row per tape picked.
+	"share": {outputJSON},
 	// runs reads the service's listing: the table by default, the
 	// service's own body under -o json, one run object per line under
 	// -o jsonl. show reads one run: the summary, or the service's body
