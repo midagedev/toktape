@@ -111,6 +111,9 @@ toktape publish ~/.toktape/runs/<id>.toktape --dry-run
 そのまま表示します。公開された実行は
 [tape.midagedev.com](https://tape.midagedev.com) で検索できます。
 
+自分のマシンでの実行を頼まれたら、`toktape share` だけで足ります。最新の実行を
+公開し、issue にそのまま貼れる一行を表示します。
+
 ## ドキュメント
 
 詳細ドキュメントは英語です。

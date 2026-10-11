@@ -111,6 +111,9 @@ A published run is public and carries its text; `--dry-run` prints exactly
 what would go up. Published runs are searchable at
 [tape.midagedev.com](https://tape.midagedev.com).
 
+Asked for a run from your machine? `toktape share` publishes the newest one
+and prints a line to paste back into the issue.
+
 ## Docs
 
 - [How it measures, and how to read the card](docs/measurement.md) — what

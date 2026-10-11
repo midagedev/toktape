@@ -108,6 +108,9 @@ toktape publish ~/.toktape/runs/<id>.toktape --dry-run
 发布出去的运行是公开的，并且带着文本；`--dry-run` 会原样打印将要上传的内容。
 已发布的运行可以在 [tape.midagedev.com](https://tape.midagedev.com) 上搜索。
 
+有人请你提供你机器上的运行结果时，只需 `toktape share`：它发布最新的一次运行，
+并打印一行可以直接贴回 issue 的文字。
+
 ## 文档
 
 详细文档为英文。
