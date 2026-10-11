@@ -19,7 +19,7 @@
 import { avatarPath } from "./author.js";
 import { fail, json, publicBase } from "./http.js";
 import { EMPTY_FIGURE, esc, fmt, head, layout } from "./page.js";
-import { anonBadge, authorOf } from "./run.js";
+import { anonBadge, authorOf, GPU_ID_RE } from "./run.js";
 import { sha256Hex } from "./ids.js";
 
 const PAGE_SIZE = 30;
@@ -844,11 +844,30 @@ function rates(r) {
   }`;
 }
 
-function chip(f, url) {
+// The GPU chips go to the hub page for that card (TTP-204) from the listings
+// that are the whole population: the front page and the hubs themselves. A
+// scoped listing (a user home) keeps the old `?gpu=` filter on its own
+// path, because the hub would drop the scope.
+function gpuHubLink(url, id) {
+  if (!(url.pathname === "/" || url.pathname.startsWith("/hw/"))) return null;
+  if (!GPU_ID_RE.test(id)) return null;
+  const u = new URL(url.href);
+  u.pathname = `/hw/${id}`;
+  u.searchParams.delete("gpu");
+  u.searchParams.delete("cursor");
+  return u.pathname + u.search;
+}
+
+export function chip(f, url) {
   const cls = f.dim ? "fact dim" : "fact";
   const inner = esc(f.shown) + (f.suffix ? `<span class="v">${esc(f.suffix)}</span>` : "");
   if (!f.param || !f.value) return `<span class="${cls}">${inner}</span>`;
   if (url.searchParams.get(f.param) === String(f.value)) return `<span class="fact on">${inner}</span>`;
+  if (f.param === "gpu") {
+    if (url.pathname === `/hw/${f.value}`) return `<span class="fact on">${inner}</span>`;
+    const hub = gpuHubLink(url, String(f.value));
+    if (hub) return `<a class="fact link" href="${esc(hub)}">${inner}</a>`;
+  }
   const u = new URL(url.href);
   u.searchParams.set(f.param, String(f.value));
   u.searchParams.delete("cursor");
@@ -895,7 +914,9 @@ function withoutParam(url, param) {
   return u.pathname + u.search;
 }
 
-export function activeFilters(url) {
+// clearHref is where "Clear all" goes: the front page, except on a hub page
+// (TTP-204), where clearing the filters means the hub itself.
+export function activeFilters(url, clearHref = "/") {
   const params = activeParams(url);
   if (!params.length) return "";
   const links = params
@@ -904,7 +925,7 @@ export function activeFilters(url) {
         `<a class="fact on" href="${esc(withoutParam(url, p))}" title="remove">${esc(filterLabel(p, url))} ×</a>`,
     )
     .join("");
-  return `<div class="active"><span class="k">Narrowed to</span>${links}<a class="clear" href="/">Clear all</a></div>`;
+  return `<div class="active"><span class="k">Narrowed to</span>${links}<a class="clear" href="${esc(clearHref)}">Clear all</a></div>`;
 }
 
 export function filterForm(url, facets) {
@@ -1013,21 +1034,24 @@ export function filterForm(url, facets) {
 </form>`;
 }
 
-async function emptyState(env, url, scope) {
-  const filtered = [...url.searchParams.keys()].some((k) => k !== "cursor");
+// `fixed` names params that are part of where the page is, not a narrowing
+// the visitor chose (the hub's gpu, TTP-204): they never make the empty page
+// "filtered" and are never offered as a way back.
+export async function emptyState(env, url, scope, fixed = []) {
+  const filtered = [...url.searchParams.keys()].some((k) => k !== "cursor" && !fixed.includes(k));
   if (!filtered) {
     return `${EMPTY_FIGURE}<p class="empty">No runs published yet. <code>toktape publish &lt;run.toktape&gt;</code> puts the first one here.</p>`;
   }
-  const back = (await wayBack(env, url, scope)).join(" · ");
+  const back = (await wayBack(env, url, scope, fixed)).join(" · ");
   return `${EMPTY_FIGURE}<p class="empty">No published run matches that. The filters are exact; the search box falls back to the names as they were recorded.${back ? `<br>Try ${back}.` : ""}</p>`;
 }
 
 // One link per active filter, each naming the population that filter hides:
 // a COUNT with that one param removed. Only runs on the empty path, at most
 // five queries, and a removal that still matches nothing is not offered.
-async function wayBack(env, url, scope) {
+async function wayBack(env, url, scope, fixed = []) {
   const out = [];
-  for (const p of activeParams(url).slice(0, 5)) {
+  for (const p of activeParams(url).filter((p) => !fixed.includes(p)).slice(0, 5)) {
     const { where, args } = whereFor(url, scope, p);
     const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM runs WHERE ${where.join(" AND ")}`)
       .bind(...args)

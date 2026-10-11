@@ -9,6 +9,7 @@
 
 import { text } from "./http.js";
 import { esc } from "./page.js";
+import { GPU_ID_RE } from "./run.js";
 
 // Sitemaps allow 50,000 URLs; the service is nowhere near, and a second
 // file is a decision to make when the first one fills.
@@ -42,6 +43,17 @@ export async function sitemap(env, base) {
     .all();
   for (const o of owners.results || []) {
     urls.push(`<url><loc>${esc(base)}/u/${esc(o.h)}</loc></url>`);
+  }
+  // The hub pages (TTP-204): one per card model with at least one public
+  // tape, by gpu_ids membership. A mixed rig lists both its cards; an id the
+  // route would not accept has no page and is left out.
+  const cards = await env.DB.prepare(
+    "SELECT DISTINCT j.value AS v FROM runs, json_each(runs.gpu_ids) j WHERE runs.private = 0 LIMIT ?",
+  )
+    .bind(Math.max(0, SITEMAP_MAX - 1 - rows.length - (owners.results || []).length))
+    .all();
+  for (const c of cards.results || []) {
+    if (typeof c.v === "string" && GPU_ID_RE.test(c.v)) urls.push(`<url><loc>${esc(base)}/hw/${esc(c.v)}</loc></url>`);
   }
   return new Response(
     `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>\n`,

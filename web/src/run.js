@@ -144,7 +144,7 @@ function runPage(row, idx, base) {
     ["size", sizeRow(idx)],
     ["engine", [idx.engine_kind, idx.engine_version].filter(Boolean).join(" ") || "?"],
     ["host", [idx.os, idx.host_class].filter(Boolean).join(" · ") || "?"],
-    ["gpus", idx.gpus_raw && idx.gpus_raw.length ? idx.gpus_raw.join(" / ") : "—"],
+    ["gpus", gpusRow(idx)],
     isDecision(idx)
       ? ["mode", `decision model · POST /v1/systemone${
           idx.decision_req_per_sec ? ` · ${fmt(idx.decision_req_per_sec)} req/s back to back` : ""
@@ -244,7 +244,7 @@ ${rows
   // repo, no normalised id); it says nothing and is left out. "?" stays: it
   // is a value that was not observed, and a reader should see that it wasn't.
   .filter(([, v]) => v !== "—")
-  .map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v mono">${esc(v)}</td></tr>`)
+  .map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v mono">${v && v.html !== undefined ? v.html : esc(v)}</td></tr>`)
   .join("\n")}
 </table>
 
@@ -496,6 +496,28 @@ function shareDescription(idx, row) {
   if (figures.length) s += (s ? " · " : "") + figures.join(" · ");
   s += (s ? ". " : "") + "Replay the run in the browser, read the transcript, or download the record.";
   return s;
+}
+
+// A GPU id the hub page route accepts, as the index normalises one
+// (internal/publish/normalise.go GPUID). Lives here, the lowest module that
+// links to a hub, so the run page, the search chips and the route share it.
+export const GPU_ID_RE = /^[a-z0-9-]+$/;
+
+// The gpus row (TTP-204): each card name that has an id links to its hub
+// page. gpu_ids drops empty ids, so it pairs with gpus_raw by position only
+// when the lengths agree; when they do not, which name lost its id is
+// unknowable and every name stays plain text. Returns a string where nothing
+// links, and {html} (escaped here) where something does.
+function gpusRow(idx) {
+  if (!(idx.gpus_raw && idx.gpus_raw.length)) return "—";
+  const names = idx.gpus_raw.map(String);
+  const ids = Array.isArray(idx.gpu_ids) ? idx.gpu_ids : [];
+  if (ids.length !== names.length || !ids.some((id) => GPU_ID_RE.test(String(id)))) return names.join(" / ");
+  return {
+    html: names
+      .map((n, i) => (GPU_ID_RE.test(String(ids[i])) ? `<a href="/hw/${esc(ids[i])}">${esc(n)}</a>` : esc(n)))
+      .join(" / "),
+  };
 }
 
 // Four identical cards read as "4× NVIDIA RTX A6000", a mixed rig as the

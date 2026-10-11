@@ -270,6 +270,22 @@ curl -fsS "$base/sitemap.xml" >"$work/fetched" && grep -q "<loc>$base/r/$id</loc
 curl -fsS "$base/r/$id.json" >"$work/row.json"
 grep -q '"schema": *1' "$work/row.json" || { cat "$work/row.json"; die "the index row is not there"; }
 
+say "the GPU hub page"
+# TTP-204: the hero tape's card has an id in the index row, its hub page lists
+# this run, the sitemap names the page, and the product alias redirects. The
+# id is read out of the row the client derived, not written down here, so a
+# fixture whose host changes does not turn this into a stale constant.
+gpu="$(grep -o '"gpu_ids": *\["[a-z0-9-]*"' "$work/row.json" | grep -o '[a-z0-9-]*"$' | tr -d '"' | head -n 1)"
+[ -n "$gpu" ] || { cat "$work/row.json"; die "the hero tape's row carries no gpu_ids"; }
+curl -fsS "$base/hw/$gpu" >"$work/hw.html" || die "/hw/$gpu does not answer"
+grep -q "href=\"/r/$id\"" "$work/hw.html" || die "/hw/$gpu does not list the run published on it"
+grep -q "rel=\"canonical\" href=\"$base/hw/$gpu\"" "$work/hw.html" || die "/hw/$gpu has no canonical of its own"
+grep -q 'content="noindex"' "$work/hw.html" && die "a hub page asks not to be indexed"
+curl -fsS "$base/sitemap.xml" >"$work/fetched" && grep -q "<loc>$base/hw/$gpu</loc>" "$work/fetched" || die "the sitemap does not list /hw/$gpu"
+curl -fsS "$base/r/$id" >"$work/page-gpu.html" && grep -q "href=\"/hw/$gpu\"" "$work/page-gpu.html" || die "the run page's gpus line does not link /hw/$gpu"
+alias_out="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$base/hw/dgx-spark?engine=x")"
+[ "$alias_out" = "301 $base/hw/gb10?engine=x" ] || die "/hw/dgx-spark answered '$alias_out', want a 301 to /hw/gb10 with the query kept"
+
 say "the security headers"
 # Set once around the router (web/src/index.js:secured), so the thing worth
 # asserting is not "the front page has them" but "no routed path answers
@@ -431,10 +447,17 @@ curl -fsS "$base/?sort=oldest&limit=10" >"$work/fetched" && grep -q '<option val
 grep -q '<option value="rtx-a6000"' "$work/fetched" || die "the GPU dropdown lists no rtx-a6000"
 # A chip link accumulates the current URL's params, so the href carries the
 # page's own sort/limit beside the gpu — match the filter link, not the URL.
-grep -o '<a class="fact link" href="[^"]*"' "$work/fetched" | grep -q 'gpu=rtx-a6000' ||
+# 2026-10-11 (TTP-204): a GPU chip now links the card's hub page, with the
+# page's own params after it, instead of `?gpu=`. Same two chips required;
+# only the target moved, and the old `?gpu=` link is asserted absent below so
+# the listing cannot quietly keep both. FAIL-first: the pre-change code
+# renders `?gpu=rtx-a6000` and fails the first match.
+grep -o '<a class="fact link" href="[^"]*"' "$work/fetched" | grep -q 'href="/hw/rtx-a6000[?"]' ||
   die "the mixed row wears no rtx-a6000 chip"
-grep -o '<a class="fact link" href="[^"]*"' "$work/fetched" | grep -q 'gpu=rtx-3090' ||
+grep -o '<a class="fact link" href="[^"]*"' "$work/fetched" | grep -q 'href="/hw/rtx-3090[?"]' ||
   die "the mixed row wears no rtx-3090 chip"
+grep -o '<a class="fact link" href="[^"]*"' "$work/fetched" | grep -q 'gpu=rtx-' &&
+  die "a GPU chip still links ?gpu= instead of the hub page"
 # Harness row, harness cleanup: the listing below must see only real publishes.
 npx wrangler d1 execute toktape --local --command "DELETE FROM runs WHERE id = 'mixedrig000000000000'" \
   >"$work/mixed-clean.log" 2>&1 || { cat "$work/mixed-clean.log"; die "could not clean up the mixed-rig harness row"; }

@@ -18,6 +18,7 @@ import { serveAvatar } from "./author.js";
 import { replaceCard } from "./card.js";
 import { deleteRun } from "./del.js";
 import { editRun } from "./edit.js";
+import { serveHubPage } from "./hw.js";
 import { fail, json, publicBase } from "./http.js";
 import { serveCard, serveRunJSON, serveRunPage, serveTape } from "./run.js";
 import { searchAPI, searchPage } from "./search.js";
@@ -32,6 +33,8 @@ const TAPE_SUFFIX = /^\/r\/([a-z0-9]{8,64})(\.toktape|\.tape)$/;
 const RUN_JSON = /^\/r\/([a-z0-9]{8,64})\.json$/;
 const RUN_CARD = /^\/r\/([a-z0-9]{8,64})\.png$/;
 const RUN_PAGE = /^\/r\/([a-z0-9]{8,64})$/;
+// The hub page of one GPU model (TTP-204): the id as the index normalises it.
+const HW_PAGE = /^\/hw\/([a-z0-9-]+)$/;
 const RUN_API = /^\/api\/v1\/runs\/([a-z0-9]{8,64})$/;
 // The owner replacing a published run's card with one its client redrew
 // from the record (a reindex's other half, card.js). The Worker still never
@@ -130,6 +133,7 @@ async function route(request, env) {
   if ((m = RUN_PAGE.exec(path))) return serveRunPage(m[1], env, publicBase(request, env));
   if ((m = USER_JSON.exec(path))) return serveUserJSON(m[1], request, env);
   if ((m = USER_PAGE.exec(path))) return serveUserPage(m[1], request, env);
+  if ((m = HW_PAGE.exec(path))) return serveHubPage(m[1], request, env);
 
   // The front page is the search: the thing a visitor came for is other
   // people's runs, not an explanation of the service. Amended 2026-09-19 —
