@@ -31,6 +31,12 @@ func newShareHub(t *testing.T, failOn int) *shareHub {
 	t.Helper()
 	h := &shareHub{failOn: failOn}
 	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			// share's check of a remembered link (TTP-207): a public run,
+			// and not an upload, so calls still counts uploads only.
+			fmt.Fprint(w, `{"id":"x","private":false}`)
+			return
+		}
 		h.mu.Lock()
 		h.calls++
 		n := h.calls
@@ -524,5 +530,144 @@ func TestPublishLetsShareSkipTheFile(t *testing.T) {
 	code, stdout, _ := exec(t, "share", "--out", dir, "--url", hub.srv.URL, "--yes")
 	if code != exitOK || hub.count() != 1 || !strings.Contains(stdout, "/r/id1") {
 		t.Errorf("share after publish: exit %d, %d uploads\n%s", code, hub.count(), stdout)
+	}
+}
+
+// TTP-207: share checks a remembered link once before it puts it in the
+// block. runHub numbers its uploads (up1, up2, ...) and answers GET
+// /r/<id>.json with whatever the test set.
+type runHub struct {
+	mu      sync.Mutex
+	uploads int
+	gets    map[string]int
+	status  int
+	private bool
+	srv     *httptest.Server
+}
+
+func newRunHub(t *testing.T) *runHub {
+	t.Helper()
+	h := &runHub{gets: map[string]int{}, status: 200}
+	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if r.Method == http.MethodGet {
+			h.gets[r.URL.Path]++
+			if h.status != 200 {
+				http.Error(w, "nope", h.status)
+				return
+			}
+			fmt.Fprintf(w, `{"id":"x","private":%v}`, h.private)
+			return
+		}
+		h.uploads++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"id":           fmt.Sprintf("up%d", h.uploads),
+			"url":          fmt.Sprintf("https://tape.example/r/up%d", h.uploads),
+			"delete_token": "dt",
+		})
+	}))
+	t.Cleanup(h.srv.Close)
+	return h
+}
+
+// seeded publishes one tape through share, so a receipt (up1) is remembered,
+// then lets the test set how the hub answers the check.
+func seeded(t *testing.T) (*runHub, string, string) {
+	t.Helper()
+	home := publishHome(t, "")
+	shareTerminal(t, false, "")
+	hub := newRunHub(t)
+	dir := t.TempDir()
+	shareTape(t, dir, "20260913-100000-a", "rig", nil)
+	if code, _, stderr := exec(t, "share", "--out", dir, "--url", hub.srv.URL, "--yes"); code != exitOK {
+		t.Fatalf("seed: exit %d: %s", code, stderr)
+	}
+	if hub.uploads != 1 || len(hub.gets) != 0 {
+		t.Fatalf("seed: %d uploads, gets %v", hub.uploads, hub.gets)
+	}
+	return hub, dir, filepath.Join(filepath.Dir(home), "published.json")
+}
+
+func TestShareRemembersARunThatIsGone(t *testing.T) {
+	hub, dir, store := seeded(t)
+	hub.status = 404
+	code, stdout, stderr := exec(t, "share", "--out", dir, "--url", hub.srv.URL, "--yes")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if hub.uploads != 2 {
+		t.Errorf("uploads = %d, want 2 (published again)", hub.uploads)
+	}
+	if !strings.Contains(stderr, "toktape share: 20260913-100000-a is no longer on "+serviceHost(hub.srv.URL)+"; publishing it again") {
+		t.Errorf("no 'no longer on' line:\n%s", stderr)
+	}
+	if strings.Contains(stdout, "/r/up1") || !strings.Contains(stdout, "/r/up2") {
+		t.Errorf("the block carries the old link or lacks the new one:\n%s", stdout)
+	}
+	b, _ := os.ReadFile(store)
+	if strings.Contains(string(b), `"up1"`) {
+		t.Errorf("the dead receipt is still remembered:\n%s", b)
+	}
+	if hub.gets["/r/up1.json"] != 1 {
+		t.Errorf("gets = %v, want one for up1", hub.gets)
+	}
+}
+
+// A private run is unlisted: out of the search, and its link still opens
+// (web/src/run.js), so its link stays in the block and nothing is
+// published again (lead, 2026-10-12: the first cut of TTP-207 left it out).
+func TestShareKeepsAPrivateRunsLink(t *testing.T) {
+	hub, dir, _ := seeded(t)
+	hub.private = true
+	code, stdout, stderr := exec(t, "share", "--out", dir, "--url", hub.srv.URL, "--yes")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if hub.uploads != 1 {
+		t.Errorf("uploads = %d, want 1 (a private run is up)", hub.uploads)
+	}
+	if !strings.Contains(stdout, "/r/up1") || !strings.Contains(stderr, "already published") {
+		t.Errorf("the private run's link left the block:\n%s\n%s", stdout, stderr)
+	}
+	if strings.Contains(stderr, "is private on") {
+		t.Errorf("a private run was treated as gone:\n%s", stderr)
+	}
+}
+
+func TestShareKeepsTheLinkWhenTheCheckFails(t *testing.T) {
+	hub, dir, _ := seeded(t)
+	hub.status = 500
+	for _, extra := range [][]string{{"--yes"}, {"--dry-run"}} {
+		args := append([]string{"share", "--out", dir, "--url", hub.srv.URL}, extra...)
+		code, stdout, stderr := exec(t, args...)
+		if code != exitOK {
+			t.Fatalf("%v: exit %d: %s", extra, code, stderr)
+		}
+		if hub.uploads != 1 {
+			t.Errorf("%v: uploads = %d, want 1", extra, hub.uploads)
+		}
+		if !strings.Contains(stdout, "/r/up1") {
+			t.Errorf("%v: the old link is not in the block:\n%s", extra, stdout)
+		}
+		if !strings.Contains(stderr, "toktape share: could not check 20260913-100000-a (") || !strings.Contains(stderr, "); keeping its link") {
+			t.Errorf("%v: no 'could not check' line:\n%s", extra, stderr)
+		}
+	}
+}
+
+func TestSharePublicRememberedRunIsCheckedOnce(t *testing.T) {
+	hub, dir, _ := seeded(t)
+	code, stdout, stderr := exec(t, "share", "--out", dir, "--url", hub.srv.URL, "--yes")
+	if code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if hub.uploads != 1 || hub.gets["/r/up1.json"] != 1 || len(hub.gets) != 1 {
+		t.Errorf("uploads %d, gets %v; want 1 upload and one GET for up1", hub.uploads, hub.gets)
+	}
+	if !strings.Contains(stdout, "/r/up1") || !strings.Contains(stderr, "already published") {
+		t.Errorf("unchanged behaviour lost:\n%s\n%s", stdout, stderr)
 	}
 }

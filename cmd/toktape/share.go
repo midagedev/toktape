@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -75,6 +76,8 @@ type sharePick struct {
 	idx  publish.Index
 	// link is the remembered link of a tape already up, "" for one to upload.
 	link string
+	// rid is the run id of that remembered receipt.
+	rid string
 }
 
 // shareResult is one row of what happened, in pick order.
@@ -194,11 +197,31 @@ func runShare(ctx context.Context, c *cli, args []string) int {
 		policy = publish.WithoutText
 	}
 	var todo []*sharePick
+	client := &publish.Client{BaseURL: svc.BaseURL, Token: svc.Token, UserAgent: "toktape/" + version}
+	host := serviceHost(svc.BaseURL)
 	for _, p := range picks {
 		for _, s := range saved {
 			if s.TapeSHA256 != "" && s.TapeSHA256 == p.sha && sameService(svc.BaseURL, firstSet(s.Service, publish.DefaultBaseURL)) {
 				p.link = firstSet(s.URL, svc.BaseURL+"/r/"+s.ID)
+				p.rid = s.ID
 				break
+			}
+		}
+		if p.link != "" {
+			// One read per remembered link: the run may have been deleted or
+			// taken down since, and the block must not hand out a dead link
+			// (TTP-207). A private run stays: private is unlisted, out of the
+			// search, and its link still opens (web/src/run.js).
+			_, rerr := client.Run(ctx, p.rid)
+			switch {
+			case errors.Is(rerr, publish.ErrRunNotFound):
+				if ferr := publish.Forget(receiptsDir, p.rid); ferr != nil {
+					fmt.Fprintf(c.stderr, "toktape: could not drop the receipt for %s: %v\n", p.rid, ferr)
+				}
+				fmt.Fprintf(c.stderr, "toktape share: %s is no longer on %s; publishing it again\n", p.id, host)
+				p.link, p.rid = "", ""
+			case rerr != nil:
+				fmt.Fprintf(c.stderr, "toktape share: could not check %s (%s); keeping its link\n", p.id, shortReason(rerr))
 			}
 		}
 		if p.link == "" {
@@ -240,7 +263,6 @@ func runShare(ctx context.Context, c *cli, args []string) int {
 		if code := c.shareConfirm(cfg, todo, opts, svc, *yes); code != exitOK {
 			return code
 		}
-		client := &publish.Client{BaseURL: svc.BaseURL, Token: svc.Token, UserAgent: "toktape/" + version}
 		for _, p := range picks {
 			r := shareResult{File: p.path, pick: p}
 			switch {
@@ -567,4 +589,16 @@ func hubGPUNames(raw []string) string {
 		return fmt.Sprintf("%d× %s", len(raw), raw[0])
 	}
 	return strings.Join(raw, " / ")
+}
+
+// shortReason is the last clause of an error, cut to one short line.
+func shortReason(err error) string {
+	m := err.Error()
+	if i := strings.LastIndex(m, ": "); i >= 0 && len(m)-i > 12 {
+		m = m[i+2:]
+	}
+	if len(m) > 80 {
+		m = m[:80] + "…"
+	}
+	return m
 }
