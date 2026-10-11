@@ -174,6 +174,8 @@ grep -q '<p>Second paragraph.</p>' "$work/page2.html" || die "the note's second 
 # than being widened — an author link is a stranger's URL typed into an
 # anonymous upload, and `nofollow ugc` is how a page says so to a crawler.
 grep -q 'rel="nofollow ugc noopener"' "$work/page2.html" || die "the author link carries no rel"
+# TTP-199: the link preview names the recorder, in the title where X shows it.
+grep -q '<meta property="og:title" content="[^"]* · by Lab Rat">' "$work/page2.html" || die "the profiled page's og:title does not carry 'by Lab Rat'"
 # The row and the API carry the author, the title and the note beside them.
 curl -fsS "$base/api/v1/runs" >"$work/list2.json"
 grep -q '"title":"First ik_llama sweep"' "$work/list2.json" || { cat "$work/list2.json"; die "the listing carries no title"; }
@@ -217,6 +219,7 @@ url4="$(tr -d '\r\n' <"$work/receipt4")"; id4="${url4##*/}"
 curl -fsS "$base/r/$id4" >"$work/page4.html"
 grep -q 'class="avatar"' "$work/page4.html" && die "a --no-profile page carries an avatar"
 grep -q 'Lab Rat' "$work/page4.html" && die "a --no-profile page names the profile"
+grep -q '<meta property="og:title" content="[^"]* · by ' "$work/page4.html" && die "a --no-profile page's og:title credits someone"
 
 say "the record comes back as a run file"
 curl -fsS "$base/r/$id.toktape" -o "$work/downloaded.tape"

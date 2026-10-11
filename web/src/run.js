@@ -183,7 +183,7 @@ function runPage(row, idx, base) {
   const heading = row.title || title;
   const sub = row.title ? `${title} · ${summaryLine(idx)}` : summaryLine(idx);
   return layout({
-    title: `${shareTitle(idx, title, row.title)} — toktape`,
+    title: `${shareTitle(idx, title, row.title, row.author_name)} — toktape`,
     // The preview is the card. Its title leads with the figure, because the
     // figure is what the post is about and X truncates a title after two
     // lines on a phone; the description carries the rest of the sentence.
@@ -192,7 +192,7 @@ function runPage(row, idx, base) {
     // never promises a preview that 404s. An unlisted run asks the index to
     // leave it out, in the head as well as in the header (§9.3).
     meta: head({
-      title: shareTitle(idx, title, row.title),
+      title: shareTitle(idx, title, row.title, row.author_name),
       description: shareDescription(idx, row),
       url: pageURL,
       image: row.card_key ? `${pageURL}.png` : "",
@@ -443,7 +443,11 @@ function caveatBlock(idx) {
 // the file name alone was not. The note's title, when set, is appended
 // after a dash — never leading, because X truncates after two lines and
 // the figure stays first.
-function shareTitle(idx, fallback, noteTitle) {
+// The recorder's name, when the upload gave one, closes the title (TTP-199):
+// X shows the title over the image and often drops the description, so the
+// credit has to be here. Appended, never leading. Unverified and user-typed;
+// head() escapes it. No name, no credit — never the token handle.
+function shareTitle(idx, fallback, noteTitle, authorName) {
   const parts = [];
   if (isDecision(idx)) {
     if (idx.decision_p50_ms) parts.push(`${fmt(idx.decision_p50_ms)} ms p50 decision`);
@@ -456,7 +460,8 @@ function shareTitle(idx, fallback, noteTitle) {
   // "Qwen2.5-7B-Instruct-Q3_K_M" followed by "Q3_K_M" said it twice.
   if (idx.quant_raw && !name.toLowerCase().includes(String(idx.quant_raw).toLowerCase())) parts.push(idx.quant_raw);
   const head = parts.join(" · ");
-  return noteTitle ? `${head} — ${noteTitle}` : head;
+  const titled = noteTitle ? `${head} — ${noteTitle}` : head;
+  return authorName ? `${titled} · by ${authorName}` : titled;
 }
 
 // The preview's second line: where and how, then what the reader can do
@@ -481,6 +486,13 @@ function shareDescription(idx, row) {
   if (idx.ttft_p50_ms) figures.push(`ttft p50 ${fmt(idx.ttft_p50_ms)} ms`);
   if (idx.caveat_count) figures.push(`${idx.caveat_count} caveat${idx.caveat_count === 1 ? "" : "s"}`);
   let s = parts.join(" ");
+  // The credit opens the same sentence (TTP-199): "Recorded by Lab Rat on
+  // GB10 with …", or "…, 2 concurrent streams on …" when the streams lead.
+  // A sentence of its own would leave the next one starting "on GB10".
+  if (row.author_name) {
+    const by = `Recorded by ${row.author_name}`;
+    s = s ? `${by}${s.startsWith("on ") ? " " : ", "}${s}` : by;
+  }
   if (figures.length) s += (s ? " · " : "") + figures.join(" · ");
   s += (s ? ". " : "") + "Replay the run in the browser, read the transcript, or download the record.";
   return s;
