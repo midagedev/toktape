@@ -106,13 +106,15 @@ release:
     lists itself in nvidia-smi but answers `[N/A]` for memory, and its CPU
     and GPU share the host's RAM; an Apple Silicon GPU shares it the same
     way. The card had no word for either: a Mac read `VRAM ?` and "all in
-    host RAM" for a model that ran on Metal. Now the RIG line reads
-    `GB10 · NVIDIA Grace (…) · 122 GB unified`, MEMORY names the one pool
+    host RAM" for a model that ran on Metal. Now the RIG line ends
+    `122 GB unified` on a Spark and `32 GB unified` on a 32 GB Mac, MEMORY
+    names the one pool
     and counts its bytes once, and no "from RAM" clause names a bus that
     is not there. The card decides this from the part names a tape already
     carries, so a tape recorded with v0.7.1 gets the new card when it is
     published or re-rendered with this release. Checked against a real
-    Spark's nvidia-smi answers (driver 595.84) and a real M1 Pro run.
+    Spark's nvidia-smi answers (driver 595.84) and a real M1 Pro run. A
+    Spark's CPU still prints `?`: aarch64 Linux reports no CPU model name.
 
     **A decision tape says what it publishes.** The dry-run read "text
     nothing" for a decision tape that carried every request and response
