@@ -184,6 +184,11 @@ type RunSummary struct {
 	// the tape says whether they did. Empty is not a defect; it means this
 	// run is not in a comparison set, which is the truth about most runs.
 	PromptSet string `json:"prompt_set,omitempty"`
+	// Images are the distinct pictures the run's requests carried, in
+	// first-seen order, de-duplicated by sha256 (TTP-208, lead 2026-10-12).
+	// The card reads them from here because it reads a summary and nothing
+	// else; the per-request references stay on the messages. Never pixels.
+	Images []ImageRef `json:"images,omitempty"`
 	// PromptTrimChars is how many characters of each set prompt this run
 	// actually sent, when it sent a prefix rather than the whole thing
 	// (TTP-144, lead, 2026-09-20). 0 means no trim: the prompts went whole.
@@ -1526,10 +1531,21 @@ func (s *RunSummary) IsChat() bool {
 	return s != nil && s.Mode == ModeChat
 }
 
-// Message is one chat message.
+// Message is one chat message. Images are the pictures sent with it, as their record: the pixels never enter a tape.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string     `json:"role"`
+	Content string     `json:"content"`
+	Images  []ImageRef `json:"images,omitempty"`
+}
+
+// ImageRef is one image a request carried (TTP-208): what it was, never its bytes.
+type ImageRef struct {
+	Name   string `json:"name"`   // "builtin" or the file's base name
+	SHA256 string `json:"sha256"` // of the bytes sent
+	Bytes  int    `json:"bytes"`
+	MIME   string `json:"mime"`            // image/png, image/jpeg, image/webp
+	Width  int    `json:"width,omitempty"` // 0: not decoded
+	Height int    `json:"height,omitempty"`
 }
 
 // TokenEvent is one generated token. T is time since the request was sent.
