@@ -87,6 +87,7 @@ func (r *run) reduce(recs []tape.RequestRecord, st *state, startedAt, finishedAt
 		Memory:      mem,
 		Concurrency: concurrency,
 		PromptSet:   r.promptSet,
+		Images:      imagesOf(recs),
 		// What the plan did to the set before the first request went out
 		// (lead, 2026-09-20): the salt line, whole, exactly as sent, and
 		// the token length every set prompt was cut to — 0 when whole.
@@ -637,4 +638,23 @@ func floatOf(v any) (float64, bool) {
 		return f, err == nil
 	}
 	return 0, false
+}
+
+// imagesOf is RunSummary.Images: the distinct pictures the requests carried,
+// by sha256, in the order first seen (TTP-208). nil for a text-only run, so
+// its tape is byte-identical to before.
+func imagesOf(recs []tape.RequestRecord) []tape.ImageRef {
+	var out []tape.ImageRef
+	seen := map[string]bool{}
+	for _, rec := range recs {
+		for _, m := range rec.Prompt.Messages {
+			for _, ref := range m.Images {
+				if !seen[ref.SHA256] {
+					seen[ref.SHA256] = true
+					out = append(out, ref)
+				}
+			}
+		}
+	}
+	return out
 }

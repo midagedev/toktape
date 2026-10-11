@@ -255,11 +255,11 @@ func TestChatHistoryGrowsTurnByTurn(t *testing.T) {
 	}
 	got := srv.sentMessages(t)
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("messages sent:\n%q\nwant\n%q", got, want)
+		t.Fatalf("messages sent:\n%+v\nwant\n%+v", got, want)
 	}
 	hist := s.History()
 	if len(hist) != 6 || hist[5].Content != "Answer number 3." {
-		t.Errorf("History = %q, want three exchanges ending in the third answer", hist)
+		t.Errorf("History = %+v, want three exchanges ending in the third answer", hist)
 	}
 	for _, m := range hist {
 		if strings.Contains(m.Content, "asks again") {
@@ -527,10 +527,10 @@ func TestChatCancelMidTurn(t *testing.T) {
 		{Role: "assistant", Content: "Answer number 2."},
 	}
 	if !reflect.DeepEqual(h, want) {
-		t.Errorf("History = %q, want %q", h, want)
+		t.Errorf("History = %+v, want %+v", h, want)
 	}
 	if msgs := srv.sentMessages(t); len(msgs) != 2 || !reflect.DeepEqual(msgs[1], want[:3]) {
-		t.Errorf("turn 2 sent %q, want the partial answer in its history", msgs)
+		t.Errorf("turn 2 sent %+v, want the partial answer in its history", msgs)
 	}
 	tp, err := s.Close()
 	if err != nil {

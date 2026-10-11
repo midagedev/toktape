@@ -139,6 +139,9 @@ func Record(ctx context.Context, opts Options) (*tape.Tape, error) {
 	if err := r.checkSlots(); err != nil {
 		return nil, err
 	}
+	if err := r.checkVision(); err != nil {
+		return nil, err
+	}
 	r.collectModel()
 	r.collectProcess()
 	r.collectHost(ctx)
@@ -402,6 +405,60 @@ func (r *run) checkSlots() error {
 		return nil
 	}
 	return &SlotsError{Sessions: r.opts.Concurrency, Slots: slots, URL: r.client.BaseURL()}
+}
+
+// ErrNoVision is returned when the run sends images and /props says the server
+// takes none (TTP-208). The run is refused before a request goes out: a server
+// without a multimodal projector answers an image with an error, or worse,
+// ignores it, and either way the figures would not be the image's.
+var ErrNoVision = errors.New("recorder: the server takes no images")
+
+// VisionError is ErrNoVision with the URL in it. Its sentence is the one the
+// user reads, after "toktape: ".
+type VisionError struct{ URL string }
+
+func (e *VisionError) Error() string {
+	return fmt.Sprintf("the server at %s takes no images (llama-server: start it with --mmproj <file>)", e.URL)
+}
+
+// Is makes errors.Is(err, ErrNoVision) true for a *VisionError.
+func (e *VisionError) Is(target error) bool { return target == ErrNoVision }
+
+// sendsImages reports whether any request the run will send carries an image.
+func (o Options) sendsImages() bool {
+	for _, p := range o.Prompts {
+		if p.HasImages() {
+			return true
+		}
+	}
+	for _, rd := range o.Rounds {
+		for _, p := range rd.Prompts {
+			if p.HasImages() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// checkVision is the image gate: /props "modalities.vision" false refuses the
+// run, true passes it, and absent (an older build, another engine, an
+// OpenAI-generic server with no /props at all) sends anyway and says on the
+// card that vision was not confirmed. Unknown is never read as no — a refusal
+// on a missing key would lock out every engine that never reports one — and
+// never as yes, which is what the caveat is for.
+func (r *run) checkVision() error {
+	if !r.opts.sendsImages() {
+		return nil
+	}
+	if vision, ok := r.props.Vision(); ok {
+		if !vision {
+			return &VisionError{URL: r.client.BaseURL()}
+		}
+		return nil
+	}
+	r.warn("the server did not say whether it takes images (no modalities in /props); the images were sent anyway")
+	return nil
 }
 
 // shapeOpenAIRequests adapts built requests to an OpenAI-compatible server
@@ -1179,6 +1236,7 @@ func (r *run) collectTemplate(ctx context.Context, reqs []server.StreamRequest) 
 	if failed > 0 {
 		r.warnTemplateFailures(failed, templated)
 	}
+	r.warnImagesNotRendered(reqs, templated-failed)
 	r.describeTemplate(&reqs[0])
 }
 
@@ -1205,6 +1263,28 @@ func (r *run) renderPrompts(ctx context.Context, reqs []server.StreamRequest) (f
 		reqs[i].RenderedPrompt = rendered
 	}
 	return failed, templated
+}
+
+// warnImagesNotRendered says that the recorded RenderedPrompt is text only
+// (TTP-208): /apply-template takes messages, not pictures, so the rendered
+// prompt of an image run leaves them out while the model saw them. rendered is
+// how many prompts were actually rendered; with none there is no text to
+// qualify. N is the largest number of images one request carried.
+func (r *run) warnImagesNotRendered(reqs []server.StreamRequest, rendered int) {
+	if rendered <= 0 {
+		return
+	}
+	most := 0
+	for _, q := range reqs {
+		n := 0
+		for _, m := range q.Messages {
+			n += len(m.Images)
+		}
+		most = max(most, n)
+	}
+	if most > 0 {
+		r.warn("the rendered prompt omits the %d image(s) the model also saw", most)
+	}
 }
 
 // warnTemplateFailures is the one sentence for prompts the template route
