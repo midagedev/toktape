@@ -102,27 +102,24 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **`toktape share`: one command from a run to a link in an issue.** A
-    project that asks someone with rare hardware for a tape used to hand
-    them five steps. Now it is install, record, `toktape share`, paste.
-    share takes the newest run (or `-n N`), asks for a name and a link the
-    first time, shows what would leave the machine, asks once, publishes,
-    and prints one Markdown line per run, copied to the clipboard. It
-    never publishes a chat tape, refuses to upload from a pipe without
-    `--yes`, and skips a run this machine already published. Runs
-    published before this release cannot be matched to their files, and
-    share says so.
+    **A publish from a script never hangs.** A first publish run over ssh
+    with no input but a controlling terminal in the background opened
+    the terminal to ask, took SIGTTIN and stopped; a stopped process does
+    not hear `timeout`. toktape now asks only when it holds the terminal's
+    foreground, and otherwise refuses at once with "no terminal to
+    confirm on" and the `--yes` hint. The clipboard's terminal write has
+    the same guard.
 
-    **An ARM host names its CPU.** aarch64 Linux reports no CPU model
-    name, so a DGX Spark's card read `GB10 · ? · 122 GB unified`. The
-    name now comes from the implementer and part each core reports, with
-    the kernel's own names: `10× Cortex-X925 + 10× Cortex-A725`. An
-    unknown part prints the value read, never a guessed family. Tapes
-    recorded before this release keep their `?`.
+    **A model file named by an engine's `-m` is read.** A server that
+    declares its own engine (bloomery) reported only a bare file name, so
+    the tape had no path, size or quant and the hub printed `?`. The
+    recorder now reads `-m` from the server's command line, resolves it
+    against the server's working directory, and reads the file's size and
+    GGUF header. When the file cannot be read, the hub takes the quant
+    from the file name; re-publishing an earlier tape repairs it.
 
-    For maintainers: `docs/publish.md` has a three-line block to paste
-    into an issue, and the hub has a page per GPU model
-    (`tape.midagedev.com/hw/gb10`).
+    **RAM says GiB.** The card divided RAM by 2^30 and printed "GB"; it
+    now prints "GiB" (`122 GiB unified`, `252 GiB`).
 
   footer: |
     ## Install
