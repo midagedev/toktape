@@ -89,6 +89,8 @@ func PublicView(t *tape.Tape, policy TextPolicy) *tape.Tape {
 
 	if policy == WithoutText {
 		out.Requests = withoutText(out.Requests)
+		// The summary lists the same pictures for the card: the same rule.
+		s.Images = anonymousImages(s.Images)
 		out.Decisions = withoutDecisionText(out.Decisions)
 	}
 	// A published tape tells the instant, never the time zone (§9.3,
@@ -276,7 +278,7 @@ func sentTheSet(recs []tape.RequestRecord, s *tape.RunSummary) bool {
 func withoutText(recs []tape.RequestRecord) []tape.RequestRecord {
 	out := make([]tape.RequestRecord, len(recs))
 	for i, r := range recs {
-		r.Prompt.Messages = nil
+		r.Prompt.Messages = imageCarriers(r.Prompt.Messages)
 		r.Prompt.RenderedPrompt = ""
 		r.Prompt.Completion = ""
 		r.Prompt.Reasoning = ""
@@ -287,6 +289,39 @@ func withoutText(recs []tape.RequestRecord) []tape.RequestRecord {
 		}
 		r.Tokens = toks
 		out[i] = r
+	}
+	return out
+}
+
+// imageCarriers is what is left of a request's messages when its text goes
+// (TTP-208): nothing for a text-only request, and for one that sent pictures a
+// message per picture-bearing turn with its role and its references and no
+// words. The references are hash, size, type and dimensions — not text, and not
+// pixels — so they stay; a file's name is the one part that is a person's, so
+// it becomes "image". The built-in image's name is ours and stays.
+func imageCarriers(msgs []tape.Message) []tape.Message {
+	var out []tape.Message
+	for _, m := range msgs {
+		if len(m.Images) == 0 {
+			continue
+		}
+		out = append(out, tape.Message{Role: m.Role, Images: anonymousImages(m.Images)})
+	}
+	return out
+}
+
+// anonymousImages copies refs with a file's name cut to "image"; the
+// built-in's name is ours and stays.
+func anonymousImages(refs []tape.ImageRef) []tape.ImageRef {
+	if refs == nil {
+		return nil
+	}
+	out := make([]tape.ImageRef, len(refs))
+	for i, ref := range refs {
+		if ref.Name != "builtin" {
+			ref.Name = "image"
+		}
+		out[i] = ref
 	}
 	return out
 }

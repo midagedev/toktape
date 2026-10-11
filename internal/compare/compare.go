@@ -16,6 +16,7 @@ package compare
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -116,7 +117,9 @@ func sameOpening(a, b *tape.Tape) bool {
 		return false
 	}
 	for i := range ma {
-		if ma[i] != mb[i] {
+		// Field by field: a message carries a slice of image references now
+		// (TTP-208), so it is no longer comparable with ==.
+		if ma[i].Role != mb[i].Role || ma[i].Content != mb[i].Content || !slices.Equal(ma[i].Images, mb[i].Images) {
 			return false
 		}
 	}

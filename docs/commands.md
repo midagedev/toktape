@@ -74,3 +74,35 @@ toktape render ~/.toktape/runs/<id>.toktape
 toktape render ~/.toktape/runs/<id>.toktape --mp4 clip.mp4 --cast clip.cast
 ```
 
+## Images
+
+`toktape --image FILE` sends a picture with the prompt, so a multimodal
+server's prefill can be measured with the picture in it. It is repeatable and
+takes png, jpeg or webp up to 20 MB; any other file is refused by name before
+the run. `--image builtin` sends a small test image embedded in the binary (a
+red circle top left, a green triangle in the centre, a blue square bottom
+right, and one line of text), so `toktape --image builtin` is a complete
+check with no file and no flag to learn. With no `--prompt` the question is
+`Describe this image in detail: every object, its colour and where it is.`,
+which has a checkable answer for the built-in image.
+
+```sh
+toktape --image builtin
+toktape --image cat.jpg --prompt "What breed is it?"
+toktape --prompts set.jsonl      # a line may carry "images": ["a.png", "builtin"]
+```
+
+The request is the OpenAI chat shape, the text part first and one `image_url`
+part with a `data:` URL per picture, which llama-server and bloomery both
+take. Before sending, `record` reads `/props`: `modalities.vision: false`
+refuses the run with the flag that fixes it (`--mmproj <file>` on
+llama-server), and a server that does not say (an older build, another
+engine) is sent the image anyway and the tape carries a caveat that vision was
+not confirmed. The prefill figures stay the server's own `prompt_n` and
+`prompt_ms`, which include the image; no engine reports image tokens or
+encode time, so toktape prints neither. The text card gets one line under Prefill, `Image  1 × 640×480 PNG (builtin) · prefill includes it`, and a caveat says the recorded rendered prompt leaves the images out, since `/apply-template` takes text only.
+
+The tape records each image as a reference (name, sha256, size, type,
+dimensions) and never its pixels. `publish` keeps the references; with
+`--no-text` a file's name becomes `image` (the built-in's name stays), and the
+`--dry-run` listing has an `images` line saying what travels.

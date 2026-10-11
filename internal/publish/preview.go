@@ -7,6 +7,7 @@ import (
 	"image"
 	"strings"
 
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -52,6 +53,9 @@ func Preview(view *tape.Tape, idx Index, opts Options) string {
 
 	b.WriteString("What travels besides the record\n")
 	fmt.Fprintf(&b, "  text           %s\n", textLine(view, opts))
+	if line := imagesLine(view); line != "" {
+		fmt.Fprintf(&b, "  images         %s\n", line)
+	}
 	// The card is uploaded, not drawn by the service — drawing one needs the
 	// whole tape and the service never opens it — so it is something that
 	// leaves this machine and belongs in a listing of what does.
@@ -167,6 +171,41 @@ func textLine(view *tape.Tape, opts Options) string {
 	}
 	return fmt.Sprintf("%d characters of prompt and %d of generated text, across %s",
 		prompt, completion, plural(len(view.Requests), "stream"))
+}
+
+// imagesLine says which pictures the run sent and that none of their pixels
+// travel (TTP-208): "" when it sent none, so a text-only preview is unchanged.
+// The hashes are the first four hex digits, enough for a person to recognise
+// one and not a copy of anything.
+func imagesLine(view *tape.Tape) string {
+	var refs []tape.ImageRef
+	seen := map[string]bool{}
+	for _, r := range view.Requests {
+		for _, m := range r.Prompt.Messages {
+			for _, ref := range m.Images {
+				if !seen[ref.SHA256] {
+					seen[ref.SHA256] = true
+					refs = append(refs, ref)
+				}
+			}
+		}
+	}
+	if len(refs) == 0 {
+		return ""
+	}
+	short := make([]string, len(refs))
+	for i, ref := range refs {
+		short[i] = ref.SHA256[:min(4, len(ref.SHA256))] + "…"
+	}
+	hashes := " (sha256 " + strings.Join(short, ", ") + "), no pixels"
+	if len(refs) == 1 {
+		return fmt.Sprintf("1 × %s %s%s", card.ImageSize(refs[0]), card.ImageKind(refs[0].MIME), hashes)
+	}
+	sizes := make([]string, len(refs))
+	for i, ref := range refs {
+		sizes[i] = card.ImageSize(ref)
+	}
+	return fmt.Sprintf("%d images · %s%s", len(refs), strings.Join(sizes, ", "), hashes)
 }
 
 // decisionTextLine is textLine for a decision run (TTP-197): the bodies are
