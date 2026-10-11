@@ -104,6 +104,9 @@ type CPUInfo struct {
 
 // ParseCPUInfo reads /proc/cpuinfo.
 //
+// Model is "model name" when the kernel has one. aarch64 has none, so Model is
+// then built from the CPU implementer/part pairs (see cpu_aarch.go).
+//
 // Threads is the number of logical processors. Cores counts distinct
 // (physical id, core id) pairs, which is the only way to get the physical
 // count right on a multi-socket box: "cpu cores" is per socket, and on a
@@ -116,6 +119,14 @@ func ParseCPUInfo(data []byte) CPUInfo {
 
 	var havePhys, haveCore bool
 	var phys, core string
+	var arm armCPUCounts
+	var impl, part string
+	flushARM := func() {
+		if impl != "" && part != "" {
+			arm.add(impl, part)
+		}
+		impl, part = "", ""
+	}
 	flush := func() {
 		if havePhys && haveCore {
 			cores[phys+"/"+core] = struct{}{}
@@ -133,11 +144,16 @@ func ParseCPUInfo(data []byte) CPUInfo {
 		switch key {
 		case "processor":
 			flush()
+			flushARM()
 			info.Threads++
 		case "model name":
 			if info.Model == "" {
 				info.Model = value
 			}
+		case "CPU implementer":
+			impl = value
+		case "CPU part":
+			part = value
 		case "physical id":
 			phys, havePhys = value, true
 		case "core id":
@@ -145,6 +161,10 @@ func ParseCPUInfo(data []byte) CPUInfo {
 		}
 	}
 	flush()
+	flushARM()
+	if info.Model == "" {
+		info.Model = arm.name()
+	}
 	info.Cores = len(cores)
 	return info
 }

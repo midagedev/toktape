@@ -78,10 +78,11 @@ func ExampleGB10() *tape.RunSummary {
 			Hostname: "spark",
 			OS:       "linux",
 			Kernel:   "6.11.0-1016-nvidia",
-			// No CPU name: aarch64 /proc/cpuinfo has no "model name", and a
-			// real Spark's tape (bloomery PR #16, 2026-10-11) carries none.
-			CPU:        "",
-			CPUCores:   20,
+			// aarch64 /proc/cpuinfo has no "model name": the name is built from
+			// the CPU implementer/part pairs (TTP-202). Synthetic cpuinfo until
+			// a real Spark's is at hand.
+			CPU:        "10× Cortex-X925 + 10× Cortex-A725",
+			CPUCores:   0, // ARM publishes no physical/core id: "?" on a real Spark
 			CPUThreads: 20,
 			RAMBytes:   130661761024, // MemTotal 127599376 kB, a real Spark: the one pool
 			GPUs: []tape.GPUInfo{

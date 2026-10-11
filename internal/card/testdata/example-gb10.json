@@ -48,7 +48,7 @@
     "hostname": "spark",
     "os": "linux",
     "kernel": "6.11.0-1016-nvidia",
-    "cpu_cores": 20,
+    "cpu": "10× Cortex-X925 + 10× Cortex-A725",
     "cpu_threads": 20,
     "ram_bytes": 130661761024,
     "gpus": [
