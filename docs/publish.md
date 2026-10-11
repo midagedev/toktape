@@ -48,3 +48,39 @@ service itself never opens a tape: everything richer than the index row is
 the same renderer this binary uses, compiled to WebAssembly and run in your
 browser.
 
+
+## Asking someone else for a tape
+
+A maintainer can only answer "how fast is it on your card?" with a number the
+other person measured. The block below is the whole job. Paste it into the
+issue as it is. The answer comes back as one link.
+
+```sh
+# 1. install: pick one line
+brew install midagedev/tap/toktape
+curl -fsSL https://raw.githubusercontent.com/midagedev/toktape/main/scripts/install.sh | sh
+
+# 2. the credit on the page, the listing and the preview
+toktape profile --name "<your name>" --link "<your page>"
+
+# 3. on the machine that serves the model, run one:
+#    decide for a decision model, record for a chat model
+toktape decide --url http://127.0.0.1:<port> --host-label "<machine>"
+toktape record --url http://127.0.0.1:<port> --host-label "<machine>"
+
+# 4. look, then publish (<tape> is the file step 3 printed)
+toktape publish --dry-run <tape>
+toktape publish <tape>
+
+# 5. paste the link it prints in the issue
+```
+
+- Run step 3 on the machine that serves the model. A remote URL records the
+  machine you typed it on as the rig, not the one that did the work.
+- `<tape>` is the file step 3 printed, in `~/.toktape/runs`.
+- `--host-label` names the machine on the card and the page. The hub groups
+  runs by GPU name, so `https://tape.midagedev.com/?gpu=<id>` lists every tape
+  made on one card model.
+- `publish --no-text` keeps the prompts, the answers and a decision run's
+  request and response bodies at home. The timings still go up.
+- The card is drawn when you publish. Publish with the newest release.
