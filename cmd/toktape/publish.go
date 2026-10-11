@@ -567,6 +567,10 @@ func mustConfigDir() string {
 // a warning that showed less than the dry run would understate what it is
 // asking about.
 //
+// The terminal must also be one this process can read without being stopped
+// (foregroundTTY): a background process group opens /dev/tty and then stops on
+// SIGTTIN, which TERM does not end.
+//
 // The answer is read from the terminal and never from stdin. A publish in a
 // pipeline must not eat the data flowing through it, and stdin in a script is
 // not a person. When there is no terminal this refuses and names --yes rather
@@ -581,11 +585,11 @@ func (c *cli) firstPublishWarning(preview string, yes bool) int {
 		return exitOK
 	}
 
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
+	tty, ok := foregroundTTY()
+	if !ok {
 		return c.fail(failure{
 			code: exitUsage,
-			msg:  "toktape: this is the first publish from this machine and there is no terminal to ask on",
+			msg:  "toktape: this is the first publish from this machine and there is no terminal to confirm on",
 			hint: "pass --yes to acknowledge the listing above, or run it once from a terminal",
 		})
 	}

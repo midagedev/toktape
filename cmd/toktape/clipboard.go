@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"os"
 	osexec "os/exec"
 	"runtime"
 	"strings"
@@ -85,8 +84,8 @@ func clipboardTool(goos string, lookPath func(string) (string, error)) (tool str
 // what was attempted rather than claiming success.
 func copyOSC52(stderr io.Writer, s string) {
 	seq := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(s)) + "\x07"
-	tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0)
-	if err != nil {
+	tty, ok := foregroundTTY()
+	if !ok {
 		fmt.Fprintln(stderr, "Clipboard: not reached — no clipboard tool did it and there is no terminal to copy through (not a tty). The card is on stdout above.")
 		return
 	}
