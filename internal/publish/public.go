@@ -89,6 +89,7 @@ func PublicView(t *tape.Tape, policy TextPolicy) *tape.Tape {
 
 	if policy == WithoutText {
 		out.Requests = withoutText(out.Requests)
+		out.Decisions = withoutDecisionText(out.Decisions)
 	}
 	// A published tape tells the instant, never the time zone (§9.3,
 	// TTP-120): every time.Time becomes UTC, and the run id's leading local
@@ -285,6 +286,37 @@ func withoutText(recs []tape.RequestRecord) []tape.RequestRecord {
 			toks[j] = ev
 		}
 		r.Tokens = toks
+		out[i] = r
+	}
+	return out
+}
+
+// withoutDecisionText is withoutText for a decision run (TTP-197): the request
+// and response bodies are the suite's questions and the model's answers, and
+// the parsed questions repeat the same words (instructions, option text). The
+// ids, types, option keys, answers' figures, timings, token counts and errors
+// are measurements and stay, so the index and the figures do not move.
+func withoutDecisionText(recs []tape.DecisionRecord) []tape.DecisionRecord {
+	out := make([]tape.DecisionRecord, len(recs))
+	for i, r := range recs {
+		r.Request = nil
+		r.Response = nil
+		if r.Questions != nil {
+			qs := make([]tape.DecisionQuestion, len(r.Questions))
+			for j, q := range r.Questions {
+				q.Instructions = ""
+				if q.Options != nil {
+					opts := make([]tape.DecisionOption, len(q.Options))
+					for k, o := range q.Options {
+						o.Text = ""
+						opts[k] = o
+					}
+					q.Options = opts
+				}
+				qs[j] = q
+			}
+			r.Questions = qs
+		}
 		out[i] = r
 	}
 	return out

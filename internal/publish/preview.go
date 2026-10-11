@@ -149,6 +149,9 @@ func argvLine(s *tape.RunSummary) string {
 // characters, because "the prompts and the answers" is not a quantity and the
 // question the warning exists to answer is how much.
 func textLine(view *tape.Tape, opts Options) string {
+	if view.Summary.IsDecision() {
+		return decisionTextLine(view, opts)
+	}
 	if opts.Text == WithoutText {
 		return "nothing · the prompts and the generated text are removed, the timings stay"
 	}
@@ -164,6 +167,48 @@ func textLine(view *tape.Tape, opts Options) string {
 	}
 	return fmt.Sprintf("%d characters of prompt and %d of generated text, across %s",
 		prompt, completion, plural(len(view.Requests), "stream"))
+}
+
+// decisionTextLine is textLine for a decision run (TTP-197): the bodies are
+// the suite's questions and the model's answers, counted and sized.
+func decisionTextLine(view *tape.Tape, opts Options) string {
+	if opts.Text == WithoutText {
+		return "nothing · the request and response bodies stay home, the timings stay"
+	}
+	req, resp, total := 0, 0, 0
+	for _, d := range view.Decisions {
+		if len(d.Request) > 0 {
+			req++
+		}
+		if len(d.Response) > 0 {
+			resp++
+		}
+		total += len(d.Request) + len(d.Response)
+	}
+	if req+resp == 0 {
+		return "nothing · this run recorded no text"
+	}
+	return fmt.Sprintf("%s, %s (%s) — the suite's questions and the model's answers",
+		bodies(req, "request"), bodies(resp, "response"), kB(total))
+}
+
+func bodies(n int, kind string) string {
+	if n == 1 {
+		return "1 " + kind + " body"
+	}
+	return fmt.Sprintf("%d %s bodies", n, kind)
+}
+
+// kB sizes a byte count the way a person reads it.
+func kB(n int) string {
+	switch {
+	case n < 1000:
+		return fmt.Sprintf("%d B", n)
+	case n < 1000*1000:
+		return fmt.Sprintf("%.1f kB", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%.1f MB", float64(n)/1e6)
+	}
 }
 
 // avatarLine names the avatar's bytes and its header dimensions, the same
