@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/midagedev/toktape/internal/card"
+	"github.com/midagedev/toktape/internal/placement"
 	"github.com/midagedev/toktape/internal/tape"
 )
 
@@ -166,7 +167,19 @@ func IndexOf(t *tape.Tape) Index {
 	// id that came from a name can therefore merge two fine-tunes of a model,
 	// and a consumer that must not do that has the field to tell it.
 	idx.ModelID, idx.ModelIDSource = ModelID(s.Model)
-	idx.QuantID, idx.QuantBits = QuantID(s.Model.Quant)
+	// A tape whose quant was never observed (the server's argv gave a path this
+	// host could not open, so no header was read) still carries the file name,
+	// and the name's quant token is what placement.QuantFromFileName reads. It
+	// is the fallback only — an observed quant, an engine's included, is never
+	// outvoted — and it lives here rather than in the tape, which keeps what
+	// was observed; a reindex therefore repairs tapes recorded before the
+	// recorder resolved the file (v0.7.4).
+	quant := s.Model.Quant
+	if quant == "" {
+		quant = placement.QuantFromFileName(s.Model.FileName)
+		idx.QuantRaw = quant
+	}
+	idx.QuantID, idx.QuantBits = QuantID(quant)
 
 	idx.GPUsRaw = make([]string, len(s.Host.GPUs))
 	gpuIDs := make([]string, len(s.Host.GPUs))

@@ -666,3 +666,36 @@ func TestIndexOfPromptSet(t *testing.T) {
 		t.Errorf("PromptSet = %q on a tape that named none, want \"\"", got)
 	}
 }
+
+// TestIndexOfQuantFromFileName: the quant falls back to the file name only
+// when the header was not read (TTP-119 naming, v0.7.4). The tape keeps what
+// was observed; the index is where the name is read, so a re-publish or a
+// reindex repairs a tape recorded before the recorder resolved the file.
+func TestIndexOfQuantFromFileName(t *testing.T) {
+	cases := []struct {
+		name  string
+		model tape.ModelInfo
+		want  string
+	}{
+		// The real DGX Spark tape: bloomery, a relative -m, no quant observed.
+		{"spark tape", tape.ModelInfo{FileName: "Qwen3.6-35B-A3B-Q4_K_M.gguf"}, "Q4_K_M"},
+		{"UD multi-part name", tape.ModelInfo{FileName: "DeepSeek-V3-0324-UD-Q4_K_XL-00001-of-00004.gguf"}, "UD-Q4_K_XL"},
+		// An observed quant outranks the name, whatever the name says.
+		{"header quant kept", tape.ModelInfo{FileName: "Model-Q8_0.gguf", Quant: "Q4_K_M"}, "Q4_K_M"},
+		// An engine's verbatim quant is an observation too.
+		{"engine quant kept", tape.ModelInfo{FileName: "Model-Q8_0.gguf", Quant: "EXL3 4.05 bpw"}, "EXL3 4.05 bpw"},
+		{"name without a quant token", tape.ModelInfo{FileName: "mystery.gguf"}, ""},
+		{"no name", tape.ModelInfo{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tp := &tape.Tape{Summary: tape.RunSummary{Model: tc.model}}
+			if got := IndexOf(PublicView(tp, WithText)).QuantRaw; got != tc.want {
+				t.Errorf("QuantRaw = %q, want %q", got, tc.want)
+			}
+			if tp.Summary.Model.Quant != tc.model.Quant {
+				t.Errorf("the tape's own quant changed to %q: the index must not write back", tp.Summary.Model.Quant)
+			}
+		})
+	}
+}

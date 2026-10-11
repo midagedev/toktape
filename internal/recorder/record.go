@@ -762,6 +762,9 @@ func (r *run) collectEngineModel() {
 // process's real argv is still recorded verbatim whenever the pid is found;
 // it is simply not parsed.
 func (r *run) collectProcess() {
+	// The argv names the model file for an engine whose /props does not; the
+	// pid and argv are known only once this returns (v0.7.4).
+	defer r.resolveModelFromArgv()
 	// An OpenAI-compatible server has no model_path in any argv to find it
 	// by (TTP-99), and guessing a pid from a listening socket would name a
 	// process nobody proved is the server. PID 0, no argv, zero flags — and
