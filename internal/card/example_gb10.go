@@ -75,15 +75,17 @@ func ExampleGB10() *tape.RunSummary {
 			ActiveBytesPerToken: 2900000000,
 		},
 		Host: tape.HostInfo{
-			Hostname:   "spark",
-			OS:         "linux",
-			Kernel:     "6.11.0-1016-nvidia",
-			CPU:        "NVIDIA Grace (Cortex-X925 + Cortex-A725)",
+			Hostname: "spark",
+			OS:       "linux",
+			Kernel:   "6.11.0-1016-nvidia",
+			// No CPU name: aarch64 /proc/cpuinfo has no "model name", and a
+			// real Spark's tape (bloomery PR #16, 2026-10-11) carries none.
+			CPU:        "",
 			CPUCores:   20,
 			CPUThreads: 20,
-			RAMBytes:   130668019712, // MemTotal: the one pool
+			RAMBytes:   130661761024, // MemTotal 127599376 kB, a real Spark: the one pool
 			GPUs: []tape.GPUInfo{
-				{Index: 0, Name: "NVIDIA GB10", VRAMBytes: 0, Driver: "580.95.05"},
+				{Index: 0, Name: "NVIDIA GB10", VRAMBytes: 0, Driver: "595.84"},
 			},
 		},
 		Placement: tape.PlacementSummary{

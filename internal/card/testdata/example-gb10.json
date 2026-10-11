@@ -48,16 +48,15 @@
     "hostname": "spark",
     "os": "linux",
     "kernel": "6.11.0-1016-nvidia",
-    "cpu": "NVIDIA Grace (Cortex-X925 + Cortex-A725)",
     "cpu_cores": 20,
     "cpu_threads": 20,
-    "ram_bytes": 130668019712,
+    "ram_bytes": 130661761024,
     "gpus": [
       {
         "index": 0,
         "name": "NVIDIA GB10",
         "vram_bytes": 0,
-        "driver": "580.95.05"
+        "driver": "595.84"
       }
     ]
   },
