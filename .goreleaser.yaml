@@ -102,23 +102,31 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **The decision suite conforms.** Every question in the built-in suite
-    now carries `instructions`, which the TypeSafe schema requires on all
-    three question types. Four of the eight cases left it out and worked
-    only against toktape's own lenient parser and mock; a conforming
-    server — Cloudflare's, or llama.cpp's new `POST /v1/systemone` —
-    refused each of those requests whole, a 400 with the request's other
-    questions unasked.
+    **A DGX Spark and a Mac are one pool of unified memory.** A GB10
+    lists itself in nvidia-smi but answers `[N/A]` for memory, and its CPU
+    and GPU share the host's RAM; an Apple Silicon GPU shares it the same
+    way. The card had no word for either: a Mac read `VRAM ?` and "all in
+    host RAM" for a model that ran on Metal. Now the RIG line reads
+    `GB10 · NVIDIA Grace (…) · 122 GB unified`, MEMORY names the one pool
+    and counts its bytes once, and no "from RAM" clause names a bus that
+    is not there. The card decides this from the part names a tape already
+    carries, so a tape recorded with v0.7.1 gets the new card when it is
+    published or re-rendered with this release. Checked against a real
+    Spark's nvidia-smi answers (driver 595.84) and a real M1 Pro run.
 
-    **A decision run names its engine.** `/props` alone never said:
-    mainline llama-server stamps a `build_info` but no engine name, and
-    ik_llama.cpp stamps neither, so every decision card read "?" where a
-    record would have named the build. A `build_info` with no engine name
-    is now llama-server, and a `/props` that says nothing is settled by
-    the process the way a record settles it: the binary's path says
-    ik_llama.cpp, and the checkout around it names the commit, with a
-    warning saying where the commit was read from. On a host with no
-    readable `/proc` the identity stays what `/props` wrote.
+    **A decision tape says what it publishes.** The dry-run read "text
+    nothing" for a decision tape that carried every request and response
+    body. It now counts them and their size, and `publish --no-text`
+    keeps them home while every timing still goes up.
+
+    **The server is its whole process tree.** A server whose port holder
+    fronts a worker process had the worker's GPU memory counted as another
+    process's and its RAM left out. GPU attribution and memory now sum the
+    server's descendants.
+
+    For maintainers: `docs/publish.md` has a block to paste into an issue
+    to ask someone for a tape from their machine, and the hub's link
+    preview now names who recorded a run.
 
   footer: |
     ## Install
