@@ -5,7 +5,7 @@
 │          42.5 GiB                                                    │
 │ ENGINE   llama-server b3650 (a1b2c3d) · linux 6.8.0-45-generic       │
 │          workstation                                                 │
-│ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GB DDR5-6000       │
+│ RIG      2× RTX 3090 24G · AMD Ryzen 9 7950X · 64 GiB DDR5-6000      │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Decode        17.4 tok/s · ≈ 785 GB/s, 84% of peak                   │
 │ Prefill       610 tok/s · 512 prompt tokens · TTFT 630 ms            │

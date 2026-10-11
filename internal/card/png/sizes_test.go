@@ -313,7 +313,7 @@ func TestRigLineKeepsTheCPU(t *testing.T) {
 			if !ok {
 				t.Fatal("ident.rig was never drawn")
 			}
-			for _, want := range []string{"5975WX", "A6000", "252 GB"} {
+			for _, want := range []string{"5975WX", "A6000", "252 GiB"} {
 				if !strings.Contains(m.Text, want) {
 					t.Errorf("ident.rig = %q, want it to still name %q", m.Text, want)
 				}

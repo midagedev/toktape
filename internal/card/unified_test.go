@@ -152,7 +152,7 @@ func TestUnifiedOnAMac(t *testing.T) {
 	s.Host = tape.HostInfo{OS: "darwin", CPU: "Apple M1 Pro", RAMBytes: 34359738368}
 	s.GPUsAtEnd = nil
 	card := Text(s)
-	if rig := strings.Join(block(card, "RIG"), " "); rig != "Apple M1 Pro · 32 GB unified" {
+	if rig := strings.Join(block(card, "RIG"), " "); rig != "Apple M1 Pro · 32 GiB unified" {
 		t.Errorf("RIG = %q", rig)
 	}
 	if strings.Contains(card, "VRAM") || strings.Contains(card, "?  ·") {

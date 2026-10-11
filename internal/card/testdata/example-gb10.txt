@@ -4,7 +4,7 @@
 │ MODEL    gpt-oss-120b-mxfp4.gguf · MXFP4 · 59.0 GiB                  │
 │ ENGINE   llama-server b6890 (c4d5e6f) · linux 6.11.0-1016-nvidia     │
 │          spark                                                       │
-│ RIG      GB10 · 10× Cortex-X925 + 10× Cortex-A725 · 122 GB unified   │
+│ RIG      GB10 · 10× Cortex-X925 + 10× Cortex-A725 · 122 GiB unified  │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Decode        52.0 tok/s · ≈ 151 GB/s                                │
 │ Prefill       1296 tok/s · 512 prompt tokens · TTFT 410 ms           │

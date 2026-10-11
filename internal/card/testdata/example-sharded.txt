@@ -6,7 +6,7 @@
 │ ENGINE   llama-server b3650 (a1b2c3d) · linux 6.8.0-45-generic       │
 │          bigram                                                      │
 │ RIG      2× RTX 3090 24G · AMD EPYC 9354 32-Core Processor           │
-│          768 GB DDR5-4800                                            │
+│          768 GiB DDR5-4800                                           │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Decode        27.6 tok/s aggregate · 6.9 tok/s each                  │
 │               ≈ 331 GB/s from RAM, 72% of peak                       │

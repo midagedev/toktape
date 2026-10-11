@@ -446,12 +446,12 @@ func shortGPUName(n string) string {
 }
 
 func ramString(h tape.HostInfo) string {
-	// A bare "?" and not "? GB": the unit belongs to a number that was
-	// measured, and "? GB" reads as a quantity of gigabytes nobody counted.
+	// A bare "?" and not "? GiB": the unit belongs to a number that was
+	// measured, and "? GiB" reads as a quantity of gibibytes nobody counted.
 	if h.RAMBytes == 0 {
 		return unknown
 	}
-	s := fmt.Sprintf("%.0f GB", float64(h.RAMBytes)/gib)
+	s := fmt.Sprintf("%.0f GiB", float64(h.RAMBytes)/gib)
 	// RAM speed is omitted when unknown rather than printed as "?": it is a
 	// nice-to-have detail, not one of the argument-settling fields.
 	if h.RAMSpeed != "" {

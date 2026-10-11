@@ -407,11 +407,11 @@ func TestUnknownNeverPrintsAsNo(t *testing.T) {
 
 	t.Run("ram", func(t *testing.T) {
 		unknownRig := Text(&tape.RunSummary{Concurrency: 1})
-		if strings.Contains(unknownRig, "? GB") {
+		if strings.Contains(unknownRig, "? GB") || strings.Contains(unknownRig, "? GiB") {
 			t.Errorf("an unmeasured RAM size printed as a quantity:\n%s", unknownRig)
 		}
 		known := Text(&tape.RunSummary{Concurrency: 1, Host: tape.HostInfo{RAMBytes: 128 * gib}})
-		if !strings.Contains(known, "128 GB") {
+		if !strings.Contains(known, "128 GiB") {
 			t.Errorf("a measured RAM size did not print:\n%s", known)
 		}
 	})

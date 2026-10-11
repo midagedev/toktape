@@ -29,7 +29,7 @@ MIT，没有遥测，不需要账号。
 │ ENGINE   ik_llama.cpp c10fbbcc · linux 6.8.0-139-generic             │
 │          workstation                                                 │
 │ RIG      RTX 3090 24G · RTX A6000 48G                                │
-│          AMD Ryzen Threadripper PRO 5975WX 32-Cores · 252 GB         │
+│          AMD Ryzen Threadripper PRO 5975WX 32-Cores · 252 GiB        │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Decode        149 tok/s aggregate · 37.3 tok/s each                  │
 │               ≈ 110–203 GB/s, 14–26% of peak                         │

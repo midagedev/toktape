@@ -1366,7 +1366,7 @@ func rigGPUsUnified(gpus []tape.GPUInfo) []string {
 }
 
 // unifiedRAM puts the word after the size and before the speed, as the text
-// card's unifiedRAMString does: "122 GB unified LPDDR5x-8533".
+// card's unifiedRAMString does: "122 GiB unified LPDDR5x-8533".
 func unifiedRAM(ram, speed string) string {
 	if speed != "" {
 		return strings.TrimSuffix(ram, " "+speed) + " unified " + speed
@@ -1429,7 +1429,7 @@ func shortGPUName(n string) string {
 // spends its 26 px on the names.
 
 func ramString(h tape.HostInfo) string {
-	// An unread RAM size is "?", not "? GB": the unit would dress an
+	// An unread RAM size is "?", not "? GiB": the unit would dress an
 	// unobserved field up as a measurement with a missing digit.
 	if h.RAMBytes <= 0 {
 		if h.RAMSpeed != "" {
@@ -1437,7 +1437,7 @@ func ramString(h tape.HostInfo) string {
 		}
 		return unknown
 	}
-	s := fmt.Sprintf("%.0f GB", float64(h.RAMBytes)/gib)
+	s := fmt.Sprintf("%.0f GiB", float64(h.RAMBytes)/gib)
 	// RAM speed is omitted when unknown rather than printed as "?": it is a
 	// nice-to-have detail, not one of the argument-settling fields.
 	if h.RAMSpeed != "" {

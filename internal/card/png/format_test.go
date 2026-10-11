@@ -53,7 +53,10 @@ func TestFormatRate(t *testing.T) {
 	}
 }
 
-// TestRamString: an unread RAM size is "?", not "? GB" — the unit would dress
+// 2026-10-11: the RAM size is MemTotal / 2^30, so it prints GiB, the unit the
+// rest of the card already uses for sizes (v0.7.4). The figures are unchanged;
+// the old code fails the new strings (FAIL-first: "64 GB" != "64 GiB").
+// TestRamString: an unread RAM size is "?", not "? GiB" — the unit would dress
 // an unobserved field up as a measurement with a digit missing.
 func TestRamString(t *testing.T) {
 	cases := []struct {
@@ -63,8 +66,8 @@ func TestRamString(t *testing.T) {
 	}{
 		{"unread", tape.HostInfo{}, unknown},
 		{"speed only", tape.HostInfo{RAMSpeed: "DDR5-6000"}, "? · DDR5-6000"},
-		{"size only", tape.HostInfo{RAMBytes: 68719476736}, "64 GB"},
-		{"both", tape.HostInfo{RAMBytes: 68719476736, RAMSpeed: "DDR5-6000"}, "64 GB DDR5-6000"},
+		{"size only", tape.HostInfo{RAMBytes: 68719476736}, "64 GiB"},
+		{"both", tape.HostInfo{RAMBytes: 68719476736, RAMSpeed: "DDR5-6000"}, "64 GiB DDR5-6000"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

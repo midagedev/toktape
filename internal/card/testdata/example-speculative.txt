@@ -5,7 +5,7 @@
 │ ENGINE   ik_llama.cpp 7b79b229 · linux 6.8.0-45-generic              │
 │          workstation                                                 │
 │ RIG      2× RTX 3090 24G · AMD Ryzen Threadripper PRO 7975WX         │
-│          256 GB DDR5-5200                                            │
+│          256 GiB DDR5-5200                                           │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Decode        76.0 tok/s aggregate · 19.0 tok/s each                 │
 │               ≈ 261 GB/s from RAM per verify step, 78% of peak       │

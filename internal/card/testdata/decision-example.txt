@@ -4,7 +4,7 @@
 │ MODEL    Cloudflare_clef-flash-Q4_K_M.gguf · q4_K · 5.2 GiB          │
 │ ENGINE   bloomery 0.1.0 (example) · linux                            │
 │ RIG      RTX A6000 48G · AMD Ryzen Threadripper PRO 5975WX 32-Cores  │
-│          252 GB                                                      │
+│          252 GiB                                                     │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Decision      37.6 ms p50 · warm · end to end                        │
 │ Engine        36.1 ms p50 · prompt + head                            │
