@@ -842,6 +842,8 @@ func TestWriteCards(t *testing.T) {
 		{"card-hangul.png", hangulSummary()},
 		// TTP-178: a DGX Spark, the unified-memory RIG and placement words.
 		{"card-gb10.png", card.ExampleGB10()},
+		// TTP-209: the server pinned to the A6000 of a 3090 + A6000 host.
+		{"card-pinned-a6000.png", clipPinnedSummary(t)},
 	}
 	for _, c := range cards {
 		path := filepath.Join(outDir, c.file)
@@ -1133,5 +1135,24 @@ func TestEngineLineOneSlot(t *testing.T) {
 	}
 	if !found {
 		t.Error("the engine line does not say 1 slot")
+	}
+}
+
+func clipPinnedSummary(t *testing.T) *tape.RunSummary {
+	t.Helper()
+	tp, err := tape.Read("../../tape/testdata/clip-pinned-a6000.tape")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &tp.Summary
+}
+
+// TestRigIdentNamesTheCardsTheServerUsed (TTP-209): the PNG's rig line is the
+// text card's rule and wording.
+func TestRigIdentNamesTheCardsTheServerUsed(t *testing.T) {
+	s := clipPinnedSummary(t)
+	got := rigIdent(s).preferred
+	if !strings.HasPrefix(got, "RTX A6000 48G · +1 idle") || strings.Contains(got, "3090") {
+		t.Errorf("rig line = %q, want the A6000 and +1 idle", got)
 	}
 }

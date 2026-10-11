@@ -1058,7 +1058,7 @@ func contentionObserved(ci tape.ContentionInfo) bool {
 func (c *content) buildIdent(s *tape.RunSummary) {
 	c.ident1 = modelIdent(s.Model)
 	c.identSub = modelDetail(s.Model)
-	c.ident2 = rigIdent(s.Host)
+	c.ident2 = rigIdent(s)
 	c.ident3 = engineIdent(s.Server)
 }
 
@@ -1164,8 +1164,13 @@ func activeParams(m tape.ModelInfo) int64 {
 // keeps the machine's name on the two-card card. The hero recording's
 // one-card form fits a rung higher and keeps its "AMD ". Below the CPU come
 // the RAM, then the GPUs alone — the line's floor.
-func rigIdent(h tape.HostInfo) fallbackLine {
-	gpus := strings.Join(rigGPUs(h.GPUs), " + ")
+func rigIdent(s *tape.RunSummary) fallbackLine {
+	h := s.Host
+	used, idle := tape.ServerRig(s)
+	gpus := strings.Join(rigGPUs(used), " + ")
+	if idle > 0 {
+		gpus += " · +" + strconv.Itoa(idle) + " idle"
+	}
 	cpu := omitUnknown(orUnknown(h.CPU))
 	ram := omitUnknown(ramString(h))
 	floor := func() string { return gpus }
@@ -1173,7 +1178,10 @@ func rigIdent(h tape.HostInfo) fallbackLine {
 		// One pool (TTP-178), the text card's rule: the GPU group is its name
 		// without a size, the RAM figure carries the word, and a Mac with no
 		// GPU row drops the "?" and keeps the chip as the line's floor.
-		gpus = strings.Join(rigGPUsUnified(h.GPUs), " + ")
+		gpus = strings.Join(rigGPUsUnified(used), " + ")
+		if idle > 0 && gpus != "" {
+			gpus += " · +" + strconv.Itoa(idle) + " idle"
+		}
 		if ram != "" {
 			ram = unifiedRAM(ram, h.RAMSpeed)
 		}

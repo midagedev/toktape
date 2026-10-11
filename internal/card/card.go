@@ -283,7 +283,7 @@ func identitySection(s *tape.RunSummary) []string {
 	}
 	out = append(out, field("ENGINE", blockLabelW, " · ", engineParts...)...)
 
-	out = append(out, field("RIG", blockLabelW, " · ", rigParts(s.Host)...)...)
+	out = append(out, field("RIG", blockLabelW, " · ", rigParts(s)...)...)
 	return out
 }
 
@@ -349,13 +349,23 @@ func osString(h tape.HostInfo) string {
 // group prints the name alone, because the pool is the RAM segment and is
 // printed once there, and a host with no GPU row (a Mac) drops the leading
 // "?" — nothing was missing, the chip is the GPU.
-func rigParts(h tape.HostInfo) []string {
+//
+// Both name the cards the server used and then count the idle ones
+// (tape.ServerRig, TTP-209): "RTX A6000 48G · +1 idle".
+func rigParts(s *tape.RunSummary) []string {
+	h := s.Host
+	gpus, idle := tape.ServerRig(s)
+	var idlePart []string
+	if idle > 0 {
+		idlePart = []string{"+" + strconv.Itoa(idle) + " idle"}
+	}
 	if tape.Unified(h) == "" {
-		return append(rigGPUs(h.GPUs), orUnknown(h.CPU), ramString(h))
+		parts := append(rigGPUs(gpus), idlePart...)
+		return append(parts, orUnknown(h.CPU), ramString(h))
 	}
 	var parts []string
-	if len(h.GPUs) > 0 {
-		parts = rigGPUsUnified(h.GPUs)
+	if len(gpus) > 0 {
+		parts = append(rigGPUsUnified(gpus), idlePart...)
 	}
 	return append(parts, orUnknown(h.CPU), unifiedRAMString(h))
 }

@@ -1,0 +1,48 @@
+┌──────────────────────────────────────────────────────────────────────┐
+│ toktape v0.6.0              20261012-071203-glm-5-3-flash-ud-q4-k-xl │
+├──────────────────────────────────────────────────────────────────────┤
+│ MODEL    GLM-5.3-Flash-UD-Q4_K_XL-00001-of-00006.gguf · q4_K         │
+│          186.0 GiB                                                   │
+│ ENGINE   bloomery 0.3.0 (8d937828) · linux 6.8.0-142-generic         │
+│ RIG      RTX A6000 48G · +1 idle                                     │
+│          AMD Ryzen Threadripper PRO 5975WX 32-Cores · 252 GiB        │
+├──────────────────────────────────────────────────────────────────────┤
+│ Decode        27.9 tok/s                                             │
+│ Prefill       139 tok/s · 2067 prompt tokens · TTFT 4878 ms          │
+│               probe 254 tok/s on one stream · 559 ms fixed           │
+│ Draft         GLM-5.3-Flash-UD-Q4_K_XL-00001-of-00006.gguf · n_max 1 │
+│               82% accepted (221/268)                                 │
+│ Context       16384 (2067 in / 159 out · 28 thinking ·               │
+│               1 of 6 hit the cap)                                    │
+│ Prefix cache  50% hit (1024/2067) · warm                             │
+│ Sampling      greedy (temp 0) · thinking off (ignored) · chat        │
+│ Prompts       6 rounds · 27.1 tok/s median (25.2–32.2)               │
+│               accepted 81% median (77–90%)                           │
+│               1 r1-A 27.9 tok/s 81%  ·  2 r2-A 26.1 tok/s            │
+│               3 r3-B 29.4 tok/s 77%  ·  4 r4-C 32.2 tok/s 90%        │
+│               5 r5-A 25.2 tok/s  ·  6 r6-A 26.3 tok/s                │
+│               prefill 2k 209 · 2k 228 · 2k 232 tok/s                 │
+│               cache 2 r2-A 99% hit of 2k, 22 evaluated               │
+│               5 r5-A 99% hit of 2k, 18 evaluated                     │
+│               6 r6-A 99% hit of 2k, 16 evaluated                     │
+├──────────────────────────────────────────────────────────────────────┤
+│ MEMORY   GPU0 [░░░░░░░░░░] 0.0/24.0 GiB                              │
+│          GPU1 [██████████] 46.9/48.0 GiB                             │
+│          weights 44.2 | kv 1.1 | compute ? GiB                       │
+│          Host placed 137.8 GiB                                       │
+│          Host RSS 188.2 GiB (file 177.6 / anon 0.5)                  │
+│          Page faults 0.3 maj/token (306 during decode)               │
+├──────────────────────────────────────────────────────────────────────┤
+│ HOST     GPU0 32°C 36 of 250 W · GPU1 72°C 258 of 300 W              │
+│          throttled: no · contended: no                               │
+├──────────────────────────────────────────────────────────────────────┤
+│ FLAGS    bloomery-serve -m                                           │
+│          GLM-5.3-Flash-UD-Q4_K_XL-00001-of-00006.gguf --host         │
+│          127.0.0.1 --port 8080 --place a                             │
+├──────────────────────────────────────────────────────────────────────┤
+│ ! 3 caveats — cold run: weights arrived from disk while the probe    │
+│   prefilled, 3.9 maj faults/token · client_disagrees_with_server ·   │
+│   thinking_ignored                                                   │
+├──────────────────────────────────────────────────────────────────────┤
+│                toktape · github.com/midagedev/toktape                │
+└──────────────────────────────────────────────────────────────────────┘

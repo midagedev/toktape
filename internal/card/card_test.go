@@ -80,6 +80,9 @@ func TestTextGolden(t *testing.T) {
 		{"example-gb10", ExampleGB10()},
 		// TTP-208: one builtin image. The only golden carrying the Image row.
 		{"example-image", ExampleImage()},
+		// TTP-209: a real clip whose server was pinned to the second of two
+		// cards. The only golden whose RIG says "+1 idle".
+		{"clip-pinned-a6000", clipPinnedSummary(t)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -853,5 +856,32 @@ func TestOfPeakIsMeasuredAgainstThePlacement(t *testing.T) {
 		t.Errorf("ExampleSharded(): a placement split between host RAM and VRAM is\n"+
 			"measured against the host bus, want %q in:\n%s",
 			"≈ 331 GB/s from RAM, 72% of peak", sharded)
+	}
+}
+
+// clipPinnedSummary is the summary of the 2026-10-12 bloomery clip: a 3090 and
+// an A6000 on the host, the server pinned to the A6000 (TTP-209).
+func clipPinnedSummary(t *testing.T) *tape.RunSummary {
+	t.Helper()
+	tp, err := tape.Read("../tape/testdata/clip-pinned-a6000.tape")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &tp.Summary
+}
+
+// TestRigNamesTheCardsTheServerUsed: the RIG lists the used cards and counts
+// the idle ones; an unknown or fully-used host keeps today's line.
+func TestRigNamesTheCardsTheServerUsed(t *testing.T) {
+	if text := Text(clipPinnedSummary(t)); !strings.Contains(text, "RTX A6000 48G · +1 idle") || strings.Contains(text, "RTX 3090") {
+		t.Errorf("RIG does not name the A6000 alone:\n%s", text)
+	}
+	s := clipPinnedSummary(t)
+	s.GPUsAtEnd = nil
+	if text := Text(s); !strings.Contains(text, "RTX 3090 24G · RTX A6000 48G") || strings.Contains(text, "idle") {
+		t.Errorf("unknown use changed the RIG:\n%s", text)
+	}
+	if text := Text(Example()); strings.Contains(text, "idle") {
+		t.Errorf("a fully used host prints idle:\n%s", text)
 	}
 }
