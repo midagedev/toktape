@@ -102,33 +102,27 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
-    **A DGX Spark and a Mac are one pool of unified memory.** A GB10
-    lists itself in nvidia-smi but answers `[N/A]` for memory, and its CPU
-    and GPU share the host's RAM; an Apple Silicon GPU shares it the same
-    way. The card had no word for either: a Mac read `VRAM ?` and "all in
-    host RAM" for a model that ran on Metal. Now the RIG line ends
-    `122 GB unified` on a Spark and `32 GB unified` on a 32 GB Mac, MEMORY
-    names the one pool
-    and counts its bytes once, and no "from RAM" clause names a bus that
-    is not there. The card decides this from the part names a tape already
-    carries, so a tape recorded with v0.7.1 gets the new card when it is
-    published or re-rendered with this release. Checked against a real
-    Spark's nvidia-smi answers (driver 595.84) and a real M1 Pro run. A
-    Spark's CPU still prints `?`: aarch64 Linux reports no CPU model name.
+    **`toktape share`: one command from a run to a link in an issue.** A
+    project that asks someone with rare hardware for a tape used to hand
+    them five steps. Now it is install, record, `toktape share`, paste.
+    share takes the newest run (or `-n N`), asks for a name and a link the
+    first time, shows what would leave the machine, asks once, publishes,
+    and prints one Markdown line per run, copied to the clipboard. It
+    never publishes a chat tape, refuses to upload from a pipe without
+    `--yes`, and skips a run this machine already published. Runs
+    published before this release cannot be matched to their files, and
+    share says so.
 
-    **A decision tape says what it publishes.** The dry-run read "text
-    nothing" for a decision tape that carried every request and response
-    body. It now counts them and their size, and `publish --no-text`
-    keeps them home while every timing still goes up.
+    **An ARM host names its CPU.** aarch64 Linux reports no CPU model
+    name, so a DGX Spark's card read `GB10 · ? · 122 GB unified`. The
+    name now comes from the implementer and part each core reports, with
+    the kernel's own names: `10× Cortex-X925 + 10× Cortex-A725`. An
+    unknown part prints the value read, never a guessed family. Tapes
+    recorded before this release keep their `?`.
 
-    **The server is its whole process tree.** A server whose port holder
-    fronts a worker process had the worker's GPU memory counted as another
-    process's and its RAM left out. GPU attribution and memory now sum the
-    server's descendants.
-
-    For maintainers: `docs/publish.md` has a block to paste into an issue
-    to ask someone for a tape from their machine, and the hub's link
-    preview now names who recorded a run.
+    For maintainers: `docs/publish.md` has a three-line block to paste
+    into an issue, and the hub has a page per GPU model
+    (`tape.midagedev.com/hw/gb10`).
 
   footer: |
     ## Install
