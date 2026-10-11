@@ -3,6 +3,7 @@ package publish
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -288,6 +289,16 @@ func (c *Client) List(ctx context.Context, q ListQuery) (*Listing, error) {
 	return out, nil
 }
 
+// ErrRunNotFound is what Run's error matches (errors.Is) when the service
+// answers 404: the run was deleted, taken down or never was.
+var ErrRunNotFound = errors.New("publish: run not found")
+
+// notFound keeps the refusal's own sentence and matches ErrRunNotFound.
+type notFound struct{ err error }
+
+func (n *notFound) Error() string   { return n.err.Error() }
+func (n *notFound) Unwrap() []error { return []error{n.err, ErrRunNotFound} }
+
 // Run reads one published run. The id is bare — RunID takes the link —
 // and anything but 200 is a failure reported verbatim like Edit's.
 func (c *Client) Run(ctx context.Context, id string) (*RunDetail, error) {
@@ -315,7 +326,11 @@ func (c *Client) Run(ctx context.Context, id string) (*RunDetail, error) {
 		return nil, fmt.Errorf("publish: %s: %w", base, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, refusedBody(base, "the run", resp, body)
+		err := refusedBody(base, "the run", resp, body)
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, &notFound{err}
+		}
+		return nil, err
 	}
 	var wire runWire
 	if err := json.Unmarshal(body, &wire); err != nil {

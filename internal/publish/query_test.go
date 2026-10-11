@@ -3,6 +3,7 @@ package publish
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -300,5 +301,26 @@ func TestDownloadRefusal(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("wrote %d refusal bytes to the download", buf.Len())
+	}
+}
+
+// TTP-207: a 404 on a run is one typed signal, so a caller can tell a run
+// that is gone from a service that is down.
+func TestRunNotFoundIsTyped(t *testing.T) {
+	var got serveQuery
+	srv := queryServer(t, &got, "no such run", 404)
+	_, err := (&Client{BaseURL: srv.URL}).Run(context.Background(), "gone")
+	srv.Close()
+	if !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("404: err = %v, want ErrRunNotFound", err)
+	}
+	if !strings.Contains(err.Error(), "refused the run (404 Not Found): no such run") {
+		t.Errorf("the message changed: %v", err)
+	}
+	srv = queryServer(t, &got, "boom", 500)
+	defer srv.Close()
+	_, err = (&Client{BaseURL: srv.URL}).Run(context.Background(), "x")
+	if err == nil || errors.Is(err, ErrRunNotFound) {
+		t.Errorf("500: err = %v, want an error that is not ErrRunNotFound", err)
 	}
 }
