@@ -28,7 +28,7 @@ MIT，没有遥测，不需要账号。
 │ MODEL    Qwen3.6-35B-A3B-UD-Q6_K.gguf · UD-Q6_K · 27.3 GiB           │
 │ ENGINE   ik_llama.cpp c10fbbcc · linux 6.8.0-139-generic             │
 │          workstation                                                 │
-│ RIG      RTX 3090 24G · RTX A6000 48G                                │
+│ RIG      RTX A6000 48G · +1 idle                                     │
 │          AMD Ryzen Threadripper PRO 5975WX 32-Cores · 252 GiB        │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Decode        149 tok/s aggregate · 37.3 tok/s each                  │
