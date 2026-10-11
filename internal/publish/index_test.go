@@ -699,3 +699,28 @@ func TestIndexOfQuantFromFileName(t *testing.T) {
 		})
 	}
 }
+
+// TestIndexOfNamesTheCardsTheServerUsed (TTP-209, 2026-10-12): the real clip
+// ran on the A6000 of a 3090 + A6000 host, so it lands under the A6000 and
+// not the 3090. A tape that never read the server's VRAM keeps both cards.
+func TestIndexOfNamesTheCardsTheServerUsed(t *testing.T) {
+	tp, err := tape.Read("../tape/testdata/clip-pinned-a6000.tape")
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := IndexOf(tp)
+	if want := []string{"rtx-a6000"}; !reflect.DeepEqual(idx.GPUIDs, want) || idx.GPUID != "rtx-a6000" || idx.HostClass != "1x rtx-a6000" {
+		t.Errorf("clip: gpu_ids %v gpu_id %q host_class %q, want the A6000 alone", idx.GPUIDs, idx.GPUID, idx.HostClass)
+	}
+	if want := []string{"NVIDIA RTX A6000"}; !reflect.DeepEqual(idx.GPUsRaw, want) {
+		t.Errorf("clip: gpus_raw %v, want %v", idx.GPUsRaw, want)
+	}
+	tp.Summary.GPUsAtEnd = nil
+	for i := range tp.Samples {
+		tp.Samples[i].GPUs = nil
+	}
+	idx = IndexOf(tp)
+	if len(idx.GPUIDs) != 2 || len(idx.GPUsRaw) != 2 || idx.GPUCount != 2 {
+		t.Errorf("unknown use: gpu_ids %v gpus_raw %v count %d, want both cards", idx.GPUIDs, idx.GPUsRaw, idx.GPUCount)
+	}
+}

@@ -181,14 +181,19 @@ func IndexOf(t *tape.Tape) Index {
 	}
 	idx.QuantID, idx.QuantBits = QuantID(quant)
 
-	idx.GPUsRaw = make([]string, len(s.Host.GPUs))
-	gpuIDs := make([]string, len(s.Host.GPUs))
-	for i, g := range s.Host.GPUs {
+	// The cards the server held memory on (tape.ServerRig, TTP-209): the same
+	// rule and the same reading the card's RIG line uses, so a run pinned to
+	// the second of two cards is listed under that card on the card and on
+	// the hub alike; the host list when use was never read.
+	cards, _ := tape.ServerRig(&s)
+	idx.GPUsRaw = make([]string, len(cards))
+	gpuIDs := make([]string, len(cards))
+	for i, g := range cards {
 		idx.GPUsRaw[i] = g.Name
 		gpuIDs[i] = GPUID(g.Name)
 		idx.VRAMBytes += g.VRAMBytes
 	}
-	idx.GPUCount = len(s.Host.GPUs)
+	idx.GPUCount = len(cards)
 	if idx.HostClass = HostClass(gpuIDs); idx.HostClass != "" {
 		// One kind of card: the shared id is the row's gpu_id. A mixed rig
 		// keeps it empty and search falls back to gpus_raw.
