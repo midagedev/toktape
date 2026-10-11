@@ -199,6 +199,12 @@ type Props struct {
 	// /props there has ever been — so absent engine and empty engine stay
 	// distinguishable.
 	Engine *EngineProps `json:"engine,omitempty"`
+	// Modalities is what llama-server reports it can take in (TTP-208):
+	// {"vision": true|false}. nil when the body had no such key, which is an
+	// older build or another engine and says nothing either way.
+	Modalities *struct {
+		Vision *bool `json:"vision"`
+	} `json:"modalities,omitempty"`
 
 	// Raw is the whole response, so a field this struct does not name is still
 	// available to the caller and to DetectKind.
@@ -308,6 +314,15 @@ func (p *Props) ServerPID() int {
 		return 0
 	}
 	return p.Engine.ServerPID
+}
+
+// Vision is whether /props said the server takes images. ok is false when it
+// said nothing: an unknown is never read as a no (TTP-208).
+func (p *Props) Vision() (vision, ok bool) {
+	if p == nil || p.Modalities == nil || p.Modalities.Vision == nil {
+		return false, false
+	}
+	return *p.Modalities.Vision, true
 }
 
 // Props reads GET /props.
@@ -695,7 +710,7 @@ func (c *Client) Tokenize(ctx context.Context, content string) (int, error) {
 // returns the prompt as the model will actually see it (lesson 4: the template
 // decides what is being measured).
 func (c *Client) ApplyTemplate(ctx context.Context, msgs []tape.Message) (string, error) {
-	body, err := c.post(ctx, "/apply-template", map[string]any{"messages": msgs})
+	body, err := c.post(ctx, "/apply-template", map[string]any{"messages": TextMessages(msgs)})
 	if err != nil {
 		return "", err
 	}

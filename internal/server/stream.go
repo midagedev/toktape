@@ -77,6 +77,11 @@ type StreamRequest struct {
 	// neither field is worth that risk where no timings object exists to
 	// fill anyway.
 	Protocol tape.ServerKind
+	// ImageData is the bytes of the images Messages refer to, by sha256
+	// (TTP-208). It exists only to build the body: nothing records it, so a
+	// tape carries the references and never the pixels. Filled by
+	// AttachImages.
+	ImageData map[string][]byte
 }
 
 // SentMaxTokens is the generation cap this request will actually carry.
@@ -188,7 +193,7 @@ func (r StreamRequest) Body() map[string]any {
 	for k, v := range r.Params {
 		body[k] = v
 	}
-	body["messages"] = r.Messages
+	body["messages"] = r.wireMessages()
 	body["stream"] = true
 	return body
 }
@@ -213,7 +218,7 @@ func (r StreamRequest) openaiBody() map[string]any {
 	for k, v := range r.Params {
 		body[k] = v
 	}
-	body["messages"] = r.Messages
+	body["messages"] = r.wireMessages()
 	body["stream"] = true
 	return body
 }
