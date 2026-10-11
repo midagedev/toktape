@@ -1,0 +1,28 @@
+┌──────────────────────────────────────────────────────────────────────┐
+│ toktape v0.7.1                          20261011-091205-gpt-oss-120b │
+├──────────────────────────────────────────────────────────────────────┤
+│ MODEL    gpt-oss-120b-mxfp4.gguf · MXFP4 · 59.0 GiB                  │
+│ ENGINE   llama-server b6890 (c4d5e6f) · linux 6.11.0-1016-nvidia     │
+│          spark                                                       │
+│ RIG      GB10 · NVIDIA Grace (Cortex-X925 + Cortex-A725)             │
+│          122 GB unified                                              │
+├──────────────────────────────────────────────────────────────────────┤
+│ Decode        52.0 tok/s · ≈ 151 GB/s                                │
+│ Prefill       1296 tok/s · 512 prompt tokens · TTFT 410 ms           │
+│ Context       32768 (512 in / 320 out)                               │
+│ Prefix cache  0% hit (0/512) · warm                                  │
+│ Sampling      temp default · chat                                    │
+├──────────────────────────────────────────────────────────────────────┤
+│ MEMORY   Unified 121.7 GiB (one pool, CPU and GPU)                   │
+│          weights 48.4 | kv 1.5 | compute 0.8 GiB                     │
+│          Placed 59.0 GiB (unified memory)                            │
+│          Host RSS 56.0 GiB (file 54.7 / anon 1.3)                    │
+│          Page faults 0.0 maj/token (0 during decode)                 │
+├──────────────────────────────────────────────────────────────────────┤
+│ HOST     GPU0 71°C 38 W · throttled: no · contended: no              │
+├──────────────────────────────────────────────────────────────────────┤
+│ FLAGS    -ngl 99 -fa on -b default -ub default -ctk default          │
+│          -ctv default                                                │
+├──────────────────────────────────────────────────────────────────────┤
+│                toktape · github.com/midagedev/toktape                │
+└──────────────────────────────────────────────────────────────────────┘

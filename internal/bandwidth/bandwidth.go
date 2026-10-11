@@ -257,6 +257,14 @@ func DeviceBytesPerSec(s *tape.RunSummary, device string) int64 {
 	if device == tape.DeviceCPU {
 		return HostBytesPerSec(s.Host)
 	}
+	// One pool, one leg (TTP-178): on a unified host a "GPU<n>" device reads
+	// the same memory the CPU does, so its ceiling is the host's — never a
+	// name-table figure for the part, and 0 (unknown, "?") when the host's own
+	// bandwidth was not observed. This is the single branch point; every
+	// per-device ceiling in this package goes through here.
+	if tape.Unified(s.Host) != "" {
+		return HostBytesPerSec(s.Host)
+	}
 	idx, ok := gpuIndex(device)
 	if !ok {
 		return 0
@@ -328,6 +336,12 @@ const (
 // UsedBytes.
 func Contradiction(s *tape.RunSummary) *PlacementContradiction {
 	if s == nil || s.Placement.Source == placement.SourceEngine {
+		return nil
+	}
+	// A unified part reports no memory of its own (a GB10's nvidia-smi says
+	// [N/A]), so a hold of 0 is a reading nobody took, not a card holding
+	// nothing (TTP-178).
+	if tape.Unified(s.Host) != "" {
 		return nil
 	}
 	for _, d := range s.Placement.Devices {

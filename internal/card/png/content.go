@@ -744,7 +744,7 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 			// The host is the sand segment. It gets no VRAM breakdown — that
 			// split is a GPU one — but it does get its own: how much of what
 			// was placed here is actually in RAM (TTP-63).
-			c.segments = append(c.segments, hostSegment(d, res))
+			c.segments = append(c.segments, hostSegment(d, res, tape.Unified(s.Host) != ""))
 			continue
 		}
 		col := gpuColors[gpuN%len(gpuColors)]
@@ -836,7 +836,7 @@ func (c *content) buildMemory(s *tape.RunSummary) {
 	// bare figure; the word alone is the floor only for a placement with no
 	// placed figure at all.
 	placedPart := placedStr + " placed"
-	word := layoutWord(s.Placement)
+	word := layoutWord(s.Placement, s.Host)
 	var spellings []string
 	add := func(parts ...string) {
 		if len(parts) > 0 && parts[0] == "" {
@@ -920,7 +920,7 @@ func trailingPartsLine(parts []string) fallbackLine {
 // sample, a remote server — keeps the block and the legend the card always had;
 // zero paged is a whole block that says "ram", which is a different claim from
 // "CPU" and worth making; and only a real shortfall draws two.
-func hostSegment(d tape.DevicePlacement, r tape.HostResidency) segment {
+func hostSegment(d tape.DevicePlacement, r tape.HostResidency, unified bool) segment {
 	seg := segment{label: orUnknown(d.Device), size: formatGiB(d.Bytes), bytes: d.Bytes, col: colHost}
 	// The residency is derived over every CPU device at once, so it describes
 	// this segment only when this segment is the whole of it. A placement with
@@ -929,14 +929,20 @@ func hostSegment(d tape.DevicePlacement, r tape.HostResidency) segment {
 	if d.Device != tape.DeviceCPU || !r.Ok || r.Placed != d.Bytes {
 		return seg
 	}
+	// On a unified host there is no separate RAM to name (TTP-178): the
+	// resident share is the CPU's part of the one pool.
+	word := "ram "
+	if unified {
+		word = "cpu "
+	}
 	if r.Paged <= 0 {
-		seg.legend = []legendEntry{{label: "ram " + formatGiB(r.Resident), col: colHost}}
+		seg.legend = []legendEntry{{label: word + formatGiB(r.Resident), col: colHost}}
 		return seg
 	}
 	resident, paged := shade(colHost, shadeResident), shade(colHost, shadePaged)
 	seg.parts = []subseg{{bytes: r.Resident, col: resident}, {bytes: r.Paged, col: paged}}
 	seg.legend = []legendEntry{
-		{label: "ram " + formatGiB(r.Resident), col: resident},
+		{label: word + formatGiB(r.Resident), col: resident},
 		{label: "disk " + formatGiB(r.Paged), col: paged},
 	}
 	return seg
@@ -1162,6 +1168,22 @@ func rigIdent(h tape.HostInfo) fallbackLine {
 	gpus := strings.Join(rigGPUs(h.GPUs), " + ")
 	cpu := omitUnknown(orUnknown(h.CPU))
 	ram := omitUnknown(ramString(h))
+	floor := func() string { return gpus }
+	if tape.Unified(h) != "" {
+		// One pool (TTP-178), the text card's rule: the GPU group is its name
+		// without a size, the RAM figure carries the word, and a Mac with no
+		// GPU row drops the "?" and keeps the chip as the line's floor.
+		gpus = strings.Join(rigGPUsUnified(h.GPUs), " + ")
+		if ram != "" {
+			ram = unifiedRAM(ram, h.RAMSpeed)
+		}
+		floor = func() string {
+			if gpus != "" {
+				return gpus
+			}
+			return stripCPUVendor(stripCoreSuffix(cpu))
+		}
+	}
 	return fallbackLine{
 		preferred: joinParts(" · ", gpus, cpu, ram),
 		fallbacks: []string{
@@ -1169,7 +1191,7 @@ func rigIdent(h tape.HostInfo) fallbackLine {
 			joinParts(" · ", gpus, stripCoreSuffix(cpu), ram),
 			joinParts(" · ", gpus, stripCPUVendor(stripCoreSuffix(cpu)), ram),
 			joinParts(" · ", gpus, ram),
-			gpus,
+			floor(),
 		},
 	}
 }
@@ -1256,7 +1278,12 @@ func engineIdent(srv tape.ServerInfo) fallbackLine {
 		ctxSlots = append(ctxSlots, "ctx "+strconv.Itoa(srv.CtxSize))
 	}
 	if srv.NSlots > 0 {
-		ctxSlots = append(ctxSlots, strconv.Itoa(srv.NSlots)+" slots")
+		// "1 slot", not "1 slots" (TTP-193), as the decision card already says.
+		word := " slots"
+		if srv.NSlots == 1 {
+			word = " slot"
+		}
+		ctxSlots = append(ctxSlots, strconv.Itoa(srv.NSlots)+word)
 	}
 	tail := strings.Join(ctxSlots, " · ")
 	return fallbackLine{
@@ -1315,6 +1342,37 @@ func engineFlagRow(names, values []string) string {
 // the same fields as three measured lines (buildIdent), and a line that does
 // not fit gives its own parts up (modelIdent's fallbacks) rather than wrapping
 // into a second row.
+
+// rigGPUsUnified is rigGPUs without sizes, and without the "?" a missing GPU
+// row would print: the text card's rigGPUsUnified, character for character.
+func rigGPUsUnified(gpus []tape.GPUInfo) []string {
+	var order []string
+	counts := map[string]int{}
+	for _, g := range gpus {
+		name := orUnknown(shortGPUName(g.Name))
+		if counts[name] == 0 {
+			order = append(order, name)
+		}
+		counts[name]++
+	}
+	out := make([]string, 0, len(order))
+	for _, name := range order {
+		if n := counts[name]; n > 1 {
+			name = strconv.Itoa(n) + "× " + name
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// unifiedRAM puts the word after the size and before the speed, as the text
+// card's unifiedRAMString does: "122 GB unified LPDDR5x-8533".
+func unifiedRAM(ram, speed string) string {
+	if speed != "" {
+		return strings.TrimSuffix(ram, " "+speed) + " unified " + speed
+	}
+	return ram + " unified"
+}
 
 // rigGPUs collapses identical devices into "2× RTX 3090 24G", exactly as the
 // text card's RIG line does.
@@ -1476,9 +1534,11 @@ func startedString(s *tape.RunSummary) string {
 
 // layoutWord names where the weights live, in the reader's words rather than
 // the schema's. The text and the rules are internal/tui's twin (layoutWord
-// there) and tape.Layout's doc says why unified memory is not among them yet.
-func layoutWord(p tape.PlacementSummary) string {
-	switch tape.Layout(p).Shape {
+// there); unified memory is tape.Layout's ShapeUnified (TTP-178).
+func layoutWord(p tape.PlacementSummary, h tape.HostInfo) string {
+	switch tape.Layout(p, h).Shape {
+	case tape.ShapeUnified:
+		return "unified memory"
 	case tape.ShapeVRAM:
 		return "all in VRAM"
 	case tape.ShapeHost:

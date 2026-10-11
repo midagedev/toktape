@@ -1,0 +1,172 @@
+{
+  "id": "20261011-091205-gpt-oss-120b",
+  "toktape_version": "0.7.1",
+  "started_at": "2026-10-11T09:12:05Z",
+  "finished_at": "2026-10-11T09:12:11.7Z",
+  "server": {
+    "kind": "llama-server",
+    "url": "http://127.0.0.1:8080",
+    "build": "b6890",
+    "commit": "c4d5e6f",
+    "pid": 3120,
+    "host": "spark",
+    "args": [
+      "/opt/llama.cpp/build/bin/llama-server",
+      "-m",
+      "/models/gpt-oss-120b-mxfp4.gguf",
+      "-c",
+      "32768",
+      "-ngl",
+      "99",
+      "-fa",
+      "on",
+      "-ncmoe",
+      "8"
+    ],
+    "flags": {
+      "ngl": "99",
+      "fa": "on"
+    },
+    "n_slots": 1,
+    "ctx_size": 32768
+  },
+  "model": {
+    "path": "/models/gpt-oss-120b-mxfp4.gguf",
+    "file_name": "gpt-oss-120b-mxfp4.gguf",
+    "name": "gpt-oss 120b",
+    "arch": "gpt-oss",
+    "quant": "MXFP4",
+    "file_bytes": 63387346944,
+    "params": 116829156672,
+    "n_layers": 36,
+    "n_experts": 128,
+    "n_experts_used": 4,
+    "ctx_train": 131072,
+    "active_bytes_per_token": 2900000000
+  },
+  "host": {
+    "hostname": "spark",
+    "os": "linux",
+    "kernel": "6.11.0-1016-nvidia",
+    "cpu": "NVIDIA Grace (Cortex-X925 + Cortex-A725)",
+    "cpu_cores": 20,
+    "cpu_threads": 20,
+    "ram_bytes": 130668019712,
+    "gpus": [
+      {
+        "index": 0,
+        "name": "NVIDIA GB10",
+        "vram_bytes": 0,
+        "driver": "580.95.05"
+      }
+    ]
+  },
+  "placement": {
+    "devices": [
+      {
+        "device": "GPU0",
+        "bytes": 52000000000,
+        "classes": {
+          "attention": 4000000000,
+          "embeddings": 1000000000,
+          "experts": 47000000000
+        },
+        "layers": "0-27"
+      },
+      {
+        "device": "CPU",
+        "bytes": 11387346944,
+        "classes": {
+          "experts": 11387346944
+        },
+        "layers": "28-35"
+      }
+    ],
+    "never_loaded_bytes": 0,
+    "source": "gguf+args",
+    "vram_weights_bytes": 52000000000,
+    "vram_kv_bytes": 1610612736,
+    "vram_compute_bytes": 805306368
+  },
+  "memory": {
+    "at_end": {
+      "virt_bytes": 75161927680,
+      "rss_bytes": 60129542144,
+      "rss_file_bytes": 58720256000,
+      "rss_anon_bytes": 1409286144,
+      "rss_shmem_bytes": 0,
+      "swap_bytes": 0,
+      "maj_faults": 0,
+      "min_faults": 402118
+    },
+    "peak_rss_bytes": 60129542144,
+    "mapped_file_bytes": 63387346944,
+    "maj_faults_total": 0,
+    "maj_faults_prompt": 0,
+    "maj_faults_decode": 0,
+    "maj_faults_per_token": 0
+  },
+  "concurrency": 1,
+  "timings": {
+    "prompt_n": 512,
+    "cache_n": 0,
+    "prompt_ms": 395.1,
+    "prompt_per_second": 1296,
+    "predicted_n": 320,
+    "predicted_ms": 6153.8,
+    "predicted_per_second": 52,
+    "ttft_ms": 410,
+    "client_prompt_per_second": 1280,
+    "client_predicted_per_second": 51.8,
+    "client_agrees_with_server": true,
+    "decode_label": "decode",
+    "itl_p50_ms": 19.2,
+    "itl_p95_ms": 21,
+    "itl_p99_ms": 24.4,
+    "effective_bw_bps": 150800000000
+  },
+  "aggregate": {
+    "streams": 1,
+    "wall_ms": 6700,
+    "total_prompt_n": 512,
+    "total_predicted_n": 320,
+    "aggregate_predicted_per_second": 52,
+    "aggregate_prompt_per_second": 1296,
+    "per_stream_predicted_per_second": 52,
+    "ttft_p50_ms": 410,
+    "ttft_p95_ms": 410,
+    "slots_busy_max": 1
+  },
+  "cache": {
+    "hit_tokens": 0,
+    "prompt_total": 512,
+    "hit_ratio": 0,
+    "label": "warm"
+  },
+  "contention": {
+    "contended": false,
+    "loadavg1": 1.4,
+    "other_gpu_procs": 0
+  },
+  "template": {
+    "chat_template": "harmony",
+    "rendered_has_think_close": false,
+    "rendered_prompt_sha256": "1b3d5f7a9c2e4a6c8e0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c4e6b8d0f2a4c",
+    "rendered_prompt_tokens": 512
+  },
+  "sampling": {
+    "endpoint": "chat"
+  },
+  "limit": {},
+  "gpus_at_end": [
+    {
+      "index": 0,
+      "used_bytes": 0,
+      "util_pct": 94,
+      "temp_c": 71,
+      "power_w": 38,
+      "clock_mhz": 2418
+    }
+  ],
+  "caveats": []
+}

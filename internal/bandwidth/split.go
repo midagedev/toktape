@@ -326,6 +326,12 @@ func ramSide(s *tape.RunSummary) (RAMSide, bool, *FigureRefusal) {
 	if s == nil {
 		return RAMSide{}, false, nil
 	}
+	// A unified host has no host leg to name (TTP-178): CPU and GPU read one
+	// pool, so "≈ N GB/s from RAM" over the CPU's share would name a bus that
+	// is not there. The combined figure is the read rate against that pool.
+	if tape.Unified(s.Host) != "" {
+		return RAMSide{}, false, nil
+	}
 	rate, streams, ok := decodeRate(s)
 	if !ok {
 		return RAMSide{}, false, nil

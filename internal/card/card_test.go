@@ -75,6 +75,9 @@ func TestTextGolden(t *testing.T) {
 		// TTP-108: four streams that did not share a decode window. The
 		// only golden carrying the ragged_aggregate caveat.
 		{"example-ragged", ExampleRagged()},
+		// TTP-178: a DGX Spark. The only golden whose RIG and MEMORY say
+		// unified, read from the GB10's name alone.
+		{"example-gb10", ExampleGB10()},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -96,6 +99,7 @@ func TestJSONGolden(t *testing.T) {
 		{"example-rounds", ExampleRounds()},
 		{"example-cached", ExampleCachedPrefill()},
 		{"example-ragged", ExampleRagged()},
+		{"example-gb10", ExampleGB10()},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

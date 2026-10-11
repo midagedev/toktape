@@ -12,12 +12,12 @@ package tape
 // looking at before any of the figures mean anything, and until now they had
 // to work it out from a bar.
 //
-// Unified memory — Apple Silicon, Jetson, an APU — is a fourth kind and is
-// deliberately NOT derived here. Nothing toktape can read today observes it:
-// the host collector is /proc-only, so it never runs on a Mac, and "the GPU
-// reports as much memory as the host has" would call a 24 GB card in a 24 GB
-// box unified, which is a guess dressed as a reading. It arrives with the
-// collector that can see it (TTP-15).
+// Unified memory — Apple Silicon, a DGX Spark's GB10 — is a fourth kind. The
+// other three ask whether reading a token crosses a slow bus; unified answers
+// that there is no second bus, so a split between "GPU0" and "CPU" is
+// bookkeeping and not a place. It is derived from the host's part names by
+// Unified, never from "the GPU reports as much memory as the host has", which
+// would call a 24 GB card in a 24 GB box unified.
 type MemoryShape string
 
 // The values of MemoryShape.
@@ -30,6 +30,9 @@ const (
 	ShapeOffload MemoryShape = "offload"
 	// ShapeHost: no GPU holds any of it.
 	ShapeHost MemoryShape = "host"
+	// ShapeUnified: CPU and GPU share one pool (Unified names the host), so the
+	// device split is not a bus. VRAMBytes and HostBytes still carry it.
+	ShapeUnified MemoryShape = "unified"
 )
 
 // MemoryLayout is the shape and the split it was decided from.
@@ -45,8 +48,9 @@ type MemoryLayout struct {
 }
 
 // Layout derives where a run's weights live. Bytes on DeviceCPU are host RAM;
-// everything else the placement names is a device of its own.
-func Layout(p PlacementSummary) MemoryLayout {
+// everything else the placement names is a device of its own. On a unified host
+// the shape is ShapeUnified whatever the split, and the split is still filled.
+func Layout(p PlacementSummary, h HostInfo) MemoryLayout {
 	var out MemoryLayout
 	for _, d := range p.Devices {
 		if d.Bytes <= 0 {
@@ -64,6 +68,8 @@ func Layout(p PlacementSummary) MemoryLayout {
 	}
 	out.VRAMShare = float64(out.VRAMBytes) / float64(total)
 	switch {
+	case Unified(h) != "":
+		out.Shape = ShapeUnified
 	case out.HostBytes == 0:
 		out.Shape = ShapeVRAM
 	case out.VRAMBytes == 0:

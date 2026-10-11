@@ -3,7 +3,7 @@
 ├──────────────────────────────────────────────────────────────────────┤
 │ MODEL    Qwen3-1.7B-Q4_K_M.gguf · Q4_K_M · 1.2 GiB                   │
 │ ENGINE   llama-server b10964 (b29c606e2) · macos 27.0                │
-│ RIG      ? · Apple M1 Pro · 32 GB                                    │
+│ RIG      Apple M1 Pro · 32 GB unified                                │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Sample        83.8 tok/s · ≈ 92 GB/s                                 │
 │ Prefill       391 tok/s                                              │
@@ -17,7 +17,7 @@
 │               1 85.6 tok/s  ·  2 81.9 tok/s                          │
 │               prefill 2 turns under 100 tokens, not measured         │
 ├──────────────────────────────────────────────────────────────────────┤
-│ MEMORY   VRAM ?                                                      │
+│ MEMORY   Unified 32.0 GiB (one pool, CPU and GPU)                    │
 │          Host RSS ?                                                  │
 │          Page faults ?                                               │
 ├──────────────────────────────────────────────────────────────────────┤

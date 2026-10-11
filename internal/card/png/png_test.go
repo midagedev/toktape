@@ -48,6 +48,8 @@ func fixtures() map[string]*tape.RunSummary {
 		// new hero lines, registered so the fit tests hold them to the frame.
 		"window": card.ExampleWindow(),
 		"probed": card.ExampleProbed(),
+		// TTP-178: unified memory — the RIG line and the placement word.
+		"gb10": card.ExampleGB10(),
 	}
 }
 
@@ -838,6 +840,8 @@ func TestWriteCards(t *testing.T) {
 		{"card-concurrent.png", card.ExampleConcurrent()},
 		{"card-unknown.png", &tape.RunSummary{}},
 		{"card-hangul.png", hangulSummary()},
+		// TTP-178: a DGX Spark, the unified-memory RIG and placement words.
+		{"card-gb10.png", card.ExampleGB10()},
 	}
 	for _, c := range cards {
 		path := filepath.Join(outDir, c.file)
@@ -1111,4 +1115,23 @@ func TestDraftClauseReplacesTheSecondDecodeLine(t *testing.T) {
 			t.Errorf("hero.left.sub2 = %q", m.Text)
 		}
 	})
+}
+
+// TestEngineLineOneSlot: the token card's engine line says "1 slot" too
+// (TTP-193). The GB10 example serves one slot; it printed "1 slots".
+func TestEngineLineOneSlot(t *testing.T) {
+	c, err := renderCanvas(card.ExampleGB10())
+	if err != nil {
+		t.Fatalf("renderCanvas: %v", err)
+	}
+	found := false
+	for _, m := range c.marks {
+		if strings.Contains(m.Text, "1 slots") {
+			t.Errorf("%s = %q", m.ID, m.Text)
+		}
+		found = found || strings.Contains(m.Text, "1 slot")
+	}
+	if !found {
+		t.Error("the engine line does not say 1 slot")
+	}
 }

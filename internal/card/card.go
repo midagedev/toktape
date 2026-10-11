@@ -283,8 +283,7 @@ func identitySection(s *tape.RunSummary) []string {
 	}
 	out = append(out, field("ENGINE", blockLabelW, " · ", engineParts...)...)
 
-	rigParts := append(rigGPUs(s.Host.GPUs), orUnknown(s.Host.CPU), ramString(s.Host))
-	out = append(out, field("RIG", blockLabelW, " · ", rigParts...)...)
+	out = append(out, field("RIG", blockLabelW, " · ", rigParts(s.Host)...)...)
 	return out
 }
 
@@ -343,6 +342,58 @@ func bareCommit(srv tape.ServerInfo) string {
 func osString(h tape.HostInfo) string {
 	s := strings.TrimSpace(h.OS + " " + h.Kernel)
 	return orUnknown(s)
+}
+
+// rigParts is the RIG line's segments, GPUs then CPU then RAM. A unified host
+// (tape.Unified, TTP-178) keeps the order and changes two things: its GPU
+// group prints the name alone, because the pool is the RAM segment and is
+// printed once there, and a host with no GPU row (a Mac) drops the leading
+// "?" — nothing was missing, the chip is the GPU.
+func rigParts(h tape.HostInfo) []string {
+	if tape.Unified(h) == "" {
+		return append(rigGPUs(h.GPUs), orUnknown(h.CPU), ramString(h))
+	}
+	var parts []string
+	if len(h.GPUs) > 0 {
+		parts = rigGPUsUnified(h.GPUs)
+	}
+	return append(parts, orUnknown(h.CPU), unifiedRAMString(h))
+}
+
+// unifiedRAMString is ramString with the word that says the number is one
+// pool shared by CPU and GPU. The size is MemTotal / hw.memsize, observed.
+func unifiedRAMString(h tape.HostInfo) string {
+	s := ramString(h)
+	if h.RAMBytes == 0 {
+		return s + " unified"
+	}
+	if h.RAMSpeed != "" {
+		return strings.TrimSuffix(s, " "+h.RAMSpeed) + " unified " + h.RAMSpeed
+	}
+	return s + " unified"
+}
+
+// rigGPUsUnified is rigGPUs without sizes. A unified part's VRAMBytes is 0
+// (nvidia-smi says [N/A]) or, from a hostile or future reporter, the pool
+// itself; either way printing it would count the pool twice.
+func rigGPUsUnified(gpus []tape.GPUInfo) []string {
+	var out []string
+	counts := map[string]int{}
+	var order []string
+	for _, g := range gpus {
+		name := orUnknown(shortGPUName(g.Name))
+		if counts[name] == 0 {
+			order = append(order, name)
+		}
+		counts[name]++
+	}
+	for _, name := range order {
+		if n := counts[name]; n > 1 {
+			name = strconv.Itoa(n) + "× " + name
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 // rigGPUs collapses identical devices into "2× RTX 3090 24G".
@@ -1435,9 +1486,17 @@ func streamLines(s *tape.RunSummary) []string {
 func memorySection(s *tape.RunSummary) []string {
 	var lines []string
 
-	if len(s.GPUsAtEnd) == 0 {
+	lay := tape.Layout(s.Placement, s.Host)
+	unified := tape.Unified(s.Host) != ""
+	switch {
+	case unified:
+		// One pool, printed once (TTP-178). The size is the host's MemTotal /
+		// hw.memsize; the per-device VRAM lines are not drawn because the
+		// device has no memory of its own to bar.
+		lines = append(lines, "Unified "+formatGiB(s.Host.RAMBytes)+" (one pool, CPU and GPU)")
+	case len(s.GPUsAtEnd) == 0:
 		lines = append(lines, "VRAM "+unknown)
-	} else {
+	default:
 		total := map[int]int64{}
 		for _, g := range s.Host.GPUs {
 			total[g.Index] = g.VRAMBytes
@@ -1468,7 +1527,13 @@ func memorySection(s *tape.RunSummary) []string {
 	// not resident and come back from the file. The medium behind that file is
 	// not in the tape, and naming it would be printing something nobody
 	// measured.
-	if r := tape.Residency(s.Placement, m.AtEnd); r.Placed > 0 {
+	if unified {
+		// The one pool holds every placed byte, so the figure is the whole
+		// placement, not the CPU side of an accounting split.
+		if placed := lay.VRAMBytes + lay.HostBytes; placed > 0 {
+			lines = append(lines, "Placed "+formatGiB(placed)+" (unified memory)")
+		}
+	} else if r := tape.Residency(s.Placement, m.AtEnd); r.Placed > 0 {
 		switch {
 		case !r.Ok:
 			lines = append(lines, "Host placed "+formatGiB(r.Placed))

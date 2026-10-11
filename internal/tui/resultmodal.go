@@ -162,7 +162,7 @@ func resultModal(m Model, th Theme, boxW int) []string {
 	// 다르니까"). A bar is a proportion and a reader has to decode it; the
 	// sentence is the thing they needed before any of the rates above meant
 	// anything.
-	if lay := tape.Layout(s.Placement); lay.Shape != tape.ShapeUnknown {
+	if lay := tape.Layout(s.Placement, s.Host); lay.Shape != tape.ShapeUnknown {
 		l := newLine(th, inner)
 		l.space(2)
 		l.add(th.text, layoutWord(lay))
@@ -452,10 +452,12 @@ func placementLines(th Theme, p tape.PlacementSummary, res tape.HostResidency, c
 //
 // They are the reader's words, not the schema's: "offloaded" is what the
 // forums call a model whose experts sit in system memory, and "all in VRAM" is
-// the state everyone is trying to reach. tape.Layout's doc says why unified
-// memory is not among them yet.
+// the state everyone is trying to reach. "unified memory" is a host with one
+// pool (tape.ShapeUnified, TTP-178), where the device split is not a bus.
 func layoutWord(lay tape.MemoryLayout) string {
 	switch lay.Shape {
+	case tape.ShapeUnified:
+		return "unified memory"
 	case tape.ShapeVRAM:
 		return "all in VRAM"
 	case tape.ShapeHost:
