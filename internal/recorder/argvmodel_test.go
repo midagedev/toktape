@@ -172,3 +172,32 @@ func TestModelFromArgvSpellings(t *testing.T) {
 		}
 	}
 }
+
+// The 3060 host's tape (2026-10-12, toktape 0.6 against bloomery 0.3.0): the
+// engine block named the absolute path in model_path and sent no quant and no
+// size, so the card printed "?" for both on a file on the same disk. Here
+// the whole engine path runs, collectModelShape then collectProcess, as
+// record does.
+func TestBloomeryAbsoluteModelPathFillsQuantAndSize(t *testing.T) {
+	want := filepath.Join(t.TempDir(), "models", "Tiny-Q4_K_M.gguf")
+	size := writeTinyGGUF(t, want)
+	argv := []string{"bin/bloomery-serve", "-m", want, "--host", "127.0.0.1"}
+
+	r := bloomeryRun(bloomeryProc(t, "", argv), argv, 4242)
+	r.props.ModelPath = want
+	r.collectModelShape()
+	r.collectProcess()
+
+	if r.model.Path != want || r.model.FileName != "Tiny-Q4_K_M.gguf" {
+		t.Errorf("model path %q, file name %q", r.model.Path, r.model.FileName)
+	}
+	if r.model.FileBytes != size {
+		t.Errorf("model.file_bytes = %d, want %d", r.model.FileBytes, size)
+	}
+	if r.model.Quant != "Q4_K_M" {
+		t.Errorf("model.quant = %q, want Q4_K_M", r.model.Quant)
+	}
+	if len(r.warnings) != 0 {
+		t.Errorf("warnings = %q, want none", r.warnings)
+	}
+}
