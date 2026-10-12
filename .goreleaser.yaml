@@ -102,6 +102,23 @@ release:
   # reasonable record and a poor introduction, so the header says what a reader
   # has to know before reading it. Rewrite it per release; it is not a template.
   header: |
+    **Images go in.** `toktape record --image photo.png` sends a PNG,
+    JPEG or WebP with the prompt as an OpenAI content part, and
+    `--image builtin` sends a 640×480 test image, so a vision run needs no
+    file of your own. A prompts file takes an `images` key per line. The
+    card adds an Image row (`1 × 640×480 PNG (builtin) · prefill includes
+    it`), and the tape stores each image as a reference (name, size,
+    digest), never its bytes. A server whose `/props` says it takes no
+    images is refused before the run; for llama-server, the message names
+    `--mmproj`. The PNG card has no Image row yet.
+
+    **RIG names the card the server used.** On a host with several GPUs,
+    the card listed all of them even when the server ran on one. The rig
+    line now lists the GPUs the server's own process held memory on, then
+    how many sat idle (`RTX A6000 48G · +1 idle`), and the hub files the
+    run under that card. A tape with no per-process GPU reading keeps the
+    host's full list.
+
     **A publish from a script never hangs.** A first publish run over ssh
     with no input but a controlling terminal in the background opened
     the terminal to ask, took SIGTTIN and stopped; a stopped process does
@@ -111,8 +128,8 @@ release:
     the same guard.
 
     **A model file named by an engine's `-m` is read.** A server that
-    declares its own engine (bloomery) reported only a bare file name, so
-    the tape had no path, size or quant and the hub printed `?`. The
+    declares its own engine (bloomery) reported a file name or a path but
+    no size or quant, so the card and the hub printed `?`. The
     recorder now reads `-m` from the server's command line, resolves it
     against the server's working directory, and reads the file's size and
     GGUF header. When the file cannot be read, the hub takes the quant
@@ -120,6 +137,12 @@ release:
 
     **RAM says GiB.** The card divided RAM by 2^30 and printed "GB"; it
     now prints "GiB" (`122 GiB unified`, `252 GiB`).
+
+    **share checks a remembered link.** A run deleted or taken down on
+    the hub since it was published answers 404; `toktape share` now drops
+    that link and publishes the tape again. A private run's link still
+    opens, so it stays. When the check itself fails, the link is kept and
+    share says it was not checked.
 
   footer: |
     ## Install
