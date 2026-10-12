@@ -957,9 +957,7 @@ func loopbackPortOf(baseURL string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	switch u.Hostname() {
-	case "127.0.0.1", "localhost", "::1":
-	default:
+	if !isLoopbackHost(u.Hostname()) {
 		return 0, fmt.Errorf("recorder: %s is not a loopback host", u.Hostname())
 	}
 	port, err := strconv.Atoi(u.Port())
@@ -983,8 +981,19 @@ func (r *run) pidReadable() bool {
 	return procmon.HasProc(r.opts.FSRoot)
 }
 
-// collectHost reads the hardware line and opens the GPU backend.
+// collectHost reads the hardware line and opens the GPU backend. A server that
+// is not on this machine (serverIsLocal) has neither read: the host line is
+// unknown beyond what the operator stated, the GPU view is the Null collector
+// so nothing samples this machine's cards for it, and one warning says why
+// (TTP-196). That holds for a collector in Options.GPU too, which stands for
+// this machine's cards.
 func (r *run) collectHost(ctx context.Context) {
+	if local, warning := serverIsLocal(ctx, r.client.BaseURL()); !local {
+		r.warn("%s", warning)
+		r.host = unknownHost(r.opts.HostRAM, r.opts.HostLabel)
+		r.gpus, r.ownGPU = gpu.Null{}, false
+		return
+	}
 	host, err := procmon.HostInfo(r.opts.FSRoot)
 	if err != nil {
 		r.warn("/proc not readable, CPU, RAM and kernel unknown")

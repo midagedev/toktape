@@ -309,7 +309,7 @@ func RecordDecision(ctx context.Context, opts DecisionOptions) (*tape.Tape, erro
 
 	var warnings []string
 	refineDecisionEngine(opts, base, &id, &warnings)
-	host, hostWarns := collectDecisionHost(ctx, opts)
+	host, hostWarns := collectDecisionHost(ctx, opts, base)
 	warnings = append(warnings, hostWarns...)
 	if id == (server.EngineIdentity{}) {
 		warnings = append(warnings, "the server answered neither /props nor /v1/models, so its engine and model file are unknown")
@@ -519,8 +519,14 @@ func refineDecisionEngine(opts DecisionOptions, base string, id *server.EngineId
 }
 
 // collectDecisionHost reads the host line the way a record does (procmon,
-// the label, the GPU inventory), as warnings rather than failures.
-func collectDecisionHost(ctx context.Context, opts DecisionOptions) (tape.HostInfo, []string) {
+// the label, the GPU inventory), as warnings rather than failures. base is the
+// server actually attached to, which opts.BaseURL is not when discovery found
+// it; a server that is not on this machine gets the same unknown host line a
+// record gives it, and one warning (TTP-196, collectHost).
+func collectDecisionHost(ctx context.Context, opts DecisionOptions, base string) (tape.HostInfo, []string) {
+	if local, warning := serverIsLocal(ctx, base); !local {
+		return unknownHost(HostRAM{}, opts.HostLabel), []string{warning}
+	}
 	var warns []string
 	host, err := procmon.HostInfo(opts.FSRoot)
 	if err != nil {

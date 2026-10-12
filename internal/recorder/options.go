@@ -159,7 +159,10 @@ type Options struct {
 	// point it at a fixture tree.
 	FSRoot string
 	// GPU is the device collector. nil means gpu.Open. A collector supplied
-	// here is owned by the caller and is not closed by Record.
+	// here is owned by the caller and is not closed by Record. It stands for
+	// THIS machine's cards, so a server that is not on this machine
+	// (serverIsLocal, TTP-196) does not use it: that run's GPU view is the
+	// Null collector.
 	GPU gpu.Collector
 	// Clock supplies StartedAt and FinishedAt. nil means the system clock.
 	Clock Clock
