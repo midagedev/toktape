@@ -13,6 +13,7 @@
 // is what makes a delete token recognisable in an issue or a log; it is not
 // what makes it work.
 
+import { invalidateFeeds } from "./feedcache.js";
 import { fail } from "./http.js";
 import { sha256Hex } from "./ids.js";
 
@@ -26,7 +27,9 @@ export async function deleteRun(id, request, env) {
     return fail(401, "the Authorization header carried no token");
   }
 
-  const row = await env.DB.prepare("SELECT tape_key, card_key, owner_token, delete_hash FROM runs WHERE id = ?")
+  const row = await env.DB.prepare(
+    "SELECT tape_key, card_key, owner_token, delete_hash, private, gpu_ids FROM runs WHERE id = ?",
+  )
     .bind(id)
     .first();
   if (!row) {
@@ -50,6 +53,11 @@ export async function deleteRun(id, request, env) {
   await env.DB.prepare("DELETE FROM runs WHERE id = ?").bind(id).run();
   await env.TAPES.delete(row.tape_key).catch(() => {});
   if (row.card_key) await env.TAPES.delete(row.card_key).catch(() => {});
+  // A public run was on the feeds. Drop those keys now; cursor pages expire
+  // with the 120s TTL. A private run was never on them.
+  if (Number(row.private) === 0) {
+    await invalidateFeeds(new URL(request.url).origin, { owner: row.owner_token, gpus: row.gpu_ids });
+  }
   // The avatar object stays: it is content-addressed (avatars/<sha256>.png)
   // and may be shared by other runs, so deleting it here could take down a
   // run that is still up. A COUNT-and-delete is a later ticket.
