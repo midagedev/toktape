@@ -13,6 +13,7 @@
 // lives in internal/tape, and a second copy of it in JavaScript would be two
 // places that are wrong differently.
 
+import { invalidateFeeds } from "./feedcache.js";
 import { fail, json, publicBase } from "./http.js";
 import { newDeleteToken, newRunID, sha256Hex } from "./ids.js";
 import { allowAnonymousUpload } from "./ratelimit.js";
@@ -408,6 +409,13 @@ export async function uploadRun(request, env) {
     sets.push("updated_at = ?");
     args.push(new Date().toISOString());
     await env.DB.prepare(`UPDATE tokens SET ${sets.join(", ")} WHERE id = ?`).bind(...args, owner).run();
+  }
+
+  // After the insert commits. A private run is not on a feed. The receipt
+  // below still carries a delete token for an anonymous upload; this call
+  // does not read it.
+  if (!isPrivate) {
+    await invalidateFeeds(new URL(request.url).origin, { owner, gpus: idx.gpu_ids });
   }
 
   const receipt = { id, url: `${publicBase(request, env)}/r/${id}` };

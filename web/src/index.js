@@ -18,6 +18,7 @@ import { serveAvatar } from "./author.js";
 import { replaceCard } from "./card.js";
 import { deleteRun } from "./del.js";
 import { editRun } from "./edit.js";
+import { isCacheableFeed, matchFeed, putFeed, withFeedCache } from "./feedcache.js";
 import { serveHubPage } from "./hw.js";
 import { fail, json, publicBase } from "./http.js";
 import { serveCard, serveRunJSON, serveRunPage, serveTape } from "./run.js";
@@ -93,8 +94,22 @@ function secured(resp) {
 }
 
 export default {
-  async fetch(request, env) {
-    return secured(counted(await route(request, env), env));
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    // A hit is the stored response, already counted and secured. The miss
+    // path is the only one that reaches D1.
+    const cacheable = request.method === "GET" && isCacheableFeed(url);
+    if (cacheable) {
+      const hit = await matchFeed(request);
+      if (hit) return hit;
+    }
+    const resp = secured(counted(await route(request, env), env));
+    if (!cacheable || resp.status !== 200) return resp;
+    const stored = withFeedCache(resp);
+    const pending = putFeed(request, stored.clone());
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(pending);
+    else await pending;
+    return stored;
   },
 };
 

@@ -17,6 +17,7 @@
 //   holds the run as the API describes it everywhere else.
 
 import { tokenOwns } from "./del.js";
+import { gpuIdsOf, invalidateFeeds } from "./feedcache.js";
 import { fail } from "./http.js";
 import { sha256Hex } from "./ids.js";
 import { INDEX_COLUMNS, SUPPORTED_INDEX_SCHEMA, columnValues } from "./row.js";
@@ -134,7 +135,20 @@ export async function editRun(id, request, env) {
     }
   }
 
+  // Before the write, so a run this edit unlists is still seen as public.
+  // Not part of the auth query the card path shares.
+  const listed = await env.DB.prepare("SELECT private, gpu_ids FROM runs WHERE id = ?").bind(id).first();
   await env.DB.prepare(`UPDATE runs SET ${sets.join(", ")} WHERE id = ?`).bind(...args, id).run();
+  // A run that is public, or that this edit just listed or unlisted, is on
+  // the feeds. Drop the canonical keys. The run page itself stays no-store.
+  const wasPublic = listed != null && Number(listed.private) === 0;
+  const nowPublic = "private" in body ? body.private === false : wasPublic;
+  if (listed && (wasPublic || nowPublic)) {
+    const gpus = "index" in body
+      ? [...gpuIdsOf(listed.gpu_ids), ...gpuIdsOf(body.index.gpu_ids)]
+      : listed.gpu_ids;
+    await invalidateFeeds(new URL(request.url).origin, { owner: row.owner_token, gpus });
+  }
   // The same shape as /r/<id>.json — and its no-store, because an edited
   // run is a run that changes.
   return serveRunJSON(id, env);
