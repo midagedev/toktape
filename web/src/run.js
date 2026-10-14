@@ -174,9 +174,16 @@ function runPage(row, idx, base) {
       ]
     : [
         ["decode", idx.decode_per_sec, "tok/s"],
-        ["prefill", idx.prefill_per_sec, "tok/s"],
+        prefillFigure(idx),
         ["ttft p50", idx.ttft_p50_ms, "ms"],
       ];
+  // The facts row qualifies the prefill stat. Absent when the run is neither
+  // short nor probed, and the table's "—" filter is not how that is said.
+  const prefill = prefillFacts(idx);
+  if (prefill) {
+    const at = rows.findIndex(([k]) => k === "workload");
+    rows.splice(at < 0 ? rows.length : at + 1, 0, ["prefill", prefill]);
+  }
 
   const pageURL = `${base}/r/${row.id}`;
   // When the note's title is set it becomes the h1 and the model name moves
@@ -232,9 +239,9 @@ ${noteSection(row.note)}
 <div class="figures">
 ${figures
   .map(
-    ([k, v, u]) => `<div class="stat"><div class="k">${esc(k)}</div><div class="n num">${fmt(
-      v,
-    )}<span class="u">${esc(u)}</span></div></div>`,
+    ([k, v, u, raw]) => `<div class="stat"><div class="k">${esc(k)}</div><div class="n num">${
+      raw ? esc(v) : fmt(v)
+    }<span class="u">${esc(u)}</span></div></div>`,
   )
   .join("\n")}
 </div>
@@ -483,7 +490,12 @@ function shareDescription(idx, row) {
     if (idx.decision_cold_ms) figures.push(`cold ${fmt(idx.decision_cold_ms)} ms`);
     if (idx.decision_req_per_sec) figures.push(`${fmt(idx.decision_req_per_sec)} req/s`);
   }
-  if (idx.prefill_per_sec) figures.push(`prefill ${fmt(idx.prefill_per_sec)} tok/s`);
+  // A short prompt has no prefill measurement (short_prompt). The clause
+  // becomes the probe's rate when one was indexed, and is left out otherwise
+  // — never the rate the index omitted.
+  if (idx.short_prompt) {
+    if (idx.probe_prefill_per_sec > 0) figures.push(`probe prefill ${fmt(idx.probe_prefill_per_sec)} tok/s`);
+  } else if (idx.prefill_per_sec) figures.push(`prefill ${fmt(idx.prefill_per_sec)} tok/s`);
   if (idx.ttft_p50_ms) figures.push(`ttft p50 ${fmt(idx.ttft_p50_ms)} ms`);
   if (idx.caveat_count) figures.push(`${idx.caveat_count} caveat${idx.caveat_count === 1 ? "" : "s"}`);
   let s = parts.join(" ");
@@ -567,7 +579,7 @@ const GIB = 1024 * 1024 * 1024;
 // taken from the float's bits.
 function formatGiBNum(b) {
   if (!(b > 0)) return "?";
-  return goFixed1(b / GIB);
+  return goFixed(b / GIB, 1);
 }
 
 function formatGiB(b) {
@@ -575,36 +587,102 @@ function formatGiB(b) {
   return n === "?" ? "?" : `${n} GiB`;
 }
 
-// goFixed1 is strconv.FormatFloat(v, 'f', 1, 64) for a finite positive v:
-// round the exact value to one decimal, ties to even.
-function goFixed1(v) {
+// prefillFigure is the prefill stat. A short prompt never shows its own
+// rate: the probe's figure when the index has one (the card's rounding,
+// formatRate), or a dash. The fourth element says the number is already
+// text, so the stat renderer does not pass it through fmt. A normal run
+// is the old triple and still goes through fmt.
+function prefillFigure(idx) {
+  if (idx.short_prompt) {
+    if (idx.probe_prefill_per_sec > 0) return ["prefill", formatRate(idx.probe_prefill_per_sec), "tok/s probe", true];
+    return ["prefill", "—", "short prompt", true];
+  }
+  return ["prefill", idx.prefill_per_sec, "tok/s"];
+}
+
+// prefillFacts is the facts-table prefill row, in probeLine's words
+// (internal/card/card.go): "probe 679 tok/s on one stream · 134 ms fixed".
+// A short prompt leads with the reason. Neither a short prompt nor a probe
+// means no row. A decision row is not given one.
+function prefillFacts(idx) {
+  if (isDecision(idx)) return "";
+  const probe = probeClause(idx);
+  if (idx.short_prompt) {
+    const n = idx.prompt_n > 0 ? String(idx.prompt_n) : "?";
+    const head = `not measured: ${n}-token prompt`;
+    return probe ? `${head} · ${probe}` : head;
+  }
+  return probe;
+}
+
+// probeClause is probeLine for a rate the index carried. Fixed cost is
+// formatted even at 0 (formatProbeMs: zero is a reading). An absent fixed
+// cost is not a reading, and the clause is left out rather than inventing
+// "0 ms".
+function probeClause(idx) {
+  if (!(idx.probe_prefill_per_sec > 0)) return "";
+  const ms = idx.probe_fixed_ms;
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return "";
+  return `probe ${formatRateUnit(idx.probe_prefill_per_sec)} on one stream · ${formatProbeMs(ms)} fixed`;
+}
+
+// formatRate is internal/card/format.go formatRate: one decimal below 100,
+// integer at or above, "?" at or below zero.
+function formatRate(v) {
+  if (!(v > 0)) return "?";
+  return v < 100 ? goFixed(v, 1) : goFixed(v, 0);
+}
+
+// formatRateUnit is formatRate with " tok/s" (and "? tok/s" for unknown).
+function formatRateUnit(v) {
+  const r = formatRate(v);
+  return r === "?" ? "? tok/s" : `${r} tok/s`;
+}
+
+// formatProbeMs is internal/card/format.go formatProbeMs: an integer
+// millisecond count, where 0 is a reading rather than unknown.
+function formatProbeMs(v) {
+  return `${goFixed(v, 0)} ms`;
+}
+
+// goFixed is strconv.FormatFloat(v, 'f', digits, 64) for a finite v: the
+// exact binary value rounded to `digits` decimals, ties to even, which
+// toFixed (ties away) does not match. The sign is kept: formatProbeMs can
+// name a negative intercept if a fit ever produces one.
+function goFixed(v, digits) {
   const buf = new ArrayBuffer(8);
   const f64 = new Float64Array(buf);
   const u64 = new BigUint64Array(buf);
   f64[0] = v;
   const bits = u64[0];
+  const neg = (bits >> 63n) === 1n;
   let exp = Number((bits >> 52n) & 0x7ffn);
   let mant = bits & 0xfffffffffffffn;
+  if (exp === 0x7ff) return neg ? "-?" : "?";
   if (exp === 0) {
     exp = 1 - 1023 - 52;
   } else {
     mant |= 1n << 52n;
     exp = exp - 1023 - 52;
   }
-  // tenths = round(mant * 2^exp * 10), half to even.
-  const num = mant * 10n;
-  let tenths;
+  // scaled = round(mant * 2^exp * 10^digits), half to even.
+  const num = mant * 10n ** BigInt(digits);
+  let scaled;
   if (exp >= 0) {
-    tenths = num << BigInt(exp);
+    scaled = num << BigInt(exp);
   } else {
     const denom = 1n << BigInt(-exp);
     const q = num / denom;
     const r = num % denom;
     const half = denom >> 1n;
-    tenths = r > half || (r === half && (q & 1n) === 1n) ? q + 1n : q;
+    scaled = r > half || (r === half && (q & 1n) === 1n) ? q + 1n : q;
   }
-  const s = tenths.toString();
-  return tenths < 10n ? `0.${s}` : `${s.slice(0, -1)}.${s.slice(-1)}`;
+  let s = scaled.toString();
+  if (digits > 0) {
+    s = s.padStart(digits + 1, "0");
+    s = `${s.slice(0, -digits)}.${s.slice(-digits)}`;
+  }
+  return neg ? `-${s}` : s;
 }
 
 // memoryRow is the card's MEMORY lines that the index carries, in one cell:

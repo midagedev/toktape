@@ -200,6 +200,7 @@ func TestIndexOfZeroTape(t *testing.T) {
 		"throttled", "cold", "power_w", "power_limit_w", "file_bytes",
 		"active_params", "n_experts", "n_experts_used",
 		"gpu_mem", "rss_bytes", "rss_file_bytes", "rss_anon_bytes",
+		"short_prompt", "probe_prefill_per_sec", "probe_fixed_ms",
 	} {
 		if bytes.Contains(b, []byte(`"`+key+`"`)) {
 			t.Errorf("unset field %q present in zero-tape JSON: %s", key, b)
@@ -299,7 +300,8 @@ func TestIndexJSONRoundTrip(t *testing.T) {
 		"os", "gpus_raw", "gpu_id", "gpu_ids", "gpu_count", "vram_bytes", "ram_bytes",
 		"host_class", "gpu_mem", "rss_bytes", "rss_file_bytes", "rss_anon_bytes",
 		"sessions", "prompt_set", "decode_per_sec",
-		"prefill_per_sec", "ttft_p50_ms", "caveats", "caveat_count",
+		"prefill_per_sec", "short_prompt", "probe_prefill_per_sec", "probe_fixed_ms",
+		"ttft_p50_ms", "caveats", "caveat_count",
 		"prompt_n", "predicted_n", "min_predicted_n", "reasoning_n",
 		"cache_hit_ratio", "ctx_size", "n_slots", "fa", "kv_cache",
 		"batch", "ubatch", "ngl", "offload", "draft_model", "draft_accept",

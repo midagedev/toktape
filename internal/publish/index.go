@@ -96,7 +96,18 @@ type Index struct {
 	PromptSet     string  `json:"prompt_set,omitempty"`
 	DecodePerSec  float64 `json:"decode_per_sec,omitempty"`
 	PrefillPerSec float64 `json:"prefill_per_sec,omitempty"`
-	TTFTp50Ms     float64 `json:"ttft_p50_ms,omitempty"`
+	// ShortPrompt is card.ShortPrompt: the prompt was too short for
+	// PrefillPerSec to be a prefill measurement. Omitted otherwise. When
+	// it is set, PrefillPerSec is left unset so the search column stays
+	// NULL — the tape still holds the server's figure.
+	ShortPrompt bool `json:"short_prompt,omitempty"`
+	// The probe pass's own figures, present on the same gate as the card's
+	// probeLine (Probe.PrefillPerSecond > 0). Pointers so a measured fixed
+	// cost of 0 ms stays on the wire: formatProbeMs treats 0 as a reading,
+	// and omitempty on a float would drop it. index_json only — no D1 column.
+	ProbePrefillPerSec *float64 `json:"probe_prefill_per_sec,omitempty"`
+	ProbeFixedMs       *float64 `json:"probe_fixed_ms,omitempty"`
+	TTFTp50Ms          float64  `json:"ttft_p50_ms,omitempty"`
 
 	// The figures behind a rate (TTP-130). Every field is additive and
 	// omitempty: absent means unknown, and the reader prints ? or omits
@@ -280,6 +291,23 @@ func IndexOf(t *tape.Tape) Index {
 		idx.DecodePerSec = s.Timings.PredictedPerSecond
 		idx.PrefillPerSec = s.Timings.PromptPerSecond
 		idx.TTFTp50Ms = s.Timings.TTFTMs
+	}
+	// Decision rows are not part of this: a decision has no prefill
+	// measurement to qualify, and its row is left exactly as the block
+	// above wrote it (internal/tape.IsDecision).
+	if !s.IsDecision() {
+		// card.ShortPrompt, not a second copy of the threshold.
+		if card.ShortPrompt(&s) {
+			idx.ShortPrompt = true
+			idx.PrefillPerSec = 0
+		}
+		// probeLine's gate. A refused fit and a missing probe are each
+		// "not observed" and travel as nothing.
+		if p := s.Probe; p != nil && p.PrefillPerSecond > 0 {
+			rate, fixed := p.PrefillPerSecond, p.FixedMs
+			idx.ProbePrefillPerSec = &rate
+			idx.ProbeFixedMs = &fixed
+		}
 	}
 
 	// The figures behind a rate (TTP-130): the card's "in" figure, its
