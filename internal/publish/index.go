@@ -22,6 +22,16 @@ import (
 // it does not know by name rather than mis-indexing it quietly.
 const IndexSchema = 1
 
+// GPUMem is one card at the end of the run, the figures the card's MEMORY
+// block prints for it (internal/card memorySection / vramLine). Index is the
+// device's own, including 0. UsedBytes and VRAMBytes are bytes; 0 was not
+// read and omitempty keeps it off the wire rather than printing a zero.
+type GPUMem struct {
+	Index     int   `json:"index"`
+	UsedBytes int64 `json:"used_bytes,omitempty"`
+	VRAMBytes int64 `json:"vram_bytes,omitempty"`
+}
+
 // Index is what the search reads: one row per published run. It is derived
 // from a tape by IndexOf and uploaded beside it.
 type Index struct {
@@ -65,6 +75,18 @@ type Index struct {
 	VRAMBytes int64    `json:"vram_bytes,omitempty"`
 	RAMBytes  int64    `json:"ram_bytes,omitempty"`
 	HostClass string   `json:"host_class,omitempty"`
+
+	// Memory the card's MEMORY block prints, copied from the tape the way
+	// memorySection reads it. gpu_mem is one entry per GPUsAtEnd sample,
+	// omitted on a unified-memory host (the card prints "Unified …" there,
+	// not a per-GPU line) and when no sample was taken. VRAMBytes on an
+	// entry is that card's capacity from Host.GPUs, by index, and 0 stays
+	// absent. The RSS fields are Memory.AtEnd; a zero RSS is no /proc view,
+	// which the card prints as "?" — so it is absent here, never a 0.
+	GPUMem       []GPUMem `json:"gpu_mem,omitempty"`
+	RSSBytes     int64    `json:"rss_bytes,omitempty"`
+	RSSFileBytes int64    `json:"rss_file_bytes,omitempty"`
+	RSSAnonBytes int64    `json:"rss_anon_bytes,omitempty"`
 
 	// What it did. Mode is the summary's own (tape.ModeChat,
 	// tape.ModeDecision), absent for a benchmark (TTP-187): a reader that
@@ -205,6 +227,28 @@ func IndexOf(t *tape.Tape) Index {
 		if id != "" {
 			idx.GPUIDs = append(idx.GPUIDs, id)
 		}
+	}
+
+	// The same two gates memorySection uses before it draws a per-GPU line:
+	// a unified host has one pool, and an empty end-of-run sample is "VRAM
+	// ?", not a row of zeros. Capacity is the host card's, looked up by
+	// index — the sample's position is not the card's.
+	if tape.Unified(s.Host) == "" && len(s.GPUsAtEnd) > 0 {
+		total := map[int]int64{}
+		for _, g := range s.Host.GPUs {
+			total[g.Index] = g.VRAMBytes
+		}
+		idx.GPUMem = make([]GPUMem, len(s.GPUsAtEnd))
+		for i, g := range s.GPUsAtEnd {
+			idx.GPUMem[i] = GPUMem{Index: g.Index, UsedBytes: g.UsedBytes, VRAMBytes: total[g.Index]}
+		}
+	}
+	// Host RSS only when a /proc view was taken. File and anon ride along;
+	// a zero of either is omitempty, the card's "?".
+	if m := s.Memory.AtEnd; m.RSSBytes > 0 {
+		idx.RSSBytes = m.RSSBytes
+		idx.RSSFileBytes = m.RSSFileBytes
+		idx.RSSAnonBytes = m.RSSAnonBytes
 	}
 
 	idx.Mode = s.Mode

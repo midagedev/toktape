@@ -145,6 +145,7 @@ function runPage(row, idx, base) {
     ["engine", [idx.engine_kind, idx.engine_version].filter(Boolean).join(" ") || "?"],
     ["host", [idx.os, idx.host_class].filter(Boolean).join(" · ") || "?"],
     ["gpus", gpusRow(idx)],
+    ["memory", memoryRow(idx)],
     isDecision(idx)
       ? ["mode", `decision model · POST /v1/systemone${
           idx.decision_req_per_sec ? ` · ${fmt(idx.decision_req_per_sec)} req/s back to back` : ""
@@ -555,6 +556,78 @@ function bits(b) {
 // derived — unknown parts are omitted, and a row with nothing known reads
 // `?` (size/workload/context/config) or is left out by the table's `—`
 // filter (draft/machine, which apply only sometimes).
+
+// gib is 2^30, the card's unit (internal/card/format.go).
+const GIB = 1024 * 1024 * 1024;
+
+// formatGiBNum is internal/card/format.go formatGiBNum: one decimal of
+// bytes/2^30, and "?" at or below zero. strconv.FormatFloat(v, 'f', 1, 64)
+// rounds half to even on the exact float64; Number.prototype.toFixed does
+// not (1.25 prints "1.3" there and "1.2" on the card), so the digits are
+// taken from the float's bits.
+function formatGiBNum(b) {
+  if (!(b > 0)) return "?";
+  return goFixed1(b / GIB);
+}
+
+function formatGiB(b) {
+  const n = formatGiBNum(b);
+  return n === "?" ? "?" : `${n} GiB`;
+}
+
+// goFixed1 is strconv.FormatFloat(v, 'f', 1, 64) for a finite positive v:
+// round the exact value to one decimal, ties to even.
+function goFixed1(v) {
+  const buf = new ArrayBuffer(8);
+  const f64 = new Float64Array(buf);
+  const u64 = new BigUint64Array(buf);
+  f64[0] = v;
+  const bits = u64[0];
+  let exp = Number((bits >> 52n) & 0x7ffn);
+  let mant = bits & 0xfffffffffffffn;
+  if (exp === 0) {
+    exp = 1 - 1023 - 52;
+  } else {
+    mant |= 1n << 52n;
+    exp = exp - 1023 - 52;
+  }
+  // tenths = round(mant * 2^exp * 10), half to even.
+  const num = mant * 10n;
+  let tenths;
+  if (exp >= 0) {
+    tenths = num << BigInt(exp);
+  } else {
+    const denom = 1n << BigInt(-exp);
+    const q = num / denom;
+    const r = num % denom;
+    const half = denom >> 1n;
+    tenths = r > half || (r === half && (q & 1n) === 1n) ? q + 1n : q;
+  }
+  const s = tenths.toString();
+  return tenths < 10n ? `0.${s}` : `${s.slice(0, -1)}.${s.slice(-1)}`;
+}
+
+// memoryRow is the card's MEMORY lines that the index carries, in one cell:
+// "GPU0 10.4/12.0 GiB · host RSS 11.6 GiB (file 11.1 / anon 0.2)". Each
+// gpu_mem entry is "GPUn used/total GiB", or "GPUn used GiB" when the
+// capacity was not read. A row with nothing known reads "?", like size.
+export function memoryRow(idx) {
+  const parts = [];
+  if (Array.isArray(idx.gpu_mem)) {
+    for (const g of idx.gpu_mem) {
+      const name = `GPU${g.index}`;
+      const used = formatGiBNum(g.used_bytes);
+      parts.push(g.vram_bytes > 0 ? `${name} ${used}/${formatGiBNum(g.vram_bytes)} GiB` : `${name} ${used} GiB`);
+    }
+  }
+  if (idx.rss_bytes > 0) {
+    parts.push(
+      `host RSS ${formatGiB(idx.rss_bytes)} (file ${formatGiBNum(idx.rss_file_bytes)} / anon ${formatGiBNum(idx.rss_anon_bytes)})`,
+    );
+  }
+  return parts.length ? parts.join(" · ") : "?";
+}
+
 function sizeRow(idx) {
   const parts = [];
   if (idx.params) parts.push(`${fmtB(idx.params)} params`);
