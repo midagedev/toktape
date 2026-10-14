@@ -55,6 +55,17 @@ func TestIndexOfSingleStream(t *testing.T) {
 		RAMBytes:  68719476736,
 		HostClass: "2x rtx-3090",
 
+		// The card's MEMORY block. The want grew the fields the example
+		// tape already carries (GPUsAtEnd used bytes, Host.GPUs capacity,
+		// Memory.AtEnd); no assertion was loosened.
+		GPUMem: []GPUMem{
+			{Index: 0, UsedBytes: 25555748454, VRAMBytes: 25769803776},
+			{Index: 1, UsedBytes: 24481361100, VRAMBytes: 25769803776},
+		},
+		RSSBytes:     1288490189,
+		RSSFileBytes: 858993459,
+		RSSAnonBytes: 429496730,
+
 		Sessions:      1,
 		DecodePerSec:  17.4, // single stream: the stream's own rate
 		PrefillPerSec: 610,
@@ -188,6 +199,7 @@ func TestIndexOfZeroTape(t *testing.T) {
 		"batch", "ubatch", "ngl", "offload", "draft_model", "draft_accept",
 		"throttled", "cold", "power_w", "power_limit_w", "file_bytes",
 		"active_params", "n_experts", "n_experts_used",
+		"gpu_mem", "rss_bytes", "rss_file_bytes", "rss_anon_bytes",
 	} {
 		if bytes.Contains(b, []byte(`"`+key+`"`)) {
 			t.Errorf("unset field %q present in zero-tape JSON: %s", key, b)
@@ -285,7 +297,8 @@ func TestIndexJSONRoundTrip(t *testing.T) {
 		"model_dir", "params", "moe",
 		"quant_raw", "quant_id", "quant_bits", "engine_kind", "engine_version",
 		"os", "gpus_raw", "gpu_id", "gpu_ids", "gpu_count", "vram_bytes", "ram_bytes",
-		"host_class", "sessions", "prompt_set", "decode_per_sec",
+		"host_class", "gpu_mem", "rss_bytes", "rss_file_bytes", "rss_anon_bytes",
+		"sessions", "prompt_set", "decode_per_sec",
 		"prefill_per_sec", "ttft_p50_ms", "caveats", "caveat_count",
 		"prompt_n", "predicted_n", "min_predicted_n", "reasoning_n",
 		"cache_hit_ratio", "ctx_size", "n_slots", "fa", "kv_cache",
@@ -723,4 +736,112 @@ func TestIndexOfNamesTheCardsTheServerUsed(t *testing.T) {
 	if len(idx.GPUIDs) != 2 || len(idx.GPUsRaw) != 2 || idx.GPUCount != 2 {
 		t.Errorf("unknown use: gpu_ids %v gpus_raw %v count %d, want both cards", idx.GPUIDs, idx.GPUsRaw, idx.GPUCount)
 	}
+}
+
+// TestIndexOfMemory pins the figures the card's MEMORY block prints
+// (internal/card memorySection / vramLine). They are copied off the tape:
+// one gpu_mem entry per GPUsAtEnd sample, vram from Host.GPUs by index and
+// omitted at 0, RSS from Memory.AtEnd and omitted when RSSBytes is 0, and
+// no gpu_mem on a unified host, where the card prints "Unified …" instead.
+func TestIndexOfMemory(t *testing.T) {
+	t.Run("two gpus and rss", func(t *testing.T) {
+		// Host order is not sample order, and the second card's capacity
+		// was not read: vram is matched by index, and 0 stays off the wire.
+		s := tape.RunSummary{
+			Host: tape.HostInfo{GPUs: []tape.GPUInfo{
+				{Index: 1, Name: "NVIDIA GeForce RTX 3060", VRAMBytes: 0},
+				{Index: 0, Name: "NVIDIA GeForce RTX 3060", VRAMBytes: 12884901888},
+			}},
+			GPUsAtEnd: []tape.GPUSample{
+				{Index: 0, UsedBytes: 11164188672},
+				{Index: 1, UsedBytes: 8589934592},
+			},
+			Memory: tape.MemorySummary{AtEnd: tape.MemSample{
+				RSSBytes:     12456681472,
+				RSSFileBytes: 11947323392,
+				RSSAnonBytes: 263991296,
+			}},
+		}
+		idx := IndexOf(&tape.Tape{Summary: s})
+		want := []GPUMem{
+			{Index: 0, UsedBytes: 11164188672, VRAMBytes: 12884901888},
+			{Index: 1, UsedBytes: 8589934592},
+		}
+		if !reflect.DeepEqual(idx.GPUMem, want) {
+			t.Errorf("GPUMem = %+v, want %+v", idx.GPUMem, want)
+		}
+		if idx.RSSBytes != 12456681472 || idx.RSSFileBytes != 11947323392 || idx.RSSAnonBytes != 263991296 {
+			t.Errorf("RSS = %d / %d / %d, want 12456681472 / 11947323392 / 263991296",
+				idx.RSSBytes, idx.RSSFileBytes, idx.RSSAnonBytes)
+		}
+		b, err := json.Marshal(idx)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		const gpuMem = `"gpu_mem":[{"index":0,"used_bytes":11164188672,"vram_bytes":12884901888},{"index":1,"used_bytes":8589934592}]`
+		if !bytes.Contains(b, []byte(gpuMem)) {
+			t.Errorf("gpu_mem JSON = %s, want it to contain %s", b, gpuMem)
+		}
+		for _, key := range []string{`"rss_bytes":12456681472`, `"rss_file_bytes":11947323392`, `"rss_anon_bytes":263991296`} {
+			if !bytes.Contains(b, []byte(key)) {
+				t.Errorf("missing %s in %s", key, b)
+			}
+		}
+		// The unread capacity is absent, not a zero.
+		if bytes.Contains(b, []byte(`"vram_bytes":0`)) {
+			t.Errorf("vram_bytes 0 present in %s", b)
+		}
+	})
+
+	t.Run("nothing measured", func(t *testing.T) {
+		// A host inventory is not a reading. GPUsAtEnd empty and RSS 0
+		// leave every memory key off the wire, even when a file byte was
+		// filled in beside a zero RSS — the card prints Host RSS only when
+		// RSSBytes > 0.
+		s := tape.RunSummary{
+			Host: tape.HostInfo{GPUs: []tape.GPUInfo{
+				{Index: 0, Name: "NVIDIA GeForce RTX 3060", VRAMBytes: 12884901888},
+			}},
+			Memory: tape.MemorySummary{AtEnd: tape.MemSample{RSSFileBytes: 11947323392}},
+		}
+		b, err := json.Marshal(IndexOf(&tape.Tape{Summary: s}))
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		for _, key := range []string{"gpu_mem", "rss_bytes", "rss_file_bytes", "rss_anon_bytes"} {
+			if bytes.Contains(b, []byte(`"`+key+`"`)) {
+				t.Errorf("unset field %q present in %s", key, b)
+			}
+		}
+	})
+
+	t.Run("unified host", func(t *testing.T) {
+		// The samples and the capacity are present, so a missing gpu_mem
+		// is the unified rule (tape.Unified), not an empty reading. RSS
+		// still travels: the card prints Host RSS on a unified host too.
+		s := tape.RunSummary{
+			Host: tape.HostInfo{
+				GPUs: []tape.GPUInfo{{Index: 0, Name: "NVIDIA GB10", VRAMBytes: 128849018880}},
+			},
+			GPUsAtEnd: []tape.GPUSample{{Index: 0, UsedBytes: 11164188672}},
+			Memory: tape.MemorySummary{AtEnd: tape.MemSample{
+				RSSBytes:     12456681472,
+				RSSFileBytes: 11947323392,
+				RSSAnonBytes: 263991296,
+			}},
+		}
+		if tape.Unified(s.Host) == "" {
+			t.Fatal("fixture is not unified; the case proves nothing")
+		}
+		b, err := json.Marshal(IndexOf(&tape.Tape{Summary: s}))
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if bytes.Contains(b, []byte(`"gpu_mem"`)) {
+			t.Errorf("gpu_mem present on a unified host: %s", b)
+		}
+		if !bytes.Contains(b, []byte(`"rss_bytes":12456681472`)) {
+			t.Errorf("rss dropped on a unified host: %s", b)
+		}
+	})
 }
