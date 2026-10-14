@@ -645,44 +645,18 @@ function formatProbeMs(v) {
   return `${goFixed(v, 0)} ms`;
 }
 
-// goFixed is strconv.FormatFloat(v, 'f', digits, 64) for a finite v: the
-// exact binary value rounded to `digits` decimals, ties to even, which
-// toFixed (ties away) does not match. The sign is kept: formatProbeMs can
-// name a negative intercept if a fit ever produces one.
-function goFixed(v, digits) {
-  const buf = new ArrayBuffer(8);
-  const f64 = new Float64Array(buf);
-  const u64 = new BigUint64Array(buf);
-  f64[0] = v;
-  const bits = u64[0];
-  const neg = (bits >> 63n) === 1n;
-  let exp = Number((bits >> 52n) & 0x7ffn);
-  let mant = bits & 0xfffffffffffffn;
-  if (exp === 0x7ff) return neg ? "-?" : "?";
-  if (exp === 0) {
-    exp = 1 - 1023 - 52;
-  } else {
-    mant |= 1n << 52n;
-    exp = exp - 1023 - 52;
+// goFixed is strconv.FormatFloat(v, 'f', digits, 64). toFixed already rounds
+// the exact binary value; the one difference is an exact tie, which toFixed
+// takes away from zero and Go takes to even. A tie is a multiple of
+// 2^-(digits+1), and that test is exact (a power-of-two scale).
+export function goFixed(v, digits) {
+  const m = 10 ** digits;
+  const x = v * m;
+  if (Number.isInteger(v * 2 ** (digits + 1)) && !Number.isInteger(x)) {
+    const f = Math.floor(x);
+    return ((f % 2 === 0 ? f : f + 1) / m).toFixed(digits);
   }
-  // scaled = round(mant * 2^exp * 10^digits), half to even.
-  const num = mant * 10n ** BigInt(digits);
-  let scaled;
-  if (exp >= 0) {
-    scaled = num << BigInt(exp);
-  } else {
-    const denom = 1n << BigInt(-exp);
-    const q = num / denom;
-    const r = num % denom;
-    const half = denom >> 1n;
-    scaled = r > half || (r === half && (q & 1n) === 1n) ? q + 1n : q;
-  }
-  let s = scaled.toString();
-  if (digits > 0) {
-    s = s.padStart(digits + 1, "0");
-    s = `${s.slice(0, -digits)}.${s.slice(-digits)}`;
-  }
-  return neg ? `-${s}` : s;
+  return v.toFixed(digits);
 }
 
 // memoryRow is the card's MEMORY lines that the index carries, in one cell:
