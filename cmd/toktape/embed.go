@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/recorder"
@@ -25,8 +26,10 @@ Usage:
   Sends each input of a set, one at a time, to an embeddings endpoint and
   keeps every returned vector on the tape. The summary shows per input the
   dimension, norm and first values, and the cosine similarity between every
-  pair. ` + "`toktape compare a.tape b.tape`" + ` on two embedding tapes prints, per
-  input, the cosine and the largest difference between the two vectors.
+  pair. ` + "`toktape play a.tape`" + ` replays it on the screen (vector strips and
+  a coloured cosine matrix), ` + "`--against b.tape`" + ` adds each input's cosine to
+  the same input in b. ` + "`toktape compare a.tape b.tape`" + ` prints the same
+  comparison as text: cosine and largest difference per input.
 
 Flags:
   --url URL             server to attach to (default: discover)
@@ -40,6 +43,9 @@ Flags:
   --encoding-format F   float (default) or base64 (openai shape)
   --vector-cap N        keep at most N values of each vector (default 0 =
                         all); dim, norm and the first values are always kept
+  --gap DURATION        idle time after each answer, so a replay shows the
+                        inputs arrive one by one (default 600ms, 0 = none);
+                        never part of a latency
   --out DIR             where the tape is written (default ~/.toktape/runs)
   --tag TEXT, --note TEXT  label the run
   --host-label TEXT     store TEXT as the hostname
@@ -57,6 +63,7 @@ func runEmbed(ctx context.Context, c *cli, args []string) int {
 	dims := fs.Int("dimensions", 0, "dimensions to send")
 	format := fs.String("encoding-format", "float", "float or base64")
 	vcap := fs.Int("vector-cap", 0, "values kept per vector")
+	gap := fs.Duration("gap", 600*time.Millisecond, "idle time after each answer")
 	outDir := fs.String("out", defaultRunsDir(), "where the tape is written")
 	tag := fs.String("tag", "", "label the run")
 	note := fs.String("note", "", "label the run")
@@ -75,12 +82,14 @@ func runEmbed(ctx context.Context, c *cli, args []string) int {
 		return c.usagef("toktape embed: --encoding-format %q: use float or base64", *format)
 	case *dims < 0:
 		return c.usagef("toktape embed: --dimensions %d: must be positive", *dims)
+	case *gap < 0:
+		return c.usagef("toktape embed: --gap %s: use 0 for no idle time", *gap)
 	case *vcap < 0:
 		return c.usagef("toktape embed: --vector-cap %d: use 0 to keep whole vectors", *vcap)
 	}
 	opts := recorder.EmbeddingOptions{
 		BaseURL: *url, API: *api, Model: *model, Dimensions: *dims, EncodingFormat: *format,
-		VectorCap: *vcap, Tag: *tag, Note: *note, Version: version,
+		VectorCap: *vcap, Gap: *gap, Tag: *tag, Note: *note, Version: version,
 		HostLabel: recorder.HostLabel{Set: flagSet(fs, "host-label"), Text: *hostLabel},
 	}
 	if *inputsFile != "" {

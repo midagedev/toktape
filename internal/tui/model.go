@@ -176,6 +176,13 @@ type Model struct {
 	// Decisions are a decision run's requests sent by At (TTP-192), empty on
 	// every other tape. The view asks of each whether its answer is in by t.
 	Decisions []tape.DecisionRecord
+
+	// Embeddings are an embedding run's requests sent by At, empty on every
+	// other tape. EmbedRef, when set, is a reference tape's records by id
+	// (`toktape play --against`), and EmbedRefName its label.
+	Embeddings   []tape.EmbeddingRecord
+	EmbedRef     map[string]tape.EmbeddingRecord
+	EmbedRefName string
 }
 
 // ModelAt builds the state of tp as of clip time at: every token, sample and
@@ -193,6 +200,10 @@ func ModelAt(tp *tape.Tape, at time.Duration) Model {
 	m.RunStart, m.runStarted = firstRequestAt(tp)
 	if tp.Summary.IsDecision() {
 		decisionModel(&m, tp, at)
+		return m
+	}
+	if tp.Summary.IsEmbedding() {
+		embeddingModel(&m, tp, at)
 		return m
 	}
 

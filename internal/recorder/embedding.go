@@ -46,6 +46,9 @@ type EmbeddingOptions struct {
 	EncodingFormat string
 	// VectorCap keeps at most this many values per vector; 0 keeps all.
 	VectorCap int
+	// Gap is idle time after each answer, so a replay at 1:1 shows the
+	// inputs arrive one by one; it is on the timestamps and in no latency.
+	Gap time.Duration
 
 	Tag, Note string
 	Version   string
@@ -150,6 +153,9 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 		recs = append(recs, rec)
 		if opts.Progress != nil {
 			opts.Progress(rec)
+		}
+		if opts.Gap > 0 && i < len(inputs)-1 && !sleepCtx(ctx, opts.Gap) {
+			break
 		}
 	}
 	finishedAt := opts.Clock.Now()
