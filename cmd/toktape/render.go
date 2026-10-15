@@ -224,6 +224,9 @@ func runRender(c *cli, args []string) int {
 	if err != nil {
 		return c.usagef("toktape: %v", err)
 	}
+	if tp.Summary.IsEmbedding() {
+		return c.usagef("toktape render: %s is an embedding tape and has no clip; `toktape card` shows it", tapePath)
+	}
 	// No TapePath, so the footer reads "run complete" (render.Options.TapePath).
 	//
 	// It used to be tildePath(tapePath), the file being replayed, and the

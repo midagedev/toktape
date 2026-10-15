@@ -95,6 +95,9 @@ type Tape struct {
 	// Decisions are the requests of a decision-model run (ModeDecision,
 	// decision.go), in send order. Requests is empty on such a tape.
 	Decisions []DecisionRecord `json:"decisions,omitempty"`
+	// Embeddings are the requests of an embedding-model run (ModeEmbedding,
+	// embedding.go), in send order. Requests is empty on such a tape.
+	Embeddings []EmbeddingRecord `json:"embeddings,omitempty"`
 }
 
 // RequestRecord is one stream: its prompt, every token, and its own timings.
@@ -151,6 +154,9 @@ type RunSummary struct {
 	// nil on every other tape. On a decision tape the token figures
 	// (Timings, Aggregate) are empty: nothing was generated.
 	Decision *DecisionSummary `json:"decision,omitempty"`
+	// Embedding is an embedding-model run's summary (ModeEmbedding), nil on
+	// every other tape.
+	Embedding *EmbeddingSummary `json:"embedding,omitempty"`
 	// SpecNMax are the speculative.n_max values of a `record --spec-n-max`
 	// sweep, in the order they ran (TTP-35, 2026-09-13). Each value runs the
 	// whole prompt set, so Rounds = len(SpecNMax) x prompts, and BySpecNMax

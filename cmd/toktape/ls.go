@@ -56,6 +56,9 @@ func runLs(c *cli, args []string) int {
 		if s.IsDecision() {
 			n = "decision"
 		}
+		if s.IsEmbedding() {
+			n = "embedding"
+		}
 		rows = append(rows, []string{
 			s.ID,
 			modelLabel(s),

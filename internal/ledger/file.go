@@ -94,7 +94,7 @@ func Append(dir string, tp *tape.Tape) error {
 // decision-model run (tape.ModeDecision, TTP-192) is kept out too: every
 // column of the ledger is a token figure it does not have.
 func Holds(tp *tape.Tape) bool {
-	return tp != nil && !tp.Summary.IsChat() && !tp.Summary.IsDecision()
+	return tp != nil && !tp.Summary.IsChat() && !tp.Summary.IsDecision() && !tp.Summary.IsEmbedding()
 }
 
 // Rebuild regenerates the ledger in dir from every tape it holds and writes
