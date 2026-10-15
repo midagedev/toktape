@@ -360,6 +360,9 @@ func sharePicks(dir string, n int) (picks []*sharePick, chats, unreadable int, e
 		if len(picks) == n {
 			break
 		}
+		if p.tp.Summary.IsEmbedding() {
+			continue // not publishable yet
+		}
 		if publish.HoldsConversation(p.tp) {
 			chats++
 			continue

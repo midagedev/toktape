@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 	"github.com/midagedev/toktape/internal/tui"
 )
@@ -37,6 +39,11 @@ func runPlay(ctx context.Context, c *cli, args []string) int {
 	tp, err := tape.Read(files[0])
 	if err != nil {
 		return c.usagef("toktape: %v", err)
+	}
+	// An embedding run has no stream to replay: it shows its view.
+	if tp.Summary.IsEmbedding() {
+		fmt.Fprint(c.stdout, card.EmbeddingText(tp))
+		return exitOK
 	}
 	if !isTTY(c.stdout) {
 		return c.fail(failure{

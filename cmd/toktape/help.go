@@ -346,6 +346,9 @@ func usageFor(verb string) string {
 	if verb == "decide" {
 		return decideUsage
 	}
+	if verb == "embed" {
+		return embedUsage
+	}
 	return usageText
 }
 

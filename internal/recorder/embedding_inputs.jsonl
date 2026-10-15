@@ -1,0 +1,8 @@
+{"id":"en-query","input":"How do I keep my sourdough starter alive while on vacation?"}
+{"id":"en-doc","input":"Before a trip, feed the starter, let it rise for an hour, then refrigerate it; it keeps for about two weeks and needs two feedings to recover."}
+{"id":"en-other","input":"The quarterly report shows revenue grew eight percent, driven by subscriptions."}
+{"id":"ko-query","input":"휴가 동안 사워도우 발효종을 어떻게 살려 두나요?"}
+{"id":"ko-doc","input":"여행 전에 발효종에 먹이를 주고 한 시간 부풀린 뒤 냉장고에 넣으면 2주 정도 버티고, 돌아와서 두 번 먹이면 회복됩니다."}
+{"id":"code-query","input":"python: read a file line by line"}
+{"id":"code-doc","input":"with open(path, encoding=\"utf-8\") as f:\n    for line in f:\n        print(line.rstrip())"}
+{"id":"code-other","input":"fn main() { let v: Vec<u32> = (1..=10).collect(); println!(\"{}\", v.iter().sum::<u32>()); }"}
