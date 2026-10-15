@@ -97,7 +97,7 @@ func TestRecordEmbeddingUnpooledFails(t *testing.T) {
 }
 
 func TestLoadEmbeddingInputs(t *testing.T) {
-	if in, err := loadEmbeddingInputs(defaultEmbeddingInputs); err != nil || len(in) != 8 {
+	if in, err := loadEmbeddingInputs(defaultEmbeddingInputs); err != nil || len(in) != 26 {
 		t.Fatalf("built-in set: %d %v", len(in), err)
 	}
 	for name, raw := range map[string]string{

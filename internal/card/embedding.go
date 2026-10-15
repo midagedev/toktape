@@ -104,7 +104,7 @@ func EmbeddingText(tp *tape.Tape) string {
 func EmbeddingCompare(a, b *tape.Tape) string {
 	ref := map[string]tape.EmbeddingRecord{}
 	for _, r := range b.Embeddings {
-		ref[r.ID] = r
+		ref[r.Key()] = r
 	}
 	var out strings.Builder
 	fmt.Fprintf(&out, "A %s · %s %s\n", a.Summary.ID, orQ(string(a.Summary.Server.Kind)), endpointOf(a))
@@ -112,7 +112,7 @@ func EmbeddingCompare(a, b *tape.Tape) string {
 	out.WriteString("  id            dim A/B    cosine   max |diff|\n")
 	worst, worstID, matched := 1.0, "", 0
 	for _, r := range a.Embeddings {
-		o, ok := ref[r.ID]
+		o, ok := ref[r.Key()]
 		switch {
 		case !ok:
 			fmt.Fprintf(&out, "  %-12s  not in B\n", clip(r.ID, 12))

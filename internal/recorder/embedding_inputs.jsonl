@@ -1,8 +1,26 @@
-{"id":"en-query","input":"How do I keep my sourdough starter alive while on vacation?"}
-{"id":"en-doc","input":"Before a trip, feed the starter, let it rise for an hour, then refrigerate it; it keeps for about two weeks and needs two feedings to recover."}
-{"id":"en-other","input":"The quarterly report shows revenue grew eight percent, driven by subscriptions."}
-{"id":"ko-query","input":"휴가 동안 사워도우 발효종을 어떻게 살려 두나요?"}
-{"id":"ko-doc","input":"여행 전에 발효종에 먹이를 주고 한 시간 부풀린 뒤 냉장고에 넣으면 2주 정도 버티고, 돌아와서 두 번 먹이면 회복됩니다."}
-{"id":"code-query","input":"python: read a file line by line"}
-{"id":"code-doc","input":"with open(path, encoding=\"utf-8\") as f:\n    for line in f:\n        print(line.rstrip())"}
-{"id":"code-other","input":"fn main() { let v: Vec<u32> = (1..=10).collect(); println!(\"{}\", v.iter().sum::<u32>()); }"}
+{"id":"cook-1","role":"doc","topic":"cooking","input":"Before a trip, feed the sourdough starter, let it rise for an hour, then refrigerate it; it keeps for about two weeks."}
+{"id":"cook-2","role":"doc","topic":"cooking","input":"김치찌개는 잘 익은 김치를 돼지고기와 먼저 볶은 뒤 물을 부어 끓이면 국물 맛이 깊어진다."}
+{"id":"cook-3","role":"doc","topic":"cooking","input":"Salt pasta water generously and keep a cup of it to loosen the sauce at the end."}
+{"id":"cook-4","role":"doc","topic":"cooking","input":"달걀을 실온에 30분 두었다가 삶으면 껍질이 잘 벗겨지고 노른자가 고르게 익는다."}
+{"id":"trav-1","role":"doc","topic":"travel","input":"The JR Pass covers most Shinkansen lines but not the fastest Nozomi trains without a surcharge."}
+{"id":"trav-2","role":"doc","topic":"travel","input":"제주도 올레길은 26개 코스로 나뉘며, 7코스는 해안 절벽 풍경으로 가장 인기가 많다."}
+{"id":"trav-3","role":"doc","topic":"travel","input":"Carry-on liquids must be in containers of 100 ml or less, all in one clear resealable bag."}
+{"id":"trav-4","role":"doc","topic":"travel","input":"해외에서 카드를 쓸 때는 현지 통화로 결제해야 이중 환전 수수료를 피할 수 있다."}
+{"id":"code-1","role":"doc","topic":"code","input":"with open(path, encoding=\"utf-8\") as f:\n    for line in f:\n        print(line.rstrip())"}
+{"id":"code-2","role":"doc","topic":"code","input":"git rebase -i HEAD~3 lets you squash the last three commits into one before pushing."}
+{"id":"code-3","role":"doc","topic":"code","input":"Rust의 소유권 규칙: 값에는 소유자가 하나뿐이고, 소유자가 스코프를 벗어나면 값은 해제된다."}
+{"id":"code-4","role":"doc","topic":"code","input":"SELECT user_id, COUNT(*) FROM orders GROUP BY user_id HAVING COUNT(*) > 5;"}
+{"id":"heal-1","role":"doc","topic":"health","input":"Adults should aim for at least 150 minutes of moderate aerobic activity every week."}
+{"id":"heal-2","role":"doc","topic":"health","input":"수면 전 한 시간은 스마트폰 화면을 멀리하면 잠드는 데 걸리는 시간이 줄어든다."}
+{"id":"heal-3","role":"doc","topic":"health","input":"Drink water steadily through the day; thirst lags behind mild dehydration."}
+{"id":"heal-4","role":"doc","topic":"health","input":"허리 통증이 있을 때는 오래 누워 있기보다 가벼운 걷기가 회복에 더 도움이 된다."}
+{"id":"fin-1","role":"doc","topic":"finance","input":"An index fund tracks a market index, so its fees are usually far lower than active funds."}
+{"id":"fin-2","role":"doc","topic":"finance","input":"연말정산에서 신용카드보다 체크카드 사용액의 소득공제율이 더 높다."}
+{"id":"fin-3","role":"doc","topic":"finance","input":"Compound interest means you earn returns on earlier returns, so starting early matters most."}
+{"id":"fin-4","role":"doc","topic":"finance","input":"비상금은 보통 생활비 3~6개월치를 입출금이 자유로운 통장에 두는 것이 좋다."}
+{"id":"q-starter","role":"query","topic":"cooking","expect":"cook-1","input":"휴가 동안 사워도우 발효종 보관법"}
+{"id":"q-file","role":"query","topic":"code","expect":"code-1","input":"python read a file line by line"}
+{"id":"q-fx","role":"query","topic":"travel","expect":"trav-4","input":"how to avoid double currency conversion fees abroad"}
+{"id":"q-exercise","role":"query","topic":"health","expect":"heal-1","input":"일주일에 운동을 얼마나 해야 하나요?"}
+{"id":"q-owner","role":"query","topic":"code","expect":"code-3","input":"what happens to a value when its owner goes out of scope"}
+{"id":"q-index","role":"query","topic":"finance","expect":"fin-1","input":"인덱스 펀드 수수료가 낮은 이유"}

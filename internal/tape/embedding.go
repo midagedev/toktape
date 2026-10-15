@@ -38,6 +38,18 @@ type EmbeddingRecord struct {
 	// ID is the input set row's id ("en-q1"); toktape's own, never sent.
 	ID    string `json:"id"`
 	Input string `json:"input"`
+	// Role, Topic and Expect are the input set's own labels, never sent:
+	// Role is "doc" or "query" ("" = unlabelled), Topic a group name, and
+	// Expect the id of the doc a query should find.
+	Role   string `json:"role,omitempty"`
+	Topic  string `json:"topic,omitempty"`
+	Expect string `json:"expect,omitempty"`
+	// Prompt names the task prefix sent before Input ("query", "document";
+	// EmbeddingSummary.Prompts has the strings); "" = Input was sent bare.
+	Prompt string `json:"prompt,omitempty"`
+	// ShownAt is when a replay starts showing a query being typed: the
+	// recorder idled from ShownAt to SentAt. It is pacing, in no latency.
+	ShownAt time.Duration `json:"shown_at,omitempty"`
 	// SentAt and AnsweredAt are since run start; AnsweredAt is 0 on a
 	// failed request.
 	SentAt     time.Duration `json:"sent_at"`
@@ -76,13 +88,41 @@ type EmbeddingSummary struct {
 	EncodingFormat string `json:"encoding_format,omitempty"`
 	InputSet       string `json:"input_set,omitempty"` // file name; "" = built-in
 	Inputs         int    `json:"inputs"`
-	Errors         int    `json:"errors,omitempty"`
-	Dim            int    `json:"dim,omitempty"` // of the first answer
+	// Docs and Queries count the set's labelled rows (each once, however
+	// many prompts it went with).
+	Docs    int `json:"docs,omitempty"`
+	Queries int `json:"queries,omitempty"`
+	Errors  int `json:"errors,omitempty"`
+	Dim     int `json:"dim,omitempty"` // of the first answer
 	// VectorCap is the per-record cap on stored values; 0 = whole vectors.
 	VectorCap    int     `json:"vector_cap,omitempty"`
 	PromptTokens int     `json:"prompt_tokens,omitempty"` // sum of the reported
 	LatencyP50Ms float64 `json:"latency_p50_ms,omitempty"`
 	LatencyMaxMs float64 `json:"latency_max_ms,omitempty"`
+	// Prompts are the task prefixes by name, as sent (a role's input went
+	// once with its prefix and once bare); nil = none.
+	Prompts map[string]string `json:"prompts,omitempty"`
+	// SceneEnd is when the recorder's last idle hold ended: a replay runs
+	// until then so the last screen can be read. Pacing, in no latency.
+	SceneEnd time.Duration `json:"scene_end,omitempty"`
+	// OutroAt is when the final hold began (the last query's answers had
+	// been read); a replay shows the closing view from there.
+	OutroAt time.Duration `json:"outro_at,omitempty"`
+}
+
+// Role values of EmbeddingRecord.Role.
+const (
+	EmbeddingRoleDoc   = "doc"
+	EmbeddingRoleQuery = "query"
+)
+
+// EmbeddingGemmaPrompts are EmbeddingGemma 2's retrieval prefixes, verbatim
+// from the "prompts" of google/embeddinggemma-2's
+// config_sentence_transformers.json ("query" and "document"), read
+// 2026-10-15.
+var EmbeddingGemmaPrompts = map[string]string{
+	"query":    "task: search result | query: ",
+	"document": "title: none | text: ",
 }
 
 // EncodeVector is the stored form of v: little-endian float32, base64.
@@ -158,3 +198,7 @@ func MaxAbsDiff(a, b []float32) float64 {
 	}
 	return m
 }
+
+// Key is a record's identity across two tapes of the same set: the input's
+// id and the prompt it went with.
+func (r EmbeddingRecord) Key() string { return r.ID + "|" + r.Prompt }

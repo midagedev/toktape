@@ -34,7 +34,7 @@ func TestEmbedRecordsCardAndCompare(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	code, stdout, stderr := exec(t, "embed", "--url", srv.URL, "--inputs", inputs, "--out", dir)
+	code, stdout, stderr := exec(t, "embed", "--url", srv.URL, "--inputs", inputs, "--out", dir, "--no-pace")
 	if code != exitOK {
 		t.Fatalf("exit %d\n%s", code, stderr)
 	}
@@ -86,10 +86,10 @@ func TestEmbedFlagRefusals(t *testing.T) {
 }
 
 // TestEmbeddingDemoTape: the recorded llama-server tape still reads and
-// shows (EmbeddingGemma 2 Q8_0, built-in set).
+// shows (EmbeddingGemma 2 Q8_0, built-in search set).
 func TestEmbeddingDemoTape(t *testing.T) {
 	code, out, _ := exec(t, "card", filepath.Join("..", "..", "assets", "embedding-demo.tape"))
-	if code != exitOK || !strings.Contains(out, "embeddinggemma-2") || !strings.Contains(out, "ko-query") {
+	if code != exitOK || !strings.Contains(out, "embeddinggemma-2") || !strings.Contains(out, "q-starter") {
 		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }
