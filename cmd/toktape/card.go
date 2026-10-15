@@ -66,10 +66,7 @@ func runCard(c *cli, args []string) int {
 	}
 
 	// An embedding tape has its own view, over its records (2026-10-15).
-	if tp.Summary.IsEmbedding() {
-		if format == outputPNG {
-			return c.usagef("toktape card: %s is an embedding tape; it has no PNG card yet", files[0])
-		}
+	if tp.Summary.IsEmbedding() && format != outputPNG {
 		fmt.Fprint(c.stdout, card.EmbeddingText(tp))
 		return exitOK
 	}

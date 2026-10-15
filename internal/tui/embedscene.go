@@ -30,13 +30,13 @@ import (
 
 const (
 	sceneTopK    = 5
-	sceneStagger = 120 * time.Millisecond // between result rows appearing
+	sceneStagger = 70 * time.Millisecond // between result rows appearing
 	// EmbedTick is the replay's redraw period while an embedding scene runs.
 	EmbedTick  = 33 * time.Millisecond
-	growDur    = 450 * time.Millisecond // a bar or strip reaching its value
+	growDur    = 350 * time.Millisecond // a bar or strip reaching its value
 	fadeDur    = 200 * time.Millisecond // a row coming up from dim
 	blinkDur   = 530 * time.Millisecond // the typing cursor's half period
-	clusterLag = 350 * time.Millisecond // between topic blocks fading in
+	clusterLag = 200 * time.Millisecond // between topic blocks fading in
 )
 
 // grow is 0..1 eased progress over growDur from since.

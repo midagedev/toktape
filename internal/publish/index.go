@@ -272,6 +272,13 @@ func IndexOf(t *tape.Tape) Index {
 		idx.DecisionColdMs = d.ColdMs
 		idx.DecisionReqPerSec = d.RequestsPerSecond
 	}
+	if e := s.Embedding; s.IsEmbedding() && e != nil {
+		// No new column (2026-10-15): an embedding run's one latency figure,
+		// the request p50, rides decision_p50_ms, and the hub labels it by
+		// mode.
+		idx.Sessions = 0
+		idx.DecisionP50Ms = e.LatencyP50Ms
+	}
 
 	// The rate choice is the one the rest of the repo already makes: above
 	// one stream the figure is the server-wide aggregate, at one stream the

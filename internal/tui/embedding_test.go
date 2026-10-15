@@ -73,14 +73,22 @@ func TestSearchScene(t *testing.T) {
 		t.Fatalf("the demo's first query has no typing time: %+v", q)
 	}
 	e := a.Summary.Embedding
+	// Mid-typing, on a cursor-on half of the blink.
+	typing := q.ShownAt + 50*time.Millisecond
+	for typing%(2*blinkDur) >= blinkDur {
+		typing += 10 * time.Millisecond
+	}
+	if typing >= q.SentAt {
+		t.Fatalf("no cursor-on instant while %s is typed", q.ID)
+	}
 	steps := []struct {
 		at   time.Duration
 		want []string
 	}{
 		{q.ShownAt / 2, []string{"INDEX", "indexing the corpus"}},
-		// Mid-typing, on a cursor-on half of the blink.
-		{(q.ShownAt+q.SentAt)/2 - ((q.ShownAt+q.SentAt)/2)%(2*blinkDur) + time.Millisecond, []string{"20/20 docs", "▌"}},
-		{q.AnsweredAt + 2*time.Second, []string{"TOP 5", "✓", "PROMPTS with #1", "MRL     768 #1", "top-1 the same", "1›", "RESOURCES", "CPU"}},
+		{typing, []string{"20/20 docs", "▌"}},
+		// Settled, before the next query starts (the hold is about 1s).
+		{q.AnsweredAt + 900*time.Millisecond, []string{"TOP 5", "✓", "PROMPTS with #1", "MRL     768 #1", "top-1 the same", "1›", "RESOURCES", "CPU"}},
 		{e.OutroAt + 3*time.Second, []string{"CLUSTERS", "recall@1 6/6", "RESOURCES"}},
 	}
 	for _, size := range [][2]int{{120, 40}, {MinWidth, MinHeight}} {
@@ -93,8 +101,8 @@ func TestSearchScene(t *testing.T) {
 			}
 		}
 	}
-	if end := EmbeddingEnd(a); end < 45*time.Second || end > 90*time.Second {
-		t.Errorf("the demo replays in %s, want 45-90s", end)
+	if end := EmbeddingEnd(a); end < 15*time.Second || end > 25*time.Second {
+		t.Errorf("the demo replays in %s, want 15-25s", end)
 	}
 }
 
@@ -142,11 +150,11 @@ func TestSceneMotion(t *testing.T) {
 		t.Error("the query is not fully typed when it is sent")
 	}
 	f := func(at time.Duration) string { return frame(t, ModelAt(a, at), at, 120, 40) }
-	early, settled := f(q.AnsweredAt+60*time.Millisecond), f(q.AnsweredAt+3*time.Second)
+	early, settled := f(q.AnsweredAt+60*time.Millisecond), f(q.AnsweredAt+850*time.Millisecond)
 	if early == settled {
 		t.Error("nothing moved between the answer landing and settling")
 	}
-	if f(q.AnsweredAt+3*time.Second+100*time.Millisecond) != settled {
+	if f(q.AnsweredAt+950*time.Millisecond) != settled {
 		t.Error("the settled frame still moves")
 	}
 }

@@ -257,6 +257,10 @@ func RunEnd(tp *tape.Tape) time.Duration {
 		}
 		return end
 	}
+	if tp.Summary.IsEmbedding() {
+		// The search scene's own end, holds included (2026-10-15).
+		return tui.EmbeddingEnd(tp)
+	}
 	for _, req := range tp.Requests {
 		if n := len(req.Tokens); n > 0 {
 			if e := req.StartedAt + req.Tokens[n-1].T; e > end {
@@ -286,6 +290,10 @@ func FirstToken(tp *tape.Tape) time.Duration {
 			}
 		}
 		return first
+	}
+	if tp.Summary.IsEmbedding() {
+		// Nothing to skip: the scene starts typing at once.
+		return 0
 	}
 	for _, req := range tp.Requests {
 		if len(req.Tokens) == 0 {
