@@ -51,6 +51,13 @@ func embeddingModel(m *Model, tp *tape.Tape, at time.Duration) {
 	if len(tp.Embeddings) > 0 {
 		m.RunStart, m.runStarted = tp.Embeddings[0].SentAt, true
 	}
+	for _, sm := range tp.Samples {
+		if sm.T > at {
+			break
+		}
+		m.Samples = append(m.Samples, sm)
+	}
+	m.seen = seenIn(tp.Samples)
 	m.RunEnd = EmbeddingEnd(tp)
 	m.Done = len(tp.Embeddings) > 0 && at >= m.RunEnd
 }
@@ -226,7 +233,7 @@ func (v *embedView) block(r tape.EmbeddingRecord) []string {
 	case r.Error != "":
 		right, rst = "✗ failed", th.bad
 	default:
-		right, rst = spinnerAt(t)+" embedding", th.accent
+		right, rst = "embedding…", pulse(th, t)
 	}
 	tok := "input " + fmtTok(r.PromptTokens) + " tok · "
 	if r.Prompt != "" {
@@ -247,9 +254,12 @@ func (v *embedView) block(r tape.EmbeddingRecord) []string {
 	switch {
 	case ok:
 		cells := downsample(vals, v.stripW)
-		// The strip is painted cell by cell, so it goes in pre-measured.
-		s.used += len(cells)
-		s.b.WriteString(vectorStrip(th, cells, v.scale))
+		// The strip fills left to right as the answer lands; it is painted
+		// cell by cell, so it goes in pre-measured.
+		shown := int(math.Round(grow(r.AnsweredAt, t) * float64(len(cells))))
+		s.used += shown
+		s.b.WriteString(vectorStrip(th, cells[:shown], v.scale))
+		s.add(th.darkFill, repeat('·', len(cells)-shown))
 		s.space(v.stripW - len(cells) + 2)
 		s.add(th.dim, "norm ")
 		s.add(th.text, fmt.Sprintf("%.4f", r.Norm))
@@ -447,4 +457,39 @@ func SetEmbedRef(m *Model, ref *tape.Tape, name string) {
 		m.EmbedRef[r.Key()] = r
 	}
 	m.EmbedRefName = name
+}
+
+// embedSpeedRows are the machine pane's SPEED rows on an embedding tape:
+// requests answered, their latency p50, and the prompt tokens embedded.
+// There is no tok/s to show: an embedding is one prefill, no decode.
+func embedSpeedRows(m Model, th Theme, t time.Duration, cw int) []string {
+	var lat []float64
+	n, tok := 0, 0
+	for _, r := range m.Embeddings {
+		if embedAnswered(r, t) {
+			n++
+			tok += r.PromptTokens
+			lat = append(lat, msOf(r.Latency()))
+		}
+	}
+	total := 0
+	if e := m.Summary.Embedding; e != nil {
+		total = e.Inputs
+	}
+	row := func(label, value string, st style) string {
+		l := newLine(th, cw)
+		l.add(th.dim, label)
+		l.gapTo(width(value))
+		l.add(st, value)
+		return l.String()
+	}
+	p50 := unknown
+	if len(lat) > 0 {
+		p50 = fmtLat(percentile(lat, 0.5)) + " ms"
+	}
+	return []string{
+		row("requests", fmt.Sprintf("%d/%d", n, total), th.text),
+		row("latency p50", p50, th.accentBold),
+		row("prompt tokens", fmtTok(tok), th.text),
+	}
 }

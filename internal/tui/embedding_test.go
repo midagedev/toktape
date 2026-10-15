@@ -78,9 +78,10 @@ func TestSearchScene(t *testing.T) {
 		want []string
 	}{
 		{q.ShownAt / 2, []string{"INDEX", "indexing the corpus"}},
-		{(q.ShownAt + q.SentAt) / 2, []string{"20/20 docs", "▌"}},
-		{q.AnsweredAt + 2*time.Second, []string{"TOP 5", "✓", "PROMPTS   with #1", "MRL       768 #1", "1›"}},
-		{e.OutroAt + time.Second, []string{"CLUSTERS", "recall@1 6/6"}},
+		// Mid-typing, on a cursor-on half of the blink.
+		{(q.ShownAt+q.SentAt)/2 - ((q.ShownAt+q.SentAt)/2)%(2*blinkDur) + time.Millisecond, []string{"20/20 docs", "▌"}},
+		{q.AnsweredAt + 2*time.Second, []string{"TOP 5", "✓", "PROMPTS with #1", "MRL     768 #1", "top-1 the same", "1›", "RESOURCES", "CPU"}},
+		{e.OutroAt + 3*time.Second, []string{"CLUSTERS", "recall@1 6/6", "RESOURCES"}},
 	}
 	for _, size := range [][2]int{{120, 40}, {MinWidth, MinHeight}} {
 		for _, st := range steps {
@@ -114,5 +115,38 @@ func TestDownsampleAndStrip(t *testing.T) {
 	}
 	if s := vectorStrip(Theme{}, []float64{-1, 0, 1}, 1); s != "▁▅█" {
 		t.Errorf("strip = %q", s)
+	}
+}
+
+// TestSceneMotion: what moves does so as a function of t — the typing is
+// monotonic and complete at send, the bars and strip grow after the answer,
+// and once settled the frame stops changing.
+func TestSceneMotion(t *testing.T) {
+	a, _ := embedTapes(t)
+	var q tape.EmbeddingRecord
+	for _, r := range a.Embeddings {
+		if r.Role == tape.EmbeddingRoleQuery && r.Prompt != "" {
+			q = r
+			break
+		}
+	}
+	prev := 0
+	for at := q.ShownAt; at <= q.SentAt; at += 20 * time.Millisecond {
+		n := typedCount(q, at)
+		if n < prev {
+			t.Fatalf("typing went back at %s: %d after %d", at, n, prev)
+		}
+		prev = n
+	}
+	if typedCount(q, q.SentAt) != len([]rune(q.Input)) {
+		t.Error("the query is not fully typed when it is sent")
+	}
+	f := func(at time.Duration) string { return frame(t, ModelAt(a, at), at, 120, 40) }
+	early, settled := f(q.AnsweredAt+60*time.Millisecond), f(q.AnsweredAt+3*time.Second)
+	if early == settled {
+		t.Error("nothing moved between the answer landing and settling")
+	}
+	if f(q.AnsweredAt+3*time.Second+100*time.Millisecond) != settled {
+		t.Error("the settled frame still moves")
 	}
 }

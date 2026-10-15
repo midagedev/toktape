@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/midagedev/toktape/internal/gpu"
+	"github.com/midagedev/toktape/internal/procmon"
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
 )
@@ -156,6 +157,23 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 	}
 	startedAt := opts.Clock.Now()
 	t0 := time.Now()
+	// The host is read the way a record reads it (the same sampler), so the
+	// screen's resource pane has a series: the server's process when it is
+	// on this machine, the GPUs and the load average.
+	st := newState(1, nil, nil)
+	stopSampling := make(chan struct{})
+	sampled := make(chan struct{})
+	fsRoot := opts.FSRoot
+	if fsRoot == "" {
+		fsRoot = "/" // procmon joins it with "proc/..."
+	}
+	dep := sampleDeps{interval: 500 * time.Millisecond, runStart: t0, fsRoot: fsRoot, gpus: opts.GPU}
+	if port, err := loopbackPortOf(base); err == nil {
+		if pid, err := procmon.FindPIDByPort(fsRoot, port); err == nil {
+			dep.pid = pid
+		}
+	}
+	go func() { st.sampleLoop(ctx, stopSampling, dep); close(sampled) }()
 	var recs []tape.EmbeddingRecord
 	send := func(in embeddingInput, prompt string, shown time.Duration) {
 		rec := sendEmbedding(ctx, opts, base+endpoint, t0, in, prompt)
@@ -198,6 +216,9 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 	}
 	idle(opts.Tail)
 	sceneEnd := time.Since(t0)
+	close(stopSampling)
+	<-sampled
+	_, samples, _ := st.snapshot()
 	finishedAt := opts.Clock.Now()
 
 	sum := &tape.EmbeddingSummary{
@@ -271,7 +292,10 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 		Tag:            opts.Tag,
 		Note:           opts.Note,
 	}
-	return &tape.Tape{Schema: tape.SchemaVersion, Summary: summary, Embeddings: recs}, nil
+	if dep.pid > 0 {
+		summary.Server.PID = dep.pid
+	}
+	return &tape.Tape{Schema: tape.SchemaVersion, Summary: summary, Embeddings: recs, Samples: samples}, nil
 }
 
 func sendEmbedding(ctx context.Context, opts EmbeddingOptions, url string, t0 time.Time, in embeddingInput, prompt string) tape.EmbeddingRecord {
