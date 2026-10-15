@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { goFixed } from "../src/run.js";
+import { goFixed } from "../src/gofixed.js";
 
 test("an exact tie rounds to even, as Go does", () => {
   assert.equal(goFixed(0.25, 1), "0.2");

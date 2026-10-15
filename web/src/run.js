@@ -10,6 +10,7 @@
 // a door — the id is the secret (§9.3).
 
 import { avatarPath } from "./author.js";
+import { goFixed } from "./gofixed.js";
 import { fail, json } from "./http.js";
 import { esc, fmt, head, layout } from "./page.js";
 
@@ -657,20 +658,6 @@ function formatRateUnit(v) {
 // millisecond count, where 0 is a reading rather than unknown.
 function formatProbeMs(v) {
   return `${goFixed(v, 0)} ms`;
-}
-
-// goFixed is strconv.FormatFloat(v, 'f', digits, 64). toFixed already rounds
-// the exact binary value; the one difference is an exact tie, which toFixed
-// takes away from zero and Go takes to even. A tie is a multiple of
-// 2^-(digits+1), and that test is exact (a power-of-two scale).
-export function goFixed(v, digits) {
-  const m = 10 ** digits;
-  const x = v * m;
-  if (Number.isInteger(v * 2 ** (digits + 1)) && !Number.isInteger(x)) {
-    const f = Math.floor(x);
-    return ((f % 2 === 0 ? f : f + 1) / m).toFixed(digits);
-  }
-  return v.toFixed(digits);
 }
 
 // memoryRow is the card's MEMORY lines that the index carries, in one cell:
