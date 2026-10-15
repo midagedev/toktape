@@ -561,8 +561,9 @@ function summaryLine(idx) {
 
 // Bits per weight as the card would print it: two decimals at most, and a
 // figure like 6.5625 (a real UD-Q6_K measurement) does not pretend to four.
+// The tie is goFixed. toFixed would print 6.125 as 6.13.
 function bits(b) {
-  return Number(b).toFixed(2).replace(/\.?0+$/, "");
+  return goFixed(Number(b), 2).replace(/\.?0+$/, "");
 }
 
 // The figure rows (TTP-130). Every part is copied from the index the client
