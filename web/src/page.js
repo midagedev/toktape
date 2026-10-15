@@ -1,3 +1,5 @@
+import { goFixed } from "./gofixed.js";
+
 // The chrome every page shares.
 //
 // One stylesheet, inline, because the pages are small and a published run
@@ -222,5 +224,7 @@ export function esc(s) {
 // `?`; never print a default you did not observe).
 export function fmt(n) {
   if (!n) return "?";
-  return n >= 100 ? n.toFixed(0) : n.toFixed(1);
+  // The card's formatRate. goFixed is the tie rule; toFixed would print the
+  // other way on an exact half.
+  return n >= 100 ? goFixed(n, 0) : goFixed(n, 1);
 }
