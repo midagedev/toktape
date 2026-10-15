@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/midagedev/toktape/internal/card"
 	"github.com/midagedev/toktape/internal/tape"
 	"github.com/midagedev/toktape/internal/tui"
 )
@@ -21,6 +19,7 @@ import (
 func runPlay(ctx context.Context, c *cli, args []string) int {
 	fs := newFlagSet("play")
 	speed := fs.Float64("speed", 1, "replay speed multiplier (4 plays four times as fast)")
+	against := fs.String("against", "", "an embedding tape to compare each input's vector with")
 	grid := fs.String("grid", tui.DefaultGrid.String(), "tile grid per page as COLSxROWS (0 = fit to the terminal)")
 	files, err := parseArgs(fs, args)
 	if err != nil {
@@ -40,10 +39,17 @@ func runPlay(ctx context.Context, c *cli, args []string) int {
 	if err != nil {
 		return c.usagef("toktape: %v", err)
 	}
-	// An embedding run has no stream to replay: it shows its view.
-	if tp.Summary.IsEmbedding() {
-		fmt.Fprint(c.stdout, card.EmbeddingText(tp))
-		return exitOK
+	var ref *tape.Tape
+	if *against != "" {
+		if !tp.Summary.IsEmbedding() {
+			return c.usagef("toktape play: --against is for an embedding tape")
+		}
+		if ref, err = tape.Read(*against); err != nil {
+			return c.usagef("toktape: %v", err)
+		}
+		if !ref.Summary.IsEmbedding() {
+			return c.usagef("toktape play: --against %s is not an embedding tape", *against)
+		}
 	}
 	if !isTTY(c.stdout) {
 		return c.fail(failure{
@@ -61,6 +67,7 @@ func runPlay(ctx context.Context, c *cli, args []string) int {
 		path:    tildePath(files[0]),
 		end:     tapeDuration(tp),
 		playing: true,
+		ref:     ref,
 	}
 	if _, err := tea.NewProgram(p, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithOutput(c.stdout)).Run(); err != nil {
 		if ctx.Err() != nil {
@@ -100,6 +107,9 @@ func tapeDuration(tp *tape.Tape) time.Duration {
 	if tp == nil {
 		return end
 	}
+	if tp.Summary.IsEmbedding() {
+		return tui.EmbeddingEnd(tp)
+	}
 	for _, req := range tp.Requests {
 		if n := len(req.Tokens); n > 0 {
 			if t := req.StartedAt + req.Tokens[n-1].T; t > end {
@@ -114,6 +124,7 @@ func tapeDuration(tp *tape.Tape) time.Duration {
 // nothing else; every frame comes from playModel and tui.View.
 type player struct {
 	tp    *tape.Tape
+	ref   *tape.Tape // --against, an embedding reference
 	speed float64
 	grid  tui.Grid
 	theme tui.Theme
@@ -179,6 +190,7 @@ func (p *player) wallAtPause() time.Duration { return p.wall }
 // the keys can never step past the last stream.
 func (p *player) pageAfter(d int) int {
 	m, _ := playModel(p.tp, p.wall, p.speed)
+	tui.SetEmbedRef(&m, p.ref, refLabel(p.ref))
 	m.Grid = p.grid
 	m.Page = p.page
 	w, h := p.size()
@@ -204,6 +216,7 @@ func (p *player) View() string {
 	}
 	w, h := p.size()
 	m, clip := playModel(p.tp, p.wall, p.speed)
+	tui.SetEmbedRef(&m, p.ref, refLabel(p.ref))
 	m.Theme = p.theme
 	// TapePath stays empty, so the footer reads "run complete": p.path is the
 	// file being replayed, and "tape saved <path>" is a claim about where the
@@ -212,4 +225,20 @@ func (p *player) View() string {
 	m.Grid = p.grid
 	m.Page = p.page
 	return tui.View(m, clip, w, h)
+}
+
+// refLabel names a reference tape on the screen: its tag, else its engine
+// and endpoint.
+func refLabel(t *tape.Tape) string {
+	if t == nil {
+		return ""
+	}
+	if t.Summary.Tag != "" {
+		return t.Summary.Tag
+	}
+	l := string(t.Summary.Server.Kind)
+	if e := t.Summary.Embedding; e != nil {
+		l += " " + e.Endpoint
+	}
+	return l
 }
