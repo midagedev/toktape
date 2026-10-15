@@ -10,12 +10,8 @@
 // front page, the sitemap, that owner's home and its JSON, and /hw/<id> for
 // each card on the tape.
 
-// Same shape as the /hw/:id route. An id that would 404 has no key to drop.
-const GPU_ID = /^[a-z0-9-]+$/;
-// Same shape as the /u/:handle route.
-const HANDLE = /^[a-z0-9][a-z0-9-]{1,31}$/;
-const HW_PATH = /^\/hw\/[a-z0-9-]+$/;
-const USER_PATH = /^\/u\/[a-z0-9][a-z0-9-]{1,31}(\.json)?$/;
+import { HW_PAGE, USER_JSON, USER_PAGE } from "./index.js";
+import { GPU_ID_RE } from "./run.js";
 
 // Narrowing filters. `gpu` is one of them on `/` and on a user home. On a
 // hub the card is the page, so `gpu` in the query is not a search there.
@@ -57,8 +53,8 @@ export function isSearch(url, { ignoreGpu = false } = {}) {
 export function feedKind(url) {
   const path = url.pathname;
   if (path === "/" || path === "/sitemap.xml" || path === "/api/v1/runs") return { ignoreGpu: false };
-  if (HW_PATH.test(path)) return { ignoreGpu: true };
-  if (USER_PATH.test(path)) return { ignoreGpu: false };
+  if (HW_PAGE.test(path)) return { ignoreGpu: true };
+  if (USER_PAGE.test(path) || USER_JSON.test(path)) return { ignoreGpu: false };
   return null;
 }
 
@@ -82,7 +78,7 @@ export function gpuIdsOf(value) {
   const seen = new Set();
   const out = [];
   for (const id of arr) {
-    if (typeof id === "string" && GPU_ID.test(id) && !seen.has(id)) {
+    if (typeof id === "string" && GPU_ID_RE.test(id) && !seen.has(id)) {
       seen.add(id);
       out.push(id);
     }
@@ -96,7 +92,8 @@ export function feedDeleteURLs(origin, { owner, gpus } = {}) {
   const base = String(origin || "").replace(/\/+$/, "");
   if (base === "") return [];
   const urls = [`${base}/`, `${base}/sitemap.xml`];
-  if (typeof owner === "string" && HANDLE.test(owner)) {
+  // USER_PAGE is the handle route. An owner that would 404 has no home key.
+  if (typeof owner === "string" && USER_PAGE.test(`/u/${owner}`)) {
     urls.push(`${base}/u/${owner}`, `${base}/u/${owner}.json`);
   }
   for (const id of gpuIdsOf(gpus)) urls.push(`${base}/hw/${id}`);
