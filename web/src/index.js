@@ -35,7 +35,9 @@ const RUN_JSON = /^\/r\/([a-z0-9]{8,64})\.json$/;
 const RUN_CARD = /^\/r\/([a-z0-9]{8,64})\.png$/;
 const RUN_PAGE = /^\/r\/([a-z0-9]{8,64})$/;
 // The hub page of one GPU model (TTP-204): the id as the index normalises it.
-const HW_PAGE = /^\/hw\/([a-z0-9-]+)$/;
+// feedcache.js matches this same expression, so a key exists only for a page
+// this route would serve.
+export const HW_PAGE = /^\/hw\/([a-z0-9-]+)$/;
 const RUN_API = /^\/api\/v1\/runs\/([a-z0-9]{8,64})$/;
 // The owner replacing a published run's card with one its client redrew
 // from the record (a reindex's other half, card.js). The Worker still never
@@ -43,8 +45,8 @@ const RUN_API = /^\/api\/v1\/runs\/([a-z0-9]{8,64})$/;
 const RUN_CARD_API = /^\/api\/v1\/runs\/([a-z0-9]{8,64})\/card$/;
 // A user home. The handle is URL-safe by construction on this side: a token
 // id that does not match has no home page, and the lookup 404s it.
-const USER_JSON = /^\/u\/([a-z0-9][a-z0-9-]{1,31})\.json$/;
-const USER_PAGE = /^\/u\/([a-z0-9][a-z0-9-]{1,31})$/;
+export const USER_JSON = /^\/u\/([a-z0-9][a-z0-9-]{1,31})\.json$/;
+export const USER_PAGE = /^\/u\/([a-z0-9][a-z0-9-]{1,31})$/;
 // An avatar's name is its bytes: 64 hex digits, and anything else is a 404
 // before touching R2.
 const AVATAR = /^\/a\/([0-9a-f]{64})\.png$/;
