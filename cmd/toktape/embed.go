@@ -51,8 +51,8 @@ Flags:
                         query: ") and bare, so the replay ranks both ways
   --gap D, --type-rate D, --hold D
                         pacing for a watchable replay: idle after each doc
-                        (500ms), per query character (90ms, the replay types
-                        it), after each query (5s); --no-pace for none.
+                        (100ms), per query character (25ms, the replay types
+                        it), after each query (1s); --no-pace for none.
                         Idle time is never part of a latency
   --out DIR             where the tape is written (default ~/.toktape/runs)
   --tag TEXT, --note TEXT  label the run
@@ -71,9 +71,9 @@ func runEmbed(ctx context.Context, c *cli, args []string) int {
 	dims := fs.Int("dimensions", 0, "dimensions to send")
 	format := fs.String("encoding-format", "float", "float or base64")
 	vcap := fs.Int("vector-cap", 0, "values kept per vector")
-	gap := fs.Duration("gap", 500*time.Millisecond, "idle time after each doc")
-	typeRate := fs.Duration("type-rate", 90*time.Millisecond, "idle time per character before each query")
-	hold := fs.Duration("hold", 5*time.Second, "idle time after each query")
+	gap := fs.Duration("gap", 100*time.Millisecond, "idle time after each doc")
+	typeRate := fs.Duration("type-rate", 25*time.Millisecond, "idle time per character before each query")
+	hold := fs.Duration("hold", time.Second, "idle time after each query")
 	noPace := fs.Bool("no-pace", false, "no idle time at all")
 	noPrompts := fs.Bool("no-prompts", false, "send every input bare, without EmbeddingGemma's task prefixes")
 	outDir := fs.String("out", defaultRunsDir(), "where the tape is written")
@@ -101,7 +101,7 @@ func runEmbed(ctx context.Context, c *cli, args []string) int {
 	}
 	opts := recorder.EmbeddingOptions{
 		BaseURL: *url, API: *api, Model: *model, Dimensions: *dims, EncodingFormat: *format,
-		VectorCap: *vcap, Gap: *gap, TypeRate: *typeRate, Hold: *hold, Tail: *hold + 3*time.Second, Tag: *tag, Note: *note, Version: version,
+		VectorCap: *vcap, Gap: *gap, TypeRate: *typeRate, Hold: *hold, Tail: *hold + time.Second, Tag: *tag, Note: *note, Version: version,
 		HostLabel: recorder.HostLabel{Set: flagSet(fs, "host-label"), Text: *hostLabel},
 	}
 	if *noPace {

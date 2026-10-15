@@ -89,6 +89,17 @@ check("the summary is an object carrying caveats", typeof d.summary === "object"
 
 // A tape it cannot read must say so rather than throw: a page that fetched a
 // truncated file has to be able to tell its reader what happened.
+// An embedding tape (2026-10-15) plays its search scene through the same
+// load() and frame(), with the resource panel on the right.
+{
+  const eb = readFileSync(join(here, "..", "..", "assets", "embedding-demo.tape"));
+  const el = api.load(new Uint8Array(eb));
+  check("embedding-demo.tape loads", el.ok === true, el.error || `${eb.length} bytes in`);
+  check("the embedding scene has a duration", el.durationMs > 10000, `${el.durationMs} ms`);
+  const f = api.frame(Math.floor(el.durationMs * 0.6), COLS, ROWS).replace(/\x1b\[[0-9;]*m/g, "");
+  check("the frame is the search scene", /SEARCH/.test(f) && /INDEX/.test(f), f.split("\n").find((l) => /INDEX/.test(l))?.trim().slice(0, 70));
+}
+
 const bad = api.load(new Uint8Array([1, 2, 3, 4]));
 check("a file that is not a tape is refused by name", bad.ok === false && bad.error.length > 0, bad.error);
 

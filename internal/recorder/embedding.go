@@ -149,7 +149,16 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
+	// One GPU collector for the inventory and the samples both; the decision
+	// host opens its own only when handed none, which left the samples bare.
+	var gpuWarns []string
+	if opts.GPU == nil {
+		c, ws := gpu.Open(ctx)
+		defer c.Close()
+		opts.GPU, gpuWarns = c, ws
+	}
 	host, warnings := collectDecisionHost(ctx, DecisionOptions{FSRoot: opts.FSRoot, GPU: opts.GPU, HostLabel: opts.HostLabel}, base)
+	warnings = append(gpuWarns, warnings...)
 
 	endpoint := "/v1/embeddings"
 	if opts.API == tape.EmbeddingAPILlama {
@@ -237,6 +246,27 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 			sum.Queries++
 		}
 	}
+	for _, r := range recs {
+		if r.Role != tape.EmbeddingRoleQuery || r.Expect == "" || r.Error != "" {
+			continue
+		}
+		docPrompt := ""
+		if r.Prompt != "" {
+			docPrompt = "document"
+		}
+		hit := tape.TopHit(recs, r.Values(), docPrompt) == r.Expect
+		switch {
+		case r.Prompt == "" && len(opts.Prompts) > 0:
+			if hit {
+				sum.HitsBare++
+			}
+		default:
+			sum.Graded++
+			if hit {
+				sum.Hits++
+			}
+		}
+	}
 	if opts.Inputs != nil {
 		sum.InputSet = filepath.Base(opts.InputsName)
 	}
@@ -294,6 +324,15 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 	}
 	if dep.pid > 0 {
 		summary.Server.PID = dep.pid
+	}
+	// The run's last reading is its at-end view, as for a token run, so the
+	// card and the index have the server's memory and the GPUs.
+	for _, smp := range samples {
+		summary.Memory.PeakRSSBytes = max(summary.Memory.PeakRSSBytes, smp.Mem.RSSBytes)
+	}
+	if n := len(samples); n > 0 {
+		summary.Memory.AtEnd = samples[n-1].Mem
+		summary.GPUsAtEnd = samples[n-1].GPUs
 	}
 	return &tape.Tape{Schema: tape.SchemaVersion, Summary: summary, Embeddings: recs, Samples: samples}, nil
 }

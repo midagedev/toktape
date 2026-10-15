@@ -92,8 +92,15 @@ type EmbeddingSummary struct {
 	// many prompts it went with).
 	Docs    int `json:"docs,omitempty"`
 	Queries int `json:"queries,omitempty"`
-	Errors  int `json:"errors,omitempty"`
-	Dim     int `json:"dim,omitempty"` // of the first answer
+	// Hits and HitsBare count the queries with an "expect" whose expected
+	// doc ranked first among the docs — with the task prompts on both
+	// sides, and bare on both sides (HitsBare is 0 without prompts). Graded
+	// is how many queries had an "expect".
+	Hits     int `json:"hits,omitempty"`
+	HitsBare int `json:"hits_bare,omitempty"`
+	Graded   int `json:"graded,omitempty"`
+	Errors   int `json:"errors,omitempty"`
+	Dim      int `json:"dim,omitempty"` // of the first answer
 	// VectorCap is the per-record cap on stored values; 0 = whole vectors.
 	VectorCap    int     `json:"vector_cap,omitempty"`
 	PromptTokens int     `json:"prompt_tokens,omitempty"` // sum of the reported
@@ -202,3 +209,18 @@ func MaxAbsDiff(a, b []float32) float64 {
 // Key is a record's identity across two tapes of the same set: the input's
 // id and the prompt it went with.
 func (r EmbeddingRecord) Key() string { return r.ID + "|" + r.Prompt }
+
+// TopHit is the id of the doc in recs (role doc, sent with prompt) nearest
+// to q by cosine; "" when there is none.
+func TopHit(recs []EmbeddingRecord, q []float32, prompt string) string {
+	best, id := math.Inf(-1), ""
+	for _, r := range recs {
+		if r.Role != EmbeddingRoleDoc || r.Prompt != prompt || r.Error != "" {
+			continue
+		}
+		if c := Cosine(q, r.Values()); c > best {
+			best, id = c, r.ID
+		}
+	}
+	return id
+}

@@ -146,7 +146,9 @@ function runPage(row, idx, base) {
     ["host", [idx.os, idx.host_class].filter(Boolean).join(" · ") || "?"],
     ["gpus", gpusRow(idx)],
     ["memory", memoryRow(idx)],
-    isDecision(idx)
+    isEmbedding(idx)
+      ? ["mode", "embedding model · POST /v1/embeddings or /embedding"]
+      : isDecision(idx)
       ? ["mode", `decision model · POST /v1/systemone${
           idx.decision_req_per_sec ? ` · ${fmt(idx.decision_req_per_sec)} req/s back to back` : ""
         }`]
@@ -166,7 +168,9 @@ function runPage(row, idx, base) {
   ];
   // A decision run (TTP-192) has no token figure; its figures are the
   // card's, every latency send to last byte on the client's clock.
-  const figures = isDecision(idx)
+  const figures = isEmbedding(idx)
+    ? [["request p50", idx.decision_p50_ms, "ms"]]
+    : isDecision(idx)
     ? [
         ["decision p50", idx.decision_p50_ms, "ms"],
         ["engine p50", idx.decision_engine_p50_ms, "ms"],
@@ -457,7 +461,9 @@ function caveatBlock(idx) {
 // head() escapes it. No name, no credit — never the token handle.
 function shareTitle(idx, fallback, noteTitle, authorName) {
   const parts = [];
-  if (isDecision(idx)) {
+  if (isEmbedding(idx)) {
+    if (idx.decision_p50_ms) parts.push(`${fmt(idx.decision_p50_ms)} ms p50 embedding`);
+  } else if (isDecision(idx)) {
     if (idx.decision_p50_ms) parts.push(`${fmt(idx.decision_p50_ms)} ms p50 decision`);
   } else if (idx.decode_per_sec) parts.push(`${fmt(idx.decode_per_sec)} tok/s`);
   // The file name stands in when the model never normalised, without its
@@ -547,9 +553,17 @@ function isDecision(idx) {
   return idx.mode === "decision";
 }
 
+// An embedding run (2026-10-15) carries its request p50 in decision_p50_ms
+// and no token figure.
+function isEmbedding(idx) {
+  return idx.mode === "embedding";
+}
+
 function summaryLine(idx) {
   const parts = [];
-  if (isDecision(idx)) {
+  if (isEmbedding(idx)) {
+    if (idx.decision_p50_ms) parts.push(`${fmt(idx.decision_p50_ms)} ms p50 embedding`);
+  } else if (isDecision(idx)) {
     if (idx.decision_p50_ms) parts.push(`${fmt(idx.decision_p50_ms)} ms p50 decision`);
   } else if (idx.decode_per_sec) parts.push(`${fmt(idx.decode_per_sec)} tok/s decode`);
   if (idx.sessions) parts.push(`${idx.sessions} stream${idx.sessions === 1 ? "" : "s"}`);
@@ -605,7 +619,7 @@ function prefillFigure(idx) {
 // A short prompt leads with the reason. Neither a short prompt nor a probe
 // means no row. A decision row is not given one.
 function prefillFacts(idx) {
-  if (isDecision(idx)) return "";
+  if (isDecision(idx) || isEmbedding(idx)) return "";
   const probe = probeClause(idx);
   if (idx.short_prompt) {
     const n = idx.prompt_n > 0 ? String(idx.prompt_n) : "?";

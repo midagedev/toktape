@@ -53,6 +53,8 @@ func renderCanvas(s *tape.RunSummary) (*canvas, error) {
 	// (TTP-192, 2026-10-02).
 	if s.IsDecision() {
 		c.drawDecision(s)
+	} else if s.IsEmbedding() {
+		c.drawEmbedding(s)
 	} else {
 		c.draw(s)
 	}

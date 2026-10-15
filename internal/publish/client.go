@@ -156,11 +156,6 @@ type Options struct {
 // Options.IncludeConversation.
 var ErrConversation = errors.New("publish: this is a chat tape and it holds the conversation's text; nothing was sent")
 
-// ErrEmbedding is Upload's refusal of an embedding tape (2026-10-15): the
-// hub has no page for one yet, so nothing is sent rather than a run page
-// that reads token figures it does not have.
-var ErrEmbedding = errors.New("publish: embedding tapes are not published yet; nothing was sent")
-
 // HoldsConversation reports whether t is a chat session, whose prompts are
 // what a person typed rather than a set toktape or a prompts file chose. It
 // is the one predicate publishing asks: the verb refuses early with it, and
@@ -199,9 +194,6 @@ func (c *Client) Upload(ctx context.Context, view *tape.Tape, idx Index, opts Op
 	}
 	if HoldsConversation(view) && !opts.IncludeConversation {
 		return nil, ErrConversation
-	}
-	if view.Summary.IsEmbedding() {
-		return nil, ErrEmbedding
 	}
 	body, contentType, err := uploadBody(view, idx, opts, c.Token)
 	if err != nil {

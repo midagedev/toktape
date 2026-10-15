@@ -92,6 +92,10 @@ func PublicView(t *tape.Tape, policy TextPolicy) *tape.Tape {
 		// The summary lists the same pictures for the card: the same rule.
 		s.Images = anonymousImages(s.Images)
 		out.Decisions = withoutDecisionText(out.Decisions)
+		// An embedding run's inputs are text the same way (2026-10-15).
+		for i := range out.Embeddings {
+			out.Embeddings[i].Input = ""
+		}
 	}
 	// A published tape tells the instant, never the time zone (§9.3,
 	// TTP-120): every time.Time becomes UTC, and the run id's leading local

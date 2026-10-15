@@ -156,6 +156,16 @@ func textLine(view *tape.Tape, opts Options) string {
 	if view.Summary.IsDecision() {
 		return decisionTextLine(view, opts)
 	}
+	if view.Summary.IsEmbedding() {
+		if opts.Text == WithoutText {
+			return "nothing · the inputs are removed, the vectors and timings stay"
+		}
+		n := 0
+		for _, r := range view.Embeddings {
+			n += len([]rune(r.Input))
+		}
+		return fmt.Sprintf("%d characters across %s, the docs and queries the scene shows", n, plural(len(view.Embeddings), "input"))
+	}
 	if opts.Text == WithoutText {
 		return "nothing · the prompts and the generated text are removed, the timings stay"
 	}
