@@ -35,17 +35,25 @@ Flags:
   --url URL             server to attach to (default: discover)
   --api NAME            openai (POST /v1/embeddings, default) or llama
                         (POST /embedding, llama-server's own shape)
-  --inputs FILE         JSONL, one {"id": ..., "input": ...} per line
-                        (default: a built-in English/Korean/code set of
-                        query/document pairs)
+  --inputs FILE         JSONL, one {"id", "input"} per line, optionally with
+                        "role" (doc|query), "topic" and, on a query, "expect"
+                        (the doc id it should find). Default: a built-in
+                        search set, 20 Korean/English docs in 5 topics and
+                        6 queries
   --model NAME          "model" to send (openai shape; default: none)
   --dimensions N        "dimensions" to send (openai shape; default: none)
   --encoding-format F   float (default) or base64 (openai shape)
   --vector-cap N        keep at most N values of each vector (default 0 =
                         all); dim, norm and the first values are always kept
-  --gap DURATION        idle time after each answer, so a replay shows the
-                        inputs arrive one by one (default 600ms, 0 = none);
-                        never part of a latency
+  --no-prompts          send inputs bare; by default a row with "role" doc or
+                        query goes twice, with EmbeddingGemma 2's task prefix
+                        ("title: none | text: " / "task: search result |
+                        query: ") and bare, so the replay ranks both ways
+  --gap D, --type-rate D, --hold D
+                        pacing for a watchable replay: idle after each doc
+                        (500ms), per query character (90ms, the replay types
+                        it), after each query (5s); --no-pace for none.
+                        Idle time is never part of a latency
   --out DIR             where the tape is written (default ~/.toktape/runs)
   --tag TEXT, --note TEXT  label the run
   --host-label TEXT     store TEXT as the hostname
@@ -63,7 +71,11 @@ func runEmbed(ctx context.Context, c *cli, args []string) int {
 	dims := fs.Int("dimensions", 0, "dimensions to send")
 	format := fs.String("encoding-format", "float", "float or base64")
 	vcap := fs.Int("vector-cap", 0, "values kept per vector")
-	gap := fs.Duration("gap", 600*time.Millisecond, "idle time after each answer")
+	gap := fs.Duration("gap", 500*time.Millisecond, "idle time after each doc")
+	typeRate := fs.Duration("type-rate", 90*time.Millisecond, "idle time per character before each query")
+	hold := fs.Duration("hold", 5*time.Second, "idle time after each query")
+	noPace := fs.Bool("no-pace", false, "no idle time at all")
+	noPrompts := fs.Bool("no-prompts", false, "send every input bare, without EmbeddingGemma's task prefixes")
 	outDir := fs.String("out", defaultRunsDir(), "where the tape is written")
 	tag := fs.String("tag", "", "label the run")
 	note := fs.String("note", "", "label the run")
@@ -82,15 +94,21 @@ func runEmbed(ctx context.Context, c *cli, args []string) int {
 		return c.usagef("toktape embed: --encoding-format %q: use float or base64", *format)
 	case *dims < 0:
 		return c.usagef("toktape embed: --dimensions %d: must be positive", *dims)
-	case *gap < 0:
-		return c.usagef("toktape embed: --gap %s: use 0 for no idle time", *gap)
+	case *gap < 0 || *typeRate < 0 || *hold < 0:
+		return c.usagef("toktape embed: --gap, --type-rate and --hold take 0 or more")
 	case *vcap < 0:
 		return c.usagef("toktape embed: --vector-cap %d: use 0 to keep whole vectors", *vcap)
 	}
 	opts := recorder.EmbeddingOptions{
 		BaseURL: *url, API: *api, Model: *model, Dimensions: *dims, EncodingFormat: *format,
-		VectorCap: *vcap, Gap: *gap, Tag: *tag, Note: *note, Version: version,
+		VectorCap: *vcap, Gap: *gap, TypeRate: *typeRate, Hold: *hold, Tail: *hold + 3*time.Second, Tag: *tag, Note: *note, Version: version,
 		HostLabel: recorder.HostLabel{Set: flagSet(fs, "host-label"), Text: *hostLabel},
+	}
+	if *noPace {
+		opts.Gap, opts.TypeRate, opts.Hold, opts.Tail = 0, 0, 0, 0
+	}
+	if !*noPrompts {
+		opts.Prompts = tape.EmbeddingGemmaPrompts
 	}
 	if *inputsFile != "" {
 		raw, err := os.ReadFile(*inputsFile)

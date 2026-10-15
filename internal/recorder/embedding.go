@@ -46,9 +46,16 @@ type EmbeddingOptions struct {
 	EncodingFormat string
 	// VectorCap keeps at most this many values per vector; 0 keeps all.
 	VectorCap int
-	// Gap is idle time after each answer, so a replay at 1:1 shows the
-	// inputs arrive one by one; it is on the timestamps and in no latency.
-	Gap time.Duration
+	// Prompts are task prefixes by name ("query", "document"); nil sends
+	// every input bare. With them, a doc row goes once with the "document"
+	// prefix and once bare, and a query row likewise with "query", so a
+	// replay can rank both ways.
+	Prompts map[string]string
+	// Pacing, so a replay at 1:1 can be watched; all of it is idle time on
+	// the timestamps and in no latency. Gap follows each doc (or unlabelled
+	// input), TypeRate per rune precedes each query (the replay types it),
+	// Hold follows each query's answers, and Tail ends the run.
+	Gap, TypeRate, Hold, Tail time.Duration
 
 	Tag, Note string
 	Version   string
@@ -60,7 +67,7 @@ type EmbeddingOptions struct {
 	Progress  func(tape.EmbeddingRecord)
 }
 
-type embeddingInput struct{ ID, Input string }
+type embeddingInput struct{ ID, Input, Role, Topic, Expect string }
 
 func loadEmbeddingInputs(raw []byte) ([]embeddingInput, error) {
 	var out []embeddingInput
@@ -71,8 +78,11 @@ func loadEmbeddingInputs(raw []byte) ([]embeddingInput, error) {
 			continue
 		}
 		var row struct {
-			ID    string `json:"id"`
-			Input string `json:"input"`
+			ID     string `json:"id"`
+			Input  string `json:"input"`
+			Role   string `json:"role"`
+			Topic  string `json:"topic"`
+			Expect string `json:"expect"`
 		}
 		if err := json.Unmarshal(line, &row); err != nil {
 			return nil, fmt.Errorf("inputs line %d: %w", n+1, err)
@@ -83,11 +93,14 @@ func loadEmbeddingInputs(raw []byte) ([]embeddingInput, error) {
 		if row.ID == "" {
 			row.ID = fmt.Sprintf("input-%d", len(out)+1)
 		}
+		if row.Role != "" && row.Role != tape.EmbeddingRoleDoc && row.Role != tape.EmbeddingRoleQuery {
+			return nil, fmt.Errorf(`inputs line %d: role %q: use "doc" or "query"`, n+1, row.Role)
+		}
 		if seen[row.ID] {
 			return nil, fmt.Errorf("inputs line %d: id %q is used twice", n+1, row.ID)
 		}
 		seen[row.ID] = true
-		out = append(out, embeddingInput{row.ID, row.Input})
+		out = append(out, embeddingInput{row.ID, row.Input, row.Role, row.Topic, row.Expect})
 	}
 	if len(out) == 0 {
 		return nil, errors.New("the input set is empty")
@@ -144,28 +157,64 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 	startedAt := opts.Clock.Now()
 	t0 := time.Now()
 	var recs []tape.EmbeddingRecord
-	for i, in := range inputs {
-		if ctx.Err() != nil {
-			break
-		}
-		rec := sendEmbedding(ctx, opts, base+endpoint, t0, in)
-		rec.Index = i
+	send := func(in embeddingInput, prompt string, shown time.Duration) {
+		rec := sendEmbedding(ctx, opts, base+endpoint, t0, in, prompt)
+		rec.Index, rec.ShownAt = len(recs), shown
+		rec.Role, rec.Topic, rec.Expect = in.Role, in.Topic, in.Expect
 		recs = append(recs, rec)
 		if opts.Progress != nil {
 			opts.Progress(rec)
 		}
-		if opts.Gap > 0 && i < len(inputs)-1 && !sleepCtx(ctx, opts.Gap) {
+	}
+	idle := func(d time.Duration) bool { return d <= 0 || sleepCtx(ctx, d) }
+	for _, in := range inputs {
+		if ctx.Err() != nil {
+			break
+		}
+		name := map[string]string{tape.EmbeddingRoleDoc: "document", tape.EmbeddingRoleQuery: "query"}[in.Role]
+		_, prefixed := opts.Prompts[name]
+		var shown time.Duration
+		if in.Role == tape.EmbeddingRoleQuery {
+			shown = time.Since(t0)
+			if !idle(opts.TypeRate * time.Duration(len([]rune(in.Input)))) {
+				break
+			}
+		}
+		if prefixed {
+			send(in, name, shown)
+		}
+		send(in, "", shown)
+		pause := opts.Gap
+		if in.Role == tape.EmbeddingRoleQuery {
+			pause = opts.Hold
+		}
+		if !idle(pause) {
 			break
 		}
 	}
+	outroAt := time.Since(t0) - opts.Hold
+	if len(inputs) > 0 && inputs[len(inputs)-1].Role != tape.EmbeddingRoleQuery {
+		outroAt = time.Since(t0)
+	}
+	idle(opts.Tail)
+	sceneEnd := time.Since(t0)
 	finishedAt := opts.Clock.Now()
 
 	sum := &tape.EmbeddingSummary{
 		API: opts.API, Endpoint: endpoint, Model: opts.Model, Dimensions: opts.Dimensions,
 		EncodingFormat: opts.EncodingFormat, Inputs: len(recs), VectorCap: opts.VectorCap,
+		Prompts: opts.Prompts, SceneEnd: sceneEnd, OutroAt: max(0, outroAt),
 	}
 	if opts.API == tape.EmbeddingAPILlama {
 		sum.EncodingFormat = "" // the llama shape has no such field
+	}
+	for _, in := range inputs {
+		switch in.Role {
+		case tape.EmbeddingRoleDoc:
+			sum.Docs++
+		case tape.EmbeddingRoleQuery:
+			sum.Queries++
+		}
 	}
 	if opts.Inputs != nil {
 		sum.InputSet = filepath.Base(opts.InputsName)
@@ -225,13 +274,14 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 	return &tape.Tape{Schema: tape.SchemaVersion, Summary: summary, Embeddings: recs}, nil
 }
 
-func sendEmbedding(ctx context.Context, opts EmbeddingOptions, url string, t0 time.Time, in embeddingInput) tape.EmbeddingRecord {
-	rec := tape.EmbeddingRecord{ID: in.ID, Input: in.Input}
+func sendEmbedding(ctx context.Context, opts EmbeddingOptions, url string, t0 time.Time, in embeddingInput, prompt string) tape.EmbeddingRecord {
+	rec := tape.EmbeddingRecord{ID: in.ID, Input: in.Input, Prompt: prompt}
+	text := opts.Prompts[prompt] + in.Input
 	var body map[string]any
 	if opts.API == tape.EmbeddingAPILlama {
-		body = map[string]any{"content": in.Input}
+		body = map[string]any{"content": text}
 	} else {
-		body = map[string]any{"input": in.Input, "encoding_format": opts.EncodingFormat}
+		body = map[string]any{"input": text, "encoding_format": opts.EncodingFormat}
 		if opts.Model != "" {
 			body["model"] = opts.Model
 		}

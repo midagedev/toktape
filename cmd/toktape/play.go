@@ -19,6 +19,7 @@ import (
 func runPlay(ctx context.Context, c *cli, args []string) int {
 	fs := newFlagSet("play")
 	speed := fs.Float64("speed", 1, "replay speed multiplier (4 plays four times as fast)")
+	verify := fs.Bool("verify", false, "embedding tape: the per-input verify screen instead of the search scene")
 	against := fs.String("against", "", "an embedding tape to compare each input's vector with")
 	grid := fs.String("grid", tui.DefaultGrid.String(), "tile grid per page as COLSxROWS (0 = fit to the terminal)")
 	files, err := parseArgs(fs, args)
@@ -68,6 +69,7 @@ func runPlay(ctx context.Context, c *cli, args []string) int {
 		end:     tapeDuration(tp),
 		playing: true,
 		ref:     ref,
+		verify:  *verify,
 	}
 	if _, err := tea.NewProgram(p, tea.WithContext(ctx), tea.WithAltScreen(), tea.WithOutput(c.stdout)).Run(); err != nil {
 		if ctx.Err() != nil {
@@ -123,16 +125,17 @@ func tapeDuration(tp *tape.Tape) time.Duration {
 // player is the bubbletea shell for a replay. It owns the wall clock and
 // nothing else; every frame comes from playModel and tui.View.
 type player struct {
-	tp    *tape.Tape
-	ref   *tape.Tape // --against, an embedding reference
-	speed float64
-	grid  tui.Grid
-	theme tui.Theme
-	path  string
-	end   time.Duration
-	wall  time.Duration
-	start time.Time
-	w, h  int
+	tp     *tape.Tape
+	ref    *tape.Tape // --against, an embedding reference
+	verify bool       // --verify
+	speed  float64
+	grid   tui.Grid
+	theme  tui.Theme
+	path   string
+	end    time.Duration
+	wall   time.Duration
+	start  time.Time
+	w, h   int
 	// page is which page of tiles the viewer has stepped to. It lives here
 	// rather than in the model because the model is rebuilt from the tape on
 	// every frame; the view takes it as ordinary model state.
@@ -191,6 +194,7 @@ func (p *player) wallAtPause() time.Duration { return p.wall }
 func (p *player) pageAfter(d int) int {
 	m, _ := playModel(p.tp, p.wall, p.speed)
 	tui.SetEmbedRef(&m, p.ref, refLabel(p.ref))
+	m.EmbedVerify = p.verify
 	m.Grid = p.grid
 	m.Page = p.page
 	w, h := p.size()
@@ -217,6 +221,7 @@ func (p *player) View() string {
 	w, h := p.size()
 	m, clip := playModel(p.tp, p.wall, p.speed)
 	tui.SetEmbedRef(&m, p.ref, refLabel(p.ref))
+	m.EmbedVerify = p.verify
 	m.Theme = p.theme
 	// TapePath stays empty, so the footer reads "run complete": p.path is the
 	// file being replayed, and "tape saved <path>" is a claim about where the

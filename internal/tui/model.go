@@ -183,6 +183,9 @@ type Model struct {
 	Embeddings   []tape.EmbeddingRecord
 	EmbedRef     map[string]tape.EmbeddingRecord
 	EmbedRefName string
+	// EmbedVerify draws the per-input verify screen instead of the search
+	// scene (`toktape play --verify`).
+	EmbedVerify bool
 }
 
 // ModelAt builds the state of tp as of clip time at: every token, sample and

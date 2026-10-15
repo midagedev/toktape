@@ -43,21 +43,57 @@ func frame(t *testing.T, m Model, at time.Duration, w, h int) string {
 	return p
 }
 
-func TestEmbeddingScreen(t *testing.T) {
+func TestEmbeddingVerifyScreen(t *testing.T) {
 	a, _ := embedTapes(t)
 	end := EmbeddingEnd(a)
 	for _, size := range [][2]int{{120, 40}, {MinWidth, MinHeight}} {
-		at := a.Embeddings[2].SentAt + time.Millisecond
-		mid := frame(t, ModelAt(a, at), at, size[0], size[1])
-		if !strings.Contains(mid, "2/8 inputs") || !strings.Contains(mid, "embedding") || strings.Contains(mid, "ko-query") {
-			t.Errorf("%v mid-run frame shows the wrong inputs:\n%s", size, mid)
-		}
-		done := frame(t, ModelAt(a, end), end, size[0], size[1])
-		for _, want := range []string{"EMBEDDING", "8/8 inputs", "COSINE SIMILARITY", "code-other", "norm 1.0000", "0.80"} {
+		m := ModelAt(a, end)
+		m.EmbedVerify = true
+		done := frame(t, m, end, size[0], size[1])
+		for _, want := range []string{"EMBEDDING", "52/52 inputs", "COSINE SIMILARITY", "q-index", "norm 1.0000", "query prompt"} {
 			if !strings.Contains(done, want) {
-				t.Errorf("%v done frame lacks %q:\n%s", size, want, done)
+				t.Errorf("%v verify frame lacks %q:\n%s", size, want, done)
 			}
 		}
+	}
+}
+
+// TestSearchScene walks the demo through its phases: indexing, a query
+// being typed, its ranked answer with the expected hit, and the clusters.
+func TestSearchScene(t *testing.T) {
+	a, _ := embedTapes(t)
+	var q tape.EmbeddingRecord
+	for _, r := range a.Embeddings {
+		if r.Role == tape.EmbeddingRoleQuery && r.Prompt != "" {
+			q = r
+			break
+		}
+	}
+	if q.ShownAt == 0 || q.SentAt <= q.ShownAt {
+		t.Fatalf("the demo's first query has no typing time: %+v", q)
+	}
+	e := a.Summary.Embedding
+	steps := []struct {
+		at   time.Duration
+		want []string
+	}{
+		{q.ShownAt / 2, []string{"INDEX", "indexing the corpus"}},
+		{(q.ShownAt + q.SentAt) / 2, []string{"20/20 docs", "▌"}},
+		{q.AnsweredAt + 2*time.Second, []string{"TOP 5", "✓", "PROMPTS   with #1", "MRL       768 #1", "1›"}},
+		{e.OutroAt + time.Second, []string{"CLUSTERS", "recall@1 6/6"}},
+	}
+	for _, size := range [][2]int{{120, 40}, {MinWidth, MinHeight}} {
+		for _, st := range steps {
+			f := frame(t, ModelAt(a, st.at), st.at, size[0], size[1])
+			for _, w := range st.want {
+				if !strings.Contains(f, w) {
+					t.Errorf("%v at %s lacks %q:\n%s", size, st.at, w, f)
+				}
+			}
+		}
+	}
+	if end := EmbeddingEnd(a); end < 45*time.Second || end > 90*time.Second {
+		t.Errorf("the demo replays in %s, want 45-90s", end)
 	}
 }
 

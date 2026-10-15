@@ -43,7 +43,8 @@ const (
 // embeddingModel fills m for an embedding tape: the records sent by at.
 func embeddingModel(m *Model, tp *tape.Tape, at time.Duration) {
 	for _, r := range tp.Embeddings {
-		if r.SentAt <= at {
+		// A query is on screen from when the replay starts typing it.
+		if shown := r.ShownAt; r.SentAt <= at || (shown > 0 && shown <= at) {
 			m.Embeddings = append(m.Embeddings, r)
 		}
 	}
@@ -59,6 +60,9 @@ func EmbeddingEnd(tp *tape.Tape) time.Duration {
 	var end time.Duration
 	for _, r := range tp.Embeddings {
 		end = max(end, r.AnsweredAt, r.SentAt)
+	}
+	if e := tp.Summary.Embedding; e != nil {
+		end = max(end, e.SceneEnd)
 	}
 	return end
 }
@@ -225,6 +229,9 @@ func (v *embedView) block(r tape.EmbeddingRecord) []string {
 		right, rst = spinnerAt(t)+" embedding", th.accent
 	}
 	tok := "input " + fmtTok(r.PromptTokens) + " tok · "
+	if r.Prompt != "" {
+		tok = r.Prompt + " prompt · " + tok
+	}
 	l := newLine(th, v.bw)
 	l.add(th.accentBold, fmt.Sprintf("%-11s", r.ID))
 	l.space(1)
@@ -262,7 +269,7 @@ func (v *embedView) block(r tape.EmbeddingRecord) []string {
 // record of the same id.
 func (v *embedView) compareCell(l *lineBuf, r tape.EmbeddingRecord, vals []float32) {
 	th := v.th
-	ref, ok := v.m.EmbedRef[r.ID]
+	ref, ok := v.m.EmbedRef[r.Key()]
 	refVals := ref.Values()
 	if !ok || refVals == nil {
 		l.add(th.dim, "not in reference")
@@ -352,7 +359,7 @@ func (v *embedView) matrix(room int) []string {
 func embeddingBody(m Model, th Theme, t time.Duration, bw, bodyH int) []string {
 	v := newEmbedView(m, th, t, bw)
 	rows := []string{v.headline(), blankRow(bw), sectionRow(th, bw, "INPUTS")}
-	mat := v.matrix(len(m.Embeddings) + 2)
+	mat := v.matrix(min(len(m.Embeddings)+2, bodyH/2))
 	room := bodyH - len(rows) - len(mat) - 1
 	// A block is three rows with its separator, two without; the separator
 	// goes first when every input would not fit otherwise.
@@ -415,7 +422,11 @@ func embeddingView(m Model, t time.Duration, w, h int) string {
 	bar := th.paint(th.dim, "│")
 	lines := make([]string, 0, h)
 	lines = append(lines, topBorder(m, th, t, inner))
-	for _, row := range embeddingBody(m, th, t, inner-2, bodyH) {
+	body := embeddingBody
+	if hasScene(m) {
+		body = sceneBody
+	}
+	for _, row := range body(m, th, t, inner-2, bodyH) {
 		lines = append(lines, bar+" "+row+" "+bar)
 	}
 	lines = append(lines, th.paint(th.dim, "├"+repeat('─', inner)+"┤"))
@@ -433,7 +444,7 @@ func SetEmbedRef(m *Model, ref *tape.Tape, name string) {
 	}
 	m.EmbedRef = map[string]tape.EmbeddingRecord{}
 	for _, r := range ref.Embeddings {
-		m.EmbedRef[r.ID] = r
+		m.EmbedRef[r.Key()] = r
 	}
 	m.EmbedRefName = name
 }
