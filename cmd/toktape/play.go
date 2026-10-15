@@ -146,11 +146,20 @@ type player struct {
 
 func (p *player) Init() tea.Cmd {
 	p.start = time.Now()
-	return playTick()
+	return p.tick()
 }
 
-func playTick() tea.Cmd {
-	return tea.Tick(tui.TickInterval, func(t time.Time) tea.Msg { return playTickMsg(t) })
+// tick is the next redraw. An embedding tape animates at ~30 fps while its
+// scene is running and drops to 4 fps once it has settled.
+func (p *player) tick() tea.Cmd {
+	d := tui.TickInterval
+	if p.tp != nil && p.tp.Summary.IsEmbedding() {
+		d = tui.EmbedTick
+		if clipTime(p.wall, p.speed) > p.end+time.Second {
+			d = 250 * time.Millisecond
+		}
+	}
+	return tea.Tick(d, func(t time.Time) tea.Msg { return playTickMsg(t) })
 }
 
 type playTickMsg time.Time
@@ -180,7 +189,7 @@ func (p *player) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if p.playing {
 			p.wall = time.Since(p.start)
 		}
-		return p, playTick()
+		return p, p.tick()
 	}
 	return p, nil
 }

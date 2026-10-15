@@ -83,7 +83,11 @@ func buildRightPane(m Model, th Theme, t time.Duration, cw, h int, boardDrawn bo
 	}
 
 	section("SPEED", "", th.dim)
-	out = append(out, speedRows(m, th, t, cw, boardDrawn)...)
+	if m.Summary.IsEmbedding() {
+		out = append(out, embedSpeedRows(m, th, t, cw)...)
+	} else {
+		out = append(out, speedRows(m, th, t, cw, boardDrawn)...)
+	}
 	section("PLACEMENT", "", th.dim)
 	out = append(out, placementRows(m, th, t, cw)...)
 	section("MEMORY", "", th.dim)

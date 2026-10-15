@@ -31,7 +31,62 @@ import (
 const (
 	sceneTopK    = 5
 	sceneStagger = 120 * time.Millisecond // between result rows appearing
+	// EmbedTick is the replay's redraw period while an embedding scene runs.
+	EmbedTick  = 33 * time.Millisecond
+	growDur    = 450 * time.Millisecond // a bar or strip reaching its value
+	fadeDur    = 200 * time.Millisecond // a row coming up from dim
+	blinkDur   = 530 * time.Millisecond // the typing cursor's half period
+	clusterLag = 350 * time.Millisecond // between topic blocks fading in
 )
+
+// grow is 0..1 eased progress over growDur from since.
+func grow(since, t time.Duration) float64 {
+	if t <= since {
+		return 0
+	}
+	return easeOutCubic(float64(t-since) / float64(growDur))
+}
+
+// fading reports whether a row that appeared at since is still coming up.
+func fading(since, t time.Duration) bool { return t < since+fadeDur }
+
+// pulse is the in-flight item's style: the accent breathing low → high.
+func pulse(th Theme, t time.Duration) style {
+	return []style{th.accentLow, th.accentMid, th.accentHigh}[breathPhase(t)]
+}
+
+// typedCount is how many runes of q are on screen at t. The typing runs
+// from ShownAt to SentAt, with a per-rune weight from a hash of the id and
+// position so the rate wavers like a hand's, and is the same every replay.
+func typedCount(q tape.EmbeddingRecord, t time.Duration) int {
+	rs := []rune(q.Input)
+	if q.SentAt <= q.ShownAt || t >= q.SentAt {
+		return len(rs)
+	}
+	if t <= q.ShownAt {
+		return 0
+	}
+	w := make([]float64, len(rs))
+	total := 0.0
+	for i := range rs {
+		h := uint32(2166136261)
+		for _, c := range q.ID {
+			h = (h ^ uint32(c)) * 16777619
+		}
+		h = (h ^ uint32(i)) * 16777619
+		w[i] = 0.55 + float64(h%1000)/1000 // 0.55..1.55
+		if rs[i] == ' ' {
+			w[i] *= 1.6 // a beat between words
+		}
+		total += w[i]
+	}
+	f := float64(t-q.ShownAt) / float64(q.SentAt-q.ShownAt) * total
+	n := 0
+	for acc := 0.0; n < len(rs) && acc+w[n] <= f; n++ {
+		acc += w[n]
+	}
+	return n
+}
 
 // sceneMRL are the truncations a query is re-ranked at.
 var sceneMRL = []int{768, 256, 128}
@@ -251,9 +306,9 @@ func (s *scene) indexColumn(w, h int, hits map[int]int) []string {
 		if r.Role == tape.EmbeddingRoleDoc && primary(r, s.prompted()) && !embedAnswered(r, s.t) && r.Error == "" {
 			l := newLine(th, w)
 			l.space(2)
-			l.add(th.accent, spinnerAt(s.t)+" ")
-			l.add(th.dim, fmt.Sprintf("%-7s", r.ID))
-			l.addTrunc(th.dim, truncate(oneLine(r.Input), l.left()))
+			l.add(pulse(th, s.t), "● ")
+			l.add(pulse(th, s.t), fmt.Sprintf("%-7s", r.ID))
+			l.addTrunc(pulse(th, s.t), truncate(oneLine(r.Input), l.left()))
 			out = append(out, l.String())
 			break
 		}
@@ -273,20 +328,20 @@ func (s *scene) searchColumn(w, h int) ([]string, map[int]int) {
 		l.add(th.dim, "› indexing the corpus…")
 		return fitRows(append(out, l.String()), blankRow(w), h), hits
 	}
-	// Typing: the text appears over ShownAt..SentAt.
-	typed := []rune(q.Input)
-	if q.SentAt > q.ShownAt && s.t < q.SentAt {
-		f := float64(s.t-q.ShownAt) / float64(q.SentAt-q.ShownAt)
-		typed = typed[:int(math.Max(0, math.Min(1, f))*float64(len(typed)))]
-	}
+	// Typing: the text appears over ShownAt..SentAt at a wavering rate.
+	typed := []rune(q.Input)[:typedCount(q, s.t)]
 	l := newLine(th, w)
 	l.add(th.accentBold, "› ")
 	l.addTrunc(th.text, truncate(string(typed), max(0, l.left()-12)))
 	switch {
 	case s.t < q.SentAt:
-		l.add(th.accent, "▌")
+		cur := "▌"
+		if int(s.t/blinkDur)%2 == 1 {
+			cur = " "
+		}
+		l.add(th.accent, cur)
 	case !embedAnswered(q, s.t):
-		l.add(th.accent, " "+spinnerAt(s.t)+" embedding")
+		l.add(pulse(th, s.t), " embedding…")
 	default:
 		ms := fmtLat(msOf(q.Latency())) + " ms"
 		l.gapTo(width(ms))
@@ -305,11 +360,26 @@ func (s *scene) searchColumn(w, h int) ([]string, map[int]int) {
 	}
 
 	qv := q.Values()
+	// The query's vector fills in left to right as the answer lands.
+	sv := newLine(th, w)
+	sv.add(th.dim, "  vec ")
+	cells := downsample(qv, max(0, sv.left()))
+	scale := 0.0
+	for _, x := range cells {
+		scale = math.Max(scale, math.Abs(x))
+	}
+	shown := int(math.Round(grow(q.AnsweredAt, s.t) * float64(len(cells))))
+	sv.used += shown
+	sv.b.WriteString(vectorStrip(th, cells[:shown], scale))
+	sv.add(th.darkFill, repeat('·', len(cells)-shown))
+	out = append(out[:len(out)-1], sv.String(), blankRow(w))
+
 	ranked := s.rank(qv, 0, false)
 	out = append(out, sectionRow(th, w, fmt.Sprintf("TOP %d", sceneTopK)))
-	barW := 12
+	barW := min(12, max(4, w/5))
 	for i, hh := range ranked[:min(sceneTopK, len(ranked))] {
-		if s.t < q.AnsweredAt+time.Duration(i)*sceneStagger {
+		at := q.AnsweredAt + time.Duration(i)*sceneStagger
+		if s.t < at {
 			out = append(out, blankRow(w))
 			continue
 		}
@@ -322,21 +392,28 @@ func (s *scene) searchColumn(w, h int) ([]string, map[int]int) {
 		if good {
 			st, mark = th.accentBold, "✓ "
 		}
+		if fading(at, s.t) {
+			st = th.dim
+		}
+		// Slide in from the right: the row starts two cells over.
+		r.space(int(math.Round(2 * (1 - grow(at, s.t)))))
 		r.add(th.dim, fmt.Sprintf("%d ", i+1))
-		// The bar is painted cell by cell, so it goes in pre-measured.
-		r.b.WriteString(eighthBar(th, (hh.score-0.3)/0.7, barW, good, ' '))
-		r.used += barW
-		r.add(st, fmt.Sprintf(" %.3f ", hh.score))
+		// The bar grows to its score; painted cell by cell, so pre-measured.
+		bw := min(barW, r.left())
+		r.b.WriteString(eighthBar(th, (hh.score-0.3)/0.7*grow(at, s.t), bw, good, ' '))
+		r.used += bw
+		r.add(st, fmt.Sprintf(" %.3f ", hh.score*grow(at, s.t)))
 		r.add(st, mark)
 		r.add(s.topicStyle(d.rec.Topic), "● ")
 		r.addTrunc(st, truncate(oneLine(d.rec.Input), r.left()))
 		out = append(out, r.String())
 	}
-	if s.t < q.AnsweredAt+sceneTopK*sceneStagger {
+	vAt := q.AnsweredAt + sceneTopK*sceneStagger
+	if s.t < vAt {
 		return fitRows(out, blankRow(w), h), hits
 	}
 	out = append(out, blankRow(w))
-	out = append(out, s.verdict(w, q, qv, ranked)...)
+	out = append(out, s.verdict(w, q, qv, ranked, vAt)...)
 	out = append(out, blankRow(w))
 	out = append(out, s.history(w, q.ID)...)
 	return fitRows(out, blankRow(w), h), hits
@@ -344,15 +421,26 @@ func (s *scene) searchColumn(w, h int) ([]string, map[int]int) {
 
 // verdict is the expected doc's rank three ways: as ranked, without the
 // task prompts, and at the MRL truncations.
-func (s *scene) verdict(w int, q tape.EmbeddingRecord, qv []float32, ranked []hit) []string {
+func (s *scene) verdict(w int, q tape.EmbeddingRecord, qv []float32, ranked []hit, from time.Duration) []string {
 	th := s.th
 	if q.Expect == "" {
 		return nil
 	}
+	// Each figure comes up in turn, from dim, a beat after the one before.
+	k := 0
 	place := func(l *lineBuf, r int) {
+		at := from + time.Duration(k)*sceneStagger
+		k++
+		if s.t < at {
+			l.add(th.darkFill, "··")
+			return
+		}
 		st := th.accentBold
 		if r != 1 {
 			st = th.warn
+		}
+		if fading(at, s.t) {
+			st = th.dim
 		}
 		if r == 0 {
 			l.add(th.dim, "–")
@@ -362,21 +450,21 @@ func (s *scene) verdict(w int, q tape.EmbeddingRecord, qv []float32, ranked []hi
 	}
 	var out []string
 	p := newLine(th, w)
-	p.add(th.dim, "PROMPTS   ")
+	p.add(th.dim, "PROMPTS ")
 	if s.prompted() {
 		bare := s.rank(s.bareQ[q.ID], 0, true)
 		p.add(th.dim, "with ")
 		place(p, s.rankOf(ranked, q.Expect))
-		p.add(th.dim, " "+margin(s, ranked, q.Expect))
-		p.add(th.dim, "   bare ")
+		p.add(th.dim, " "+margin(s, ranked, q.Expect, grow(from, s.t)))
+		p.add(th.dim, "  bare ")
 		place(p, s.rankOf(bare, q.Expect))
-		p.add(th.dim, " "+margin(s, bare, q.Expect))
+		p.add(th.dim, " "+margin(s, bare, q.Expect, grow(from+sceneStagger, s.t)))
 	} else {
 		p.add(th.dim, "none sent (--no-prompts)")
 	}
 	out = append(out, p.String())
 	m := newLine(th, w)
-	m.add(th.dim, "MRL       ")
+	m.add(th.dim, "MRL     ")
 	top1 := ""
 	stable := true
 	for i, d := range sceneMRL {
@@ -395,12 +483,17 @@ func (s *scene) verdict(w int, q tape.EmbeddingRecord, qv []float32, ranked []hi
 			}
 		}
 	}
-	if stable {
-		m.add(th.dim, "   top-1 stable")
-	} else {
-		m.add(th.warn, "   top-1 moves")
+	out = append(out, m.String())
+	st := newLine(th, w)
+	st.space(8)
+	if s.t >= from+time.Duration(k)*sceneStagger {
+		if stable {
+			st.add(th.dim, "top-1 the same at every size")
+		} else {
+			st.add(th.warn, "top-1 changes with the size")
+		}
 	}
-	return append(out, m.String())
+	return append(out, st.String())
 }
 
 // history is one line per query answered before current.
@@ -456,15 +549,32 @@ func (s *scene) clusters(w, h int) []string {
 			}
 		}
 	}
-	const labelW, cellW = 18, 4
-	out := []string{sectionRow(th, w, "CLUSTERS  doc × doc cosine, ordered by topic")}
+	const labelW, cellW = 18, 3
+	// Topic blocks fade in one after another: a cell is up once both its
+	// row's and its column's topics are.
+	outro := s.m.Summary.Embedding.OutroAt
+	upAt := func(d sceneDoc) time.Duration { return outro + time.Duration(idx[d.rec.Topic])*clusterLag }
+	out := []string{sectionRow(th, w, "CLUSTERS  doc × doc cosine ×100, ordered by topic")}
 	for i := 0; i < n && len(out) < h-2; i++ {
 		l := newLine(th, w)
+		if s.t < upAt(docs[i]) {
+			out = append(out, l.String())
+			continue
+		}
 		l.add(s.topicStyle(docs[i].rec.Topic), "● ")
 		l.add(th.text, fmt.Sprintf("%-*s", labelW-2, truncate(docs[i].rec.ID+" "+docs[i].rec.Topic, labelW-3)))
 		for j := 0; j < n && l.left() >= cellW; j++ {
 			c := tape.Cosine(docs[i].vec, docs[j].vec)
-			cell := fmt.Sprintf("%*s", cellW, strings.TrimPrefix(fmt.Sprintf("%.2f", c), "0"))
+			cell := fmt.Sprintf("%*d", cellW, int(math.Round(c*100)))
+			at := max(upAt(docs[i]), upAt(docs[j]))
+			if s.t < at {
+				l.add(th.darkFill, fmt.Sprintf("%*s", cellW, "·"))
+				continue
+			}
+			if fading(at, s.t) {
+				l.add(th.dim, cell)
+				continue
+			}
 			if i == j {
 				l.add(th.darkFill, fmt.Sprintf("%*s", cellW, "▪▪"))
 				continue
@@ -494,6 +604,9 @@ func (s *scene) clusters(w, h int) []string {
 	}
 	out = append(out, blankRow(w))
 	l := newLine(th, w)
+	if s.t < outro+time.Duration(len(order))*clusterLag {
+		return fitRows(out, blankRow(w), h)
+	}
 	l.add(th.dim, "same-topic pairs bold · ")
 	l.add(th.accentBold, fmt.Sprintf("recall@1 %d/%d", with, n1))
 	if s.prompted() {
@@ -506,30 +619,41 @@ func (s *scene) clusters(w, h int) []string {
 // sceneBody is the scene's body rows.
 func sceneBody(m Model, th Theme, t time.Duration, bw, bodyH int) []string {
 	s := newScene(m, th, t)
-	if s.outro() {
-		return s.clusters(bw, bodyH)
-	}
-	lw := bw * 46 / 100
-	rw := bw - lw - 3
-	right, hits := s.searchColumn(rw, bodyH)
-	left := s.indexColumn(lw, bodyH, hits)
+	// The machine pane on the right is the record screen's own (rightPane):
+	// speed, placement, memory, and the resource graphs from the samples.
+	paneW := rightWidth(bw + 4)
+	mainW := bw - paneW - 3
+	pane := rightPane(m, th, t, paneW, bodyH, false)
 	sep := th.paint(th.dim, " │ ")
+	var main []string
+	if s.outro() {
+		main = s.clusters(mainW, bodyH)
+	} else {
+		lw := mainW * 45 / 100
+		rw := mainW - lw - 3
+		right, hits := s.searchColumn(rw, bodyH)
+		left := s.indexColumn(lw, bodyH, hits)
+		for i := 0; i < bodyH; i++ {
+			main = append(main, left[i]+sep+right[i])
+		}
+	}
 	rows := make([]string, bodyH)
 	for i := range rows {
-		rows[i] = left[i] + sep + right[i]
+		rows[i] = main[i] + sep + pane[i]
 	}
 	return rows
 }
 
 // margin is the expected doc's lead over the best other doc ("+0.08"), or
 // how far behind the top it is ("-0.03").
-func margin(s *scene, hs []hit, id string) string {
+// The figure counts up from zero as f goes 0..1.
+func margin(s *scene, hs []hit, id string, f float64) string {
 	r := s.rankOf(hs, id)
 	if r == 0 || len(hs) < 2 {
 		return ""
 	}
 	if r == 1 {
-		return fmt.Sprintf("(+%.3f)", hs[0].score-hs[1].score)
+		return "(+" + strings.TrimPrefix(fmt.Sprintf("%.3f", (hs[0].score-hs[1].score)*f), "0") + ")"
 	}
-	return fmt.Sprintf("(%.3f)", hs[r-1].score-hs[0].score)
+	return "(-" + strings.TrimPrefix(fmt.Sprintf("%.3f", (hs[0].score-hs[r-1].score)*f), "0") + ")"
 }
