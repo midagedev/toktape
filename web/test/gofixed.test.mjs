@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { fmt } from "../src/page.js";
 import { goFixed } from "../src/gofixed.js";
 
 test("an exact tie rounds to even, as Go does", () => {
@@ -14,6 +15,13 @@ test("an exact tie rounds to even, as Go does", () => {
   assert.equal(goFixed(2.5, 0), "2");
   assert.equal(goFixed(3.5, 0), "4");
   assert.equal(goFixed(-0.25, 1), "-0.2");
+});
+
+test("fmt uses that tie rule for the figures the page shares with the card", () => {
+  assert.equal(fmt(0.25), "0.2");
+  assert.equal(fmt(0.75), "0.8");
+  assert.equal(fmt(150.5), "150");
+  assert.equal(fmt(0), "?");
 });
 
 test("a value that only looks like a tie rounds by its exact value", () => {
