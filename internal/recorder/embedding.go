@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/midagedev/toktape/internal/gpu"
+	"github.com/midagedev/toktape/internal/placement"
 	"github.com/midagedev/toktape/internal/procmon"
 	"github.com/midagedev/toktape/internal/server"
 	"github.com/midagedev/toktape/internal/tape"
@@ -184,8 +185,12 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 	}
 	go func() { st.sampleLoop(ctx, stopSampling, dep); close(sampled) }()
 	var recs []tape.EmbeddingRecord
+	answeredModel := ""
 	send := func(in embeddingInput, prompt string, shown time.Duration) {
-		rec := sendEmbedding(ctx, opts, base+endpoint, t0, in, prompt)
+		rec, m := sendEmbedding(ctx, opts, base+endpoint, t0, in, prompt)
+		if answeredModel == "" {
+			answeredModel = m
+		}
 		rec.Index, rec.ShownAt = len(recs), shown
 		rec.Role, rec.Topic, rec.Expect = in.Role, in.Topic, in.Expect
 		recs = append(recs, rec)
@@ -300,7 +305,14 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 		warnings = append(warnings, fmt.Sprintf("%d of %d inputs failed; first: %s", sum.Errors, len(recs), firstErr))
 	}
 
-	slug := id.ModelFile
+	model := tape.ModelInfo{Path: id.ModelPath, FileName: id.ModelFile, Quant: id.Quant}
+	// The MODEL line names the model that embedded: a side seat runs beside
+	// the chat model /props reports (bloomery #190), so the answer's "model",
+	// then --model, then the one embedding entry of /v1/models win over it.
+	if em := embeddingModelName(ctx, opts, base, answeredModel); em != "" && filepath.Base(em) != filepath.Base(id.ModelFile) {
+		model = tape.ModelInfo{Path: em, FileName: filepath.Base(em), Quant: placement.QuantFromFileName(em)}
+	}
+	slug := model.FileName
 	if slug == "" {
 		slug = opts.Model
 	}
@@ -313,7 +325,7 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 		StartedAt:      startedAt,
 		FinishedAt:     finishedAt,
 		Server:         tape.ServerInfo{Kind: id.Kind, URL: base, Host: host.Hostname, Build: id.Build, Commit: id.Commit},
-		Model:          tape.ModelInfo{Path: id.ModelPath, FileName: id.ModelFile, Quant: id.Quant},
+		Model:          model,
 		Host:           host,
 		Concurrency:    1,
 		Warnings:       warnings,
@@ -337,7 +349,7 @@ func RecordEmbedding(ctx context.Context, opts EmbeddingOptions) (*tape.Tape, er
 	return &tape.Tape{Schema: tape.SchemaVersion, Summary: summary, Embeddings: recs, Samples: samples}, nil
 }
 
-func sendEmbedding(ctx context.Context, opts EmbeddingOptions, url string, t0 time.Time, in embeddingInput, prompt string) tape.EmbeddingRecord {
+func sendEmbedding(ctx context.Context, opts EmbeddingOptions, url string, t0 time.Time, in embeddingInput, prompt string) (tape.EmbeddingRecord, string) {
 	rec := tape.EmbeddingRecord{ID: in.ID, Input: in.Input, Prompt: prompt}
 	text := opts.Prompts[prompt] + in.Input
 	var body map[string]any
@@ -357,29 +369,33 @@ func sendEmbedding(ctx context.Context, opts EmbeddingOptions, url string, t0 ti
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
 	if err != nil {
 		rec.Error = err.Error()
-		return rec
+		return rec, ""
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := opts.HTTP.Do(req)
 	if err != nil {
 		rec.Error = err.Error()
-		return rec
+		return rec, ""
 	}
 	raw, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	answered := time.Since(t0)
 	if err != nil {
 		rec.Error = err.Error()
-		return rec
+		return rec, ""
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		rec.Error = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw[:min(len(raw), 200)])))
-		return rec
+		return rec, ""
 	}
 	vec, tokens, err := parseEmbedding(raw)
+	var echo struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(raw, &echo)
 	if err != nil {
 		rec.Error = err.Error()
-		return rec
+		return rec, ""
 	}
 	rec.AnsweredAt = answered
 	rec.PromptTokens = tokens
@@ -391,7 +407,7 @@ func sendEmbedding(ctx context.Context, opts EmbeddingOptions, url string, t0 ti
 		keep = keep[:opts.VectorCap]
 	}
 	rec.Vector, rec.Stored = tape.EncodeVector(keep), len(keep)
-	return rec
+	return rec, echo.Model
 }
 
 // parseEmbedding reads the first vector out of either response shape:
@@ -457,4 +473,46 @@ func vectorOf(m json.RawMessage) ([]float32, error) {
 		v[i] = float32(x)
 	}
 	return v, nil
+}
+
+// embeddingModelName is the model that embedded: the answer's "model", else
+// the --model sent, else the single entry of /v1/models whose id says
+// "embed" when the server lists several. "" when none of them names one.
+func embeddingModelName(ctx context.Context, opts EmbeddingOptions, base, answered string) string {
+	if answered != "" {
+		return answered
+	}
+	if opts.Model != "" {
+		return opts.Model
+	}
+	if opts.HTTP == nil {
+		return ""
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/models", nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := opts.HTTP.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	var list struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&list) != nil || len(list.Data) < 2 {
+		return ""
+	}
+	pick := ""
+	for _, m := range list.Data {
+		if strings.Contains(strings.ToLower(m.ID), "embed") {
+			if pick != "" {
+				return ""
+			}
+			pick = m.ID
+		}
+	}
+	return pick
 }
