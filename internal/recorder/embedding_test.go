@@ -111,3 +111,40 @@ func TestLoadEmbeddingInputs(t *testing.T) {
 		}
 	}
 }
+
+// A side seat answers beside the chat model /props names (bloomery #190):
+// the MODEL line must name the embedding model, taken from the answer's
+// "model", else the one embedding entry of a two-model /v1/models.
+func TestRecordEmbeddingModelLine(t *testing.T) {
+	for _, echo := range []string{"", "embeddinggemma-2-Q8_0.gguf"} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/props":
+				json.NewEncoder(w).Encode(map[string]any{"model_path": "/models/Qwen3.6-35B-A3B-Q4_K_M.gguf"})
+			case "/v1/models":
+				json.NewEncoder(w).Encode(map[string]any{"data": []any{
+					map[string]any{"id": "Qwen3.6-35B-A3B-Q4_K_M.gguf"},
+					map[string]any{"id": "embeddinggemma-2-Q8_0.gguf"},
+				}})
+			case "/v1/embeddings":
+				out := map[string]any{"data": []any{map[string]any{"embedding": []float64{1, 2, 3}}}}
+				if echo != "" {
+					out["model"] = echo
+				}
+				json.NewEncoder(w).Encode(out)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		tp, err := RecordEmbedding(context.Background(), EmbeddingOptions{
+			BaseURL: srv.URL, API: tape.EmbeddingAPIOpenAI, EncodingFormat: "float", Inputs: []byte(twoInputs),
+		})
+		srv.Close()
+		if err != nil {
+			t.Fatalf("echo %q: %v", echo, err)
+		}
+		if m := tp.Summary.Model; m.FileName != "embeddinggemma-2-Q8_0.gguf" || m.Quant != "Q8_0" {
+			t.Errorf("echo %q: model %+v", echo, m)
+		}
+	}
+}
